@@ -7,7 +7,6 @@ unchanged.  It only makes host-side source transport and cleanup reliable.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import logging.handlers
@@ -20,6 +19,13 @@ from collections.abc import Mapping, MutableMapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+from brt6.runtime.official_container_registry import (
+    InstanceLock,
+    OfficialContainerRegistry,
+    ensure_container_running,
+    lock_filename,
+)
 
 
 _CLONE_RE = re.compile(
@@ -34,10 +40,7 @@ _DEFAULT_SWT_METADATA_ROOT = Path(__file__).resolve().parent / "vendor/swtbench_
 
 def _lock_filename(instance_id: str) -> str:
     """Return a filesystem-safe lock name without changing Docker naming."""
-    rendered = re.sub(r"[^0-9A-Za-z_.-]+", "_", instance_id).strip("._")
-    if not rendered:
-        raise ValueError("instance_id is empty after sanitization")
-    return f"{rendered}.lock"
+    return lock_filename(instance_id)
 
 
 def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
@@ -75,14 +78,8 @@ def _instance_lock(instance_id: str):
     lock_dir = Path(
         os.environ.get("BRT_SWT_CONTAINER_LOCK_DIR", str(_DEFAULT_LOCK_DIR))
     )
-    lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_dir / _lock_filename(instance_id)
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    with InstanceLock(instance_id, lock_dir):
+        yield
 
 
 def _preserve_cached_image(client, image_id, logger=None):
@@ -444,34 +441,42 @@ def install() -> None:
     def reuse_validated_container(
         exec_spec, client, logger, nocache, force_rebuild=False, build_mode="api"
     ):
-        container_name = exec_spec.get_instance_container_name()
-        try:
-            container = client.containers.get(container_name)
-        except docker.errors.NotFound:
-            container = None
+        registry = OfficialContainerRegistry()
+        resolution = registry.resolve(
+            client,
+            instance_id=exec_spec.instance_id,
+            expected_image=exec_spec.instance_image_key,
+            preferred_name=exec_spec.get_instance_container_name(),
+        )
+        container_name = resolution.name
+        container = resolution.container
         if container is not None:
-            container.reload()
-            if _container_is_reusable(
-                container.attrs, exec_spec.instance_image_key
-            ):
-                logger.info(
-                    f"Reusing persistent container {container_name} for "
-                    f"{exec_spec.instance_id}."
-                )
-                return container
-            logger.warning(
-                f"Replacing incompatible container {container_name} for "
+            ensure_container_running(container)
+            logger.info(
+                f"Reusing persistent container {container_name} for "
                 f"{exec_spec.instance_id}."
             )
-            container.remove(force=True)
-        return original_build_container(
-            exec_spec,
-            client,
-            logger,
-            nocache,
-            force_rebuild=force_rebuild,
-            build_mode=build_mode,
+            return container
+
+        original_name_method = exec_spec.get_instance_container_name
+        exec_spec.get_instance_container_name = lambda: container_name
+        try:
+            container = original_build_container(
+                exec_spec,
+                client,
+                logger,
+                nocache,
+                force_rebuild=force_rebuild,
+                build_mode=build_mode,
+            )
+        finally:
+            exec_spec.get_instance_container_name = original_name_method
+        registry.confirm(
+            instance_id=exec_spec.instance_id,
+            expected_image=exec_spec.instance_image_key,
+            container_name=container.name,
         )
+        return container
 
     docker_build.build_container = reuse_validated_container
 
