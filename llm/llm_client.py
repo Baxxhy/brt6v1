@@ -75,6 +75,9 @@ class LLMClient:
                 DEFAULT_LLM_RATE_LIMIT_BACKOFF,
             )
         )
+        self.wait_forever = str(
+            os.environ.get("BRT_LLM_WAIT_FOREVER") or ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
         if not self.api_key:
             env_name = "GPT_API_KEY" if self.provider == "gpt" else "DEEPSEEK_API_KEY"
             raise ValueError(f"missing {self.provider} API key; set {env_name}")
@@ -152,7 +155,8 @@ class LLMClient:
             len(configured_apis(self.provider)),
             len(self._env_keys(self.provider)),
         )
-        for attempt in range(max_attempts):
+        attempt = 0
+        while self.wait_forever or attempt < max_attempts:
             payload["model"] = self.model
             data = json.dumps(payload).encode("utf-8")
             url = self._chat_url(self.base_url)
@@ -171,9 +175,11 @@ class LLMClient:
                 # long exponential backoff and cannot make them succeed.
                 if exc.code in {400, 404, 405, 413, 422}:
                     break
-                if exc.code in {401, 403, 429}:
+                if exc.code in {401, 403, 429} or exc.code >= 500:
                     self._rotate_api()
-                if exc.code == 429 and attempt < max_attempts - 1:
+                if exc.code == 429 and (
+                    self.wait_forever or attempt < max_attempts - 1
+                ):
                     retry_after = exc.headers.get("Retry-After")
                     try:
                         server_wait = float(retry_after) if retry_after else 0.0
@@ -181,12 +187,20 @@ class LLMClient:
                         server_wait = 0.0
                     wait = max(
                         server_wait,
-                        min(self.rate_limit_backoff * (2**attempt), 300.0),
+                        min(
+                            self.rate_limit_backoff * (2 ** min(attempt, 8)),
+                            300.0,
+                        ),
                     )
                     time.sleep(wait)
+                    attempt += 1
                     continue
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
-            if attempt < max_attempts - 1:
-                time.sleep(min(self.backoff_base * (2**attempt), 180.0))
-        raise RuntimeError(f"LLM request failed after {max_attempts} attempts: {last_error}")
+                self._rotate_api()
+            attempt += 1
+            if self.wait_forever or attempt < max_attempts:
+                time.sleep(
+                    min(self.backoff_base * (2 ** min(attempt - 1, 8)), 180.0)
+                )
+        raise RuntimeError(f"LLM request failed after {attempt} attempts: {last_error}")
