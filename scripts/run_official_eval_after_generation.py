@@ -30,6 +30,7 @@ from brt6.evaluation.swtbench_runtime_compat import (  # noqa: E402
 
 
 INCOMPLETE_GENERATION_EXIT = 3
+F2P_ONLY_MARKER = "F2P_ONLY"
 
 
 def parse_bool(value: str) -> bool:
@@ -39,6 +40,15 @@ def parse_bool(value: str) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise argparse.ArgumentTypeError(f"expected true/false, got {value!r}")
+
+
+def _f2p_only_marker(evaluation_dir: Path) -> Path | None:
+    """Return the run-scoped marker that disables coverage for this evaluation."""
+
+    candidates = [evaluation_dir / F2P_ONLY_MARKER]
+    if len(evaluation_dir.parents) >= 2:
+        candidates.append(evaluation_dir.parents[1] / F2P_ONLY_MARKER)
+    return next((path for path in candidates if path.is_file()), None)
 
 
 def _git_head(path: Path) -> str:
@@ -144,6 +154,9 @@ def main() -> int:
     run_id = _safe_run_id(args.run_id)
     evaluation_dir = Path(args.evaluation_dir).resolve()
     evaluation_dir.mkdir(parents=True, exist_ok=True)
+    f2p_only_marker = _f2p_only_marker(evaluation_dir)
+    if f2p_only_marker is not None:
+        args.compute_coverage = False
     predictions_path = evaluation_dir / "official_predictions.json"
     export_manifest = export_official_predictions(
         args.outputs_dir,
@@ -268,6 +281,9 @@ def main() -> int:
         "predictions": export_manifest,
         "generation_gate": generation_gate,
         "official_harness_invoked": True,
+        "evaluation_scope": "f2p_only" if not args.compute_coverage else "f2p_and_coverage",
+        "compute_coverage": args.compute_coverage,
+        "f2p_only_marker": str(f2p_only_marker or ""),
         "runtime_compatibility": (
             {
                 "mode": "official_harness_host_safety_shim",
@@ -319,6 +335,11 @@ def main() -> int:
             json.dumps(report, indent=2) + "\n", encoding="utf-8"
         )
         metrics = _metrics_from_report(report, args.dataset, official_commit)
+        if not args.compute_coverage:
+            metrics.pop("patch_cov_at_1_percent", None)
+            metrics.pop("patch_cov_delta_at_1_percent", None)
+            metrics.pop("patch_cov_definition", None)
+            metrics["evaluation_scope"] = "f2p_only"
         (evaluation_dir / "metrics.json").write_text(
             json.dumps(metrics, indent=2) + "\n", encoding="utf-8"
         )

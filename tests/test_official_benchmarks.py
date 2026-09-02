@@ -13,9 +13,20 @@ from brt6.evaluation.official_benchmarks import (
     new_file_patch,
     resolve_generated_test_path,
 )
+from brt6.scripts.run_official_eval_after_generation import _f2p_only_marker
 
 
 class OfficialBenchmarkExportTests(unittest.TestCase):
+    def test_run_scoped_f2p_marker_disables_only_its_evaluation(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp) / "run"
+            evaluation = run / "evaluation" / "formal_f2p"
+            evaluation.mkdir(parents=True)
+            marker = run / "F2P_ONLY"
+            marker.write_text("f2p only\n", encoding="utf-8")
+
+            self.assertEqual(_f2p_only_marker(evaluation), marker)
+
     def test_swt_harness_defaults_to_the_vendored_project_copy(self) -> None:
         project_root = Path(__file__).resolve().parents[1]
         launcher = (project_root / "pipeline" / "run.py").read_text(
