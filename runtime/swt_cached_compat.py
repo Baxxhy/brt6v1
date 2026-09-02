@@ -21,6 +21,25 @@ def _append_once(spec: dict, key: str, command: str) -> None:
         values.append(command)
 
 
+_OFFLINE_EXPORT = (
+    "export PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1 "
+    "HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1"
+)
+
+
+def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]:
+    """Remove cached-image installation and noisy diagnostics from eval states."""
+
+    diagnostics = {"git status", "git show", f"git diff {base_commit}"}
+    converted = [_OFFLINE_EXPORT]
+    for command in commands:
+        if command in diagnostics or "pip install" in command:
+            continue
+        if command != _OFFLINE_EXPORT:
+            converted.append(command)
+    return converted
+
+
 def apply_environment_compatibility(version_map: dict) -> None:
     """Apply the environment contracts used by the cached BRT6 images."""
 
@@ -154,6 +173,7 @@ def install_cached_image_contract(exec_spec_class: type) -> None:
     original_repo_commands = exec_spec_class.repo_script_list.fget
     original_env_image_key = exec_spec_class.env_image_key.fget
     original_test_command = exec_spec_class.test_command.fget
+    original_eval_commands = exec_spec_class.eval_script_list.fget
 
     def repo_script_list(self):
         return retryable_repo_commands(
@@ -183,9 +203,16 @@ def install_cached_image_contract(exec_spec_class: type) -> None:
             test_directives=tuple(self.test_directives or ()),
         )
 
+    def eval_script_list(self):
+        return offline_eval_commands(
+            original_eval_commands(self),
+            base_commit=self.base_commit,
+        )
+
     exec_spec_class.repo_script_list = property(repo_script_list)
     exec_spec_class.env_image_key = property(env_image_key)
     exec_spec_class.test_command = property(test_command)
+    exec_spec_class.eval_script_list = property(eval_script_list)
 
 
 def install_local_source_fetches(repo_root: str | Path) -> None:

@@ -14,9 +14,39 @@ from brt6.evaluation.swtbench_runtime_compat import (
     _make_tree_world_accessible,
     _retryable_build_failure,
 )
+from brt6.runtime.swt_cached_compat import offline_eval_commands
 
 
 class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
+    def test_cached_eval_removes_every_runtime_install_and_keeps_state_commands(self) -> None:
+        commands = [
+            "source /opt/miniconda3/bin/activate",
+            "git status",
+            "git show",
+            "git diff base123",
+            "python -m pip install -e .[test] --verbose",
+            "python -c 'import roman' || python -m pip install roman==3.3",
+            "git apply -v -",
+            "python -m pytest tests/test_generated.py",
+            "git checkout base123",
+        ]
+
+        converted = offline_eval_commands(commands, base_commit="base123")
+
+        rendered = "\n".join(converted)
+        self.assertEqual(
+            converted[0],
+            "export PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1 "
+            "HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1",
+        )
+        self.assertNotIn("pip install", rendered)
+        self.assertNotIn("git status", converted)
+        self.assertNotIn("git show", converted)
+        self.assertNotIn("git diff base123", converted)
+        self.assertIn("git apply -v -", converted)
+        self.assertIn("python -m pytest tests/test_generated.py", converted)
+        self.assertIn("git checkout base123", converted)
+
     def test_cached_image_cleanup_is_a_noop(self) -> None:
         remover = getattr(runtime_compat, "_preserve_cached_image", None)
         self.assertIsNotNone(remover)
