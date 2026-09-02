@@ -205,6 +205,10 @@ def _start_swt_cached(
 
     import docker
 
+    from brt6.runtime.official_container_registry import (
+        OfficialContainerRegistry,
+        ensure_container_running,
+    )
     from brt6.runtime.swt_cached_compat import configure_cached_official_runtime
     from src.constants import MAP_VERSION_TO_INSTALL
     from src.exec_spec import ExecSpec, make_exec_spec
@@ -242,6 +246,7 @@ def _start_swt_cached(
         raise RuntimeError(f"cached official image missing: {image}") from exc
 
     attempt_names: list[str] = []
+    owned_container_names: list[str] = []
     cleanup_results: list[dict[str, str | int]] = []
     lifecycle = {
         "schema_version": 1,
@@ -250,22 +255,38 @@ def _start_swt_cached(
         "image_owned": False,
         "context_root": "",
         "container_names": attempt_names,
+        "owned_container_names": owned_container_names,
         "docker_api_timeout_seconds": docker_api_timeout,
+        "container_persistent": True,
         "status": "PREPARING",
     }
     _write_lifecycle(lifecycle_path, lifecycle)
     container = None
+    created_by_invocation = False
+    reused = False
+    adopted = False
     errors: list[str] = []
     try:
         config = MAP_VERSION_TO_INSTALL[spec.repo][spec.version]
         user = "root" if not config.get("execute_test_as_nonroot", False) else "nonroot"
+        registry = OfficialContainerRegistry()
+        resolution = registry.resolve(
+            client,
+            instance_id=request["instance_id"],
+            expected_image=image,
+            preferred_name=spec.get_instance_container_name(),
+        )
+        name = resolution.name
+        container = resolution.container
+        reused = resolution.reused
+        adopted = resolution.adopted
+        attempt_names.append(name)
+        if container is not None:
+            ensure_container_running(container)
+        else:
+            owned_container_names.append(name)
         retries = max(1, int(os.environ.get("BRT_OFFICIAL_BUILD_RETRIES", "3")))
-        for attempt in range(1, retries + 1):
-            name = (
-                image.replace(":latest", "")
-                + f".brt6.{os.getpid()}.{uuid.uuid4().hex[:8]}.a{attempt}"
-            )
-            attempt_names.append(name)
+        for attempt in range(1, retries + 1) if container is None else ():
             lifecycle["status"] = f"ATTEMPT_{attempt}"
             _write_lifecycle(lifecycle_path, lifecycle)
             try:
@@ -279,17 +300,7 @@ def _start_swt_cached(
                     platform=spec.platform,
                 )
                 container.start()
-                check = container.exec_run(
-                    ["git", "-C", spec.repo_directory, "rev-parse", "HEAD"]
-                )
-                actual_commit = check.output.decode(
-                    "utf-8", errors="replace"
-                ).strip()
-                if check.exit_code != 0 or actual_commit != request["base_commit"]:
-                    raise RuntimeError(
-                        "cached image base commit mismatch: "
-                        f"expected {request['base_commit']}, got {actual_commit or 'unavailable'}"
-                    )
+                created_by_invocation = True
                 break
             except Exception as exc:
                 errors.append(f"attempt {attempt}/{retries}: {exc!r}")
@@ -308,11 +319,29 @@ def _start_swt_cached(
                 time.sleep(min(30, 5 * attempt))
 
         assert container is not None
+        check = container.exec_run(
+            ["git", "-C", spec.repo_directory, "rev-parse", "HEAD"]
+        )
+        actual_commit = check.output.decode("utf-8", errors="replace").strip()
+        if check.exit_code != 0 or actual_commit != request["base_commit"]:
+            raise RuntimeError(
+                "cached image base commit mismatch: "
+                f"expected {request['base_commit']}, got {actual_commit or 'unavailable'}"
+            )
+        registry.confirm(
+            instance_id=request["instance_id"],
+            expected_image=image,
+            container_name=container.name,
+        )
         result = {
             "container_id": container.id,
             "container_name": container.name,
             "image": image,
             "image_owned": False,
+            "container_persistent": True,
+            "container_reused": reused,
+            "container_adopted": adopted,
+            "container_registry": str(registry.path),
             "repo_directory": spec.repo_directory,
             "env_name": spec.env_name,
             "platform": spec.platform,
@@ -337,20 +366,18 @@ def _start_swt_cached(
         _write_lifecycle(lifecycle_path, lifecycle)
         return result
     except Exception:
-        if container is not None:
+        if container is not None and created_by_invocation:
             try:
                 container.remove(force=True)
             except Exception:
                 pass
-        cleanup_results.extend(
-            _remove_container_by_name(client, name) for name in attempt_names
-        )
         lifecycle["status"] = "FAILED_CLEANED"
         lifecycle["attempt_cleanup"] = cleanup_results
         _write_lifecycle(lifecycle_path, lifecycle)
         raise
     finally:
         close_logger(logger)
+        client.close()
 
 
 def _start_swt_rebuild(
@@ -363,6 +390,10 @@ def _start_swt_rebuild(
     sys.path.insert(0, str(root))
     import docker
 
+    from brt6.runtime.official_container_registry import (
+        OfficialContainerRegistry,
+        ensure_container_running,
+    )
     from src import docker_build as official_docker_build
     from src.exec_spec import ExecSpec, make_exec_spec
     from src.utils import close_logger, setup_logger
@@ -408,7 +439,7 @@ def _start_swt_rebuild(
     spec = ReliableFetchExecSpec(**asdict(official_spec))
     spec._official_instance_image_key = official_spec.instance_image_key
     spec._reliable_instance_dockerfile = reliable_dockerfile
-    spec._brt_container_name = ""
+    spec._brt_container_name = official_spec.get_instance_container_name()
     context_root = (
         log_path.parent
         / f".official_build_context_{os.getpid()}_{uuid.uuid4().hex[:10]}"
@@ -449,33 +480,52 @@ def _start_swt_rebuild(
         shutil.rmtree(context_root, ignore_errors=True)
         raise
     container = None
+    created_by_invocation = False
+    reused = False
+    adopted = False
     attempt_names: list[str] = []
+    owned_container_names: list[str] = []
     cleanup_results: list[dict[str, str | int]] = []
     lifecycle = {
         "schema_version": 1,
         "instance_id": request["instance_id"],
         "image": spec.instance_image_key,
+        "image_owned": False,
         "context_root": str(context_root),
         "container_names": attempt_names,
+        "owned_container_names": owned_container_names,
         "docker_api_timeout_seconds": docker_api_timeout,
+        "container_persistent": True,
         "status": "PREPARING",
     }
     _write_lifecycle(lifecycle_path, lifecycle)
     try:
+        registry = OfficialContainerRegistry()
+        resolution = registry.resolve(
+            client,
+            instance_id=request["instance_id"],
+            expected_image=spec.instance_image_key,
+            preferred_name=spec._brt_container_name,
+        )
+        spec._brt_container_name = resolution.name
+        container = resolution.container
+        reused = resolution.reused
+        adopted = resolution.adopted
+        attempt_names.append(spec._brt_container_name)
+        if container is not None:
+            ensure_container_running(container)
+        else:
+            owned_container_names.append(spec._brt_container_name)
         retries = max(1, int(os.environ.get("BRT_OFFICIAL_BUILD_RETRIES", "3")))
         errors: list[str] = []
-        for attempt in range(1, retries + 1):
-            spec._brt_container_name = (
-                f"exec.eval.{spec.arch}.{spec.env_hash}.{spec.instance_hash}."
-                f"brt6.{os.getpid()}.{uuid.uuid4().hex[:8]}.a{attempt}"
-            )
-            attempt_names.append(spec._brt_container_name)
+        for attempt in range(1, retries + 1) if container is None else ():
             lifecycle["status"] = f"ATTEMPT_{attempt}"
             _write_lifecycle(lifecycle_path, lifecycle)
             try:
                 container = official_docker_build.start_container(
                     spec, client, logger, build_mode="api"
                 )
+                created_by_invocation = True
                 break
             except Exception as exc:
                 errors.append(f"attempt {attempt}/{retries}: {exc!r}")
@@ -503,10 +553,20 @@ def _start_swt_rebuild(
                     raise
                 time.sleep(min(30, 5 * attempt))
         assert container is not None
+        registry.confirm(
+            instance_id=request["instance_id"],
+            expected_image=spec.instance_image_key,
+            container_name=container.name,
+        )
         result = {
             "container_id": container.id,
             "container_name": container.name,
             "image": spec.instance_image_key,
+            "image_owned": False,
+            "container_persistent": True,
+            "container_reused": reused,
+            "container_adopted": adopted,
+            "container_registry": str(registry.path),
             "repo_directory": spec.repo_directory,
             "env_name": spec.env_name,
             "platform": spec.platform,
@@ -529,18 +589,11 @@ def _start_swt_rebuild(
         _write_lifecycle(lifecycle_path, lifecycle)
         return result
     except Exception:
-        if container is not None:
+        if container is not None and created_by_invocation:
             try:
                 container.remove(force=True)
             except Exception:
                 pass
-        cleanup_results.extend(
-            _remove_container_by_name(client, name) for name in attempt_names
-        )
-        try:
-            client.images.remove(spec.instance_image_key, force=True)
-        except Exception:
-            pass
         lifecycle["status"] = "FAILED_CLEANED"
         lifecycle["attempt_cleanup"] = cleanup_results
         _write_lifecycle(lifecycle_path, lifecycle)
@@ -549,6 +602,7 @@ def _start_swt_rebuild(
         official_docker_build.INSTANCE_IMAGE_BUILD_DIR = original_instance_build_dir
         shutil.rmtree(context_root, ignore_errors=True)
         close_logger(logger)
+        client.close()
 
 
 def _start_swt(

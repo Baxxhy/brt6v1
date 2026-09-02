@@ -26,6 +26,7 @@ from typing import Any, Iterator
 from ..core.behavior_evidence import BehaviorEvidence
 from ..core.schema import ExecutionResult
 from ..core.utils import safe_json_dump
+from .official_container_registry import InstanceLock
 
 
 OFFICIAL_RUNTIME_BACKEND = "official_docker"
@@ -381,6 +382,7 @@ class OfficialDockerRuntime:
         self.container_name = ""
         self.image = ""
         self.image_owned = True
+        self.container_persistent = False
         self.repo_directory = "/testbed"
         self.env_name = "testbed"
         self.manifest: dict[str, Any] = {}
@@ -410,7 +412,9 @@ class OfficialDockerRuntime:
             lifecycle = {}
         names = [
             str(name)
-            for name in lifecycle.get("container_names", [])
+            for name in lifecycle.get(
+                "owned_container_names", lifecycle.get("container_names", [])
+            )
             if str(name)
         ]
         commands: list[dict[str, Any]] = []
@@ -519,6 +523,9 @@ class OfficialDockerRuntime:
         if not self.image:
             raise RuntimeError("official harness did not report its instance image")
         self.image_owned = bool(payload.get("image_owned", True))
+        self.container_persistent = bool(
+            payload.get("container_persistent", False)
+        )
         self.repo_directory = str(payload.get("repo_directory") or "/testbed")
         self.env_name = str(payload.get("env_name") or "testbed")
         self.manifest = {
@@ -554,11 +561,19 @@ class OfficialDockerRuntime:
             ),
             "container_id": self.container_id,
             "container_name": self.container_name,
+            "container_persistent": self.container_persistent,
+            "container_reused": bool(payload.get("container_reused", False)),
+            "container_adopted": bool(payload.get("container_adopted", False)),
+            "container_registry": str(payload.get("container_registry") or ""),
             "repo_directory": self.repo_directory,
             "env_name": self.env_name,
             "gold_fields_present": [],
             "host_project_environment_created": False,
-            "container_reuse_scope": "one_instance",
+            "container_reuse_scope": (
+                "persistent_official_instance"
+                if self.container_persistent
+                else "one_instance"
+            ),
             "instance_image_cache_policy": (
                 "remove_on_instance_close"
                 if self.image_owned
@@ -748,6 +763,23 @@ class OfficialDockerRuntime:
         if not self.container_id and not self.image:
             return
 
+        if self.container_persistent:
+            self.manifest.update(
+                {
+                    "status": "PERSISTENT_READY",
+                    "container_cleanup_attempted": False,
+                    "container_cleanup_returncode": 0,
+                    "instance_image_cleanup_attempted": False,
+                    "instance_image_cleanup_returncode": 0,
+                    "instance_image_cache_policy": "preserve_cached_image",
+                }
+            )
+            safe_json_dump(self.manifest, str(self.manifest_path))
+            self.container_id = ""
+            self.image = ""
+            self.image_owned = True
+            return
+
         def cleanup_command(
             command: list[str], timeout_seconds: int
         ) -> tuple[int, str, str]:
@@ -872,20 +904,30 @@ def official_generation_runtime(
         output_dir=output_dir,
         startup_timeout=startup_timeout,
     )
-    runtime.start()
-    with _ACTIVE_LOCK:
-        if runtime.instance_id in _ACTIVE:
-            runtime.close()
-            raise RuntimeError(
-                f"official Docker runtime already active: {runtime.instance_id}"
-            )
-        _ACTIVE[runtime.instance_id] = runtime
+    instance_lock = InstanceLock(runtime.instance_id) if dataset_mode == "swt" else None
+    if instance_lock is not None:
+        instance_lock.acquire()
     try:
-        yield runtime
-    finally:
+        runtime.start()
         with _ACTIVE_LOCK:
-            _ACTIVE.pop(runtime.instance_id, None)
+            if runtime.instance_id in _ACTIVE:
+                runtime.close()
+                raise RuntimeError(
+                    f"official Docker runtime already active: {runtime.instance_id}"
+                )
+            _ACTIVE[runtime.instance_id] = runtime
+        try:
+            yield runtime
+        finally:
+            with _ACTIVE_LOCK:
+                _ACTIVE.pop(runtime.instance_id, None)
+            runtime.close()
+    except Exception:
         runtime.close()
+        raise
+    finally:
+        if instance_lock is not None:
+            instance_lock.release()
 
 
 def _cleanup_active_at_exit() -> None:
