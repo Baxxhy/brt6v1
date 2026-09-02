@@ -29,6 +29,7 @@ _CLONE_RE = re.compile(
 _RESET_RE = re.compile(r"^git reset --hard ([0-9a-f]{40})$", re.MULTILINE)
 _INSTALLED = False
 _DEFAULT_LOCK_DIR = Path("/root/Baxxhy/BugReproduce/brt6/.runtime/locks")
+_DEFAULT_SWT_METADATA_ROOT = Path(__file__).resolve().parent / "vendor/swtbench_metadata"
 
 
 def _lock_filename(instance_id: str) -> str:
@@ -287,7 +288,7 @@ def install() -> None:
 
     repo_root = Path(
         os.environ.get(
-            "BRT_SWT_LOCAL_REPOS", "/root/Baxxhy/BugReproduce/swe_repos"
+            "BRT_SWT_LOCAL_REPOS", str(_DEFAULT_SWT_METADATA_ROOT)
         )
     )
     configure_cached_official_runtime(
@@ -367,7 +368,7 @@ def install() -> None:
         source_dir = build_dir / "source"
         repo_root = Path(
             os.environ.get(
-                "BRT_SWT_LOCAL_REPOS", "/root/Baxxhy/BugReproduce/swe_repos"
+                "BRT_SWT_LOCAL_REPOS", str(_DEFAULT_SWT_METADATA_ROOT)
             )
         )
         source_repo = _find_local_repo(repo_root, owner, repo_name)

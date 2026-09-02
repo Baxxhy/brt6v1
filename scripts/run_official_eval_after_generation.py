@@ -42,6 +42,9 @@ def parse_bool(value: str) -> bool:
 
 
 def _git_head(path: Path) -> str:
+    commit_marker = path / "OFFICIAL_COMMIT"
+    if commit_marker.is_file():
+        return commit_marker.read_text(encoding="utf-8").strip()
     result = subprocess.run(
         ["git", "-C", str(path), "rev-parse", "HEAD"],
         text=True,
@@ -129,7 +132,10 @@ def main() -> int:
     parser.add_argument("--model-name", default="brt6-deepseek-v3")
     parser.add_argument("--compute-coverage", type=parse_bool, default=True)
     parser.add_argument("--official-python", default="")
-    parser.add_argument("--swtbench-root", default=str(PACKAGE_ROOT / "swt-bench"))
+    parser.add_argument(
+        "--swtbench-root",
+        default=str(PROJECT_ROOT / "evaluation/vendor/swtbench"),
+    )
     parser.add_argument(
         "--tddbench-root", default=str(PACKAGE_ROOT / "TDD-Bench-Verified")
     )
@@ -268,14 +274,15 @@ def main() -> int:
                 "sitecustomize": str(runtime_shim),
                 "shim_source": str(PROJECT_ROOT / "evaluation" / "swtbench_runtime_compat.py"),
                 "changes": [
-                    "stage the exact base_commit from the local source cache instead of cloning GitHub inside Docker",
+                    "resolve official requirements metadata from the project-local cache",
                     "treat an already-absent instance image as successful cleanup",
                     "make official exception stringification side-effect free",
                     "rotate host-side official harness logs at a bounded size",
                     "preserve the shared cached instance image after all six official evaluation states finish",
                     "reuse the official SWT-Bench container name per instance across all six states",
                     "serialize each instance with a lock stored under /root",
-                    "run required source rebuilds with pip and dataset access forced offline",
+                    "reuse ignored build artifacts baked into the official image and skip project reinstall",
+                    "force optional pip commands and dataset access offline",
                     "decode Docker test output as strict UTF-8 first and auditably escape only invalid bytes",
                     "patch both official run_evaluation module aliases loaded by src.main",
                 ],

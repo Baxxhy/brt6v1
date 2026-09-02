@@ -45,6 +45,9 @@ from ..runtime.official_docker_runtime import (
 
 _CONDA_ENV_LOCKS: dict[str, threading.Lock] = {}
 _CONDA_ENV_LOCKS_GUARD = threading.Lock()
+_VENDORED_SWTBENCH_ROOT = (
+    Path(__file__).resolve().parents[1] / "evaluation/vendor/swtbench"
+)
 
 
 def _conda_env_lock(env_name: str) -> threading.Lock:
@@ -117,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--swtbench_root",
         default=os.environ.get(
-            "SWTBENCH_ROOT", "/root/Baxxhy/BugReproduce/swt-bench"
+            "SWTBENCH_ROOT", str(_VENDORED_SWTBENCH_ROOT)
         ),
     )
     parser.add_argument(

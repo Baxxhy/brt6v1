@@ -7,10 +7,11 @@
 ## Docker 生命周期
 
 - 官方缓存镜像只读复用，不构建、不拉取、不删除。
+- SWT 官方 harness 固定提交及 276 条实例计算镜像 key 所需的 requirements 元数据均保存在 `evaluation/vendor/`，默认评测不读取项目外工作区。
 - 每个实例使用常驻容器，容器名称完全沿用 SWT-Bench 官方 `ExecSpec.get_instance_container_name()`，不维护 BRT6 私有命名规则。
-- 六个 SWT 状态以及后续相同实例重跑复用该容器。每个状态开始前执行仓库复位、未跟踪文件清理和残留补丁清理。
-- cached-image 评测不再执行项目 `pip install`。这与 iCoRe native 一致，并避免 PEP 517 build isolation 访问网络。
-- 容器复用前校验镜像、实例标识、运行状态、仓库 HEAD 和 Python 导入。标识不匹配或容器损坏时，只删除该精确容器并从已有缓存镜像创建；不得拉取、构建或联网安装。
+- 六个 SWT 状态以及后续相同实例重跑复用该容器。每个状态开始前执行仓库复位、普通未跟踪文件清理和残留补丁清理；使用 `git clean -fd` 保留官方镜像中被忽略的编译产物。
+- cached-image 评测不再执行项目 `pip install`，不升级 pip、setuptools 或项目依赖。这与 iCoRe native 的镜像复用原则一致，并避免 PEP 517 build isolation 访问网络。
+- 容器复用前校验镜像标识和运行状态。不匹配或容器损坏时，只删除该精确容器并从已有缓存镜像创建；不得拉取、构建或联网安装。
 - 同一实例使用文件锁串行访问，不同实例仍可并发。锁文件放在 `/root/Baxxhy/BugReproduce/brt6/.runtime/locks`。
 
 ## 评测兼容

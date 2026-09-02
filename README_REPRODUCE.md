@@ -1,11 +1,12 @@
 # Fresh-machine reproduction
 
 The repository can prepare a new Debian/Ubuntu Linux machine with Conda already
-installed, but API credentials are never stored in Git. Initial setup downloads
+installed. This private deployment tracks its API pool at
+`.secrets/api_pool.json` at the repository owner's request. Initial setup downloads
 framework dependencies, the benchmark repositories, and per-project Conda
 environments. Expect substantial network traffic, disk use, and setup time.
 
-## 1. Publish a clean repository
+## 1. Export before publishing publicly
 
 The original Git history contained a tracked multi-key pool. Deleting the file
 in a later commit does not delete it from history. Revoke/rotate those keys and
@@ -89,7 +90,7 @@ bash scripts/bootstrap_machine.sh --dataset all
 `--dataset all` also clones
 `https://github.com/IBM/TDD-Bench-Verified.git` beside the BRT repository.
 
-## 3. Configure keys without committing them
+## 3. Configure keys
 
 Interactive multi-key configuration:
 
@@ -122,9 +123,9 @@ export GPT_BASE_URL='https://aigc.x-see.cn/v1'
 export GPT_MODEL='gpt-5.4-mini'
 ```
 
-For a remote machine or cluster, pass these values through its secret manager,
-or transfer `.secrets/api_pool.json` separately over an authenticated channel.
-Do not put that file in the repository, even when the repository is private.
+For a remote machine or cluster, either use the tracked private pool or pass
+replacement values through its secret manager. Never publish the tracked pool
+to a public repository; remove it from history and rotate the keys first.
 
 Select the configured provider explicitly when launching an experiment:
 

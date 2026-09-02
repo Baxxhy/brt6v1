@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from brt6.evaluation import swtbench_runtime_compat as runtime_compat
+from brt6.runtime import swt_cached_compat
 from brt6.evaluation.swtbench_runtime_compat import (
     _bounded_setup_logger,
     _configure_container_reuse,
@@ -22,6 +23,23 @@ from brt6.runtime.swt_cached_compat import offline_eval_commands
 
 
 class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
+    def test_vendored_metadata_path_stays_inside_project_cache(self) -> None:
+        root = Path("/root/project/evaluation/vendor/swtbench_metadata")
+
+        self.assertEqual(
+            swt_cached_compat._vendored_metadata_path(
+                root,
+                "django",
+                "django",
+                "setup-commit",
+                "tests/requirements/py3.txt",
+            ),
+            root
+            / "django__django"
+            / "setup-commit"
+            / "tests/requirements/py3.txt",
+        )
+
     def test_lock_name_uses_instance_id_without_defining_a_container_name(self) -> None:
         self.assertEqual(
             _lock_filename("astropy__astropy-7746"),

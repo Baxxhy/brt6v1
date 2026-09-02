@@ -4,12 +4,12 @@ BRT6 从 issue、iCoRe 已生成的源码/测试检索结果和 buggy 仓库出�
 
 BRT6 不在宿主机为 benchmark 项目创建、克隆、修复或安装 Conda 环境。宿主机上的 `icore` 只运行 BRT 控制器和 LLM 客户端，官方 harness 的独立 Python 只负责构建/启动官方 image；项目依赖始终封装在 benchmark Docker image 内。生成容器只接收实例标识、仓库、版本和 base/setup commit，不接收 gold code/test patch。
 
-Docker 只缓存共享 `exec.base.*` / `exec.env.*` 环境层；每个实例结束后会删除其容器和精确的 `exec.eval.*` image。生成默认要求 Docker data-root 至少有 120 GiB 可用空间并拒绝 `vfs`（诊断时可用 `BRT_DOCKER_MIN_FREE_GB`、`BRT_REJECT_DOCKER_VFS` 显式覆盖）。只有生成返回成功且数据集每行都有非空 `final_test.py` 时，正式评测才会启动；否则 run 会写入 `generation_gate.json` 并记录评测被跳过。
+Docker 直接复用本机已有的官方 `exec.eval.*` 镜像。每个实例沿用 SWT-Bench 官方容器名并保留一个常驻容器，六个评测状态和后续重跑都复用它；评测不会升级 pip、setuptools 或项目依赖，也不会重复安装项目。生成默认要求 Docker data-root 至少有 120 GiB 可用空间并拒绝 `vfs`（诊断时可用 `BRT_DOCKER_MIN_FREE_GB`、`BRT_REJECT_DOCKER_VFS` 显式覆盖）。只有生成返回成功且数据集每行都有非空 `final_test.py` 时，正式评测才会启动；否则 run 会写入 `generation_gate.json` 并记录评测被跳过。
 
 ## 新机器复现
 
 完整的安全导出、自动安装、密钥配置和全量实验说明见
-[README_REPRODUCE.md](README_REPRODUCE.md)。真实 API key 不保存在 Git 中。
+[README_REPRODUCE.md](README_REPRODUCE.md)。当前私有仓库按仓库所有者要求跟踪 `.secrets/api_pool.json`；公开导出前必须移除并轮换其中的 key。
 
 ```bash
 bash scripts/bootstrap_official_benchmarks.sh

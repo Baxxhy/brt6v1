@@ -16,6 +16,22 @@ from brt6.evaluation.official_benchmarks import (
 
 
 class OfficialBenchmarkExportTests(unittest.TestCase):
+    def test_swt_harness_defaults_to_the_vendored_project_copy(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        launcher = (project_root / "pipeline" / "run.py").read_text(
+            encoding="utf-8"
+        )
+        evaluator = (
+            project_root / "scripts" / "run_official_eval_after_generation.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("/root/Baxxhy/BugReproduce/swt-bench", launcher)
+        self.assertIn("evaluation/vendor/swtbench", launcher)
+        self.assertIn("evaluation/vendor/swtbench", evaluator)
+        self.assertTrue(
+            (project_root / "evaluation" / "vendor" / "swtbench" / "src" / "main.py").is_file()
+        )
+
     def test_generation_completeness_requires_every_nonempty_export(self) -> None:
         self.assertTrue(
             generation_completeness(

@@ -18,7 +18,9 @@ brt6/
   mutation/      seed mutation planning
   execution/     command execution, dual-version helpers, surrogate patch loop
   validation/    verifier, strict verifier, semantic guard
-  evaluation/    direct/formal evaluation implementation
+  evaluation/    direct/formal evaluation implementation and vendored SWT harness
+    vendor/swtbench/          fixed official harness source
+    vendor/swtbench_metadata/ offline requirements metadata for all 276 SWT instances
   io/            input and retrieval loading helpers
   runtime/       official Docker runtime and environment management
   pipeline/      pipeline orchestration

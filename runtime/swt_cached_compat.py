@@ -27,6 +27,18 @@ _OFFLINE_EXPORT = (
 )
 
 
+def _vendored_metadata_path(
+    root: Path,
+    owner: str,
+    repository_name: str,
+    commit: str,
+    relative: str,
+) -> Path:
+    """Map one raw-GitHub object to the project-local metadata cache."""
+
+    return root / f"{owner}__{repository_name}" / commit / relative
+
+
 def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]:
     """Reuse the official image build and keep optional installs offline.
 
@@ -253,6 +265,16 @@ def install_local_source_fetches(repo_root: str | Path) -> None:
         relative = posixpath.normpath(relative)
         if relative == ".." or relative.startswith("../"):
             raise RuntimeError("offline source path escapes repository")
+        metadata_file = _vendored_metadata_path(
+            root, owner, repository_name, commit, relative
+        )
+        if metadata_file.is_file():
+            response = requests.Response()
+            response.status_code = 200
+            response.url = url
+            response._content = metadata_file.read_bytes()
+            response.encoding = "utf-8"
+            return response
         candidates = (root / repository_name, root / f"{owner}__{repository_name}")
         for repository in candidates:
             if not (repository / ".git").is_dir():
@@ -270,10 +292,12 @@ def install_local_source_fetches(repo_root: str | Path) -> None:
                 response._content = result.stdout
                 response.encoding = "utf-8"
                 return response
-        raise RuntimeError(
-            f"offline source file unavailable: "
-            f"{owner}/{repository_name}@{commit}:{relative}"
-        )
+        response = requests.Response()
+        response.status_code = 404
+        response.url = url
+        response._content = b""
+        response.encoding = "utf-8"
+        return response
 
     requests.get = local_get
 

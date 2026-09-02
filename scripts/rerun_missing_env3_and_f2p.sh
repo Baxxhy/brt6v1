@@ -18,7 +18,7 @@ INSTANCES=$PROJECT_ROOT/data/issues/swt276_issues.json
 GOLD_DATASET=$SOURCE_RUN/dataset/swt276_with_gold.json
 CODE_RETRIEVAL=$PROJECT_ROOT/retrieval_results/code/code_retrieval_results_gpt.json
 TEST_RETRIEVAL=$PROJECT_ROOT/retrieval_results/test/icore/gpt/related_tests.json
-REPO_ROOT=/root/Baxxhy/BugReproduce/swe_repos
+REPO_ROOT=${REPO_ROOT:-$PROJECT_ROOT/evaluation/vendor/swtbench_metadata}
 BEHAVIOR_CACHE=$SOURCE_RUN/issue_rewrite
 
 IDS=(

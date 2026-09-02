@@ -81,7 +81,7 @@ python scripts/run_official_eval_after_generation.py \
   --timeout 1800 \
   --run-id <run_name> \
   --official-python /root/miniconda3/envs/swtbench/bin/python \
-  --swtbench-root /root/Baxxhy/BugReproduce/swt-bench
+  --swtbench-root /root/Baxxhy/BugReproduce/brt6/evaluation/vendor/swtbench
 ```
 
 `--dataset-file` 必须只包含本次已生成的实例；完整性门禁会拒绝缺少
@@ -104,7 +104,7 @@ bash scripts/run_official_swt_full.sh
 
 ## API key 配置
 
-优先使用本地、不入 Git 的配置文件：
+当前私有仓库使用 `.secrets/api_pool.json` 中的 14-key 池：
 
 ```bash
 cd /root/Baxxhy/BugReproduce/brt6
@@ -112,7 +112,7 @@ python scripts/configure_api_keys.py --provider deepseek
 ```
 
 也可以设置 `DEEPSEEK_API_KEYS`、`DEEPSEEK_BASE_URL`、`DEEPSEEK_MODEL`，或使用
-`GPT_API_KEY` 等 GPT 配置。真实 key 不要写入仓库。
+`GPT_API_KEY` 等 GPT 配置。若仓库将来改为公开，必须先移除并轮换已跟踪的 key。
 
 ## Docker 与临时目录
 
@@ -122,10 +122,32 @@ BRT6 沿用 iCoRe native 的本机 Docker：默认连接
 `results/runs/<run_name>/` 下；如需覆盖 Docker socket，可在启动前设置
 `DOCKER_HOST`。
 
-SWT 生成和官方评测默认直接使用已存在的 `exec.eval.x86_64.*` 镜像，不执行
-build、pull 或源码 fetch，结束时只删除本次容器并保留共享镜像。启动前可用
-`DOCKER_HOST=unix:///run/mutate-docker.sock docker info` 检查 daemon。仅诊断缺失
-镜像时才显式设置 `BRT_ALLOW_OFFICIAL_IMAGE_REBUILD=1`；正常批量运行不要设置。
+SWT 官方 harness 的固定提交已复制到
+`evaluation/vendor/swtbench/`，默认运行不再读取项目外的 `swt-bench` 工作区。
+
+SWT 生成和官方评测默认直接使用已存在的 `exec.eval.x86_64.*` 官方镜像，不执行
+build、pull 或网络源码 fetch。每个实例使用官方 `ExecSpec` 生成的原始容器名；
+容器在评测结束后保留并供后续六状态或重跑复用。cached-image 评测跳过项目
+`pip install`，不会升级 pip、setuptools 或项目依赖；仓库复位使用 `git clean -fd`
+保留官方镜像中被 Git 忽略的编译产物。
+
+启动前检查 daemon 和已有容器：
+
+```bash
+DOCKER_HOST=unix:///run/mutate-docker.sock docker info
+DOCKER_HOST=unix:///run/mutate-docker.sock docker ps -a \
+  --format '{{.Names}}\t{{.Status}}\t{{.Image}}' | grep '^exec\.eval\.'
+```
+
+只有确认某个实例容器已损坏时，才按上一步显示的完整官方名称精确删除；官方镜像
+不删除，下一次评测会从已有镜像重建同名容器：
+
+```bash
+DOCKER_HOST=unix:///run/mutate-docker.sock docker rm -f <完整官方容器名>
+```
+
+仅诊断缺失镜像时才显式设置 `BRT_ALLOW_OFFICIAL_IMAGE_REBUILD=1`；正常批量运行
+不要设置。
 
 ## 主要参数
 
