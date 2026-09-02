@@ -388,6 +388,62 @@ def test_case():
 
         self.assertIn("前置类型断言", audit_candidate(behavior, candidate))
 
+    def test_rendered_output_literal_must_not_be_inferred_from_attribute_name(self) -> None:
+        issue = """
+tbl = QTable({'response': [0.7] * u.count})
+tbl.write(sys.stdout, format='ascii.rst', header_rows=['name', 'unit'])
+ response
+       ct
+"""
+        behavior = BehaviorTarget(
+            "astropy__astropy-14182",
+            expected_behavior={"text": "RST output supports header rows."},
+        )
+        wrong = """
+def test_case():
+    output = render_table()
+    assert 'count' in output
+"""
+        correct = """
+def test_case():
+    output = render_table()
+    assert 'ct' in output
+"""
+
+        self.assertIn(
+            "展示文本",
+            audit_candidate(behavior, wrong, issue_text=issue),
+        )
+        self.assertEqual(audit_candidate(behavior, correct, issue_text=issue), "")
+
+    def test_minimal_reproducer_rejects_unstated_schema_keywords(self) -> None:
+        issue = """
+The following qdp file should read into a Table rather than crashing:
+read serr 1 2
+1 0.5 1 0.5
+Table.read('test.qdp', format='ascii.qdp')
+"""
+        behavior = BehaviorTarget(
+            "astropy__astropy-14365",
+            expected_behavior={"text": "The QDP input reads without crashing."},
+        )
+        wrong = """
+def test_case():
+    table = Table.read('test.qdp', format='ascii.qdp', names=['a', 'b', 'c', 'd'])
+    assert table
+"""
+        correct = """
+def test_case():
+    table = Table.read('test.qdp', format='ascii.qdp')
+    assert table
+"""
+
+        self.assertIn(
+            "names",
+            audit_candidate(behavior, wrong, issue_text=issue),
+        )
+        self.assertEqual(audit_candidate(behavior, correct, issue_text=issue), "")
+
     def test_strict_accept_is_overridden_by_deterministic_issue_guard(self) -> None:
         llm = _StaticLLM(
             {

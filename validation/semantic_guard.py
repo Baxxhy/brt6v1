@@ -330,6 +330,90 @@ def _leading_type_precondition(
     return ""
 
 
+def _unsupported_rendered_literal(issue_text: str, tree: ast.Module) -> str:
+    """Reject display text guessed only from an API attribute identifier."""
+
+    literals: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assert)
+            and isinstance(node.test, ast.Compare)
+            and len(node.test.ops) == 1
+            and isinstance(node.test.ops[0], ast.In)
+            and isinstance(node.test.left, ast.Constant)
+            and isinstance(node.test.left.value, str)
+        ):
+            literals.add(node.test.left.value)
+        elif isinstance(node, ast.Call) and _name(node.func).lower().endswith(
+            "assertin"
+        ):
+            if (
+                node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+            ):
+                literals.add(node.args[0].value)
+
+    for literal in sorted(literals):
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{1,}", literal):
+            continue
+        matches = list(
+            re.finditer(rf"(?i)(?<![A-Za-z0-9_]){re.escape(literal)}(?![A-Za-z0-9_])", issue_text)
+        )
+        if matches and all(match.start() > 0 and issue_text[match.start() - 1] == "." for match in matches):
+            return literal
+    return ""
+
+
+_SCHEMA_KEYWORDS = {
+    "columns",
+    "dtype",
+    "fieldnames",
+    "headers",
+    "names",
+    "schema",
+    "usecols",
+}
+
+
+def _unstated_reproducer_schema_keyword(
+    behavior: BehaviorEvidence,
+    issue_text: str,
+    tree: ast.Module,
+) -> str:
+    expected = _expected_text(behavior)
+    no_crash = any(
+        marker in expected or marker in issue_text.lower()
+        for marker in (
+            "rather than crashing",
+            "without crashing",
+            "should not crash",
+            "without raising",
+            "不崩溃",
+            "不报错",
+        )
+    )
+    if not no_crash:
+        return ""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        call_name = _name(node.func)
+        if not call_name or not re.search(
+            rf"\b{re.escape(call_name)}\s*\(", issue_text
+        ):
+            continue
+        for keyword in node.keywords:
+            if (
+                keyword.arg in _SCHEMA_KEYWORDS
+                and not re.search(
+                    rf"\b{re.escape(keyword.arg)}\s*=", issue_text
+                )
+            ):
+                return keyword.arg
+    return ""
+
+
 def oracle_contract_summary(
     behavior: BehaviorEvidence,
     code: str,
@@ -457,6 +541,28 @@ def audit_candidate(
             "首个前置类型断言会在目标行为执行或观察前失败，并且 expected_behavior "
             "并未要求该返回类型。请删除此前置类型断言，直接构造 Issue 的触发路径，"
             "让最终 Oracle 只验证修复后公开行为。"
+        )
+
+    rendered_literal = (
+        _unsupported_rendered_literal(issue_text, tree) if issue_text else ""
+    )
+    if rendered_literal:
+        return (
+            f"候选把 API 属性名 {rendered_literal!r} 猜成了展示文本，但 Issue 只在"
+            "属性访问中使用该名称，没有给出相同的渲染值。必须直接沿用 Issue 的"
+            "精确输出示例或断言更稳定的公开结构，不能由标识符推断格式化文本。"
+        )
+
+    schema_keyword = (
+        _unstated_reproducer_schema_keyword(behavior, issue_text, tree)
+        if issue_text
+        else ""
+    )
+    if schema_keyword:
+        return (
+            f"Issue 已给出可直接执行的最小复现调用，但候选额外传入 {schema_keyword}="
+            " 改变了输入 schema，可能让 fixed 版本因另一个前置条件失败。请删除"
+            "该额外参数，原样保留 Issue 的输入和目标调用，只观察承诺的修复行为。"
         )
 
     if "NO_TESTS_COLLECTED" in code:

@@ -26,6 +26,8 @@
 - 原始 Issue 中明确出现的限定 API（例如 `models.FilePathField`）优先于相似测试检索结果；候选使用冲突 API 时要求修复。
 - Issue 表达“默认、未配置、absence of explicitly configured”时，候选不得显式覆盖同名配置来模拟默认行为。
 - 首个失败必须是 Issue 承诺行为的可观察结果。Issue 未承诺的类型前置断言、私有实现断言或未命中目标 API 的失败不能进入 hard-eligible 候选。
+- Issue 给出精确展示输出时，候选不得把构造 API 的属性名猜成渲染文本；必须使用示例中的实际展示值或更稳定的结构断言。
+- Issue 给出可直接执行的最小复现调用并要求不崩溃时，候选不得额外传入 `names`、`schema`、`dtype` 等输入结构参数改变复现语义。
 - 确定性语义风险优先于 LLM `accept`，高风险候选继续修复或切换 seed。
 
 ## 错误处理
