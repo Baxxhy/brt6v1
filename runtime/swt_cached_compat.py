@@ -28,13 +28,24 @@ _OFFLINE_EXPORT = (
 
 
 def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]:
-    """Remove cached-image installation and noisy diagnostics from eval states."""
+    """Keep required source builds while making every pip command offline."""
 
     diagnostics = {"git status", "git show", f"git diff {base_commit}"}
     converted = [_OFFLINE_EXPORT]
     for command in commands:
-        if command in diagnostics or "pip install" in command:
+        if command in diagnostics:
             continue
+        if "pip install" in command:
+            command = re.sub(
+                r"python\s+-m\s+pip\s+install\b",
+                "python -m pip install --no-index --disable-pip-version-check "
+                "--no-build-isolation",
+                command,
+            )
+            command = command.replace(
+                "--no-build-isolation --no-build-isolation",
+                "--no-build-isolation",
+            )
         if command != _OFFLINE_EXPORT:
             converted.append(command)
     return converted

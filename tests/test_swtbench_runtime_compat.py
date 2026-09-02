@@ -36,7 +36,10 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
         self.assertEqual(environment["SWT_REUSE_CONTAINERS"], "1")
         self.assertEqual(environment["SWT_KEEP_CONTAINERS"], "1")
         self.assertEqual(environment["SWT_CONTAINER_REUSE_SCOPE"], "instance")
-        self.assertEqual(environment["SWT_SKIP_EVAL_INSTALL"], "1")
+        self.assertEqual(environment["SWT_SKIP_EVAL_INSTALL"], "0")
+        self.assertEqual(environment["PIP_NO_INDEX"], "1")
+        self.assertEqual(environment["HF_HUB_OFFLINE"], "1")
+        self.assertEqual(environment["HF_DATASETS_OFFLINE"], "1")
         self.assertEqual(
             environment["BRT_SWT_CONTAINER_LOCK_DIR"],
             "/root/Baxxhy/BugReproduce/brt6/.runtime/locks",
@@ -59,7 +62,7 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
             )
         )
 
-    def test_cached_eval_removes_every_runtime_install_and_keeps_state_commands(self) -> None:
+    def test_cached_eval_keeps_project_reinstall_but_forces_it_offline(self) -> None:
         commands = [
             "source /opt/miniconda3/bin/activate",
             "git status",
@@ -80,7 +83,16 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
             "export PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1 "
             "HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1",
         )
-        self.assertNotIn("pip install", rendered)
+        self.assertIn(
+            "python -m pip install --no-index --disable-pip-version-check "
+            "--no-build-isolation -e .[test] --verbose",
+            converted,
+        )
+        self.assertIn(
+            "python -c 'import roman' || python -m pip install --no-index "
+            "--disable-pip-version-check --no-build-isolation roman==3.3",
+            converted,
+        )
         self.assertNotIn("git status", converted)
         self.assertNotIn("git show", converted)
         self.assertNotIn("git diff base123", converted)

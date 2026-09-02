@@ -275,7 +275,7 @@ def main() -> int:
                     "preserve the shared cached instance image after all six official evaluation states finish",
                     "reuse the official SWT-Bench container name per instance across all six states",
                     "serialize each instance with a lock stored under /root",
-                    "remove runtime package installation from cached-image evaluation scripts",
+                    "run required source rebuilds with pip and dataset access forced offline",
                     "decode Docker test output as strict UTF-8 first and auditably escape only invalid bytes",
                     "patch both official run_evaluation module aliases loaded by src.main",
                 ],
