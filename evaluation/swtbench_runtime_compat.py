@@ -23,7 +23,6 @@ from typing import Any
 from brt6.runtime.official_container_registry import (
     InstanceLock,
     OfficialContainerRegistry,
-    ensure_container_running,
     lock_filename,
 )
 
@@ -92,6 +91,30 @@ def _preserve_cached_image(client, image_id, logger=None):
     elif logger is None:
         print(message)
     return None
+
+
+def _preserve_official_container(client, container, logger=None):
+    """Keep the official instance container for the next generation/eval state."""
+
+    del client
+    if container is None:
+        return None
+    message = f"Preserving persistent container {container.name}."
+    if logger not in (None, "quiet"):
+        logger.info(message)
+    elif logger is None:
+        print(message)
+    return None
+
+
+def _prepare_container_for_official_start(container) -> None:
+    """Official start_container expects a created or stopped container."""
+
+    container.reload()
+    status = str((container.attrs.get("State") or {}).get("Status") or "").lower()
+    if status == "running":
+        container.stop(timeout=15)
+        container.reload()
 
 
 def _decode_test_output(raw: bytes, log_dir: Path) -> str:
@@ -310,6 +333,7 @@ def install() -> None:
 
     remove_image = _preserve_cached_image
     docker_utils.remove_image = remove_image
+    docker_utils.cleanup_container = _preserve_official_container
 
     from src import docker_build
 
@@ -451,7 +475,7 @@ def install() -> None:
         container_name = resolution.name
         container = resolution.container
         if container is not None:
-            ensure_container_running(container)
+            _prepare_container_for_official_start(container)
             logger.info(
                 f"Reusing persistent container {container_name} for "
                 f"{exec_spec.instance_id}."
@@ -489,6 +513,7 @@ def install() -> None:
     def patch_run_evaluation(run_evaluation) -> None:
         run_evaluation.EvaluationError.__str__ = evaluation_error_str
         run_evaluation.remove_image = remove_image
+        run_evaluation.cleanup_container = _preserve_official_container
 
         def eval_in_container(
             log_dir,

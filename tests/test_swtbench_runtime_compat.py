@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from brt6.evaluation import swtbench_runtime_compat as runtime_compat
 from brt6.runtime import swt_cached_compat
@@ -17,12 +18,31 @@ from brt6.evaluation.swtbench_runtime_compat import (
     _lock_filename,
     _make_tree_world_accessible,
     _parse_pytest_single_test_progress,
+    _prepare_container_for_official_start,
+    _preserve_official_container,
     _retryable_build_failure,
 )
 from brt6.runtime.swt_cached_compat import offline_eval_commands
 
 
 class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
+    def test_persistent_container_cleanup_is_a_noop(self) -> None:
+        container = mock.Mock()
+        container.name = "exec.eval.x86_64.environment.instance.owner__repo-1"
+
+        _preserve_official_container(mock.Mock(), container, "quiet")
+
+        container.stop.assert_not_called()
+        container.remove.assert_not_called()
+
+    def test_running_reused_container_is_stopped_for_official_start(self) -> None:
+        container = mock.Mock()
+        container.attrs = {"State": {"Status": "running"}}
+
+        _prepare_container_for_official_start(container)
+
+        container.stop.assert_called_once_with(timeout=15)
+
     def test_vendored_metadata_path_stays_inside_project_cache(self) -> None:
         root = Path("/root/project/evaluation/vendor/swtbench_metadata")
 
