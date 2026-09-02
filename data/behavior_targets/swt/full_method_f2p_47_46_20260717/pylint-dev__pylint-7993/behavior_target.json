@@ -1,0 +1,314 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pylint-dev__pylint-7993",
+  "issue_summary": "使用自定义大括号的消息模板时，Pylint 错误地解析了模板字符串，导致输出不正确并产生警告。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 linter fixture（如相关测试中所示）来获取 PyLinter 实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 StringIO 捕获输出，并设置为 linter.reporter.out。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要调用 linter.open() 和 linter.set_current_module() 来初始化。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_template_option_non_existing",
+        "test_file": "tests/reporters/unittest_reporting.py",
+        "why_relevant": "它测试了 msg-template 选项对不存在的参数的处理，并检查了相关的 UserWarning，这与 Issue 中观察到的警告类型相似。",
+        "reusable_parts": [
+          "使用 StringIO 捕获输出",
+          "设置 linter.config.msg_template",
+          "使用 pytest.warns 捕获 UserWarning",
+          "使用 linter.add_message 生成消息",
+          "断言输出行"
+        ],
+        "possible_gap": "该测试使用简单的占位符（如 {a_new_option}），而不是 Issue 中复杂的嵌套大括号结构（{{ ... }}）。"
+      },
+      {
+        "test_name": "test_template_option",
+        "test_file": "tests/reporters/unittest_reporting.py",
+        "why_relevant": "它测试了基本的 msg-template 功能，展示了如何设置模板和验证输出。",
+        "reusable_parts": [
+          "设置 linter.config.msg_template",
+          "使用 linter.add_message",
+          "断言 output.getvalue()"
+        ],
+        "possible_gap": "它使用简单的模板格式，没有涉及自定义大括号或 JSON 结构。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用包含自定义大括号（如 {{ \"Category\": \"{category}\" }}）的 --msg-template 参数运行 pylint。",
+      "evidence": [
+        "Issue 中的命令：pylint test.py --msg-template='{{ \"Category\": \"{category}\" }}'",
+        "Issue 显示在 pylint 2.12.2 上触发警告和错误输出。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Pylint 发出 UserWarning，警告不识别参数 '{ \"Category\"'，并且输出被截断为 \" }\"，而不是完整的 JSON 对象。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 输出显示：UserWarning: Don't recognize the argument '{ \"Category\"' in the --msg-template.",
+        "Issue 输出显示：\" }\" 作为输出行。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pylint.lint.PyLinter",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试中用于设置 msg_template 配置和添加消息的核心类。"
+      },
+      {
+        "name": "pylint.reporters.text.TextReporter",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中警告来自 text.py，负责处理消息模板和输出。"
+      },
+      {
+        "name": "linter.config.msg_template",
+        "kind": "config",
+        "source_path": "",
+        "reason": "相关测试中直接设置此配置以测试模板行为。"
+      },
+      {
+        "name": "linter.add_message",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于触发消息生成，以观察模板输出。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/reporters/text.py",
+        "object": "TextReporter",
+        "lines": "206",
+        "reason": "Issue 中的警告信息指向该文件和行号：UserWarning: Don't recognize the argument '{ \"Category\"' in the --msg-template."
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "linter.config.msg_template = \"{msg_id}:{line:03d}\"",
+        "target_pattern": "linter.config.msg_template = \"{{ \\\"Category\\\": \\\"{category}\\\" }}\"",
+        "reason": "Issue 的触发条件是模板包含外层大括号和内部 JSON 键，这可能导致解析器错误地将 \"{ \"Category\"\" 视为一个参数名。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用简单的消息 ID 和行号作为模板参数。",
+        "target_pattern": "使用包含 category 字段的消息（如 C0301 或 line-too-long），因为 Issue 模板使用了 {category}。",
+        "reason": "为了复现，需要确保消息包含 category 属性，以便模板替换能正常工作。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Pylint 应正确解析消息模板，输出完整的自定义格式（如 { \"Category\": \"convention\" }），而不发出关于模板格式的错误警告。",
+      "evidence": [
+        "Issue 的预期行为描述：\"Expect the dictionary to print out with `\"Category\"` as the key.\"",
+        "Issue 显示在 pylint 1.7 上能正常工作，输出 { \"Category\": \"convention\" } 等。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 或 pytest.warns 捕获的 UserWarning 消息内容。",
+        "reason": "Issue 中明确出现了关于不识别参数的警告，观测警告内容可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "output.getvalue() 或 output.getvalue().split('\\n') 中的输出行。",
+        "reason": "Issue 显示输出被截断为 \" }\"，观测实际输出可以验证模板是否被正确渲染。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "输出应包含完整的 JSON 对象片段，如 { \"Category\": \"convention\" }，而不是截断的 \" }\"。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的输出字符串相等，因为具体消息内容可能变化。",
+        "reason": "Issue 的核心是输出格式错误，断言包含预期的键和结构更稳定。"
+      },
+      {
+        "assertion_goal": "不应出现关于 '{ \"Category\"' 的 UserWarning。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言警告数量为 0，因为其他警告可能无关。",
+        "reason": "Issue 表明该警告是错误的，修复后应消失。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "消息模板解析的确切逻辑和导致错误解析的具体代码位置（除了警告行外）。",
+    "category 参数在消息对象中是否始终可用，或者是否需要特定的消息类型。",
+    "修复后，对于包含嵌套大括号的模板，预期的完整输出格式是什么（Issue 只给出了一个示例）。"
+  ],
+  "raw": {
+    "issue_summary": "使用自定义大括号的消息模板时，Pylint 错误地解析了模板字符串，导致输出不正确并产生警告。",
+    "trigger_condition": {
+      "text": "使用包含自定义大括号（如 {{ \"Category\": \"{category}\" }}）的 --msg-template 参数运行 pylint。",
+      "evidence": [
+        "Issue 中的命令：pylint test.py --msg-template='{{ \"Category\": \"{category}\" }}'",
+        "Issue 显示在 pylint 2.12.2 上触发警告和错误输出。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Pylint 发出 UserWarning，警告不识别参数 '{ \"Category\"'，并且输出被截断为 \" }\"，而不是完整的 JSON 对象。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 输出显示：UserWarning: Don't recognize the argument '{ \"Category\"' in the --msg-template.",
+        "Issue 输出显示：\" }\" 作为输出行。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Pylint 应正确解析消息模板，输出完整的自定义格式（如 { \"Category\": \"convention\" }），而不发出关于模板格式的错误警告。",
+      "evidence": [
+        "Issue 的预期行为描述：\"Expect the dictionary to print out with `\"Category\"` as the key.\"",
+        "Issue 显示在 pylint 1.7 上能正常工作，输出 { \"Category\": \"convention\" } 等。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pylint.lint.PyLinter",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试中用于设置 msg_template 配置和添加消息的核心类。"
+      },
+      {
+        "name": "pylint.reporters.text.TextReporter",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中警告来自 text.py，负责处理消息模板和输出。"
+      },
+      {
+        "name": "linter.config.msg_template",
+        "kind": "config",
+        "source_path": "",
+        "reason": "相关测试中直接设置此配置以测试模板行为。"
+      },
+      {
+        "name": "linter.add_message",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于触发消息生成，以观察模板输出。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/reporters/text.py",
+        "object": "TextReporter",
+        "lines": "206",
+        "reason": "Issue 中的警告信息指向该文件和行号：UserWarning: Don't recognize the argument '{ \"Category\"' in the --msg-template."
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_template_option_non_existing",
+        "test_file": "tests/reporters/unittest_reporting.py",
+        "why_relevant": "它测试了 msg-template 选项对不存在的参数的处理，并检查了相关的 UserWarning，这与 Issue 中观察到的警告类型相似。",
+        "reusable_parts": [
+          "使用 StringIO 捕获输出",
+          "设置 linter.config.msg_template",
+          "使用 pytest.warns 捕获 UserWarning",
+          "使用 linter.add_message 生成消息",
+          "断言输出行"
+        ],
+        "possible_gap": "该测试使用简单的占位符（如 {a_new_option}），而不是 Issue 中复杂的嵌套大括号结构（{{ ... }}）。"
+      },
+      {
+        "test_name": "test_template_option",
+        "test_file": "tests/reporters/unittest_reporting.py",
+        "why_relevant": "它测试了基本的 msg-template 功能，展示了如何设置模板和验证输出。",
+        "reusable_parts": [
+          "设置 linter.config.msg_template",
+          "使用 linter.add_message",
+          "断言 output.getvalue()"
+        ],
+        "possible_gap": "它使用简单的模板格式，没有涉及自定义大括号或 JSON 结构。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "linter.config.msg_template = \"{msg_id}:{line:03d}\"",
+        "target_pattern": "linter.config.msg_template = \"{{ \\\"Category\\\": \\\"{category}\\\" }}\"",
+        "reason": "Issue 的触发条件是模板包含外层大括号和内部 JSON 键，这可能导致解析器错误地将 \"{ \"Category\"\" 视为一个参数名。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用简单的消息 ID 和行号作为模板参数。",
+        "target_pattern": "使用包含 category 字段的消息（如 C0301 或 line-too-long），因为 Issue 模板使用了 {category}。",
+        "reason": "为了复现，需要确保消息包含 category 属性，以便模板替换能正常工作。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 或 pytest.warns 捕获的 UserWarning 消息内容。",
+        "reason": "Issue 中明确出现了关于不识别参数的警告，观测警告内容可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "output.getvalue() 或 output.getvalue().split('\\n') 中的输出行。",
+        "reason": "Issue 显示输出被截断为 \" }\"，观测实际输出可以验证模板是否被正确渲染。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "输出应包含完整的 JSON 对象片段，如 { \"Category\": \"convention\" }，而不是截断的 \" }\"。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的输出字符串相等，因为具体消息内容可能变化。",
+        "reason": "Issue 的核心是输出格式错误，断言包含预期的键和结构更稳定。"
+      },
+      {
+        "assertion_goal": "不应出现关于 '{ \"Category\"' 的 UserWarning。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言警告数量为 0，因为其他警告可能无关。",
+        "reason": "Issue 表明该警告是错误的，修复后应消失。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 linter fixture（如相关测试中所示）来获取 PyLinter 实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 StringIO 捕获输出，并设置为 linter.reporter.out。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要调用 linter.open() 和 linter.set_current_module() 来初始化。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "消息模板解析的确切逻辑和导致错误解析的具体代码位置（除了警告行外）。",
+      "category 参数在消息对象中是否始终可用，或者是否需要特定的消息类型。",
+      "修复后，对于包含嵌套大括号的模板，预期的完整输出格式是什么（Issue 只给出了一个示例）。"
+    ]
+  }
+}

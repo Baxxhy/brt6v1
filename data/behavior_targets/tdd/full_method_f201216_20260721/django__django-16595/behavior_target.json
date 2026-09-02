@@ -1,0 +1,306 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16595",
+  "issue_summary": "Migration optimizer fails to reduce multiple consecutive AlterField operations when AddField is not present.",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "Use SimpleTestCase or a similar test class from Django's test suite.",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Import migrations and models from django.db.",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Create a MigrationOptimizer instance.",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "OptimizerTests.test_add_field_alter_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "Tests optimization involving AddField and AlterField, uses the same optimizer and assertOptimizesTo pattern.",
+        "reusable_parts": [
+          "OptimizerTests class",
+          "assertOptimizesTo method",
+          "imports for migrations and models",
+          "construction of migration operation lists."
+        ],
+        "possible_gap": "This test includes AddField, which the Issue says works. It does not test multiple consecutive AlterField operations without AddField."
+      },
+      {
+        "test_name": "OptimizerTests.test_alter_field_delete_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "Tests optimization involving AlterField and another operation (RemoveField), showing reduction logic.",
+        "reusable_parts": [
+          "Test structure",
+          "use of AlterField in operation list."
+        ],
+        "possible_gap": "Tests reduction to a different operation type (RemoveField), not reduction of multiple AlterFields."
+      },
+      {
+        "test_name": "OptimizerTests.test_alter_field_rename_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "Tests optimization involving AlterField and RenameField, showing complex reduction scenarios.",
+        "reusable_parts": [
+          "Test structure",
+          "use of multiple operations including AlterField."
+        ],
+        "possible_gap": "Focuses on interaction with RenameField, not consecutive AlterFields."
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "Calling MigrationOptimizer.optimize() with a list of operations containing multiple consecutive AlterField operations on the same model and field, where the first operation is not AddField.",
+      "evidence": [
+        "Issue describes optimizer.optimize(operations[1:], \"books\") where operations[1:] are three AlterField operations.",
+        "Issue states 'none of the AlterField are reduced'."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "The optimizer returns a list containing all three AlterField operations unchanged, instead of reducing them to a single AlterField operation.",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue shows optimizer output: [<AlterField ...>, <AlterField ...>, <AlterField ...>].",
+        "Issue states 'none of the AlterField are reduced'."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "MigrationOptimizer.optimize",
+        "kind": "method",
+        "source_path": "django/db/migrations/optimizer.py",
+        "reason": "Main entry point for optimization, called in the Issue example."
+      },
+      {
+        "name": "AlterField.reduce",
+        "kind": "method",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue identifies the bug is in AlterField.reduce not handling another AlterField."
+      },
+      {
+        "name": "AlterField.is_same_field_operation",
+        "kind": "method",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Used in reduce to check if operations target the same field, likely needed for the fix."
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AlterField.reduce",
+        "lines": "249-267",
+        "reason": "Issue states 'AlterField.reduce does not consider the case where operation is also an AlterField'. Source code shows it handles RemoveField and RenameField, but not AlterField."
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Related tests use operation lists mixing different operation types (AddField+AlterField, AlterField+RemoveField, AlterField+RenameField).",
+        "target_pattern": "Operation list containing only multiple consecutive AlterField operations on the same model and field.",
+        "reason": "The bug is triggered specifically when AlterField.reduce is called with another AlterField operation.",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "Related tests often start with AddField or include other operation types.",
+        "target_pattern": "Start the operation list directly with AlterField (i.e., omit the AddField).",
+        "reason": "Issue shows bug occurs when AddField is separated or absent.",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "The optimizer should reduce multiple consecutive AlterField operations on the same model and field into a single AlterField operation representing the final field state.",
+      "evidence": [
+        "Issue suggests adding logic to AlterField.reduce to handle another AlterField operation.",
+        "Related test test_add_field_alter_field shows AlterField can be optimized into AddField, indicating reduction is a general goal."
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "The list returned by optimizer.optimize().",
+        "reason": "The bug symptom is the optimizer returning an unchanged list of AlterFields instead of a reduced list."
+      },
+      {
+        "kind": "state",
+        "expression_hint": "The number of operations in the returned list, or the type/field attributes of the operations.",
+        "reason": "To verify if multiple AlterFields were collapsed into one final AlterField."
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "The optimized operation list should contain fewer AlterField operations than the input list when they target the same field.",
+        "preferred_assertion_style": "equals",
+        "avoid": "Asserting exact SQL or exact field repr strings, as field parameters may change.",
+        "reason": "The core issue is about reduction, not the exact final field definition. A stable assertion compares the length or structure of the result list."
+      }
+    ]
+  },
+  "uncertainties": [
+    "The exact expected output after reduction: should it be a single AlterField with the last field definition, or could intermediate reductions happen?",
+    "Whether the reduction should also consider and merge the field attributes from all AlterFields, or just take the last one.",
+    "Whether other constraints (like non-elidable migrations mentioned in Issue) affect the reduction logic."
+  ],
+  "raw": {
+    "issue_summary": "Migration optimizer fails to reduce multiple consecutive AlterField operations when AddField is not present.",
+    "trigger_condition": {
+      "text": "Calling MigrationOptimizer.optimize() with a list of operations containing multiple consecutive AlterField operations on the same model and field, where the first operation is not AddField.",
+      "evidence": [
+        "Issue describes optimizer.optimize(operations[1:], \"books\") where operations[1:] are three AlterField operations.",
+        "Issue states 'none of the AlterField are reduced'."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "The optimizer returns a list containing all three AlterField operations unchanged, instead of reducing them to a single AlterField operation.",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue shows optimizer output: [<AlterField ...>, <AlterField ...>, <AlterField ...>].",
+        "Issue states 'none of the AlterField are reduced'."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "The optimizer should reduce multiple consecutive AlterField operations on the same model and field into a single AlterField operation representing the final field state.",
+      "evidence": [
+        "Issue suggests adding logic to AlterField.reduce to handle another AlterField operation.",
+        "Related test test_add_field_alter_field shows AlterField can be optimized into AddField, indicating reduction is a general goal."
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "MigrationOptimizer.optimize",
+        "kind": "method",
+        "source_path": "django/db/migrations/optimizer.py",
+        "reason": "Main entry point for optimization, called in the Issue example."
+      },
+      {
+        "name": "AlterField.reduce",
+        "kind": "method",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue identifies the bug is in AlterField.reduce not handling another AlterField."
+      },
+      {
+        "name": "AlterField.is_same_field_operation",
+        "kind": "method",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Used in reduce to check if operations target the same field, likely needed for the fix."
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AlterField.reduce",
+        "lines": "249-267",
+        "reason": "Issue states 'AlterField.reduce does not consider the case where operation is also an AlterField'. Source code shows it handles RemoveField and RenameField, but not AlterField."
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "OptimizerTests.test_add_field_alter_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "Tests optimization involving AddField and AlterField, uses the same optimizer and assertOptimizesTo pattern.",
+        "reusable_parts": [
+          "OptimizerTests class",
+          "assertOptimizesTo method",
+          "imports for migrations and models",
+          "construction of migration operation lists."
+        ],
+        "possible_gap": "This test includes AddField, which the Issue says works. It does not test multiple consecutive AlterField operations without AddField."
+      },
+      {
+        "test_name": "OptimizerTests.test_alter_field_delete_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "Tests optimization involving AlterField and another operation (RemoveField), showing reduction logic.",
+        "reusable_parts": [
+          "Test structure",
+          "use of AlterField in operation list."
+        ],
+        "possible_gap": "Tests reduction to a different operation type (RemoveField), not reduction of multiple AlterFields."
+      },
+      {
+        "test_name": "OptimizerTests.test_alter_field_rename_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "Tests optimization involving AlterField and RenameField, showing complex reduction scenarios.",
+        "reusable_parts": [
+          "Test structure",
+          "use of multiple operations including AlterField."
+        ],
+        "possible_gap": "Focuses on interaction with RenameField, not consecutive AlterFields."
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Related tests use operation lists mixing different operation types (AddField+AlterField, AlterField+RemoveField, AlterField+RenameField).",
+        "target_pattern": "Operation list containing only multiple consecutive AlterField operations on the same model and field.",
+        "reason": "The bug is triggered specifically when AlterField.reduce is called with another AlterField operation.",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "Related tests often start with AddField or include other operation types.",
+        "target_pattern": "Start the operation list directly with AlterField (i.e., omit the AddField).",
+        "reason": "Issue shows bug occurs when AddField is separated or absent.",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "The list returned by optimizer.optimize().",
+        "reason": "The bug symptom is the optimizer returning an unchanged list of AlterFields instead of a reduced list."
+      },
+      {
+        "kind": "state",
+        "expression_hint": "The number of operations in the returned list, or the type/field attributes of the operations.",
+        "reason": "To verify if multiple AlterFields were collapsed into one final AlterField."
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "The optimized operation list should contain fewer AlterField operations than the input list when they target the same field.",
+        "preferred_assertion_style": "equals",
+        "avoid": "Asserting exact SQL or exact field repr strings, as field parameters may change.",
+        "reason": "The core issue is about reduction, not the exact final field definition. A stable assertion compares the length or structure of the result list."
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "Use SimpleTestCase or a similar test class from Django's test suite.",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Import migrations and models from django.db.",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Create a MigrationOptimizer instance.",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "The exact expected output after reduction: should it be a single AlterField with the last field definition, or could intermediate reductions happen?",
+      "Whether the reduction should also consider and merge the field attributes from all AlterFields, or just take the last one.",
+      "Whether other constraints (like non-elidable migrations mentioned in Issue) affect the reduction logic."
+    ]
+  }
+}

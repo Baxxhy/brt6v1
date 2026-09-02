@@ -1,0 +1,282 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sphinx-doc__sphinx-7985",
+  "issue_summary": "linkcheck 构建器不检查本地（内部）链接，只检查外部链接。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 pytest-sphinx 的 app fixture 和 'linkcheck' 构建器，设置 freshenv=True 和包含本地引用的 testroot。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时 reStructuredText 文件，模拟 Issue 中的 index.rst 内容。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_defaults",
+        "test_file": "tests/test_build_linkcheck.py",
+        "why_relevant": "它测试 linkcheck 构建器的默认行为，包括检查外部 URL 和锚点（anchor），与 Issue 的 linkcheck 功能相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('linkcheck', testroot='linkcheck', freshenv=True) fixture 使用",
+          "app.builder.build_all() 调用",
+          "检查输出文件 (output.txt) 和断言内容包含特定字符串的模式。"
+        ],
+        "possible_gap": "当前测试只检查外部 URL（如 https://...）和外部文档中的锚点，没有测试本地（内部）引用（如 `.. _label:` 指向同一文档中的位置）。"
+      },
+      {
+        "test_name": "test_defaults_json",
+        "test_file": "tests/test_build_linkcheck.py",
+        "why_relevant": "它测试 linkcheck 的 JSON 输出格式，验证了各种链接状态（working, broken），包括锚点检查。",
+        "reusable_parts": [
+          "JSON 输出解析和状态验证模式",
+          "通过 uri 键索引行的断言风格。"
+        ],
+        "possible_gap": "测试数据（links.txt）似乎只包含外部 URI 和锚点，没有本地 reStructuredText 引用目标。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用包含本地引用（如 `.. _local-link: doesntexist`）和外部引用（如 `.. _external-link: https://...`）的 reStructuredText 文档运行 `make linkcheck` 或 `sphinx-build -b linkcheck`。",
+      "evidence": [
+        "Issue 的 'Procedure to reproduce the problem' 部分描述了创建包含 `.. _local-link: doesntexist` 的 index.rst 并运行 `make linkcheck`。",
+        "Issue 的错误日志显示 `-local-   doesntexist` 行没有报告为 broken，而外部链接报告了错误。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "linkcheck 构建器输出中，本地（内部）链接（如 `doesntexist`）未被识别为 broken，而外部链接被正确识别并报告错误。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 的错误日志显示 `(line   14) -local-   doesntexist` 行，但没有 'broken' 状态或错误信息。",
+        "Issue 的 'Expected results' 部分指出 'Also a check for the local link.'，暗示当前缺失。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.builders.linkcheck",
+        "kind": "module",
+        "source_path": "sphinx/builders/linkcheck.py",
+        "reason": "Issue 主题是 linkcheck 构建器的功能，相关源码片段指向此文件。"
+      },
+      {
+        "name": "sphinx.domains.rst",
+        "kind": "module",
+        "source_path": "sphinx/domains/rst.py",
+        "reason": "iCoRe 检索出的相关源码包含此文件，可能涉及 reStructuredText 域和内部链接处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/builders/linkcheck.py",
+        "object": "linkcheck 构建器",
+        "lines": "",
+        "reason": "Issue 直接关于 linkcheck 构建器的功能，它可能只处理外部 URI，而忽略了内部引用。"
+      },
+      {
+        "path": "sphinx/domains/rst.py",
+        "object": "rst 域",
+        "lines": "",
+        "reason": "内部链接（如 `.. _label:`）由 reStructuredText 域处理，linkcheck 可能未与此集成以验证目标存在性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用包含外部 URL 和跨文档锚点的输入文件（如 links.txt）。",
+        "target_pattern": "输入文件应包含本地（内部）reStructuredText 引用，如 `.. _local-label: target`，其中 target 可能不存在。",
+        "reason": "Issue 表明 linkcheck 不检查此类本地链接，改变输入可以触发缺失的检查逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用默认配置或覆盖如 linkcheck_ignore。",
+        "target_pattern": "可能需要配置以启用本地链接检查，但 Issue 未指定；当前可能无相关配置，因此保持默认。",
+        "reason": "如果本地链接检查是缺失功能，配置可能无关；但变异可探索是否有相关设置被忽略。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "linkcheck 构建器应检查并报告本地（内部）链接的有效性，例如当目标不存在时标记为 broken。",
+      "evidence": [
+        "Issue 的 'Expected results' 部分明确说明 'Also a check for the local link.'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "linkcheck 构建器的输出文件内容（如 output.txt 或 output.json）。",
+        "reason": "Issue 通过控制台输出显示问题；观察输出文件可以检测本地链接是否被报告为 broken。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "构建过程中的警告信息（warning 流）。",
+        "reason": "linkcheck 可能通过警告报告问题；观察警告可以捕获缺失的错误报告。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "构建后内部链接检查结果的数据结构（如收集的链接列表及其状态）。",
+        "reason": "可以插桩以查看 linkcheck 是否将本地引用纳入检查集合。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证输出中包含本地链接（如 `doesntexist`）被标记为 broken 或类似错误状态的信息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的输出字符串或精确行号，因为输出格式可能变化。",
+        "reason": "Issue 期望本地链接被检查；断言输出包含相关错误片段（如 'broken'、'not found'）与本地链接 URI 对齐，而不依赖不稳定细节。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "本地链接检查的确切预期输出格式是什么（例如，是 'broken' 状态还是特定错误信息）？",
+    "linkcheck 是否应该检查所有类型的本地引用（如 `.. _label:`、`:ref:`），还是仅特定子集？",
+    "相关源码片段（sphinx/builders/linkcheck.py 和 sphinx/domains/rst.py）中具体哪些函数或类需要修改？"
+  ],
+  "raw": {
+    "issue_summary": "linkcheck 构建器不检查本地（内部）链接，只检查外部链接。",
+    "trigger_condition": {
+      "text": "使用包含本地引用（如 `.. _local-link: doesntexist`）和外部引用（如 `.. _external-link: https://...`）的 reStructuredText 文档运行 `make linkcheck` 或 `sphinx-build -b linkcheck`。",
+      "evidence": [
+        "Issue 的 'Procedure to reproduce the problem' 部分描述了创建包含 `.. _local-link: doesntexist` 的 index.rst 并运行 `make linkcheck`。",
+        "Issue 的错误日志显示 `-local-   doesntexist` 行没有报告为 broken，而外部链接报告了错误。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "linkcheck 构建器输出中，本地（内部）链接（如 `doesntexist`）未被识别为 broken，而外部链接被正确识别并报告错误。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 的错误日志显示 `(line   14) -local-   doesntexist` 行，但没有 'broken' 状态或错误信息。",
+        "Issue 的 'Expected results' 部分指出 'Also a check for the local link.'，暗示当前缺失。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "linkcheck 构建器应检查并报告本地（内部）链接的有效性，例如当目标不存在时标记为 broken。",
+      "evidence": [
+        "Issue 的 'Expected results' 部分明确说明 'Also a check for the local link.'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.builders.linkcheck",
+        "kind": "module",
+        "source_path": "sphinx/builders/linkcheck.py",
+        "reason": "Issue 主题是 linkcheck 构建器的功能，相关源码片段指向此文件。"
+      },
+      {
+        "name": "sphinx.domains.rst",
+        "kind": "module",
+        "source_path": "sphinx/domains/rst.py",
+        "reason": "iCoRe 检索出的相关源码包含此文件，可能涉及 reStructuredText 域和内部链接处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/builders/linkcheck.py",
+        "object": "linkcheck 构建器",
+        "lines": "",
+        "reason": "Issue 直接关于 linkcheck 构建器的功能，它可能只处理外部 URI，而忽略了内部引用。"
+      },
+      {
+        "path": "sphinx/domains/rst.py",
+        "object": "rst 域",
+        "lines": "",
+        "reason": "内部链接（如 `.. _label:`）由 reStructuredText 域处理，linkcheck 可能未与此集成以验证目标存在性。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_defaults",
+        "test_file": "tests/test_build_linkcheck.py",
+        "why_relevant": "它测试 linkcheck 构建器的默认行为，包括检查外部 URL 和锚点（anchor），与 Issue 的 linkcheck 功能相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('linkcheck', testroot='linkcheck', freshenv=True) fixture 使用",
+          "app.builder.build_all() 调用",
+          "检查输出文件 (output.txt) 和断言内容包含特定字符串的模式。"
+        ],
+        "possible_gap": "当前测试只检查外部 URL（如 https://...）和外部文档中的锚点，没有测试本地（内部）引用（如 `.. _label:` 指向同一文档中的位置）。"
+      },
+      {
+        "test_name": "test_defaults_json",
+        "test_file": "tests/test_build_linkcheck.py",
+        "why_relevant": "它测试 linkcheck 的 JSON 输出格式，验证了各种链接状态（working, broken），包括锚点检查。",
+        "reusable_parts": [
+          "JSON 输出解析和状态验证模式",
+          "通过 uri 键索引行的断言风格。"
+        ],
+        "possible_gap": "测试数据（links.txt）似乎只包含外部 URI 和锚点，没有本地 reStructuredText 引用目标。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用包含外部 URL 和跨文档锚点的输入文件（如 links.txt）。",
+        "target_pattern": "输入文件应包含本地（内部）reStructuredText 引用，如 `.. _local-label: target`，其中 target 可能不存在。",
+        "reason": "Issue 表明 linkcheck 不检查此类本地链接，改变输入可以触发缺失的检查逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用默认配置或覆盖如 linkcheck_ignore。",
+        "target_pattern": "可能需要配置以启用本地链接检查，但 Issue 未指定；当前可能无相关配置，因此保持默认。",
+        "reason": "如果本地链接检查是缺失功能，配置可能无关；但变异可探索是否有相关设置被忽略。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "linkcheck 构建器的输出文件内容（如 output.txt 或 output.json）。",
+        "reason": "Issue 通过控制台输出显示问题；观察输出文件可以检测本地链接是否被报告为 broken。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "构建过程中的警告信息（warning 流）。",
+        "reason": "linkcheck 可能通过警告报告问题；观察警告可以捕获缺失的错误报告。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "构建后内部链接检查结果的数据结构（如收集的链接列表及其状态）。",
+        "reason": "可以插桩以查看 linkcheck 是否将本地引用纳入检查集合。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证输出中包含本地链接（如 `doesntexist`）被标记为 broken 或类似错误状态的信息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的输出字符串或精确行号，因为输出格式可能变化。",
+        "reason": "Issue 期望本地链接被检查；断言输出包含相关错误片段（如 'broken'、'not found'）与本地链接 URI 对齐，而不依赖不稳定细节。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytest-sphinx 的 app fixture 和 'linkcheck' 构建器，设置 freshenv=True 和包含本地引用的 testroot。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时 reStructuredText 文件，模拟 Issue 中的 index.rst 内容。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "本地链接检查的确切预期输出格式是什么（例如，是 'broken' 状态还是特定错误信息）？",
+      "linkcheck 是否应该检查所有类型的本地引用（如 `.. _label:`、`:ref:`），还是仅特定子集？",
+      "相关源码片段（sphinx/builders/linkcheck.py 和 sphinx/domains/rst.py）中具体哪些函数或类需要修改？"
+    ]
+  }
+}

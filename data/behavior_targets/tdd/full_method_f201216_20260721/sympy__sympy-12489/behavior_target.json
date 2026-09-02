@@ -1,0 +1,284 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-12489",
+  "issue_summary": "Permutation 类的 __new__ 和 _af_new 方法硬编码了类名，导致子类化时无法返回子类实例。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义一个简单的 Permutation 子类。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊的 fixture 或外部设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Permutation",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "该测试广泛测试了 Permutation 的构造和各种操作，包含了实例化 Permutation 的多种方式。",
+        "reusable_parts": [
+          "imports",
+          "Permutation 对象构造（如 Permutation([0, 1, 2, 3])）",
+          "assert 风格"
+        ],
+        "possible_gap": "现有测试没有涉及子类化 Permutation 的场景。"
+      },
+      {
+        "test_name": "test_args",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "该测试专注于 Permutation 构造函数的各种参数形式，是测试实例化逻辑的起点。",
+        "reusable_parts": [
+          "Permutation 构造参数的各种形式",
+          "对错误输入的测试（raises）"
+        ],
+        "possible_gap": "没有测试子类构造。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个继承自 Permutation 的子类，并尝试实例化该子类。",
+      "evidence": [
+        "Issue 描述：'I stumbled across a subclassing issue with `combinatorics.Permutation`...'",
+        "Issue 描述：'...trying to subclass `Permutation`.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "子类实例化时返回的是父类 Permutation 的实例，而不是子类的实例。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述：'...always instances of `Permutation` are returned.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Permutation.__new__",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "Issue 指出对象创建在 __new__ 中完成，且内部使用了 _af_new。"
+      },
+      {
+        "name": "Permutation._af_new",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "Issue 指出 _af_new 被 __new__ 使用，并最终调用 Basic.__new__(Perm, perm)，其中 Perm 硬编码为 Permutation。"
+      },
+      {
+        "name": "Basic.__new__",
+        "kind": "method",
+        "source_path": "sympy/core/basic.py",
+        "reason": "源码片段显示 _af_new 调用了 Basic.__new__(Perm, perm)。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Permutation._af_new",
+        "lines": "928-950",
+        "reason": "该方法使用 `Basic.__new__(Perm, perm)` 创建对象，其中 `Perm` 是硬编码的对 `Permutation` 的引用，而不是使用传入的类参数。"
+      },
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Permutation.__new__",
+        "lines": "801-925",
+        "reason": "该方法在多个分支（如 `return _af_new(...)`）中调用 `_af_new`，而没有将子类信息传递下去。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试直接使用 Permutation 类进行实例化。",
+        "target_pattern": "定义一个继承自 Permutation 的子类，并尝试实例化该子类。",
+        "reason": "Issue 的核心是子类化问题，需要将测试对象从 Permutation 类变为其子类。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 Permutation(...)。",
+        "target_pattern": "测试调用 SubClassOfPermutation(...)，并检查返回对象的类型。",
+        "reason": "为了触发缺陷，需要考察子类构造函数的调用路径是否最终返回了子类实例。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "子类化 Permutation 时，实例化应返回子类的实例。",
+      "evidence": [
+        "Issue 描述：'An elegant solution would be to stick to Python's instance creation mechanisms...'",
+        "Issue 描述：'...use the mandatory reference to the class (the first argument of a classmethod) the method is called on for instance creation.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(instance)",
+        "reason": "Issue 的关键是返回对象的类型错误（应为子类类型，实际为父类 Permutation 类型）。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(instance)",
+        "reason": "对象的 repr 可能包含类名信息，可用于辅助判断类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "子类实例化返回的对象类型应为该子类。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的 repr 字符串相等，因为类名可能变化。",
+        "reason": "Issue 的预期行为是子类化正常工作，因此应验证实例属于子类。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到 'I monkeypatched it locally and ran the tests, all succeeded.'，但未提供具体补丁内容。",
+    "除了 __new__ 和 _af_new，是否还有其他方法（如类方法 from_sequence, random 等）也存在相同的子类化问题？",
+    "修复后，子类实例是否应完全继承父类的所有方法和属性，且行为一致？"
+  ],
+  "raw": {
+    "issue_summary": "Permutation 类的 __new__ 和 _af_new 方法硬编码了类名，导致子类化时无法返回子类实例。",
+    "trigger_condition": {
+      "text": "创建一个继承自 Permutation 的子类，并尝试实例化该子类。",
+      "evidence": [
+        "Issue 描述：'I stumbled across a subclassing issue with `combinatorics.Permutation`...'",
+        "Issue 描述：'...trying to subclass `Permutation`.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "子类实例化时返回的是父类 Permutation 的实例，而不是子类的实例。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述：'...always instances of `Permutation` are returned.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "子类化 Permutation 时，实例化应返回子类的实例。",
+      "evidence": [
+        "Issue 描述：'An elegant solution would be to stick to Python's instance creation mechanisms...'",
+        "Issue 描述：'...use the mandatory reference to the class (the first argument of a classmethod) the method is called on for instance creation.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Permutation.__new__",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "Issue 指出对象创建在 __new__ 中完成，且内部使用了 _af_new。"
+      },
+      {
+        "name": "Permutation._af_new",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "Issue 指出 _af_new 被 __new__ 使用，并最终调用 Basic.__new__(Perm, perm)，其中 Perm 硬编码为 Permutation。"
+      },
+      {
+        "name": "Basic.__new__",
+        "kind": "method",
+        "source_path": "sympy/core/basic.py",
+        "reason": "源码片段显示 _af_new 调用了 Basic.__new__(Perm, perm)。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Permutation._af_new",
+        "lines": "928-950",
+        "reason": "该方法使用 `Basic.__new__(Perm, perm)` 创建对象，其中 `Perm` 是硬编码的对 `Permutation` 的引用，而不是使用传入的类参数。"
+      },
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Permutation.__new__",
+        "lines": "801-925",
+        "reason": "该方法在多个分支（如 `return _af_new(...)`）中调用 `_af_new`，而没有将子类信息传递下去。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Permutation",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "该测试广泛测试了 Permutation 的构造和各种操作，包含了实例化 Permutation 的多种方式。",
+        "reusable_parts": [
+          "imports",
+          "Permutation 对象构造（如 Permutation([0, 1, 2, 3])）",
+          "assert 风格"
+        ],
+        "possible_gap": "现有测试没有涉及子类化 Permutation 的场景。"
+      },
+      {
+        "test_name": "test_args",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "该测试专注于 Permutation 构造函数的各种参数形式，是测试实例化逻辑的起点。",
+        "reusable_parts": [
+          "Permutation 构造参数的各种形式",
+          "对错误输入的测试（raises）"
+        ],
+        "possible_gap": "没有测试子类构造。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试直接使用 Permutation 类进行实例化。",
+        "target_pattern": "定义一个继承自 Permutation 的子类，并尝试实例化该子类。",
+        "reason": "Issue 的核心是子类化问题，需要将测试对象从 Permutation 类变为其子类。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 Permutation(...)。",
+        "target_pattern": "测试调用 SubClassOfPermutation(...)，并检查返回对象的类型。",
+        "reason": "为了触发缺陷，需要考察子类构造函数的调用路径是否最终返回了子类实例。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(instance)",
+        "reason": "Issue 的关键是返回对象的类型错误（应为子类类型，实际为父类 Permutation 类型）。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(instance)",
+        "reason": "对象的 repr 可能包含类名信息，可用于辅助判断类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "子类实例化返回的对象类型应为该子类。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的 repr 字符串相等，因为类名可能变化。",
+        "reason": "Issue 的预期行为是子类化正常工作，因此应验证实例属于子类。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义一个简单的 Permutation 子类。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊的 fixture 或外部设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到 'I monkeypatched it locally and ran the tests, all succeeded.'，但未提供具体补丁内容。",
+      "除了 __new__ 和 _af_new，是否还有其他方法（如类方法 from_sequence, random 等）也存在相同的子类化问题？",
+      "修复后，子类实例是否应完全继承父类的所有方法和属性，且行为一致？"
+    ]
+  }
+}

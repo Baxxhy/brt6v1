@@ -1,0 +1,306 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-5413",
+  "issue_summary": "pytest.raises 上下文管理器返回的 ExceptionInfo 对象的 str() 行为与普通异常捕获的 str() 行为不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 pytest.raises 作为上下文管理器来捕获异常。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_excinfo_str",
+        "test_file": "testing/code/test_excinfo.py",
+        "why_relevant": "该测试直接检查 ExceptionInfo 对象的 str() 行为，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "使用 pytest.raises 捕获异常并获取 ExceptionInfo 对象 (excinfo)",
+          "对 excinfo 调用 str() 并断言其内容"
+        ],
+        "possible_gap": "该测试检查 str(excinfo) 的输出格式（文件路径、异常类型），但没有测试当异常消息包含换行符时，str(excinfo) 是否包含完整的消息内容。"
+      },
+      {
+        "test_name": "test_pytest_fail",
+        "test_file": "testing/test_runner.py",
+        "why_relevant": "展示了在 pytest.raises 上下文中使用 excinfo 变量并进行断言的基本模式。",
+        "reusable_parts": [
+          "with pytest.raises(...) as excinfo 的上下文管理器用法",
+          "通过 excinfo 访问异常信息"
+        ],
+        "possible_gap": "该测试关注的是 exconly 方法，而不是 str() 方法，且异常消息是单行的。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 pytest.raises 上下文管理器内捕获一个包含换行符的多行异常消息，然后对上下文管理器变量（ExceptionInfo 对象）调用 str()。",
+      "evidence": [
+        "Issue 中展示了在 pytest.raises(LookupError) as e 块内引发 LookupError('A\\nB\\nC')，然后调用 print(str(e))。",
+        "源码片段 1 显示 pytest.raises 返回 RaisesContext，其 __enter__ 返回 ExceptionInfo 对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对 ExceptionInfo 对象调用 str() 只输出异常的第一行（如 '<console>:3: LookupError: A'），而不是完整的异常消息 'A\\nB\\nC'。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了普通 try-except 打印 str(e) 输出完整三行，而 pytest.raises 上下文打印 str(e) 只输出第一行。",
+        "Issue 提到必须使用 str(e.value) 才能获取完整消息。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.raises",
+        "kind": "function",
+        "source_path": "src/_pytest/python_api.py",
+        "reason": "Issue 的核心是使用 pytest.raises 作为上下文管理器时产生的 ExceptionInfo 对象的行为问题。"
+      },
+      {
+        "name": "ExceptionInfo",
+        "kind": "class",
+        "source_path": "src/_pytest/_code/code.py",
+        "reason": "pytest.raises 上下文管理器返回的对象是 ExceptionInfo 实例，其 str() 方法是问题的焦点。"
+      },
+      {
+        "name": "ExceptionInfo.value",
+        "kind": "method",
+        "source_path": "src/_pytest/_code/code.py",
+        "reason": "Issue 提到 str(e.value) 可以获取完整消息，说明 value 属性存储了实际的异常实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/_code/code.py",
+        "object": "ExceptionInfo.__str__",
+        "lines": "",
+        "reason": "ExceptionInfo 类的 __str__ 方法可能没有正确处理包含换行符的异常消息，或者其格式化输出与普通异常不同。"
+      },
+      {
+        "path": "src/_pytest/python_api.py",
+        "object": "RaisesContext.__enter__",
+        "lines": "",
+        "reason": "该上下文管理器负责创建和返回 ExceptionInfo 对象，可能影响了该对象的初始化或行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中引发具有简单单行消息的异常（如 ValueError('value must be 42')）。",
+        "target_pattern": "引发一个消息包含换行符（'\\n'）的多行异常（如 LookupError('A\\nB\\nC')）。",
+        "reason": "Issue 显示问题在异常消息包含换行符时显现，单行消息可能不会触发不一致行为或问题不明显。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中对 ExceptionInfo 对象调用 exconly() 或检查其 type/value 属性。",
+        "target_pattern": "直接对 ExceptionInfo 对象调用 str()，而不是 str(e.value) 或 exconly()。",
+        "reason": "Issue 的核心是 str(ExceptionInfo) 的行为与 str(exception_instance) 不同。需要直接测试 str() 调用。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对 pytest.raises 上下文管理器变量（ExceptionInfo 对象）调用 str() 应返回与普通异常捕获的 str(e) 语义一致的内容，例如包含完整的异常消息。",
+      "evidence": [
+        "Issue 作者期望 'the behavior could be changed to eliminate this gotcha'，即消除这种不一致性。",
+        "普通异常捕获的 str(e) 行为是返回完整的异常消息字符串，这是预期的参照。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "str",
+        "expression_hint": "str(excinfo)",
+        "reason": "Issue 中错误现象的直接体现是 str(excinfo) 的输出内容不完整。观测此表达式可判断问题是否触发。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(excinfo.value)",
+        "reason": "Issue 提到 str(e.value) 可以得到完整消息。观测此表达式可作为正确行为的基准进行对比。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "excinfo.value.args[0]",
+        "reason": "异常实例的消息字符串存储在 value.args[0] 中。观测此值可以确认引发的原始消息内容。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言 str(ExceptionInfo对象) 包含完整的、由换行符分隔的异常消息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言 str(ExceptionInfo) 的完整字符串完全等于某个特定格式（如包含文件路径和行号），因为具体格式可能因环境变化。",
+        "reason": "Issue 关注的是消息内容的完整性，而不是具体的输出格式。使用 contains 检查消息的各个部分（如 'A'， 'B'， 'C'）更稳定。"
+      },
+      {
+        "assertion_goal": "断言 str(ExceptionInfo对象) 与 str(ExceptionInfo.value) 在消息内容上具有一致性（例如，后者是前者的子集或前者包含后者的核心消息）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言 str(ExceptionInfo) == str(ExceptionInfo.value)，因为前者可能包含额外的上下文信息（如文件位置）。",
+        "reason": "修复的目标是消除“不一致”的陷阱，确保从 ExceptionInfo 能方便地获取完整消息，而不是要求两者字符串完全相等。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "ExceptionInfo.__str__ 方法的具体实现和其默认输出格式是什么？它是否设计为只输出摘要（如第一行）？",
+    "当前 str(ExceptionInfo) 的预期行为（根据文档或设计）到底是什么？Issue 认为这是不一致，但现有行为可能是有意为之。",
+    "除了消息包含换行符，是否还有其他条件（如异常类型、回溯深度）会影响 str(ExceptionInfo) 的输出？"
+  ],
+  "raw": {
+    "issue_summary": "pytest.raises 上下文管理器返回的 ExceptionInfo 对象的 str() 行为与普通异常捕获的 str() 行为不一致。",
+    "trigger_condition": {
+      "text": "在 pytest.raises 上下文管理器内捕获一个包含换行符的多行异常消息，然后对上下文管理器变量（ExceptionInfo 对象）调用 str()。",
+      "evidence": [
+        "Issue 中展示了在 pytest.raises(LookupError) as e 块内引发 LookupError('A\\nB\\nC')，然后调用 print(str(e))。",
+        "源码片段 1 显示 pytest.raises 返回 RaisesContext，其 __enter__ 返回 ExceptionInfo 对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对 ExceptionInfo 对象调用 str() 只输出异常的第一行（如 '<console>:3: LookupError: A'），而不是完整的异常消息 'A\\nB\\nC'。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了普通 try-except 打印 str(e) 输出完整三行，而 pytest.raises 上下文打印 str(e) 只输出第一行。",
+        "Issue 提到必须使用 str(e.value) 才能获取完整消息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对 pytest.raises 上下文管理器变量（ExceptionInfo 对象）调用 str() 应返回与普通异常捕获的 str(e) 语义一致的内容，例如包含完整的异常消息。",
+      "evidence": [
+        "Issue 作者期望 'the behavior could be changed to eliminate this gotcha'，即消除这种不一致性。",
+        "普通异常捕获的 str(e) 行为是返回完整的异常消息字符串，这是预期的参照。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.raises",
+        "kind": "function",
+        "source_path": "src/_pytest/python_api.py",
+        "reason": "Issue 的核心是使用 pytest.raises 作为上下文管理器时产生的 ExceptionInfo 对象的行为问题。"
+      },
+      {
+        "name": "ExceptionInfo",
+        "kind": "class",
+        "source_path": "src/_pytest/_code/code.py",
+        "reason": "pytest.raises 上下文管理器返回的对象是 ExceptionInfo 实例，其 str() 方法是问题的焦点。"
+      },
+      {
+        "name": "ExceptionInfo.value",
+        "kind": "method",
+        "source_path": "src/_pytest/_code/code.py",
+        "reason": "Issue 提到 str(e.value) 可以获取完整消息，说明 value 属性存储了实际的异常实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/_code/code.py",
+        "object": "ExceptionInfo.__str__",
+        "lines": "",
+        "reason": "ExceptionInfo 类的 __str__ 方法可能没有正确处理包含换行符的异常消息，或者其格式化输出与普通异常不同。"
+      },
+      {
+        "path": "src/_pytest/python_api.py",
+        "object": "RaisesContext.__enter__",
+        "lines": "",
+        "reason": "该上下文管理器负责创建和返回 ExceptionInfo 对象，可能影响了该对象的初始化或行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_excinfo_str",
+        "test_file": "testing/code/test_excinfo.py",
+        "why_relevant": "该测试直接检查 ExceptionInfo 对象的 str() 行为，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "使用 pytest.raises 捕获异常并获取 ExceptionInfo 对象 (excinfo)",
+          "对 excinfo 调用 str() 并断言其内容"
+        ],
+        "possible_gap": "该测试检查 str(excinfo) 的输出格式（文件路径、异常类型），但没有测试当异常消息包含换行符时，str(excinfo) 是否包含完整的消息内容。"
+      },
+      {
+        "test_name": "test_pytest_fail",
+        "test_file": "testing/test_runner.py",
+        "why_relevant": "展示了在 pytest.raises 上下文中使用 excinfo 变量并进行断言的基本模式。",
+        "reusable_parts": [
+          "with pytest.raises(...) as excinfo 的上下文管理器用法",
+          "通过 excinfo 访问异常信息"
+        ],
+        "possible_gap": "该测试关注的是 exconly 方法，而不是 str() 方法，且异常消息是单行的。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中引发具有简单单行消息的异常（如 ValueError('value must be 42')）。",
+        "target_pattern": "引发一个消息包含换行符（'\\n'）的多行异常（如 LookupError('A\\nB\\nC')）。",
+        "reason": "Issue 显示问题在异常消息包含换行符时显现，单行消息可能不会触发不一致行为或问题不明显。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中对 ExceptionInfo 对象调用 exconly() 或检查其 type/value 属性。",
+        "target_pattern": "直接对 ExceptionInfo 对象调用 str()，而不是 str(e.value) 或 exconly()。",
+        "reason": "Issue 的核心是 str(ExceptionInfo) 的行为与 str(exception_instance) 不同。需要直接测试 str() 调用。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "str",
+        "expression_hint": "str(excinfo)",
+        "reason": "Issue 中错误现象的直接体现是 str(excinfo) 的输出内容不完整。观测此表达式可判断问题是否触发。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(excinfo.value)",
+        "reason": "Issue 提到 str(e.value) 可以得到完整消息。观测此表达式可作为正确行为的基准进行对比。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "excinfo.value.args[0]",
+        "reason": "异常实例的消息字符串存储在 value.args[0] 中。观测此值可以确认引发的原始消息内容。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言 str(ExceptionInfo对象) 包含完整的、由换行符分隔的异常消息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言 str(ExceptionInfo) 的完整字符串完全等于某个特定格式（如包含文件路径和行号），因为具体格式可能因环境变化。",
+        "reason": "Issue 关注的是消息内容的完整性，而不是具体的输出格式。使用 contains 检查消息的各个部分（如 'A'， 'B'， 'C'）更稳定。"
+      },
+      {
+        "assertion_goal": "断言 str(ExceptionInfo对象) 与 str(ExceptionInfo.value) 在消息内容上具有一致性（例如，后者是前者的子集或前者包含后者的核心消息）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言 str(ExceptionInfo) == str(ExceptionInfo.value)，因为前者可能包含额外的上下文信息（如文件位置）。",
+        "reason": "修复的目标是消除“不一致”的陷阱，确保从 ExceptionInfo 能方便地获取完整消息，而不是要求两者字符串完全相等。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytest.raises 作为上下文管理器来捕获异常。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "ExceptionInfo.__str__ 方法的具体实现和其默认输出格式是什么？它是否设计为只输出摘要（如第一行）？",
+      "当前 str(ExceptionInfo) 的预期行为（根据文档或设计）到底是什么？Issue 认为这是不一致，但现有行为可能是有意为之。",
+      "除了消息包含换行符，是否还有其他条件（如异常类型、回溯深度）会影响 str(ExceptionInfo) 的输出？"
+    ]
+  }
+}

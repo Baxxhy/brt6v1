@@ -1,0 +1,286 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14016",
+  "issue_summary": "在 Q 对象中使用 | 运算符时，如果 Q 对象包含不可 pickle 的对象（如 dict_keys），会引发 TypeError: cannot pickle 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 django.db.models.Q，并使用 SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要数据库或特殊设置，因为 Q 对象是查询工具类。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "QTests.test_combine_or_empty",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了 Q 对象与空 Q 对象使用 | 运算符的组合，与 Issue 中 Q() | Q(...) 的模式相似。",
+        "reusable_parts": [
+          "imports",
+          "Q class",
+          "assertEqual usage",
+          "SimpleTestCase"
+        ],
+        "possible_gap": "现有测试使用普通可 pickle 的参数（如 x=1），没有测试包含不可 pickle 对象（如 dict_keys）的参数。"
+      },
+      {
+        "test_name": "QTests.test_combine_not_q_object",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了 Q 对象与非 Q 对象使用 | 运算符时抛出 TypeError，展示了异常断言风格。",
+        "reusable_parts": [
+          "assertRaisesMessage usage",
+          "Q object construction"
+        ],
+        "possible_gap": "它测试的是操作数类型错误，而非操作数内部值不可 pickle 的错误。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 | 运算符组合两个 Q 对象，其中一个 Q 对象包含不可 pickle 的对象（如 dict_keys）作为查询参数的值。",
+      "evidence": [
+        "Issue 中描述：Q() | Q(x__in={}.keys())",
+        "Issue 中错误信息：TypeError: cannot pickle 'dict_keys' object"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 Q() | Q(x__in={}.keys()) 时抛出 TypeError: cannot pickle 'dict_keys' object 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中 Traceback 显示 TypeError: cannot pickle 'dict_keys' object"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 类的 | 运算符行为。"
+      },
+      {
+        "name": "Q.__or__",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 中触发错误的操作是使用 | 运算符，对应 __or__ 方法。"
+      },
+      {
+        "name": "Q._combine",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "__or__ 方法调用了 _combine 方法，可能是错误传播的路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q._combine",
+        "lines": "",
+        "reason": "__or__ 方法调用 _combine，而组合操作可能涉及 pickle 序列化，导致对不可 pickle 对象报错。"
+      },
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q.__or__",
+        "lines": "60-61",
+        "reason": "这是 | 运算符的直接实现，是触发错误的入口点。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通可 pickle 的值作为 Q 的参数，如 Q(x=1)。",
+        "target_pattern": "使用包含不可 pickle 对象（如 dict_keys）的值作为 Q 的参数，如 Q(x__in={}.keys())。",
+        "reason": "Issue 表明当 Q 对象包含不可 pickle 对象时，| 操作会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中可能直接构造单个 Q 对象或组合两个普通 Q 对象。",
+        "target_pattern": "使用 | 运算符组合一个空 Q 对象和一个包含不可 pickle 对象的 Q 对象。",
+        "reason": "Issue 中触发错误的具体操作是 Q() | Q(x__in={}.keys())。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用 | 运算符组合 Q 对象时，即使 Q 对象包含 dict_keys 等不可 pickle 的对象，也应能正常组合而不抛出 pickle 相关的异常。",
+      "evidence": [
+        "Issue 中作者认为 'using .keys() should work'，暗示期望正常操作"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 q1 | q2 时是否抛出 TypeError，以及异常消息是否包含 'cannot pickle'。",
+        "reason": "Issue 的核心错误是抛出 TypeError: cannot pickle 'dict_keys' object。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Q(x__in={}.keys()) 中 x__in 参数值的类型（如 dict_keys）。",
+        "reason": "错误与参数值的不可 pickle 类型相关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 | 运算符组合包含 dict_keys 的 Q 对象时，不会抛出 pickle 相关的 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的异常消息字符串，因为消息可能因 Python 版本或对象不同而变化。",
+        "reason": "Issue 当前行为是抛出异常，修复后应不再抛出。但根据规则9，修复后应正常，所以断言风格应为 'not raises' 或验证组合成功。然而，由于当前是 buggy 状态，生成测试的目标是复现缺陷，因此初始断言应为 raises。在后续生成修复后测试时，才应使用正向断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误是否只发生在 | 运算符，还是 & 运算符也会发生？",
+    "除了 dict_keys，其他不可 pickle 类型（如 generator、lambda）是否也会触发相同错误？",
+    "_combine 方法内部具体哪一步导致了 pickle 操作？",
+    "修复后的预期行为是让组合操作成功，还是让 Q 对象在构造时就更早地拒绝不可 pickle 对象？"
+  ],
+  "raw": {
+    "issue_summary": "在 Q 对象中使用 | 运算符时，如果 Q 对象包含不可 pickle 的对象（如 dict_keys），会引发 TypeError: cannot pickle 异常。",
+    "trigger_condition": {
+      "text": "使用 | 运算符组合两个 Q 对象，其中一个 Q 对象包含不可 pickle 的对象（如 dict_keys）作为查询参数的值。",
+      "evidence": [
+        "Issue 中描述：Q() | Q(x__in={}.keys())",
+        "Issue 中错误信息：TypeError: cannot pickle 'dict_keys' object"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 Q() | Q(x__in={}.keys()) 时抛出 TypeError: cannot pickle 'dict_keys' object 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中 Traceback 显示 TypeError: cannot pickle 'dict_keys' object"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 | 运算符组合 Q 对象时，即使 Q 对象包含 dict_keys 等不可 pickle 的对象，也应能正常组合而不抛出 pickle 相关的异常。",
+      "evidence": [
+        "Issue 中作者认为 'using .keys() should work'，暗示期望正常操作"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 类的 | 运算符行为。"
+      },
+      {
+        "name": "Q.__or__",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 中触发错误的操作是使用 | 运算符，对应 __or__ 方法。"
+      },
+      {
+        "name": "Q._combine",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "__or__ 方法调用了 _combine 方法，可能是错误传播的路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q._combine",
+        "lines": "",
+        "reason": "__or__ 方法调用 _combine，而组合操作可能涉及 pickle 序列化，导致对不可 pickle 对象报错。"
+      },
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q.__or__",
+        "lines": "60-61",
+        "reason": "这是 | 运算符的直接实现，是触发错误的入口点。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "QTests.test_combine_or_empty",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了 Q 对象与空 Q 对象使用 | 运算符的组合，与 Issue 中 Q() | Q(...) 的模式相似。",
+        "reusable_parts": [
+          "imports",
+          "Q class",
+          "assertEqual usage",
+          "SimpleTestCase"
+        ],
+        "possible_gap": "现有测试使用普通可 pickle 的参数（如 x=1），没有测试包含不可 pickle 对象（如 dict_keys）的参数。"
+      },
+      {
+        "test_name": "QTests.test_combine_not_q_object",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了 Q 对象与非 Q 对象使用 | 运算符时抛出 TypeError，展示了异常断言风格。",
+        "reusable_parts": [
+          "assertRaisesMessage usage",
+          "Q object construction"
+        ],
+        "possible_gap": "它测试的是操作数类型错误，而非操作数内部值不可 pickle 的错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通可 pickle 的值作为 Q 的参数，如 Q(x=1)。",
+        "target_pattern": "使用包含不可 pickle 对象（如 dict_keys）的值作为 Q 的参数，如 Q(x__in={}.keys())。",
+        "reason": "Issue 表明当 Q 对象包含不可 pickle 对象时，| 操作会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中可能直接构造单个 Q 对象或组合两个普通 Q 对象。",
+        "target_pattern": "使用 | 运算符组合一个空 Q 对象和一个包含不可 pickle 对象的 Q 对象。",
+        "reason": "Issue 中触发错误的具体操作是 Q() | Q(x__in={}.keys())。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 q1 | q2 时是否抛出 TypeError，以及异常消息是否包含 'cannot pickle'。",
+        "reason": "Issue 的核心错误是抛出 TypeError: cannot pickle 'dict_keys' object。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Q(x__in={}.keys()) 中 x__in 参数值的类型（如 dict_keys）。",
+        "reason": "错误与参数值的不可 pickle 类型相关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 | 运算符组合包含 dict_keys 的 Q 对象时，不会抛出 pickle 相关的 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的异常消息字符串，因为消息可能因 Python 版本或对象不同而变化。",
+        "reason": "Issue 当前行为是抛出异常，修复后应不再抛出。但根据规则9，修复后应正常，所以断言风格应为 'not raises' 或验证组合成功。然而，由于当前是 buggy 状态，生成测试的目标是复现缺陷，因此初始断言应为 raises。在后续生成修复后测试时，才应使用正向断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 django.db.models.Q，并使用 SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要数据库或特殊设置，因为 Q 对象是查询工具类。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "错误是否只发生在 | 运算符，还是 & 运算符也会发生？",
+      "除了 dict_keys，其他不可 pickle 类型（如 generator、lambda）是否也会触发相同错误？",
+      "_combine 方法内部具体哪一步导致了 pickle 操作？",
+      "修复后的预期行为是让组合操作成功，还是让 Q 对象在构造时就更早地拒绝不可 pickle 对象？"
+    ]
+  }
+}

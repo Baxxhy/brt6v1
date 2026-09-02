@@ -1,0 +1,256 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sphinx-doc__sphinx-7757",
+  "issue_summary": "Sphinx 文档生成时，位置限定参数（positional-only argument）的默认值在生成的文档中缺失。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Sphinx `app` fixture 来创建测试环境，可能涉及 `make_directive_bridge`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或直接使用 `py:function` 指令，或者测试 `format_signature` 方法。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_format_signature",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "它直接测试 `format_signature` 方法，该方法生成文档中的签名字符串，是缺陷的核心功能点。",
+        "reusable_parts": [
+          "`formatsig` 辅助函数",
+          "对 `app` fixture 的使用",
+          "对不同对象类型（函数、类、方法）签名的断言模式"
+        ],
+        "possible_gap": "现有测试用例没有覆盖包含位置限定参数（`/`）且有默认值的函数签名。"
+      },
+      {
+        "test_name": "test_signature_from_str_default_values",
+        "test_file": "tests/test_util_inspect.py",
+        "why_relevant": "它测试从字符串解析签名并检查默认值，与 Issue 中从指令字符串解析签名并保留默认值的问题相关。",
+        "reusable_parts": [
+          "对 `inspect.signature_from_str` 的调用",
+          "对 `sig.parameters[...].default` 的断言"
+        ],
+        "possible_gap": "测试的是纯字符串解析，不涉及 Sphinx 指令（如 `py:function`）的文档生成流程。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 Sphinx 的 `py:function` 指令生成一个包含位置限定参数（以 `/` 分隔）且该参数有默认值的函数签名文档。",
+      "evidence": [
+        "Issue 中的 `.. py:function:: foo(a, b=0, /, c=1)` 示例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的文档中，位置限定参数 `b` 的默认值 `0` 没有显示。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 截图显示签名输出为 `foo(a, b, /, c=1)`，缺少 `b=0`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "inspect.signature_from_str",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 显示它用于解析包含默认值的签名字符串，可能与签名格式化相关。"
+      },
+      {
+        "name": "autodoc 相关类的 format_signature 方法",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 3 测试 `format_signature` 方法，它负责生成文档中的签名字符串。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "处理 `py:function` 指令签名解析或格式化的代码",
+        "lines": "",
+        "reason": "Issue 表明在解析或渲染包含 `/` 和默认值的签名时，默认值信息丢失。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试 `test_format_signature` 中的函数签名如 `(a, b, c=1, **d)` 或 `(a='\\n')`。",
+        "target_pattern": "包含位置限定参数和默认值的签名，如 `(a, b=0, /, c=1)`。",
+        "reason": "Issue 表明当签名包含 `/` 时，其前面的参数的默认值会丢失。变异输入可以触发该路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 2 中通过 `app.config.autodoc_default_options` 配置自动文档选项。",
+        "target_pattern": "使用 `py:function` 指令（而非自动文档）来生成特定签名。",
+        "reason": "Issue 的复现步骤使用的是 `.. py:function::` 指令，这可能涉及不同的代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "生成的文档应正确显示位置限定参数的默认值，例如 `foo(a, b=0, /, c=1)`。",
+      "evidence": [
+        "Issue 描述 'The default value is shown.' 和截图对比。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`formatsig` 函数返回的签名字符串，或 `inst.format_signature()` 的结果。",
+        "reason": "缺陷表现为输出的签名字符串中缺少默认值，直接观察此返回值可判断问题。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "解析后的签名对象（如 `sig`）或其参数的 `repr`（如 `sig.parameters['b'].default`）。",
+        "reason": "可以检查在解析阶段默认值信息是否已丢失，还是在格式化阶段丢失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的签名字符串应包含位置限定参数的默认值（例如包含 'b=0'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、字面量相等的签名字符串，因为空格、引号等格式可能变化。",
+        "reason": "Issue 的核心是默认值是否存在，而非签名的精确格式。使用片段包含断言更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷具体发生在签名解析阶段（如 `inspect.signature_from_str`）还是文档生成/格式化阶段（如 `format_signature`）。",
+    "`py:function` 指令的处理流程与自动文档（autodoc）的 `format_signature` 方法是否共享同一代码路径。",
+    "除了位置限定参数，其他参数类型（如关键字限定参数 `*`）的默认值是否也会受影响。"
+  ],
+  "raw": {
+    "issue_summary": "Sphinx 文档生成时，位置限定参数（positional-only argument）的默认值在生成的文档中缺失。",
+    "trigger_condition": {
+      "text": "使用 Sphinx 的 `py:function` 指令生成一个包含位置限定参数（以 `/` 分隔）且该参数有默认值的函数签名文档。",
+      "evidence": [
+        "Issue 中的 `.. py:function:: foo(a, b=0, /, c=1)` 示例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的文档中，位置限定参数 `b` 的默认值 `0` 没有显示。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 截图显示签名输出为 `foo(a, b, /, c=1)`，缺少 `b=0`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "生成的文档应正确显示位置限定参数的默认值，例如 `foo(a, b=0, /, c=1)`。",
+      "evidence": [
+        "Issue 描述 'The default value is shown.' 和截图对比。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "inspect.signature_from_str",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 显示它用于解析包含默认值的签名字符串，可能与签名格式化相关。"
+      },
+      {
+        "name": "autodoc 相关类的 format_signature 方法",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 3 测试 `format_signature` 方法，它负责生成文档中的签名字符串。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "处理 `py:function` 指令签名解析或格式化的代码",
+        "lines": "",
+        "reason": "Issue 表明在解析或渲染包含 `/` 和默认值的签名时，默认值信息丢失。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_format_signature",
+        "test_file": "tests/test_ext_autodoc.py",
+        "why_relevant": "它直接测试 `format_signature` 方法，该方法生成文档中的签名字符串，是缺陷的核心功能点。",
+        "reusable_parts": [
+          "`formatsig` 辅助函数",
+          "对 `app` fixture 的使用",
+          "对不同对象类型（函数、类、方法）签名的断言模式"
+        ],
+        "possible_gap": "现有测试用例没有覆盖包含位置限定参数（`/`）且有默认值的函数签名。"
+      },
+      {
+        "test_name": "test_signature_from_str_default_values",
+        "test_file": "tests/test_util_inspect.py",
+        "why_relevant": "它测试从字符串解析签名并检查默认值，与 Issue 中从指令字符串解析签名并保留默认值的问题相关。",
+        "reusable_parts": [
+          "对 `inspect.signature_from_str` 的调用",
+          "对 `sig.parameters[...].default` 的断言"
+        ],
+        "possible_gap": "测试的是纯字符串解析，不涉及 Sphinx 指令（如 `py:function`）的文档生成流程。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试 `test_format_signature` 中的函数签名如 `(a, b, c=1, **d)` 或 `(a='\\n')`。",
+        "target_pattern": "包含位置限定参数和默认值的签名，如 `(a, b=0, /, c=1)`。",
+        "reason": "Issue 表明当签名包含 `/` 时，其前面的参数的默认值会丢失。变异输入可以触发该路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 2 中通过 `app.config.autodoc_default_options` 配置自动文档选项。",
+        "target_pattern": "使用 `py:function` 指令（而非自动文档）来生成特定签名。",
+        "reason": "Issue 的复现步骤使用的是 `.. py:function::` 指令，这可能涉及不同的代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`formatsig` 函数返回的签名字符串，或 `inst.format_signature()` 的结果。",
+        "reason": "缺陷表现为输出的签名字符串中缺少默认值，直接观察此返回值可判断问题。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "解析后的签名对象（如 `sig`）或其参数的 `repr`（如 `sig.parameters['b'].default`）。",
+        "reason": "可以检查在解析阶段默认值信息是否已丢失，还是在格式化阶段丢失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的签名字符串应包含位置限定参数的默认值（例如包含 'b=0'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、字面量相等的签名字符串，因为空格、引号等格式可能变化。",
+        "reason": "Issue 的核心是默认值是否存在，而非签名的精确格式。使用片段包含断言更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Sphinx `app` fixture 来创建测试环境，可能涉及 `make_directive_bridge`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或直接使用 `py:function` 指令，或者测试 `format_signature` 方法。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷具体发生在签名解析阶段（如 `inspect.signature_from_str`）还是文档生成/格式化阶段（如 `format_signature`）。",
+      "`py:function` 指令的处理流程与自动文档（autodoc）的 `format_signature` 方法是否共享同一代码路径。",
+      "除了位置限定参数，其他参数类型（如关键字限定参数 `*`）的默认值是否也会受影响。"
+    ]
+  }
+}

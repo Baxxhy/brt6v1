@@ -1,0 +1,308 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-25122",
+  "issue_summary": "在 `mlab._spectral_helper` 函数中，窗口校正因子使用了 `np.abs`，导致包含负值的窗口（如 `flattop`）计算结果错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 `numpy`、`matplotlib.mlab` 以及 `scipy.signal.windows`（用于获取 `flattop` 窗口）。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 `pytest` 参数化来测试不同的窗口函数和 `mode`/`scale_by_freq` 组合。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要构造一个简单的输入信号（如正弦波或随机噪声）以进行谱分析。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestSpectral.test_psd_window_hanning",
+        "test_file": "lib/matplotlib/tests/test_mlab.py",
+        "why_relevant": "该测试专门测试了使用 `window_hanning` 窗口的 `psd` 函数，并验证了窗口校正因子的计算（通过 `spec_c *= len(ycontrol1)/(np.abs(windowVals)**2).sum()`）。它直接涉及窗口校正逻辑。",
+        "reusable_parts": [
+          "测试类 `TestSpectral` 的框架和参数化设置",
+          "使用 `mlab.psd` 和 `mlab.window_hanning` 的调用模式",
+          "使用 `assert_allclose` 进行数值比较的断言风格"
+        ],
+        "possible_gap": "该测试只使用了 `window_hanning`（其值非负），没有测试包含负值的窗口（如 `flattop`），因此无法触发当前 Issue 描述的缺陷。"
+      },
+      {
+        "test_name": "TestSpectral.test_psd_windowarray_scale_by_freq",
+        "test_file": "lib/matplotlib/tests/test_mlab.py",
+        "why_relevant": "该测试比较了 `scale_by_freq` 为 `True` 和 `False` 时 `psd` 的结果，并包含了一个断言 `assert_allclose(spec_s*(win**2).sum(), spec_n/self.Fs*win.sum()**2, atol=1e-08)`，这直接关联到窗口校正因子的计算（涉及 `win.sum()**2`）。",
+        "reusable_parts": [
+          "测试类 `TestSpectral` 的框架",
+          "使用 `mlab.psd` 和 `mlab.window_hanning` 的调用",
+          "比较不同 `scale_by_freq` 设置的测试逻辑"
+        ],
+        "possible_gap": "该测试同样只使用了 `window_hanning`（非负），且其断言依赖于当前有缺陷的实现（使用了 `win.sum()**2`，但 Issue 认为这是正确的，而 `np.abs(win).sum()**2` 是错误的）。测试本身可能无法直接揭示缺陷，因为对于非负窗口，两者结果相同。"
+      },
+      {
+        "test_name": "TestSpectral.test_spectral_helper_psd",
+        "test_file": "lib/matplotlib/tests/test_mlab.py",
+        "why_relevant": "该测试直接调用了 `mlab._spectral_helper` 函数，并测试了不同的 `mode`（包括 `'psd'`）。",
+        "reusable_parts": [
+          "直接调用 `_spectral_helper` 的测试模式",
+          "参数化测试 `mode` 的设置",
+          "使用 `assert_allclose` 和形状检查的断言"
+        ],
+        "possible_gap": "该测试没有专门测试窗口校正因子，使用的可能是默认窗口或简单窗口，没有包含负值窗口。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用包含负值的窗口函数（如 `signal.windows.flattop`）调用 `mlab._spectral_helper` 或相关函数（如 `psd`、`specgram`），且 `mode` 为 `'psd'` 或 `'complex'` 或 `'magnitude'`，并且 `scale_by_freq` 为 `False` 或 `mode` 为 `'complex'` 或 `'magnitude'`。",
+      "evidence": [
+        "Issue 中提供的复现代码使用了 `signal.windows.flattop` 窗口，该窗口包含负值。",
+        "源码片段 1 第 423-430 行显示在 `mode == 'psd'` 且 `scale_by_freq == False` 时使用了 `np.abs(window).sum()**2`，在 `mode == 'complex'` 或 `mode == 'magnitude'` 时使用了 `np.abs(window).sum()`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于包含负值的窗口，计算出的功率谱密度（PSD）或其他谱模式（如 magnitude, complex）的值不正确，因为窗口校正因子错误地使用了窗口的绝对值之和，而不是窗口本身的和。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中复现代码显示 `np.abs(window).sum()**2 - window.sum()**2` 不为零，表明使用绝对值和不等于使用原始和。",
+        "Issue 指出 `np.abs` 是不需要的，并且对于像 `flattop` 这样有负值的窗口会给出错误结果。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "mlab._spectral_helper",
+        "kind": "function",
+        "source_path": "lib/matplotlib/mlab.py",
+        "reason": "这是 Issue 直接指出的存在缺陷的函数，负责计算谱分析的核心逻辑。"
+      },
+      {
+        "name": "mlab.psd",
+        "kind": "function",
+        "source_path": "lib/matplotlib/mlab.py",
+        "reason": "它是调用 `_spectral_helper` 的高层函数之一，且相关测试中大量使用。"
+      },
+      {
+        "name": "mlab.specgram",
+        "kind": "function",
+        "source_path": "lib/matplotlib/mlab.py",
+        "reason": "它是调用 `_spectral_helper` 的高层函数之一，且相关测试中有所涉及。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/mlab.py",
+        "object": "_spectral_helper",
+        "lines": "423-430",
+        "reason": "Issue 链接指向该行号范围，其中在 `mode == 'psd'` 且 `scale_by_freq == False` 的分支中使用了 `np.abs(window).sum()**2`，在 `mode == 'complex'` 和 `mode == 'magnitude'` 的分支中使用了 `np.abs(window).sum()`。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用 `mlab.window_hanning` 或默认窗口（值非负）。",
+        "target_pattern": "使用包含负值的窗口函数，如 `signal.windows.flattop`。",
+        "reason": "Issue 明确指出缺陷在窗口包含负值时触发，而现有测试只使用了非负窗口。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 `mode` 可能为 `'psd'`，`scale_by_freq` 可能为 `True` 或 `False`。",
+        "target_pattern": "确保测试配置使得代码执行到使用 `np.abs(window).sum()` 或 `np.abs(window).sum()**2` 的分支，即 `mode` 为 `'psd'` 且 `scale_by_freq=False`，或 `mode` 为 `'complex'` 或 `'magnitude'`。",
+        "reason": "源码显示缺陷代码位于这些特定分支中。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "窗口校正因子应使用窗口本身的求和（`window.sum()`），而不是其绝对值的求和（`np.abs(window).sum()`），以确保对于所有窗口函数（包括包含负值的窗口）计算正确。",
+      "evidence": [
+        "Issue 中引用的 SciPy 实现链接显示其使用了 `window.sum()` 而不是 `np.abs(window).sum()`。",
+        "Issue 的预期结果是 `np.abs(window).sum()**2 - window.sum()**2` 应为 0，这暗示了正确的校正因子应基于 `window.sum()`。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 `mlab._spectral_helper` 或 `mlab.psd` 等函数返回的谱值（`spec` 或结果的第一项）。",
+        "reason": "缺陷导致返回的谱值不正确，观察其数值可以判断是否触发缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "计算 `np.abs(window).sum()**2` 和 `window.sum()**2`（或 `np.abs(window).sum()` 和 `window.sum()`）的值。",
+        "reason": "Issue 的核心是这两个值在窗口有负值时不等，观察它们可以直接验证缺陷条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于包含负值的窗口，使用 `window.sum()` 作为校正因子计算出的谱结果应与使用 `np.abs(window).sum()` 作为校正因子计算出的结果不同（在缺陷存在时），或者与一个已知正确的参考值（如基于 `window.sum()` 手动计算的值）匹配（在修复后）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能随实现细节变化的数值数组完全相等。应使用容差比较（如 `assert_allclose`）。",
+        "reason": "Issue 是关于数值计算的错误，使用容差比较数值结果更稳定。修复后，基于 `window.sum()` 的计算应产生正确结果。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否也影响 `mode == 'psd'` 且 `scale_by_freq == True` 的情况？源码中该分支使用 `(np.abs(window)**2).sum()`，这可能不受影响，因为平方使负值变正。",
+    "除了 `flattop`，还有哪些常见的窗口函数包含负值？",
+    "现有测试中 `test_psd_windowarray_scale_by_freq` 的断言 `assert_allclose(spec_s*(win**2).sum(), spec_n/self.Fs*win.sum()**2, atol=1e-08)` 在窗口有负值时，在当前有缺陷的实现下是否仍然成立？这需要验证。"
+  ],
+  "raw": {
+    "issue_summary": "在 `mlab._spectral_helper` 函数中，窗口校正因子使用了 `np.abs`，导致包含负值的窗口（如 `flattop`）计算结果错误。",
+    "trigger_condition": {
+      "text": "使用包含负值的窗口函数（如 `signal.windows.flattop`）调用 `mlab._spectral_helper` 或相关函数（如 `psd`、`specgram`），且 `mode` 为 `'psd'` 或 `'complex'` 或 `'magnitude'`，并且 `scale_by_freq` 为 `False` 或 `mode` 为 `'complex'` 或 `'magnitude'`。",
+      "evidence": [
+        "Issue 中提供的复现代码使用了 `signal.windows.flattop` 窗口，该窗口包含负值。",
+        "源码片段 1 第 423-430 行显示在 `mode == 'psd'` 且 `scale_by_freq == False` 时使用了 `np.abs(window).sum()**2`，在 `mode == 'complex'` 或 `mode == 'magnitude'` 时使用了 `np.abs(window).sum()`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于包含负值的窗口，计算出的功率谱密度（PSD）或其他谱模式（如 magnitude, complex）的值不正确，因为窗口校正因子错误地使用了窗口的绝对值之和，而不是窗口本身的和。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中复现代码显示 `np.abs(window).sum()**2 - window.sum()**2` 不为零，表明使用绝对值和不等于使用原始和。",
+        "Issue 指出 `np.abs` 是不需要的，并且对于像 `flattop` 这样有负值的窗口会给出错误结果。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "窗口校正因子应使用窗口本身的求和（`window.sum()`），而不是其绝对值的求和（`np.abs(window).sum()`），以确保对于所有窗口函数（包括包含负值的窗口）计算正确。",
+      "evidence": [
+        "Issue 中引用的 SciPy 实现链接显示其使用了 `window.sum()` 而不是 `np.abs(window).sum()`。",
+        "Issue 的预期结果是 `np.abs(window).sum()**2 - window.sum()**2` 应为 0，这暗示了正确的校正因子应基于 `window.sum()`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "mlab._spectral_helper",
+        "kind": "function",
+        "source_path": "lib/matplotlib/mlab.py",
+        "reason": "这是 Issue 直接指出的存在缺陷的函数，负责计算谱分析的核心逻辑。"
+      },
+      {
+        "name": "mlab.psd",
+        "kind": "function",
+        "source_path": "lib/matplotlib/mlab.py",
+        "reason": "它是调用 `_spectral_helper` 的高层函数之一，且相关测试中大量使用。"
+      },
+      {
+        "name": "mlab.specgram",
+        "kind": "function",
+        "source_path": "lib/matplotlib/mlab.py",
+        "reason": "它是调用 `_spectral_helper` 的高层函数之一，且相关测试中有所涉及。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/mlab.py",
+        "object": "_spectral_helper",
+        "lines": "423-430",
+        "reason": "Issue 链接指向该行号范围，其中在 `mode == 'psd'` 且 `scale_by_freq == False` 的分支中使用了 `np.abs(window).sum()**2`，在 `mode == 'complex'` 和 `mode == 'magnitude'` 的分支中使用了 `np.abs(window).sum()`。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestSpectral.test_psd_window_hanning",
+        "test_file": "lib/matplotlib/tests/test_mlab.py",
+        "why_relevant": "该测试专门测试了使用 `window_hanning` 窗口的 `psd` 函数，并验证了窗口校正因子的计算（通过 `spec_c *= len(ycontrol1)/(np.abs(windowVals)**2).sum()`）。它直接涉及窗口校正逻辑。",
+        "reusable_parts": [
+          "测试类 `TestSpectral` 的框架和参数化设置",
+          "使用 `mlab.psd` 和 `mlab.window_hanning` 的调用模式",
+          "使用 `assert_allclose` 进行数值比较的断言风格"
+        ],
+        "possible_gap": "该测试只使用了 `window_hanning`（其值非负），没有测试包含负值的窗口（如 `flattop`），因此无法触发当前 Issue 描述的缺陷。"
+      },
+      {
+        "test_name": "TestSpectral.test_psd_windowarray_scale_by_freq",
+        "test_file": "lib/matplotlib/tests/test_mlab.py",
+        "why_relevant": "该测试比较了 `scale_by_freq` 为 `True` 和 `False` 时 `psd` 的结果，并包含了一个断言 `assert_allclose(spec_s*(win**2).sum(), spec_n/self.Fs*win.sum()**2, atol=1e-08)`，这直接关联到窗口校正因子的计算（涉及 `win.sum()**2`）。",
+        "reusable_parts": [
+          "测试类 `TestSpectral` 的框架",
+          "使用 `mlab.psd` 和 `mlab.window_hanning` 的调用",
+          "比较不同 `scale_by_freq` 设置的测试逻辑"
+        ],
+        "possible_gap": "该测试同样只使用了 `window_hanning`（非负），且其断言依赖于当前有缺陷的实现（使用了 `win.sum()**2`，但 Issue 认为这是正确的，而 `np.abs(win).sum()**2` 是错误的）。测试本身可能无法直接揭示缺陷，因为对于非负窗口，两者结果相同。"
+      },
+      {
+        "test_name": "TestSpectral.test_spectral_helper_psd",
+        "test_file": "lib/matplotlib/tests/test_mlab.py",
+        "why_relevant": "该测试直接调用了 `mlab._spectral_helper` 函数，并测试了不同的 `mode`（包括 `'psd'`）。",
+        "reusable_parts": [
+          "直接调用 `_spectral_helper` 的测试模式",
+          "参数化测试 `mode` 的设置",
+          "使用 `assert_allclose` 和形状检查的断言"
+        ],
+        "possible_gap": "该测试没有专门测试窗口校正因子，使用的可能是默认窗口或简单窗口，没有包含负值窗口。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用 `mlab.window_hanning` 或默认窗口（值非负）。",
+        "target_pattern": "使用包含负值的窗口函数，如 `signal.windows.flattop`。",
+        "reason": "Issue 明确指出缺陷在窗口包含负值时触发，而现有测试只使用了非负窗口。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 `mode` 可能为 `'psd'`，`scale_by_freq` 可能为 `True` 或 `False`。",
+        "target_pattern": "确保测试配置使得代码执行到使用 `np.abs(window).sum()` 或 `np.abs(window).sum()**2` 的分支，即 `mode` 为 `'psd'` 且 `scale_by_freq=False`，或 `mode` 为 `'complex'` 或 `'magnitude'`。",
+        "reason": "源码显示缺陷代码位于这些特定分支中。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 `mlab._spectral_helper` 或 `mlab.psd` 等函数返回的谱值（`spec` 或结果的第一项）。",
+        "reason": "缺陷导致返回的谱值不正确，观察其数值可以判断是否触发缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "计算 `np.abs(window).sum()**2` 和 `window.sum()**2`（或 `np.abs(window).sum()` 和 `window.sum()`）的值。",
+        "reason": "Issue 的核心是这两个值在窗口有负值时不等，观察它们可以直接验证缺陷条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于包含负值的窗口，使用 `window.sum()` 作为校正因子计算出的谱结果应与使用 `np.abs(window).sum()` 作为校正因子计算出的结果不同（在缺陷存在时），或者与一个已知正确的参考值（如基于 `window.sum()` 手动计算的值）匹配（在修复后）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能随实现细节变化的数值数组完全相等。应使用容差比较（如 `assert_allclose`）。",
+        "reason": "Issue 是关于数值计算的错误，使用容差比较数值结果更稳定。修复后，基于 `window.sum()` 的计算应产生正确结果。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 `numpy`、`matplotlib.mlab` 以及 `scipy.signal.windows`（用于获取 `flattop` 窗口）。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 `pytest` 参数化来测试不同的窗口函数和 `mode`/`scale_by_freq` 组合。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要构造一个简单的输入信号（如正弦波或随机噪声）以进行谱分析。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否也影响 `mode == 'psd'` 且 `scale_by_freq == True` 的情况？源码中该分支使用 `(np.abs(window)**2).sum()`，这可能不受影响，因为平方使负值变正。",
+      "除了 `flattop`，还有哪些常见的窗口函数包含负值？",
+      "现有测试中 `test_psd_windowarray_scale_by_freq` 的断言 `assert_allclose(spec_s*(win**2).sum(), spec_n/self.Fs*win.sum()**2, atol=1e-08)` 在窗口有负值时，在当前有缺陷的实现下是否仍然成立？这需要验证。"
+    ]
+  }
+}

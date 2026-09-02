@@ -1,0 +1,266 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13590",
+  "issue_summary": "在 Django 2.2 升级到 3.0 后，将具名元组作为参数传递给 __range 查询集过滤器会引发 TypeError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和相应的模型（例如一个带有数值字段的模型）来构建 QuerySet 和过滤器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 collections.namedtuple 或 typing.NamedTuple 来创建具名元组类。",
+        "source": "inference",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_named_values_list_expression",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 values_list 与 named=True 的交互，涉及具名元组（Row）的构造，与 Issue 中具名元组的处理相关。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "使用 F 表达式和 annotate",
+          "使用 values_list 和 named 参数",
+          "使用 .first() 获取结果",
+          "使用 _fields 属性进行断言"
+        ],
+        "possible_gap": "该测试关注的是查询结果的具名元组表示，而非将具名元组作为输入参数传递给查询过滤器。"
+      },
+      {
+        "test_name": "test_named_values_list_with_fields",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 values_list(named=True) 返回的具名元组（Row）类型和字段，展示了 Django 内部使用具名元组的一种模式。",
+        "reusable_parts": [
+          "使用 .extra() 和 .annotate()",
+          "使用 values_list(named=True)",
+          "断言 type(values).__name__ 和 _fields"
+        ],
+        "possible_gap": "同样，它测试的是输出，而非输入。没有测试将具名元组作为查询参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用一个具名元组（named tuple）作为参数传递给 QuerySet 的 __range 过滤器（或任何可能调用 resolve_lookup_value 的查询操作）。",
+      "evidence": [
+        "Issue 描述：'This project passes named 2-tuples as arguments to range queryset filters.'",
+        "源码片段 1 显示 resolve_lookup_value 会处理 tuple 类型，并尝试用 type(value)(...) 重新构造。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: __new__() missing 1 required positional argument: 'far'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'On 3.0 it causes the following error: TypeError: __new__() missing 1 required positional argument: 'far'.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.sql.query.Query.resolve_lookup_value",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 明确指出问题发生在这个方法内，它处理查询值并尝试重新构造元组。"
+      },
+      {
+        "name": "range",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 提到 __range 查询集过滤器是触发场景。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.resolve_lookup_value",
+        "lines": "1072-1084",
+        "reason": "Issue 描述和源码片段 1 显示，该方法在处理 tuple 时使用 type(value)(generator) 构造新对象，这对具名元组不适用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通值（如 'num'）或普通元组作为查询参数。",
+        "target_pattern": "使用一个具名元组（例如 collections.namedtuple 定义的类实例）作为查询参数，特别是传递给 __range 过滤器。",
+        "reason": "Issue 的核心是具名元组作为输入时，在 resolve_lookup_value 中的重构过程失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用 filter(somefield__range=(start, end))，其中 (start, end) 是普通元组。",
+        "target_pattern": "调用 filter(somefield__range=named_tuple_instance)，其中 named_tuple_instance 是一个具名元组类的实例。",
+        "reason": "这直接模拟了 Issue 中描述的触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "具名元组作为查询参数时，应能像普通元组一样被正确处理，不引发 TypeError，并生成正确的查询。",
+      "evidence": [
+        "Issue 描述：'This works fine on 2.2.'",
+        "源码片段 1 的逻辑意图是处理列表和元组，并保留其类型。修复后应能处理具名元组。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 filter 或执行查询（如 .first()）时捕获的异常。",
+        "reason": "Issue 明确描述了会抛出 TypeError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "传递给 resolve_lookup_value 的 value 的类型，以及重构后对象的类型。",
+        "reason": "需要确认输入是具名元组类型，以及重构尝试是否成功保留了类型或失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用具名元组作为 __range 参数时，查询应正常执行而不抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的完整错误消息字符串（除非 Issue 提供了精确措辞），或断言不相关的查询结果。",
+        "reason": "当前缺陷表现为异常，修复后异常应消失。使用 assertRaises 或其反面可以稳定地验证这一点。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "除了 __range 之外，还有哪些查询查找类型（lookup）会调用 resolve_lookup_value 并可能触发此问题？",
+    "修复后的具体代码变更是什么（例如，是使用 * 展开迭代器还是其他方式）？",
+    "具名元组的具体定义（字段名）是否会影响错误消息中的参数名（如 'far'）？"
+  ],
+  "raw": {
+    "issue_summary": "在 Django 2.2 升级到 3.0 后，将具名元组作为参数传递给 __range 查询集过滤器会引发 TypeError 异常。",
+    "trigger_condition": {
+      "text": "使用一个具名元组（named tuple）作为参数传递给 QuerySet 的 __range 过滤器（或任何可能调用 resolve_lookup_value 的查询操作）。",
+      "evidence": [
+        "Issue 描述：'This project passes named 2-tuples as arguments to range queryset filters.'",
+        "源码片段 1 显示 resolve_lookup_value 会处理 tuple 类型，并尝试用 type(value)(...) 重新构造。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: __new__() missing 1 required positional argument: 'far'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'On 3.0 it causes the following error: TypeError: __new__() missing 1 required positional argument: 'far'.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "具名元组作为查询参数时，应能像普通元组一样被正确处理，不引发 TypeError，并生成正确的查询。",
+      "evidence": [
+        "Issue 描述：'This works fine on 2.2.'",
+        "源码片段 1 的逻辑意图是处理列表和元组，并保留其类型。修复后应能处理具名元组。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.sql.query.Query.resolve_lookup_value",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 明确指出问题发生在这个方法内，它处理查询值并尝试重新构造元组。"
+      },
+      {
+        "name": "range",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 提到 __range 查询集过滤器是触发场景。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.resolve_lookup_value",
+        "lines": "1072-1084",
+        "reason": "Issue 描述和源码片段 1 显示，该方法在处理 tuple 时使用 type(value)(generator) 构造新对象，这对具名元组不适用。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_named_values_list_expression",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 values_list 与 named=True 的交互，涉及具名元组（Row）的构造，与 Issue 中具名元组的处理相关。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "使用 F 表达式和 annotate",
+          "使用 values_list 和 named 参数",
+          "使用 .first() 获取结果",
+          "使用 _fields 属性进行断言"
+        ],
+        "possible_gap": "该测试关注的是查询结果的具名元组表示，而非将具名元组作为输入参数传递给查询过滤器。"
+      },
+      {
+        "test_name": "test_named_values_list_with_fields",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 values_list(named=True) 返回的具名元组（Row）类型和字段，展示了 Django 内部使用具名元组的一种模式。",
+        "reusable_parts": [
+          "使用 .extra() 和 .annotate()",
+          "使用 values_list(named=True)",
+          "断言 type(values).__name__ 和 _fields"
+        ],
+        "possible_gap": "同样，它测试的是输出，而非输入。没有测试将具名元组作为查询参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通值（如 'num'）或普通元组作为查询参数。",
+        "target_pattern": "使用一个具名元组（例如 collections.namedtuple 定义的类实例）作为查询参数，特别是传递给 __range 过滤器。",
+        "reason": "Issue 的核心是具名元组作为输入时，在 resolve_lookup_value 中的重构过程失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用 filter(somefield__range=(start, end))，其中 (start, end) 是普通元组。",
+        "target_pattern": "调用 filter(somefield__range=named_tuple_instance)，其中 named_tuple_instance 是一个具名元组类的实例。",
+        "reason": "这直接模拟了 Issue 中描述的触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 filter 或执行查询（如 .first()）时捕获的异常。",
+        "reason": "Issue 明确描述了会抛出 TypeError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "传递给 resolve_lookup_value 的 value 的类型，以及重构后对象的类型。",
+        "reason": "需要确认输入是具名元组类型，以及重构尝试是否成功保留了类型或失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用具名元组作为 __range 参数时，查询应正常执行而不抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的完整错误消息字符串（除非 Issue 提供了精确措辞），或断言不相关的查询结果。",
+        "reason": "当前缺陷表现为异常，修复后异常应消失。使用 assertRaises 或其反面可以稳定地验证这一点。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和相应的模型（例如一个带有数值字段的模型）来构建 QuerySet 和过滤器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 collections.namedtuple 或 typing.NamedTuple 来创建具名元组类。",
+        "source": "inference",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 __range 之外，还有哪些查询查找类型（lookup）会调用 resolve_lookup_value 并可能触发此问题？",
+      "修复后的具体代码变更是什么（例如，是使用 * 展开迭代器还是其他方式）？",
+      "具名元组的具体定义（字段名）是否会影响错误消息中的参数名（如 'far'）？"
+    ]
+  }
+}

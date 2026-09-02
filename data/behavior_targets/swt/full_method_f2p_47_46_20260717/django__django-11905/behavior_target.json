@@ -1,0 +1,384 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11905",
+  "issue_summary": "__isnull 查找允许非布尔值，应引发错误以确保一致性和避免混淆。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要数据库支持（如 SQLite）和相应的测试模型（如 Related、JSONModel、Membership、ModelA）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 类并设置测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "对于 JSON 字段测试，可能需要 PostgreSQL 数据库（但可能在其他后端上也能部分测试）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "IsNullTests.test_primary_key",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它直接测试了 __isnull 查找与布尔值 True/False 的使用。",
+        "reusable_parts": [
+          "imports",
+          "TestCase",
+          "对象创建（如 CustomPk, Related）",
+          "filter(custom__isnull=True/False)",
+          "assertSequenceEqual"
+        ],
+        "possible_gap": "它只使用了正确的布尔值 True/False，没有测试非布尔值输入。"
+      },
+      {
+        "test_name": "TestQuerying.test_isnull_key",
+        "test_file": "tests/postgres_tests/test_json.py",
+        "why_relevant": "它测试了 JSON 字段上的 __isnull 查找。",
+        "reusable_parts": [
+          "PostgreSQLTestCase",
+          "JSONModel",
+          "filter(field__a__isnull=True/False)",
+          "assertSequenceEqual"
+        ],
+        "possible_gap": "它只使用了布尔值 True/False，没有测试非布尔值。"
+      },
+      {
+        "test_name": "MultiColumnFKTests.test_isnull_lookup",
+        "test_file": "tests/foreign_object/tests.py",
+        "why_relevant": "它测试了多列外键上的 __isnull 查找。",
+        "reusable_parts": [
+          "TestCase",
+          "Membership",
+          "filter(group__isnull=True/False)",
+          "assertQuerysetEqual"
+        ],
+        "possible_gap": "它只使用了布尔值 True/False，没有测试非布尔值。"
+      },
+      {
+        "test_name": "ValidationMessagesTest.test_null_boolean_field_raises_error_message",
+        "test_file": "tests/validation/test_error_messages.py",
+        "why_relevant": "它测试了 NullBooleanField 对非布尔值的验证错误，与 __isnull 查找的预期行为类似（应引发错误）。",
+        "reusable_parts": [
+          "TestCase",
+          "models.NullBooleanField",
+          "验证错误消息检查"
+        ],
+        "possible_gap": "它针对的是模型字段验证，而非查询查找。"
+      },
+      {
+        "test_name": "NullJoinPromotionOrTest.test_isnull_filter_promotion",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 __isnull 查找在连接提升中的行为，Issue 提到了非布尔值不会促进 OUTER JOIN。",
+        "reusable_parts": [
+          "TestCase",
+          "ModelA",
+          "Q 对象",
+          "filter with Q",
+          "检查查询字符串中的 JOIN 类型"
+        ],
+        "possible_gap": "它只使用了布尔值 True/False，没有测试非布尔值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在查询中使用 __isnull 查找，并传入非布尔值（例如字符串、整数等真值/假值）。",
+      "evidence": [
+        "Issue 描述：'__isnull should not allow for non-boolean values. Using truthy/falsey...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用非布尔值（如真值/假值）时，对于简单查询可以工作，但不会将 INNER JOIN 提升为 OUTER JOIN，且行为未记录和未经测试。Issue 认为应引发错误。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'Using truthy/falsey doesn't promote INNER JOIN to an OUTER JOIN but works fine for a simple queries. Using non-boolean values is ​undocumented and untested. IMO we should raise an error...'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 涉及在查询中使用 __isnull 查找，通常通过 QuerySet.filter() 调用。"
+      },
+      {
+        "name": "__isnull",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 直接关于 __isnull 查找的行为。"
+      },
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 5 展示了在 Q 对象中使用 __isnull。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "iCoRe 未提供相关源代码片段，无法推断具体位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "filter(field__isnull=True) 或 filter(field__isnull=False)",
+        "target_pattern": "filter(field__isnull=非布尔值)，例如 filter(field__isnull='yes')、filter(field__isnull=1)、filter(field__isnull=None（如果 None 不被视为布尔值）)",
+        "reason": "Issue 指出 __isnull 应不允许非布尔值，当前测试只使用布尔值，变异输入可能触发缺陷路径（缺少验证）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "Q(b__name__isnull=True/False)",
+        "target_pattern": "Q(b__name__isnull=非布尔值)",
+        "reason": "在 Q 对象中使用非布尔值可能同样存在问题，且相关测试 5 使用了 Q。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 __isnull 查找接收到非布尔值（如字符串、整数）时，应引发错误（例如 ValueError 或 ValidationError）。",
+      "evidence": [
+        "Issue 描述：'IMO we should raise an error for non-boolean values to avoid confusion and for consistency.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "尝试执行 filter(__isnull=非布尔值) 时是否引发异常（如 ValueError、ValidationError）。",
+        "reason": "Issue 期望对非布尔值引发错误，观察异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "str(query) 或 query.sql，检查生成的 SQL 是否包含预期的 JOIN 类型（如 LEFT OUTER JOIN 或 INNER JOIN）。",
+        "reason": "Issue 提到非布尔值不会促进 OUTER JOIN，观察 SQL 可以确认行为是否一致。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询结果（如 list(qs)），检查非布尔值输入是否返回了意外结果。",
+        "reason": "如果未引发错误，观察查询结果是否与布尔值输入的行为不同或错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 __isnull 查找使用非布尔值（如字符串、整数）时，应引发错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的错误消息字符串，因为消息可能变化；避免断言未引发错误时的查询结果。",
+        "reason": "Issue 的核心要求是引发错误，使用 raises 断言直接验证这一点。"
+      },
+      {
+        "assertion_goal": "使用非布尔值时，不应静默处理并返回可能错误的结果。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的 SQL 字符串片段，因为 JOIN 行为可能依赖于实现。",
+        "reason": "确保缺陷被捕获，而不是被忽略。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "哪些非布尔值具体会触发问题（例如空字符串、0、1、'yes'、None 等）。",
+    "错误的确切类型和消息是什么（例如 ValueError、ValidationError 或特定于 Django 的异常）。",
+    "非布尔值在简单查询中‘工作正常’的具体含义是什么，以及如何观测。",
+    "__isnull 查找的验证逻辑在代码库中的具体位置。",
+    "是否所有后端（SQLite、PostgreSQL 等）行为一致。"
+  ],
+  "raw": {
+    "issue_summary": "__isnull 查找允许非布尔值，应引发错误以确保一致性和避免混淆。",
+    "trigger_condition": {
+      "text": "在查询中使用 __isnull 查找，并传入非布尔值（例如字符串、整数等真值/假值）。",
+      "evidence": [
+        "Issue 描述：'__isnull should not allow for non-boolean values. Using truthy/falsey...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用非布尔值（如真值/假值）时，对于简单查询可以工作，但不会将 INNER JOIN 提升为 OUTER JOIN，且行为未记录和未经测试。Issue 认为应引发错误。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'Using truthy/falsey doesn't promote INNER JOIN to an OUTER JOIN but works fine for a simple queries. Using non-boolean values is ​undocumented and untested. IMO we should raise an error...'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 __isnull 查找接收到非布尔值（如字符串、整数）时，应引发错误（例如 ValueError 或 ValidationError）。",
+      "evidence": [
+        "Issue 描述：'IMO we should raise an error for non-boolean values to avoid confusion and for consistency.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 涉及在查询中使用 __isnull 查找，通常通过 QuerySet.filter() 调用。"
+      },
+      {
+        "name": "__isnull",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 直接关于 __isnull 查找的行为。"
+      },
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 5 展示了在 Q 对象中使用 __isnull。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "iCoRe 未提供相关源代码片段，无法推断具体位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "IsNullTests.test_primary_key",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它直接测试了 __isnull 查找与布尔值 True/False 的使用。",
+        "reusable_parts": [
+          "imports",
+          "TestCase",
+          "对象创建（如 CustomPk, Related）",
+          "filter(custom__isnull=True/False)",
+          "assertSequenceEqual"
+        ],
+        "possible_gap": "它只使用了正确的布尔值 True/False，没有测试非布尔值输入。"
+      },
+      {
+        "test_name": "TestQuerying.test_isnull_key",
+        "test_file": "tests/postgres_tests/test_json.py",
+        "why_relevant": "它测试了 JSON 字段上的 __isnull 查找。",
+        "reusable_parts": [
+          "PostgreSQLTestCase",
+          "JSONModel",
+          "filter(field__a__isnull=True/False)",
+          "assertSequenceEqual"
+        ],
+        "possible_gap": "它只使用了布尔值 True/False，没有测试非布尔值。"
+      },
+      {
+        "test_name": "MultiColumnFKTests.test_isnull_lookup",
+        "test_file": "tests/foreign_object/tests.py",
+        "why_relevant": "它测试了多列外键上的 __isnull 查找。",
+        "reusable_parts": [
+          "TestCase",
+          "Membership",
+          "filter(group__isnull=True/False)",
+          "assertQuerysetEqual"
+        ],
+        "possible_gap": "它只使用了布尔值 True/False，没有测试非布尔值。"
+      },
+      {
+        "test_name": "ValidationMessagesTest.test_null_boolean_field_raises_error_message",
+        "test_file": "tests/validation/test_error_messages.py",
+        "why_relevant": "它测试了 NullBooleanField 对非布尔值的验证错误，与 __isnull 查找的预期行为类似（应引发错误）。",
+        "reusable_parts": [
+          "TestCase",
+          "models.NullBooleanField",
+          "验证错误消息检查"
+        ],
+        "possible_gap": "它针对的是模型字段验证，而非查询查找。"
+      },
+      {
+        "test_name": "NullJoinPromotionOrTest.test_isnull_filter_promotion",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 __isnull 查找在连接提升中的行为，Issue 提到了非布尔值不会促进 OUTER JOIN。",
+        "reusable_parts": [
+          "TestCase",
+          "ModelA",
+          "Q 对象",
+          "filter with Q",
+          "检查查询字符串中的 JOIN 类型"
+        ],
+        "possible_gap": "它只使用了布尔值 True/False，没有测试非布尔值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "filter(field__isnull=True) 或 filter(field__isnull=False)",
+        "target_pattern": "filter(field__isnull=非布尔值)，例如 filter(field__isnull='yes')、filter(field__isnull=1)、filter(field__isnull=None（如果 None 不被视为布尔值）)",
+        "reason": "Issue 指出 __isnull 应不允许非布尔值，当前测试只使用布尔值，变异输入可能触发缺陷路径（缺少验证）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "Q(b__name__isnull=True/False)",
+        "target_pattern": "Q(b__name__isnull=非布尔值)",
+        "reason": "在 Q 对象中使用非布尔值可能同样存在问题，且相关测试 5 使用了 Q。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "尝试执行 filter(__isnull=非布尔值) 时是否引发异常（如 ValueError、ValidationError）。",
+        "reason": "Issue 期望对非布尔值引发错误，观察异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "str(query) 或 query.sql，检查生成的 SQL 是否包含预期的 JOIN 类型（如 LEFT OUTER JOIN 或 INNER JOIN）。",
+        "reason": "Issue 提到非布尔值不会促进 OUTER JOIN，观察 SQL 可以确认行为是否一致。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询结果（如 list(qs)），检查非布尔值输入是否返回了意外结果。",
+        "reason": "如果未引发错误，观察查询结果是否与布尔值输入的行为不同或错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 __isnull 查找使用非布尔值（如字符串、整数）时，应引发错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的错误消息字符串，因为消息可能变化；避免断言未引发错误时的查询结果。",
+        "reason": "Issue 的核心要求是引发错误，使用 raises 断言直接验证这一点。"
+      },
+      {
+        "assertion_goal": "使用非布尔值时，不应静默处理并返回可能错误的结果。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的 SQL 字符串片段，因为 JOIN 行为可能依赖于实现。",
+        "reason": "确保缺陷被捕获，而不是被忽略。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要数据库支持（如 SQLite）和相应的测试模型（如 Related、JSONModel、Membership、ModelA）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 类并设置测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "对于 JSON 字段测试，可能需要 PostgreSQL 数据库（但可能在其他后端上也能部分测试）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "哪些非布尔值具体会触发问题（例如空字符串、0、1、'yes'、None 等）。",
+      "错误的确切类型和消息是什么（例如 ValueError、ValidationError 或特定于 Django 的异常）。",
+      "非布尔值在简单查询中‘工作正常’的具体含义是什么，以及如何观测。",
+      "__isnull 查找的验证逻辑在代码库中的具体位置。",
+      "是否所有后端（SQLite、PostgreSQL 等）行为一致。"
+    ]
+  }
+}

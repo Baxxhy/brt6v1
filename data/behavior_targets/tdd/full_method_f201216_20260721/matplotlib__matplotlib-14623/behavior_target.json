@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-14623",
+  "issue_summary": "在 matplotlib 3.1.0 中，对数坐标轴无法通过设置其上下限来反转方向。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 plt.subplots 创建图形和坐标轴，并绘制一些数据（如 Issue 中的示例数据）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试结束后调用 plt.close() 以清理图形。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inverted_limits",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "它测试了通过 invert_xaxis/invert_yaxis 方法反转坐标轴，并断言 get_xlim/get_ylim 的结果。这与 Issue 中通过 set_ylim 反转坐标轴的目标相似。",
+        "reusable_parts": [
+          "使用 plt.subplots 创建图形和坐标轴",
+          "调用 ax.plot 绘制数据",
+          "使用 assert ax.get_ylim() == ... 进行断言"
+        ],
+        "possible_gap": "该测试使用 invert_yaxis 方法，而 Issue 使用 set_ylim 来反转坐标轴。它没有测试对数刻度下的反转。"
+      },
+      {
+        "test_name": "test_invalid_log_lims",
+        "test_file": "lib/matplotlib/tests/test_scale.py",
+        "why_relevant": "它测试了对数刻度下设置无效限制（如非正值）的行为，并检查了警告和限制是否被忽略。这涉及到对数刻度下 set_ylim 的特殊处理。",
+        "reusable_parts": [
+          "使用 plt.subplots 创建图形和坐标轴",
+          "设置对数刻度：ax.set_yscale('log')",
+          "调用 ax.set_ylim 并检查结果",
+          "使用 pytest.warns 捕获警告"
+        ],
+        "possible_gap": "该测试关注的是无效值（非正值）被忽略，而不是有效的递减序列（正数，但 bottom > top）是否导致反转失败。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个坐标轴，设置其 y 轴为对数刻度（yscale='log'），然后调用 set_ylim 并传入一个递减的序列（例如 (y.max(), y.min())）来反转坐标轴。",
+      "evidence": [
+        "Issue 中的代码：`ax.set_yscale('log'); ax.set_ylim(y.max(), y.min())`",
+        "源码 set_ylim 的文档说明：'The bottom value may be greater than the top value, in which case the y-axis values will decrease from bottom to top.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "y 轴仅在线性刻度下被反转，在对数刻度下未被反转。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'The yaxis is only inverted for the \"linear\" scale.'",
+        "Issue 中的图片对比展示了线性刻度反转成功，对数刻度未反转。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.axes.Axes.set_yscale",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_base.py",
+        "reason": "用于设置 y 轴的刻度类型（如 'log'），是触发条件的一部分。"
+      },
+      {
+        "name": "matplotlib.axes.Axes.set_ylim",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_base.py",
+        "reason": "用于设置 y 轴的上下限，当 bottom > top 时应反转坐标轴，这是 Issue 的核心操作。"
+      },
+      {
+        "name": "matplotlib.axes.Axes.get_ylim",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于在测试中断言坐标轴的实际上下限，以验证反转是否成功。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "_AxesBase.set_ylim",
+        "lines": "3540-3664",
+        "reason": "该方法处理坐标轴上下限的设置，包含了对数刻度的特殊检查（如检查非正值），可能影响了反转逻辑。"
+      },
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "_AxesBase.set_yscale",
+        "lines": "3676-3707",
+        "reason": "该方法设置刻度类型，可能影响后续 set_ylim 的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "test_inverted_limits 中调用 ax.invert_yaxis() 来反转坐标轴。",
+        "target_pattern": "改为先调用 ax.set_yscale('log')，然后调用 ax.set_ylim(bottom, top) 并传入 bottom > top 的值来反转坐标轴。",
+        "reason": "Issue 表明，在对数刻度下，通过 set_ylim 反转坐标轴的方法失效。这个变异将测试路径导向缺陷条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "test_invalid_log_lims 中设置对数刻度后，传入无效的（非正值）限制值。",
+        "target_pattern": "设置对数刻度后，传入有效的正数值，但 bottom > top，以测试反转功能。",
+        "reason": "Issue 中的限制值是有效的正数（如 1000e2 和 1），但顺序是递减的。测试需要覆盖这种有效但顺序颠倒的情况。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论坐标轴是线性还是对数刻度，当 set_ylim 的 bottom 参数大于 top 参数时，y 轴都应被反转。",
+      "evidence": [
+        "Issue 中的期望：'I would expect the yaxis to be inverted for both the \"linear\" and the \"log\" scale.'",
+        "源码 set_ylim 的文档说明：'The bottom value may be greater than the top value, in which case the y-axis values will decrease from bottom to top.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "ax.get_ylim() 的返回值，特别是 (bottom, top) 的顺序。",
+        "reason": "如果坐标轴成功反转，get_ylim() 应返回 (y.max(), y.min())；如果反转失败，则返回 (y.min(), y.max())。这是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "ax.yaxis_inverted() 的返回值。",
+        "reason": "该方法应返回一个布尔值，指示 y 轴是否被反转。可以将其与 get_ylim() 的顺序进行交叉验证。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在对数刻度下，当 set_ylim 的 bottom 参数大于 top 参数时，y 轴的上下限应被正确设置为 (bottom, top)，即坐标轴被反转。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的图形输出或像素级比较，因为 Issue 关注的是坐标轴状态。",
+        "reason": "直接比较 get_ylim() 的返回值与预期的 (bottom, top) 顺序，可以稳定地验证坐标轴反转功能是否正常工作。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 set_ylim 方法中处理对数刻度反转的逻辑，还是在 yaxis._set_scale 或 limit_range_for_scale 中。",
+    "是否还有其他因素（如 autoscaling）会影响对数刻度下的反转行为。",
+    "除了 y 轴，x 轴在对数刻度下是否也存在相同的反转问题。"
+  ],
+  "raw": {
+    "issue_summary": "在 matplotlib 3.1.0 中，对数坐标轴无法通过设置其上下限来反转方向。",
+    "trigger_condition": {
+      "text": "创建一个坐标轴，设置其 y 轴为对数刻度（yscale='log'），然后调用 set_ylim 并传入一个递减的序列（例如 (y.max(), y.min())）来反转坐标轴。",
+      "evidence": [
+        "Issue 中的代码：`ax.set_yscale('log'); ax.set_ylim(y.max(), y.min())`",
+        "源码 set_ylim 的文档说明：'The bottom value may be greater than the top value, in which case the y-axis values will decrease from bottom to top.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "y 轴仅在线性刻度下被反转，在对数刻度下未被反转。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'The yaxis is only inverted for the \"linear\" scale.'",
+        "Issue 中的图片对比展示了线性刻度反转成功，对数刻度未反转。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论坐标轴是线性还是对数刻度，当 set_ylim 的 bottom 参数大于 top 参数时，y 轴都应被反转。",
+      "evidence": [
+        "Issue 中的期望：'I would expect the yaxis to be inverted for both the \"linear\" and the \"log\" scale.'",
+        "源码 set_ylim 的文档说明：'The bottom value may be greater than the top value, in which case the y-axis values will decrease from bottom to top.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.axes.Axes.set_yscale",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_base.py",
+        "reason": "用于设置 y 轴的刻度类型（如 'log'），是触发条件的一部分。"
+      },
+      {
+        "name": "matplotlib.axes.Axes.set_ylim",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_base.py",
+        "reason": "用于设置 y 轴的上下限，当 bottom > top 时应反转坐标轴，这是 Issue 的核心操作。"
+      },
+      {
+        "name": "matplotlib.axes.Axes.get_ylim",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于在测试中断言坐标轴的实际上下限，以验证反转是否成功。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "_AxesBase.set_ylim",
+        "lines": "3540-3664",
+        "reason": "该方法处理坐标轴上下限的设置，包含了对数刻度的特殊检查（如检查非正值），可能影响了反转逻辑。"
+      },
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "_AxesBase.set_yscale",
+        "lines": "3676-3707",
+        "reason": "该方法设置刻度类型，可能影响后续 set_ylim 的行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inverted_limits",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "它测试了通过 invert_xaxis/invert_yaxis 方法反转坐标轴，并断言 get_xlim/get_ylim 的结果。这与 Issue 中通过 set_ylim 反转坐标轴的目标相似。",
+        "reusable_parts": [
+          "使用 plt.subplots 创建图形和坐标轴",
+          "调用 ax.plot 绘制数据",
+          "使用 assert ax.get_ylim() == ... 进行断言"
+        ],
+        "possible_gap": "该测试使用 invert_yaxis 方法，而 Issue 使用 set_ylim 来反转坐标轴。它没有测试对数刻度下的反转。"
+      },
+      {
+        "test_name": "test_invalid_log_lims",
+        "test_file": "lib/matplotlib/tests/test_scale.py",
+        "why_relevant": "它测试了对数刻度下设置无效限制（如非正值）的行为，并检查了警告和限制是否被忽略。这涉及到对数刻度下 set_ylim 的特殊处理。",
+        "reusable_parts": [
+          "使用 plt.subplots 创建图形和坐标轴",
+          "设置对数刻度：ax.set_yscale('log')",
+          "调用 ax.set_ylim 并检查结果",
+          "使用 pytest.warns 捕获警告"
+        ],
+        "possible_gap": "该测试关注的是无效值（非正值）被忽略，而不是有效的递减序列（正数，但 bottom > top）是否导致反转失败。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "test_inverted_limits 中调用 ax.invert_yaxis() 来反转坐标轴。",
+        "target_pattern": "改为先调用 ax.set_yscale('log')，然后调用 ax.set_ylim(bottom, top) 并传入 bottom > top 的值来反转坐标轴。",
+        "reason": "Issue 表明，在对数刻度下，通过 set_ylim 反转坐标轴的方法失效。这个变异将测试路径导向缺陷条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "test_invalid_log_lims 中设置对数刻度后，传入无效的（非正值）限制值。",
+        "target_pattern": "设置对数刻度后，传入有效的正数值，但 bottom > top，以测试反转功能。",
+        "reason": "Issue 中的限制值是有效的正数（如 1000e2 和 1），但顺序是递减的。测试需要覆盖这种有效但顺序颠倒的情况。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "ax.get_ylim() 的返回值，特别是 (bottom, top) 的顺序。",
+        "reason": "如果坐标轴成功反转，get_ylim() 应返回 (y.max(), y.min())；如果反转失败，则返回 (y.min(), y.max())。这是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "ax.yaxis_inverted() 的返回值。",
+        "reason": "该方法应返回一个布尔值，指示 y 轴是否被反转。可以将其与 get_ylim() 的顺序进行交叉验证。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在对数刻度下，当 set_ylim 的 bottom 参数大于 top 参数时，y 轴的上下限应被正确设置为 (bottom, top)，即坐标轴被反转。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的图形输出或像素级比较，因为 Issue 关注的是坐标轴状态。",
+        "reason": "直接比较 get_ylim() 的返回值与预期的 (bottom, top) 顺序，可以稳定地验证坐标轴反转功能是否正常工作。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 plt.subplots 创建图形和坐标轴，并绘制一些数据（如 Issue 中的示例数据）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试结束后调用 plt.close() 以清理图形。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 set_ylim 方法中处理对数刻度反转的逻辑，还是在 yaxis._set_scale 或 limit_range_for_scale 中。",
+      "是否还有其他因素（如 autoscaling）会影响对数刻度下的反转行为。",
+      "除了 y 轴，x 轴在对数刻度下是否也存在相同的反转问题。"
+    ]
+  }
+}

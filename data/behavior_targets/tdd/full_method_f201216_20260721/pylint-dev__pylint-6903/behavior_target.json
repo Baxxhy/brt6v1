@@ -1,0 +1,292 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pylint-dev__pylint-6903",
+  "issue_summary": "在Kubernetes Pod中运行pylint时，当--jobs=0且_query_cpu()返回0时，multiprocessing.Pool会因进程数至少为1而崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要模拟容器环境，可能使用monkeypatch或mock来模拟/sys/fs/cgroup/cpu/下的文件存在性和内容。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造PyLinter对象并设置config.jobs=0。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_multiprocessing",
+        "test_file": "tests/lint/unittest_lint.py",
+        "why_relevant": "该测试直接测试了pylint在jobs=1和jobs=2时的多进程检查功能，涉及核心的check方法和并行逻辑。",
+        "reusable_parts": [
+          "PyLinter对象构造",
+          "reporter设置",
+          "linter.check调用",
+          "jobs参数配置"
+        ],
+        "possible_gap": "该测试使用jobs=1和2，没有测试jobs=0或_query_cpu返回0的场景，且测试环境可能不是Kubernetes容器。"
+      },
+      {
+        "test_name": "TestCheckParallel.test_invoke_single_job",
+        "test_file": "tests/test_check_parallel.py",
+        "why_relevant": "该测试直接调用check_parallel函数，并设置jobs=1，展示了如何构造参数调用并行检查。",
+        "reusable_parts": [
+          "check_parallel调用",
+          "jobs参数设置",
+          "PyLinter和Reporter构造",
+          "文件数据生成"
+        ],
+        "possible_gap": "该测试使用jobs=1，没有测试jobs=0的场景，也没有模拟_query_cpu返回0的容器环境。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在Kubernetes Pod环境中运行pylint，使用--jobs=0参数，且_query_cpu()函数返回0。",
+      "evidence": [
+        "Issue描述：'Running pylint in Kubernetes Pod with --jobs=0 fails'",
+        "Issue中命令：'pylint --exit-zero --jobs 0 --verbose my_package'",
+        "Issue中计算：'cpu_shares = 2', 'int(cpu_shares / 1024)'结果为0"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "multiprocessing.Pool初始化时抛出ValueError: \"Number of processes must be at least 1\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中错误输出：'raise ValueError(\"Number of processes must be at least 1\")'",
+        "源码parallel.py中multiprocessing.Pool调用使用jobs参数"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_query_cpu",
+        "kind": "function",
+        "source_path": "pylint/lint/run.py",
+        "reason": "该函数负责计算可用CPU数量，当其返回0时会导致后续multiprocessing.Pool崩溃。"
+      },
+      {
+        "name": "check_parallel",
+        "kind": "function",
+        "source_path": "pylint/lint/parallel.py",
+        "reason": "该函数使用multiprocessing.Pool，并传入jobs参数，当jobs为0时会触发异常。"
+      },
+      {
+        "name": "PyLinter.check",
+        "kind": "method",
+        "source_path": "pylint/lint/pylinter.py",
+        "reason": "该方法根据self.config.jobs的值决定调用check_parallel或_check_files。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/lint/run.py",
+        "object": "_query_cpu",
+        "lines": "34-61",
+        "reason": "该函数在特定条件下（cpu_shares < 1024）会返回0，而multiprocessing.Pool要求进程数至少为1。"
+      },
+      {
+        "path": "pylint/lint/parallel.py",
+        "object": "check_parallel",
+        "lines": "125-175",
+        "reason": "该函数直接使用传入的jobs参数创建multiprocessing.Pool，未对jobs <= 0的情况进行处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中设置jobs=1或2等正整数。",
+        "target_pattern": "设置jobs=0，并模拟_query_cpu返回0的容器环境。",
+        "reason": "Issue触发条件是jobs=0且_query_cpu返回0，导致multiprocessing.Pool接收0作为进程数。",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "测试在常规系统环境中运行。",
+        "target_pattern": "模拟Kubernetes容器环境，使/sys/fs/cgroup/cpu/cpu.shares文件存在且值小于1024。",
+        "reason": "_query_cpu函数通过读取容器cgroup文件计算CPU数量，当cpu_shares < 1024时返回0。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "pylint在可用CPU数量计算错误（结果为0）的特殊情况下不应崩溃，计算出的进程数应至少为1。",
+      "evidence": [
+        "Issue中期望：'I expect pylint to not crash if the number of available cpu is misscalculated in this special case. The calculated number should never be 0.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "multiprocessing.Pool初始化时的异常",
+        "reason": "Issue的核心错误是ValueError: \"Number of processes must be at least 1\"，观测此异常可确认缺陷被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "_query_cpu()的返回值",
+        "reason": "该函数返回0是导致后续崩溃的直接原因，观测其返回值可确认计算逻辑问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当_query_cpu返回0且jobs=0时，pylint不会抛出ValueError异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的完整错误消息字符串，因为消息可能因Python版本或multiprocessing实现而微调。",
+        "reason": "Issue期望修复后pylint不崩溃，因此测试应验证在触发条件下不抛出特定异常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后当_query_cpu返回0时，pylint应该使用默认值1还是其他回退逻辑？Issue建议'append a ` or 1`'但未明确最终行为。",
+    "除了cpu.shares路径，cpu_quota/cpu_period计算是否也可能返回0？Issue提到不确定line 55的计算。",
+    "在非容器环境中，_query_cpu返回None时，pylint如何确定默认进程数？"
+  ],
+  "raw": {
+    "issue_summary": "在Kubernetes Pod中运行pylint时，当--jobs=0且_query_cpu()返回0时，multiprocessing.Pool会因进程数至少为1而崩溃。",
+    "trigger_condition": {
+      "text": "在Kubernetes Pod环境中运行pylint，使用--jobs=0参数，且_query_cpu()函数返回0。",
+      "evidence": [
+        "Issue描述：'Running pylint in Kubernetes Pod with --jobs=0 fails'",
+        "Issue中命令：'pylint --exit-zero --jobs 0 --verbose my_package'",
+        "Issue中计算：'cpu_shares = 2', 'int(cpu_shares / 1024)'结果为0"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "multiprocessing.Pool初始化时抛出ValueError: \"Number of processes must be at least 1\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中错误输出：'raise ValueError(\"Number of processes must be at least 1\")'",
+        "源码parallel.py中multiprocessing.Pool调用使用jobs参数"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pylint在可用CPU数量计算错误（结果为0）的特殊情况下不应崩溃，计算出的进程数应至少为1。",
+      "evidence": [
+        "Issue中期望：'I expect pylint to not crash if the number of available cpu is misscalculated in this special case. The calculated number should never be 0.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_query_cpu",
+        "kind": "function",
+        "source_path": "pylint/lint/run.py",
+        "reason": "该函数负责计算可用CPU数量，当其返回0时会导致后续multiprocessing.Pool崩溃。"
+      },
+      {
+        "name": "check_parallel",
+        "kind": "function",
+        "source_path": "pylint/lint/parallel.py",
+        "reason": "该函数使用multiprocessing.Pool，并传入jobs参数，当jobs为0时会触发异常。"
+      },
+      {
+        "name": "PyLinter.check",
+        "kind": "method",
+        "source_path": "pylint/lint/pylinter.py",
+        "reason": "该方法根据self.config.jobs的值决定调用check_parallel或_check_files。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/lint/run.py",
+        "object": "_query_cpu",
+        "lines": "34-61",
+        "reason": "该函数在特定条件下（cpu_shares < 1024）会返回0，而multiprocessing.Pool要求进程数至少为1。"
+      },
+      {
+        "path": "pylint/lint/parallel.py",
+        "object": "check_parallel",
+        "lines": "125-175",
+        "reason": "该函数直接使用传入的jobs参数创建multiprocessing.Pool，未对jobs <= 0的情况进行处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_multiprocessing",
+        "test_file": "tests/lint/unittest_lint.py",
+        "why_relevant": "该测试直接测试了pylint在jobs=1和jobs=2时的多进程检查功能，涉及核心的check方法和并行逻辑。",
+        "reusable_parts": [
+          "PyLinter对象构造",
+          "reporter设置",
+          "linter.check调用",
+          "jobs参数配置"
+        ],
+        "possible_gap": "该测试使用jobs=1和2，没有测试jobs=0或_query_cpu返回0的场景，且测试环境可能不是Kubernetes容器。"
+      },
+      {
+        "test_name": "TestCheckParallel.test_invoke_single_job",
+        "test_file": "tests/test_check_parallel.py",
+        "why_relevant": "该测试直接调用check_parallel函数，并设置jobs=1，展示了如何构造参数调用并行检查。",
+        "reusable_parts": [
+          "check_parallel调用",
+          "jobs参数设置",
+          "PyLinter和Reporter构造",
+          "文件数据生成"
+        ],
+        "possible_gap": "该测试使用jobs=1，没有测试jobs=0的场景，也没有模拟_query_cpu返回0的容器环境。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中设置jobs=1或2等正整数。",
+        "target_pattern": "设置jobs=0，并模拟_query_cpu返回0的容器环境。",
+        "reason": "Issue触发条件是jobs=0且_query_cpu返回0，导致multiprocessing.Pool接收0作为进程数。",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "测试在常规系统环境中运行。",
+        "target_pattern": "模拟Kubernetes容器环境，使/sys/fs/cgroup/cpu/cpu.shares文件存在且值小于1024。",
+        "reason": "_query_cpu函数通过读取容器cgroup文件计算CPU数量，当cpu_shares < 1024时返回0。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "multiprocessing.Pool初始化时的异常",
+        "reason": "Issue的核心错误是ValueError: \"Number of processes must be at least 1\"，观测此异常可确认缺陷被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "_query_cpu()的返回值",
+        "reason": "该函数返回0是导致后续崩溃的直接原因，观测其返回值可确认计算逻辑问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当_query_cpu返回0且jobs=0时，pylint不会抛出ValueError异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的完整错误消息字符串，因为消息可能因Python版本或multiprocessing实现而微调。",
+        "reason": "Issue期望修复后pylint不崩溃，因此测试应验证在触发条件下不抛出特定异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要模拟容器环境，可能使用monkeypatch或mock来模拟/sys/fs/cgroup/cpu/下的文件存在性和内容。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造PyLinter对象并设置config.jobs=0。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后当_query_cpu返回0时，pylint应该使用默认值1还是其他回退逻辑？Issue建议'append a ` or 1`'但未明确最终行为。",
+      "除了cpu.shares路径，cpu_quota/cpu_period计算是否也可能返回0？Issue提到不确定line 55的计算。",
+      "在非容器环境中，_query_cpu返回None时，pylint如何确定默认进程数？"
+    ]
+  }
+}

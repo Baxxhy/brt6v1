@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-10297",
+  "issue_summary": "RidgeClassifierCV 的 __init__ 方法不支持 store_cv_values 参数，但文档声称该参数存在且会影响 cv_values_ 属性。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 sklearn.linear_model。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要生成随机的分类特征数据 (X) 和标签数据 (y)。Issue 使用了回归风格的连续 y，但 RidgeClassifierCV 期望分类标签。相关测试使用了分类数据。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要设置 cv=None（默认值）以使 store_cv_values 生效（根据文档）。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ridgecv_store_cv_values",
+        "test_file": "sklearn/linear_model/tests/test_ridge.py",
+        "why_relevant": "该测试直接针对 RidgeCV（与 RidgeClassifierCV 同属 _BaseRidgeCV 家族）的 store_cv_values 参数和 cv_values_ 属性进行测试，逻辑高度相关。",
+        "reusable_parts": [
+          "imports (np)",
+          "随机数据生成模式",
+          "使用 store_cv_values=True 参数构造对象",
+          "对 cv_values_ 属性的形状进行断言"
+        ],
+        "possible_gap": "该测试针对的是 RidgeCV，而非有问题的 RidgeClassifierCV。RidgeClassifierCV 的 __init__ 签名不同，且涉及分类问题（标签二值化）。"
+      },
+      {
+        "test_name": "test_class_weights_cv",
+        "test_file": "sklearn/linear_model/tests/test_ridge.py",
+        "why_relevant": "该测试直接测试 RidgeClassifierCV，展示了其构造和 fit 的基本用法。",
+        "reusable_parts": [
+          "RidgeClassifierCV 的导入和构造",
+          "fit 和 predict 的调用模式",
+          "使用分类数据（而非回归数据）"
+        ],
+        "possible_gap": "该测试没有使用 store_cv_values 参数，也没有检查 cv_values_ 属性。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 store_cv_values=True 参数实例化 RidgeClassifierCV 对象。",
+      "evidence": [
+        "Issue 中的代码：lm.RidgeClassifierCV(..., store_cv_values = True).fit(x, y)",
+        "Issue 描述：'lm.RidgeClassifierCV actually has no parameter store_cv_values'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "TypeError: __init__() got an unexpected keyword argument 'store_cv_values'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：'TypeError: __init__() got an unexpected keyword argument 'store_cv_values''"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.linear_model.RidgeClassifierCV.__init__",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/ridge.py",
+        "reason": "Issue 的核心是 __init__ 方法缺少 store_cv_values 参数。"
+      },
+      {
+        "name": "sklearn.linear_model.RidgeClassifierCV.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/ridge.py",
+        "reason": "fit 方法负责计算并可能存储 cv_values_ 属性。"
+      },
+      {
+        "name": "sklearn.linear_model._BaseRidgeCV",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/ridge.py",
+        "reason": "RidgeClassifierCV 继承自 _BaseRidgeCV，store_cv_values 参数可能需要在父类中处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/ridge.py",
+        "object": "RidgeClassifierCV.__init__",
+        "lines": "1335-1340",
+        "reason": "__init__ 方法的签名中不包含 store_cv_values 参数，但父类 _BaseRidgeCV 的 __init__ 可能支持该参数。"
+      },
+      {
+        "path": "sklearn/linear_model/ridge.py",
+        "object": "RidgeClassifierCV",
+        "lines": "1247-1381",
+        "reason": "类的文档字符串（cv_values_ 属性）提到了 store_cv_values 参数，但实现中未支持。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "RidgeClassifierCV(alphas=[.01, .1, 1], class_weight=None) （来自 test_class_weights_cv）",
+        "target_pattern": "RidgeClassifierCV(alphas=np.arange(0.1, 1000, 0.1), normalize=True, store_cv_values=True) （来自 Issue）",
+        "reason": "添加 store_cv_values=True 参数是触发 TypeError 的直接原因。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "RidgeCV(alphas=alphas, store_cv_values=True) （来自 test_ridgecv_store_cv_values）",
+        "target_pattern": "RidgeClassifierCV(alphas=alphas, store_cv_values=True)",
+        "reason": "将测试对象从 RidgeCV 替换为 RidgeClassifierCV，以暴露后者缺少该参数的问题。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "RidgeClassifierCV 的 __init__ 方法应接受 store_cv_values 参数，并在 cv=None 时，若 store_cv_values=True，则 fit 后应能通过 cv_values_ 属性访问交叉验证值。",
+      "evidence": [
+        "源码片段 1 中 cv_values_ 属性的文档：'Cross-validation values for each alpha (if `store_cv_values=True` and `cv=None`)'",
+        "Issue 中的期望：'Expected to get the usual ridge regression model output, keeping the cross validation predictions as attribute.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 RidgeClassifierCV.__init__(store_cv_values=True) 时捕获的异常",
+        "reason": "Issue 的核心错误是 TypeError，直接观测构造函数调用是否抛出此异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功构造后对象的 __init__ 参数列表（通过 inspect.signature 或 dir）",
+        "reason": "确认 store_cv_values 参数是否被接受并成为对象的属性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "fit 之后对象的 cv_values_ 属性（如果存在）",
+        "reason": "根据文档，当 store_cv_values=True 且 cv=None 时，该属性应被填充。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 store_cv_values=True 参数构造 RidgeClassifierCV 不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为措辞可能变化。",
+        "reason": "当前行为是抛出 TypeError，修复后应不再抛出。断言不抛出异常是正向目标。"
+      },
+      {
+        "assertion_goal": "成功构造后，store_cv_values 参数值应被存储或影响后续行为。",
+        "preferred_assertion_style": "hasattr 或检查相关属性",
+        "avoid": "直接断言 cv_values_ 的具体值，因为它是计算依赖的。",
+        "reason": "修复后，参数应被正确处理，可能表现为对象具有某个相关属性或状态。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "store_cv_values 参数的确切预期行为是什么？它是否应直接成为 RidgeClassifierCV 的实例属性，还是通过父类 _BaseRidgeCV 处理？",
+    "当 cv 不为 None 时，store_cv_values 是否应被忽略或引发警告？文档说明仅在 cv=None 时有效。",
+    "RidgeClassifierCV 的 cv_values_ 属性在分类问题下的具体形状和内容是什么？（测试 test_ridgecv_store_cv_values 是针对回归的）",
+    "除了添加参数，是否还需要修改 fit 方法或其他地方来确保 cv_values_ 被正确计算和存储？"
+  ],
+  "raw": {
+    "issue_summary": "RidgeClassifierCV 的 __init__ 方法不支持 store_cv_values 参数，但文档声称该参数存在且会影响 cv_values_ 属性。",
+    "trigger_condition": {
+      "text": "使用 store_cv_values=True 参数实例化 RidgeClassifierCV 对象。",
+      "evidence": [
+        "Issue 中的代码：lm.RidgeClassifierCV(..., store_cv_values = True).fit(x, y)",
+        "Issue 描述：'lm.RidgeClassifierCV actually has no parameter store_cv_values'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "TypeError: __init__() got an unexpected keyword argument 'store_cv_values'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：'TypeError: __init__() got an unexpected keyword argument 'store_cv_values''"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "RidgeClassifierCV 的 __init__ 方法应接受 store_cv_values 参数，并在 cv=None 时，若 store_cv_values=True，则 fit 后应能通过 cv_values_ 属性访问交叉验证值。",
+      "evidence": [
+        "源码片段 1 中 cv_values_ 属性的文档：'Cross-validation values for each alpha (if `store_cv_values=True` and `cv=None`)'",
+        "Issue 中的期望：'Expected to get the usual ridge regression model output, keeping the cross validation predictions as attribute.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.linear_model.RidgeClassifierCV.__init__",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/ridge.py",
+        "reason": "Issue 的核心是 __init__ 方法缺少 store_cv_values 参数。"
+      },
+      {
+        "name": "sklearn.linear_model.RidgeClassifierCV.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/ridge.py",
+        "reason": "fit 方法负责计算并可能存储 cv_values_ 属性。"
+      },
+      {
+        "name": "sklearn.linear_model._BaseRidgeCV",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/ridge.py",
+        "reason": "RidgeClassifierCV 继承自 _BaseRidgeCV，store_cv_values 参数可能需要在父类中处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/ridge.py",
+        "object": "RidgeClassifierCV.__init__",
+        "lines": "1335-1340",
+        "reason": "__init__ 方法的签名中不包含 store_cv_values 参数，但父类 _BaseRidgeCV 的 __init__ 可能支持该参数。"
+      },
+      {
+        "path": "sklearn/linear_model/ridge.py",
+        "object": "RidgeClassifierCV",
+        "lines": "1247-1381",
+        "reason": "类的文档字符串（cv_values_ 属性）提到了 store_cv_values 参数，但实现中未支持。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ridgecv_store_cv_values",
+        "test_file": "sklearn/linear_model/tests/test_ridge.py",
+        "why_relevant": "该测试直接针对 RidgeCV（与 RidgeClassifierCV 同属 _BaseRidgeCV 家族）的 store_cv_values 参数和 cv_values_ 属性进行测试，逻辑高度相关。",
+        "reusable_parts": [
+          "imports (np)",
+          "随机数据生成模式",
+          "使用 store_cv_values=True 参数构造对象",
+          "对 cv_values_ 属性的形状进行断言"
+        ],
+        "possible_gap": "该测试针对的是 RidgeCV，而非有问题的 RidgeClassifierCV。RidgeClassifierCV 的 __init__ 签名不同，且涉及分类问题（标签二值化）。"
+      },
+      {
+        "test_name": "test_class_weights_cv",
+        "test_file": "sklearn/linear_model/tests/test_ridge.py",
+        "why_relevant": "该测试直接测试 RidgeClassifierCV，展示了其构造和 fit 的基本用法。",
+        "reusable_parts": [
+          "RidgeClassifierCV 的导入和构造",
+          "fit 和 predict 的调用模式",
+          "使用分类数据（而非回归数据）"
+        ],
+        "possible_gap": "该测试没有使用 store_cv_values 参数，也没有检查 cv_values_ 属性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "RidgeClassifierCV(alphas=[.01, .1, 1], class_weight=None) （来自 test_class_weights_cv）",
+        "target_pattern": "RidgeClassifierCV(alphas=np.arange(0.1, 1000, 0.1), normalize=True, store_cv_values=True) （来自 Issue）",
+        "reason": "添加 store_cv_values=True 参数是触发 TypeError 的直接原因。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "RidgeCV(alphas=alphas, store_cv_values=True) （来自 test_ridgecv_store_cv_values）",
+        "target_pattern": "RidgeClassifierCV(alphas=alphas, store_cv_values=True)",
+        "reason": "将测试对象从 RidgeCV 替换为 RidgeClassifierCV，以暴露后者缺少该参数的问题。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 RidgeClassifierCV.__init__(store_cv_values=True) 时捕获的异常",
+        "reason": "Issue 的核心错误是 TypeError，直接观测构造函数调用是否抛出此异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功构造后对象的 __init__ 参数列表（通过 inspect.signature 或 dir）",
+        "reason": "确认 store_cv_values 参数是否被接受并成为对象的属性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "fit 之后对象的 cv_values_ 属性（如果存在）",
+        "reason": "根据文档，当 store_cv_values=True 且 cv=None 时，该属性应被填充。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 store_cv_values=True 参数构造 RidgeClassifierCV 不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为措辞可能变化。",
+        "reason": "当前行为是抛出 TypeError，修复后应不再抛出。断言不抛出异常是正向目标。"
+      },
+      {
+        "assertion_goal": "成功构造后，store_cv_values 参数值应被存储或影响后续行为。",
+        "preferred_assertion_style": "hasattr 或检查相关属性",
+        "avoid": "直接断言 cv_values_ 的具体值，因为它是计算依赖的。",
+        "reason": "修复后，参数应被正确处理，可能表现为对象具有某个相关属性或状态。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 sklearn.linear_model。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要生成随机的分类特征数据 (X) 和标签数据 (y)。Issue 使用了回归风格的连续 y，但 RidgeClassifierCV 期望分类标签。相关测试使用了分类数据。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要设置 cv=None（默认值）以使 store_cv_values 生效（根据文档）。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "store_cv_values 参数的确切预期行为是什么？它是否应直接成为 RidgeClassifierCV 的实例属性，还是通过父类 _BaseRidgeCV 处理？",
+      "当 cv 不为 None 时，store_cv_values 是否应被忽略或引发警告？文档说明仅在 cv=None 时有效。",
+      "RidgeClassifierCV 的 cv_values_ 属性在分类问题下的具体形状和内容是什么？（测试 test_ridgecv_store_cv_values 是针对回归的）",
+      "除了添加参数，是否还需要修改 fit 方法或其他地方来确保 cv_values_ 被正确计算和存储？"
+    ]
+  }
+}

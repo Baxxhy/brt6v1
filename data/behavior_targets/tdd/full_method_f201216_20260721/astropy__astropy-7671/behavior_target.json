@@ -1,0 +1,266 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "astropy__astropy-7671",
+  "issue_summary": "当使用包含字母后缀（如 'dev'）的版本字符串调用 minversion 函数时，在某些情况下会引发 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建一个模拟模块对象，并设置其 __version__ 属性为类似 '1.14.3' 的字符串。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 types.ModuleType 和 astropy.utils.introspection.minversion。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_minversion",
+        "test_file": "astropy/utils/tests/test_introspection.py",
+        "why_relevant": "这是针对 minversion 函数的现有测试，包含了版本比较的测试逻辑。",
+        "reusable_parts": [
+          "导入 minversion 函数",
+          "使用 ModuleType 创建测试模块",
+          "使用 __version__ 属性",
+          "使用 assert 进行布尔值断言"
+        ],
+        "possible_gap": "现有测试没有覆盖包含字母后缀（如 'dev'）且数字部分长度不同的版本字符串比较场景。"
+      },
+      {
+        "test_name": "TestTimeComparisons.test_miscompares",
+        "test_file": "astropy/time/tests/test_comparisons.py",
+        "why_relevant": "该测试涉及比较操作符（如 >=）在类型不匹配时抛出 TypeError 的行为，与当前 Issue 的错误类型相关。",
+        "reusable_parts": [
+          "使用 pytest.raises(TypeError) 捕获异常",
+          "使用 operator 模块中的比较操作符"
+        ],
+        "possible_gap": "该测试针对的是 Time 对象，与 minversion 和 LooseVersion 的上下文不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 minversion 函数，其 version 参数包含字母后缀（如 'dev'），并且 have_version 的版本字符串包含数字后缀（如 '.3'），同时 inclusive 参数为 True 或 False（默认 True）。",
+      "evidence": [
+        "Issue 中示例：minversion('numpy', '1.14dev') 导致错误。",
+        "Issue 中说明：LooseVersion('1.14.3') >= LooseVersion('1.14dev') 会失败，而 LooseVersion('1.14') >= LooseVersion('1.14dev') 不会。",
+        "源码片段 1 显示 minversion 函数使用 LooseVersion 进行比较。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: '<' not supported between instances of 'int' and 'str'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误堆栈显示 TypeError 来自 distutils/version.py 中的 _cmp 方法。",
+        "Issue 中提供了直接使用 LooseVersion 复现的示例。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "minversion",
+        "kind": "function",
+        "source_path": "astropy/utils/introspection.py",
+        "reason": "Issue 直接报告了此函数的缺陷。"
+      },
+      {
+        "name": "LooseVersion",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 指出错误源于 LooseVersion 在处理混合类型版本组件时的比较。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/utils/introspection.py",
+        "object": "minversion",
+        "lines": "91-145",
+        "reason": "该函数直接使用 LooseVersion 进行比较，是错误传播的入口点。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_minversion 中使用的版本字符串如 '0.12', '0.12.1', '0.12.0.dev', '1', '1.2rc1'。",
+        "target_pattern": "使用类似 '1.14.3' 与 '1.14dev' 这样的版本对，其中 have_version 包含数字后缀，version 参数包含字母后缀。",
+        "reason": "Issue 表明当 have_version 为 '1.14.3'（版本组件为 [1, 14, 3]）与 version 为 '1.14dev'（版本组件为 [1, 14, 'dev']）比较时，LooseVersion 的内部比较会引发 int 与 str 的类型错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_minversion 中 inclusive 参数使用默认值 True。",
+        "target_pattern": "显式设置 inclusive 为 True 或 False 均可，因为比较操作符（>= 或 >）都会触发 LooseVersion 的 __ge__ 或 __gt__，进而调用 _cmp。",
+        "reason": "源码显示无论 inclusive 是 True 还是 False，都会创建 LooseVersion 对象并进行比较。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "minversion 函数应能正确处理包含字母后缀的版本字符串比较，并返回布尔值，而不抛出 TypeError。",
+      "evidence": [
+        "Issue 中提到使用 pkg_resources.parse_version 可以正常工作：parse_version('1.14.3') >= parse_version('1.14dev') 返回 True。",
+        "minversion 函数的文档字符串说明其功能是检查模块是否满足最低版本要求。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 minversion(test_module, '1.14dev') 时是否抛出 TypeError。",
+        "reason": "Issue 的核心错误现象是 TypeError，观测此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "minversion 函数的返回值（应为布尔值）。",
+        "reason": "在修复后，函数应正常返回布尔值而非抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证调用 minversion 并传入特定版本字符串时不会抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体行号或路径可能变化。",
+        "reason": "当前缺陷表现为抛出 TypeError，修复后该调用应不再抛出此异常。因此，在缺陷版本中，断言会抛出 TypeError 是合适的；但最终修复后的测试应断言无异常并可能验证返回值。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "LooseVersion 内部对版本字符串 '1.14dev' 的确切解析结果（例如是 [1, 14, 'dev'] 还是其他）未在提供材料中明确。",
+    "除了 'dev' 后缀，其他字母后缀（如 'rc', 'a', 'b'）是否也会触发相同错误。",
+    "修复方案的具体细节未知（例如是替换 LooseVersion 还是修改其使用方式）。"
+  ],
+  "raw": {
+    "issue_summary": "当使用包含字母后缀（如 'dev'）的版本字符串调用 minversion 函数时，在某些情况下会引发 TypeError。",
+    "trigger_condition": {
+      "text": "调用 minversion 函数，其 version 参数包含字母后缀（如 'dev'），并且 have_version 的版本字符串包含数字后缀（如 '.3'），同时 inclusive 参数为 True 或 False（默认 True）。",
+      "evidence": [
+        "Issue 中示例：minversion('numpy', '1.14dev') 导致错误。",
+        "Issue 中说明：LooseVersion('1.14.3') >= LooseVersion('1.14dev') 会失败，而 LooseVersion('1.14') >= LooseVersion('1.14dev') 不会。",
+        "源码片段 1 显示 minversion 函数使用 LooseVersion 进行比较。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: '<' not supported between instances of 'int' and 'str'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误堆栈显示 TypeError 来自 distutils/version.py 中的 _cmp 方法。",
+        "Issue 中提供了直接使用 LooseVersion 复现的示例。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "minversion 函数应能正确处理包含字母后缀的版本字符串比较，并返回布尔值，而不抛出 TypeError。",
+      "evidence": [
+        "Issue 中提到使用 pkg_resources.parse_version 可以正常工作：parse_version('1.14.3') >= parse_version('1.14dev') 返回 True。",
+        "minversion 函数的文档字符串说明其功能是检查模块是否满足最低版本要求。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "minversion",
+        "kind": "function",
+        "source_path": "astropy/utils/introspection.py",
+        "reason": "Issue 直接报告了此函数的缺陷。"
+      },
+      {
+        "name": "LooseVersion",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 指出错误源于 LooseVersion 在处理混合类型版本组件时的比较。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/utils/introspection.py",
+        "object": "minversion",
+        "lines": "91-145",
+        "reason": "该函数直接使用 LooseVersion 进行比较，是错误传播的入口点。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_minversion",
+        "test_file": "astropy/utils/tests/test_introspection.py",
+        "why_relevant": "这是针对 minversion 函数的现有测试，包含了版本比较的测试逻辑。",
+        "reusable_parts": [
+          "导入 minversion 函数",
+          "使用 ModuleType 创建测试模块",
+          "使用 __version__ 属性",
+          "使用 assert 进行布尔值断言"
+        ],
+        "possible_gap": "现有测试没有覆盖包含字母后缀（如 'dev'）且数字部分长度不同的版本字符串比较场景。"
+      },
+      {
+        "test_name": "TestTimeComparisons.test_miscompares",
+        "test_file": "astropy/time/tests/test_comparisons.py",
+        "why_relevant": "该测试涉及比较操作符（如 >=）在类型不匹配时抛出 TypeError 的行为，与当前 Issue 的错误类型相关。",
+        "reusable_parts": [
+          "使用 pytest.raises(TypeError) 捕获异常",
+          "使用 operator 模块中的比较操作符"
+        ],
+        "possible_gap": "该测试针对的是 Time 对象，与 minversion 和 LooseVersion 的上下文不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_minversion 中使用的版本字符串如 '0.12', '0.12.1', '0.12.0.dev', '1', '1.2rc1'。",
+        "target_pattern": "使用类似 '1.14.3' 与 '1.14dev' 这样的版本对，其中 have_version 包含数字后缀，version 参数包含字母后缀。",
+        "reason": "Issue 表明当 have_version 为 '1.14.3'（版本组件为 [1, 14, 3]）与 version 为 '1.14dev'（版本组件为 [1, 14, 'dev']）比较时，LooseVersion 的内部比较会引发 int 与 str 的类型错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_minversion 中 inclusive 参数使用默认值 True。",
+        "target_pattern": "显式设置 inclusive 为 True 或 False 均可，因为比较操作符（>= 或 >）都会触发 LooseVersion 的 __ge__ 或 __gt__，进而调用 _cmp。",
+        "reason": "源码显示无论 inclusive 是 True 还是 False，都会创建 LooseVersion 对象并进行比较。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 minversion(test_module, '1.14dev') 时是否抛出 TypeError。",
+        "reason": "Issue 的核心错误现象是 TypeError，观测此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "minversion 函数的返回值（应为布尔值）。",
+        "reason": "在修复后，函数应正常返回布尔值而非抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证调用 minversion 并传入特定版本字符串时不会抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体行号或路径可能变化。",
+        "reason": "当前缺陷表现为抛出 TypeError，修复后该调用应不再抛出此异常。因此，在缺陷版本中，断言会抛出 TypeError 是合适的；但最终修复后的测试应断言无异常并可能验证返回值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建一个模拟模块对象，并设置其 __version__ 属性为类似 '1.14.3' 的字符串。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 types.ModuleType 和 astropy.utils.introspection.minversion。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "LooseVersion 内部对版本字符串 '1.14dev' 的确切解析结果（例如是 [1, 14, 'dev'] 还是其他）未在提供材料中明确。",
+      "除了 'dev' 后缀，其他字母后缀（如 'rc', 'a', 'b'）是否也会触发相同错误。",
+      "修复方案的具体细节未知（例如是替换 LooseVersion 还是修改其使用方式）。"
+    ]
+  }
+}

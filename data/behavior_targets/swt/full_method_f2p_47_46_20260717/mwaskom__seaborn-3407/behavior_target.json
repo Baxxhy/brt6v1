@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "mwaskom__seaborn-3407",
+  "issue_summary": "pairplot 在处理 MultiIndex DataFrame 时引发 KeyError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 seaborn、pandas、numpy 并创建一个具有 MultiIndex 列的 DataFrame。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能继承自现有的 TestPairGrid 类以复用 fixture（如 self.df），但需要修改 fixture 以使用 MultiIndex。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要使用 matplotlib 的测试上下文（如 plt.switch_backend('agg')）以避免 GUI 问题。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pairplot",
+        "test_file": "tests/test_axisgrid.py",
+        "why_relevant": "它测试了 pairplot 的基本功能，包括数据提取和绘图，可以作为测试 MultiIndex 场景的起点。",
+        "reusable_parts": [
+          "imports (如 seaborn as sns, pandas as pd, numpy as np)",
+          "TestPairGrid 类结构",
+          "使用 self.df fixture",
+          "断言图形属性的模式（如 ax.patches, ax.collections）"
+        ],
+        "possible_gap": "现有测试使用具有简单字符串列名（如 \"x\", \"y\", \"z\"）的 DataFrame，而不是 MultiIndex 列。"
+      },
+      {
+        "test_name": "test_pairplot_hist",
+        "test_file": "tests/test_axisgrid.py",
+        "why_relevant": "它测试了 pairplot 的特定变体（hist），展示了如何设置参数和比较绘图输出。",
+        "reusable_parts": [
+          "使用 kind 参数",
+          "assert_plots_equal 的断言风格"
+        ],
+        "possible_gap": "同样使用简单列名，未测试 MultiIndex。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 seaborn.pairplot 绘制一个具有 MultiIndex 列（例如 (\"A\", \"1\")）的 pandas DataFrame。",
+      "evidence": [
+        "Issue 中的 MRE 代码：`sns.pairplot(df)`，其中 `df` 的列是 MultiIndex。",
+        "Issue 标题：\"pairplot raises KeyError with MultiIndex DataFrame\"。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 pairplot 时引发 KeyError: \"['1'] not in index\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示 KeyError 来自 pandas 的 `_raise_if_missing` 方法。",
+        "Issue 输出：\"KeyError: \"['1'] not in index\"\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "seaborn.pairplot",
+        "kind": "function",
+        "source_path": "seaborn/axisgrid.py",
+        "reason": "Issue 直接报告此函数在处理 MultiIndex DataFrame 时失败。"
+      },
+      {
+        "name": "seaborn.PairGrid.map_diag",
+        "kind": "method",
+        "source_path": "seaborn/axisgrid.py",
+        "reason": "错误堆栈跟踪指向此方法（第1490行），其中 `vector = self.data[var]` 可能错误地处理了 MultiIndex 列名。"
+      },
+      {
+        "name": "pandas.DataFrame.__getitem__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "错误堆栈跟踪显示 KeyError 源自 pandas DataFrame 的索引查找。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "seaborn/axisgrid.py",
+        "object": "PairGrid.map_diag",
+        "lines": "1431-1511",
+        "reason": "错误堆栈跟踪指向此方法第1490行 `vector = self.data[var]`，其中 `var` 可能被错误地从 MultiIndex 列名转换或处理。"
+      },
+      {
+        "path": "seaborn/axisgrid.py",
+        "object": "pairplot",
+        "lines": "2005-2176",
+        "reason": "这是入口函数，可能未正确处理 MultiIndex DataFrame 的列名传递。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用具有简单字符串列名（如 \"x\", \"y\", \"z\"）的 DataFrame。",
+        "target_pattern": "使用具有 MultiIndex 列（例如 (\"A\", \"1\"), (\"A\", \"2\")）的 DataFrame。",
+        "reason": "Issue 表明 MultiIndex 列是触发 KeyError 的关键输入差异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 `ag.pairplot(self.df)`，其中 self.df 列是简单字符串。",
+        "target_pattern": "调用 `sns.pairplot(df)`，其中 df 的列是 pd.MultiIndex.from_tuples([(\"A\", \"1\"), ...])。",
+        "reason": "Issue 的 MRE 展示了触发缺陷的确切调用方式。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "pairplot 应能正确处理 MultiIndex DataFrame 并生成图表，或至少提供清晰的错误信息，而不是引发 KeyError。",
+      "evidence": [
+        "Issue 描述的问题表明这是一个缺陷，期望行为是正常绘图。",
+        "源码片段 1 中 pairplot 的文档说明它接受 pandas DataFrame，未明确排除 MultiIndex。",
+        "Issue 中提供了通过展平列来绕过错误的解决方法，暗示期望行为是支持 MultiIndex。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `sns.pairplot(multiindex_df)` 时是否引发 KeyError 及其消息。",
+        "reason": "Issue 的核心症状是 KeyError，观测此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`sns.pairplot(multiindex_df)` 的返回值类型和属性（如 grid.axes, grid.diag_axes）。",
+        "reason": "如果函数成功返回（修复后），可以检查返回的 PairGrid 对象是否包含正确的子图数量。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 map_diag 方法中，`var` 变量的类型和值，以及 `self.data[var]` 的行为。",
+        "reason": "KeyError 可能源于 `var` 被错误地解释为单层索引而不是 MultiIndex 元组。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 MultiIndex DataFrame 调用 pairplot 不应引发 KeyError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串，因为修复后的错误信息可能改变。",
+        "reason": "Issue 的核心是异常，断言不引发 KeyError 直接验证修复目标。"
+      },
+      {
+        "assertion_goal": "如果 pairplot 成功，应返回一个具有正确数量子图的 PairGrid 对象。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的图形属性（如颜色、精确坐标），这些可能因随机数据而变化。",
+        "reason": "验证函数基本功能正常，而不依赖于可视化的具体细节。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "KeyError 的确切根源是在 pairplot 内部、PairGrid 构造函数中，还是在 map_diag 方法中？",
+    "修复后的预期行为是 pairplot 完全支持 MultiIndex，还是将其转换为扁平列名，或是引发更清晰的错误？",
+    "除了 pairplot，其他 seaborn 函数（如 PairGrid 直接使用）是否也存在相同的 MultiIndex 问题？"
+  ],
+  "raw": {
+    "issue_summary": "pairplot 在处理 MultiIndex DataFrame 时引发 KeyError。",
+    "trigger_condition": {
+      "text": "使用 seaborn.pairplot 绘制一个具有 MultiIndex 列（例如 (\"A\", \"1\")）的 pandas DataFrame。",
+      "evidence": [
+        "Issue 中的 MRE 代码：`sns.pairplot(df)`，其中 `df` 的列是 MultiIndex。",
+        "Issue 标题：\"pairplot raises KeyError with MultiIndex DataFrame\"。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 pairplot 时引发 KeyError: \"['1'] not in index\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示 KeyError 来自 pandas 的 `_raise_if_missing` 方法。",
+        "Issue 输出：\"KeyError: \"['1'] not in index\"\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pairplot 应能正确处理 MultiIndex DataFrame 并生成图表，或至少提供清晰的错误信息，而不是引发 KeyError。",
+      "evidence": [
+        "Issue 描述的问题表明这是一个缺陷，期望行为是正常绘图。",
+        "源码片段 1 中 pairplot 的文档说明它接受 pandas DataFrame，未明确排除 MultiIndex。",
+        "Issue 中提供了通过展平列来绕过错误的解决方法，暗示期望行为是支持 MultiIndex。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "seaborn.pairplot",
+        "kind": "function",
+        "source_path": "seaborn/axisgrid.py",
+        "reason": "Issue 直接报告此函数在处理 MultiIndex DataFrame 时失败。"
+      },
+      {
+        "name": "seaborn.PairGrid.map_diag",
+        "kind": "method",
+        "source_path": "seaborn/axisgrid.py",
+        "reason": "错误堆栈跟踪指向此方法（第1490行），其中 `vector = self.data[var]` 可能错误地处理了 MultiIndex 列名。"
+      },
+      {
+        "name": "pandas.DataFrame.__getitem__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "错误堆栈跟踪显示 KeyError 源自 pandas DataFrame 的索引查找。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "seaborn/axisgrid.py",
+        "object": "PairGrid.map_diag",
+        "lines": "1431-1511",
+        "reason": "错误堆栈跟踪指向此方法第1490行 `vector = self.data[var]`，其中 `var` 可能被错误地从 MultiIndex 列名转换或处理。"
+      },
+      {
+        "path": "seaborn/axisgrid.py",
+        "object": "pairplot",
+        "lines": "2005-2176",
+        "reason": "这是入口函数，可能未正确处理 MultiIndex DataFrame 的列名传递。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pairplot",
+        "test_file": "tests/test_axisgrid.py",
+        "why_relevant": "它测试了 pairplot 的基本功能，包括数据提取和绘图，可以作为测试 MultiIndex 场景的起点。",
+        "reusable_parts": [
+          "imports (如 seaborn as sns, pandas as pd, numpy as np)",
+          "TestPairGrid 类结构",
+          "使用 self.df fixture",
+          "断言图形属性的模式（如 ax.patches, ax.collections）"
+        ],
+        "possible_gap": "现有测试使用具有简单字符串列名（如 \"x\", \"y\", \"z\"）的 DataFrame，而不是 MultiIndex 列。"
+      },
+      {
+        "test_name": "test_pairplot_hist",
+        "test_file": "tests/test_axisgrid.py",
+        "why_relevant": "它测试了 pairplot 的特定变体（hist），展示了如何设置参数和比较绘图输出。",
+        "reusable_parts": [
+          "使用 kind 参数",
+          "assert_plots_equal 的断言风格"
+        ],
+        "possible_gap": "同样使用简单列名，未测试 MultiIndex。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用具有简单字符串列名（如 \"x\", \"y\", \"z\"）的 DataFrame。",
+        "target_pattern": "使用具有 MultiIndex 列（例如 (\"A\", \"1\"), (\"A\", \"2\")）的 DataFrame。",
+        "reason": "Issue 表明 MultiIndex 列是触发 KeyError 的关键输入差异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 `ag.pairplot(self.df)`，其中 self.df 列是简单字符串。",
+        "target_pattern": "调用 `sns.pairplot(df)`，其中 df 的列是 pd.MultiIndex.from_tuples([(\"A\", \"1\"), ...])。",
+        "reason": "Issue 的 MRE 展示了触发缺陷的确切调用方式。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `sns.pairplot(multiindex_df)` 时是否引发 KeyError 及其消息。",
+        "reason": "Issue 的核心症状是 KeyError，观测此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`sns.pairplot(multiindex_df)` 的返回值类型和属性（如 grid.axes, grid.diag_axes）。",
+        "reason": "如果函数成功返回（修复后），可以检查返回的 PairGrid 对象是否包含正确的子图数量。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 map_diag 方法中，`var` 变量的类型和值，以及 `self.data[var]` 的行为。",
+        "reason": "KeyError 可能源于 `var` 被错误地解释为单层索引而不是 MultiIndex 元组。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 MultiIndex DataFrame 调用 pairplot 不应引发 KeyError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串，因为修复后的错误信息可能改变。",
+        "reason": "Issue 的核心是异常，断言不引发 KeyError 直接验证修复目标。"
+      },
+      {
+        "assertion_goal": "如果 pairplot 成功，应返回一个具有正确数量子图的 PairGrid 对象。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的图形属性（如颜色、精确坐标），这些可能因随机数据而变化。",
+        "reason": "验证函数基本功能正常，而不依赖于可视化的具体细节。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 seaborn、pandas、numpy 并创建一个具有 MultiIndex 列的 DataFrame。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能继承自现有的 TestPairGrid 类以复用 fixture（如 self.df），但需要修改 fixture 以使用 MultiIndex。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要使用 matplotlib 的测试上下文（如 plt.switch_backend('agg')）以避免 GUI 问题。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "KeyError 的确切根源是在 pairplot 内部、PairGrid 构造函数中，还是在 map_diag 方法中？",
+      "修复后的预期行为是 pairplot 完全支持 MultiIndex，还是将其转换为扁平列名，或是引发更清晰的错误？",
+      "除了 pairplot，其他 seaborn 函数（如 PairGrid 直接使用）是否也存在相同的 MultiIndex 问题？"
+    ]
+  }
+}

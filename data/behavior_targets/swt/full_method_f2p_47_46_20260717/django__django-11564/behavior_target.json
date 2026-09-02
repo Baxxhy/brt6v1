@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11564",
+  "issue_summary": "当 Django 运行在子路径（使用 SCRIPT_NAME WSGI 参数）时，static 标签、FileSystemStorage 和 StaticFilesStorage 生成的 URL 没有正确添加 SCRIPT_NAME 前缀。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 RequestFactory 来创建带有 META 字典的请求对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings 来配置 STATIC_URL 和 MEDIA_URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_static_statictag01",
+        "test_file": "tests/template_tests/syntax_tests/test_static.py",
+        "why_relevant": "它测试了 static 标签的基本功能，是生成静态 URL 的起点。",
+        "reusable_parts": [
+          "@override_settings(INSTALLED_APPS=[], MEDIA_URL='/media/', STATIC_URL='/static/')",
+          "SimpleTestCase",
+          "self.engine.render_to_string",
+          "urljoin(settings.STATIC_URL, ...)"
+        ],
+        "possible_gap": "它没有设置 SCRIPT_NAME WSGI 环境，也没有模拟请求上下文。"
+      },
+      {
+        "test_name": "test_get_script_name",
+        "test_file": "tests/handlers/tests.py",
+        "why_relevant": "它直接测试了从环境字典中获取 SCRIPT_NAME 的逻辑，展示了如何构造触发条件。",
+        "reusable_parts": [
+          "SimpleTestCase",
+          "构造包含 SCRIPT_URL 和 PATH_INFO 的环境字典"
+        ],
+        "possible_gap": "它测试的是 get_script_name 函数，而不是 static 标签或存储类的 URL 生成。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 WSGI 环境中设置 SCRIPT_NAME 参数（例如 SCRIPT_NAME='/foobar'），然后使用 static 模板标签或相关存储类的 url 方法生成静态文件或媒体文件的 URL。",
+      "evidence": [
+        "Issue 描述：'When running on sub-path, using SCRIPT_NAME WSGI param, it results in incorrect static URL - it doesn't prepend SCRIPT_NAME prefix.'",
+        "相关测试 1 展示了如何从环境字典中获取 SCRIPT_NAME。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的静态文件或媒体文件 URL 缺少 SCRIPT_NAME 前缀，导致 URL 指向错误的路径。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'it results in incorrect static URL - it doesn't prepend SCRIPT_NAME prefix.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.templatetags.static.static",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提到需要修改 'default Django static tag'。"
+      },
+      {
+        "name": "django.contrib.staticfiles.templatetags.staticfiles.static",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提到需要修改 'django.contrib.staticfiles tag'。"
+      },
+      {
+        "name": "django.core.files.storage.FileSystemStorage.url",
+        "kind": "method",
+        "source_path": "django/core/files/storage.py",
+        "reason": "Issue 提到 'FileSystemStorage and StaticFilesStorage ignores SCRIPT_NAME as well'。"
+      },
+      {
+        "name": "django.contrib.staticfiles.storage.StaticFilesStorage.url",
+        "kind": "method",
+        "source_path": "django/contrib/staticfiles/storage.py",
+        "reason": "StaticFilesStorage 继承自 FileSystemStorage，且 Issue 明确提及。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/templatetags/static.py",
+        "object": "static 标签的渲染逻辑",
+        "lines": "",
+        "reason": "Issue 建议在 static 标签的 render 方法中更新 URL 时加入 request.META['SCRIPT_NAME']。"
+      },
+      {
+        "path": "django/contrib/staticfiles/templatetags/staticfiles.py",
+        "object": "staticfiles 标签的渲染逻辑",
+        "lines": "",
+        "reason": "Issue 提到需要修改 django.contrib.staticfiles tag。"
+      },
+      {
+        "path": "django/core/files/storage.py",
+        "object": "FileSystemStorage.url",
+        "lines": "",
+        "reason": "Issue 提到 FileSystemStorage 忽略了 SCRIPT_NAME。"
+      },
+      {
+        "path": "django/contrib/staticfiles/storage.py",
+        "object": "StaticFilesStorage.url",
+        "lines": "",
+        "reason": "StaticFilesStorage 继承自 FileSystemStorage，因此也可能存在相同问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中使用 @override_settings 设置 STATIC_URL，但没有设置 WSGI 环境。",
+        "target_pattern": "在测试中模拟一个带有 SCRIPT_NAME 的 WSGI 环境（例如，通过设置 request.META 或使用特定的测试客户端配置）。",
+        "reason": "Issue 表明缺陷仅在 SCRIPT_NAME 被设置时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用模板引擎渲染 static 标签。",
+        "target_pattern": "确保渲染上下文包含一个 request 对象，且 request.META 包含 SCRIPT_NAME。",
+        "reason": "Issue 建议的修复代码片段需要访问 request.META['SCRIPT_NAME']。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 SCRIPT_NAME 被设置时，static 标签、FileSystemStorage.url 和 StaticFilesStorage.url 生成的 URL 应包含 SCRIPT_NAME 前缀。",
+      "evidence": [
+        "Issue 描述：'This can be easily added into default Django static tag and django.contrib.staticfiles tag...' 暗示了修复方向。",
+        "Issue 描述：'This problem can be solved with prepending SCRIPT_NAME to STATIC_URL...' 说明了期望的最终结果。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "static 标签渲染后的输出字符串，或 FileSystemStorage.url(name) 的返回值。",
+        "reason": "观察生成的 URL 是否以 SCRIPT_NAME 开头，是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "request.META.get('SCRIPT_NAME') 的值。",
+        "reason": "确认触发条件（SCRIPT_NAME 环境变量）是否已正确设置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的静态/媒体文件 URL 应以 SCRIPT_NAME 值开头。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的 URL 字符串完全相等，因为 STATIC_URL 和文件路径部分可能变化。",
+        "reason": "Issue 的核心是 URL 缺少前缀，因此断言 URL 包含 SCRIPT_NAME 片段是稳定且对齐的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "SCRIPT_NAME 是应该直接拼接到 STATIC_URL/MEDIA_URL 前面，还是应该通过某种更通用的 URL 解析/连接机制处理？",
+    "FileSystemStorage 和 StaticFilesStorage 的 url 方法具体如何获取 request 上下文（如果它们需要的话）？",
+    "除了模板标签，是否还有其他生成静态/媒体 URL 的 API 受此影响？"
+  ],
+  "raw": {
+    "issue_summary": "当 Django 运行在子路径（使用 SCRIPT_NAME WSGI 参数）时，static 标签、FileSystemStorage 和 StaticFilesStorage 生成的 URL 没有正确添加 SCRIPT_NAME 前缀。",
+    "trigger_condition": {
+      "text": "在 WSGI 环境中设置 SCRIPT_NAME 参数（例如 SCRIPT_NAME='/foobar'），然后使用 static 模板标签或相关存储类的 url 方法生成静态文件或媒体文件的 URL。",
+      "evidence": [
+        "Issue 描述：'When running on sub-path, using SCRIPT_NAME WSGI param, it results in incorrect static URL - it doesn't prepend SCRIPT_NAME prefix.'",
+        "相关测试 1 展示了如何从环境字典中获取 SCRIPT_NAME。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的静态文件或媒体文件 URL 缺少 SCRIPT_NAME 前缀，导致 URL 指向错误的路径。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'it results in incorrect static URL - it doesn't prepend SCRIPT_NAME prefix.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 SCRIPT_NAME 被设置时，static 标签、FileSystemStorage.url 和 StaticFilesStorage.url 生成的 URL 应包含 SCRIPT_NAME 前缀。",
+      "evidence": [
+        "Issue 描述：'This can be easily added into default Django static tag and django.contrib.staticfiles tag...' 暗示了修复方向。",
+        "Issue 描述：'This problem can be solved with prepending SCRIPT_NAME to STATIC_URL...' 说明了期望的最终结果。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.templatetags.static.static",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提到需要修改 'default Django static tag'。"
+      },
+      {
+        "name": "django.contrib.staticfiles.templatetags.staticfiles.static",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提到需要修改 'django.contrib.staticfiles tag'。"
+      },
+      {
+        "name": "django.core.files.storage.FileSystemStorage.url",
+        "kind": "method",
+        "source_path": "django/core/files/storage.py",
+        "reason": "Issue 提到 'FileSystemStorage and StaticFilesStorage ignores SCRIPT_NAME as well'。"
+      },
+      {
+        "name": "django.contrib.staticfiles.storage.StaticFilesStorage.url",
+        "kind": "method",
+        "source_path": "django/contrib/staticfiles/storage.py",
+        "reason": "StaticFilesStorage 继承自 FileSystemStorage，且 Issue 明确提及。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/templatetags/static.py",
+        "object": "static 标签的渲染逻辑",
+        "lines": "",
+        "reason": "Issue 建议在 static 标签的 render 方法中更新 URL 时加入 request.META['SCRIPT_NAME']。"
+      },
+      {
+        "path": "django/contrib/staticfiles/templatetags/staticfiles.py",
+        "object": "staticfiles 标签的渲染逻辑",
+        "lines": "",
+        "reason": "Issue 提到需要修改 django.contrib.staticfiles tag。"
+      },
+      {
+        "path": "django/core/files/storage.py",
+        "object": "FileSystemStorage.url",
+        "lines": "",
+        "reason": "Issue 提到 FileSystemStorage 忽略了 SCRIPT_NAME。"
+      },
+      {
+        "path": "django/contrib/staticfiles/storage.py",
+        "object": "StaticFilesStorage.url",
+        "lines": "",
+        "reason": "StaticFilesStorage 继承自 FileSystemStorage，因此也可能存在相同问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_static_statictag01",
+        "test_file": "tests/template_tests/syntax_tests/test_static.py",
+        "why_relevant": "它测试了 static 标签的基本功能，是生成静态 URL 的起点。",
+        "reusable_parts": [
+          "@override_settings(INSTALLED_APPS=[], MEDIA_URL='/media/', STATIC_URL='/static/')",
+          "SimpleTestCase",
+          "self.engine.render_to_string",
+          "urljoin(settings.STATIC_URL, ...)"
+        ],
+        "possible_gap": "它没有设置 SCRIPT_NAME WSGI 环境，也没有模拟请求上下文。"
+      },
+      {
+        "test_name": "test_get_script_name",
+        "test_file": "tests/handlers/tests.py",
+        "why_relevant": "它直接测试了从环境字典中获取 SCRIPT_NAME 的逻辑，展示了如何构造触发条件。",
+        "reusable_parts": [
+          "SimpleTestCase",
+          "构造包含 SCRIPT_URL 和 PATH_INFO 的环境字典"
+        ],
+        "possible_gap": "它测试的是 get_script_name 函数，而不是 static 标签或存储类的 URL 生成。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中使用 @override_settings 设置 STATIC_URL，但没有设置 WSGI 环境。",
+        "target_pattern": "在测试中模拟一个带有 SCRIPT_NAME 的 WSGI 环境（例如，通过设置 request.META 或使用特定的测试客户端配置）。",
+        "reason": "Issue 表明缺陷仅在 SCRIPT_NAME 被设置时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用模板引擎渲染 static 标签。",
+        "target_pattern": "确保渲染上下文包含一个 request 对象，且 request.META 包含 SCRIPT_NAME。",
+        "reason": "Issue 建议的修复代码片段需要访问 request.META['SCRIPT_NAME']。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "static 标签渲染后的输出字符串，或 FileSystemStorage.url(name) 的返回值。",
+        "reason": "观察生成的 URL 是否以 SCRIPT_NAME 开头，是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "request.META.get('SCRIPT_NAME') 的值。",
+        "reason": "确认触发条件（SCRIPT_NAME 环境变量）是否已正确设置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的静态/媒体文件 URL 应以 SCRIPT_NAME 值开头。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的 URL 字符串完全相等，因为 STATIC_URL 和文件路径部分可能变化。",
+        "reason": "Issue 的核心是 URL 缺少前缀，因此断言 URL 包含 SCRIPT_NAME 片段是稳定且对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 RequestFactory 来创建带有 META 字典的请求对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings 来配置 STATIC_URL 和 MEDIA_URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "SCRIPT_NAME 是应该直接拼接到 STATIC_URL/MEDIA_URL 前面，还是应该通过某种更通用的 URL 解析/连接机制处理？",
+      "FileSystemStorage 和 StaticFilesStorage 的 url 方法具体如何获取 request 上下文（如果它们需要的话）？",
+      "除了模板标签，是否还有其他生成静态/媒体 URL 的 API 受此影响？"
+    ]
+  }
+}

@@ -1,0 +1,242 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11179",
+  "issue_summary": "删除没有依赖关系的模型实例后，主键（PK）未被设置为 None。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型，该模型没有指向其他模型的外键，也没有其他模型指向它。使用 TestCase 和数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要连接 pre_delete 或 post_delete 信号来捕获被删除的实例对象，以便在信号处理函数或测试中检查其 pk。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DeletionTests.test_instance_update",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接验证了删除后实例的 pk 应为 None，与 Issue 描述的核心问题完全一致。",
+        "reusable_parts": [
+          "测试类 DeletionTests(TestCase)",
+          "使用 signals.pre_delete 收集被删除对象",
+          "断言风格 `self.assertIsNone(obj.pk)`"
+        ],
+        "possible_gap": "该测试可能涉及有依赖关系的模型（如 R、A），而 Issue 强调‘没有任何依赖关系’的模型。测试可能未覆盖快速删除（fast delete）的优化路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个没有任何依赖关系的模型实例调用 .delete() 方法。",
+      "evidence": [
+        "Issue 描述：'Deleting any model with no dependencies not updates the PK on the model.'",
+        "源码片段 1 第 262-327 行展示了 Collector.delete() 方法，其中包含处理无依赖实例的逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 .delete() 后，模型实例的主键（pk）属性未被更新为 None。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'It should be set to None after .delete() call.'",
+        "相关测试 1 (test_instance_update) 中，删除后检查 `self.assertIsNone(obj.pk)`，表明这是期望行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.deletion.Collector.delete",
+        "kind": "method",
+        "source_path": "django/db/models/deletion.py",
+        "reason": "Issue 直接引用了此方法（Django.db.models.deletion:276-281），它是执行删除操作的核心逻辑，负责更新实例状态。"
+      },
+      {
+        "name": "django.db.models.Model.delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用户通常直接调用模型实例的 .delete() 方法，这会触发 Collector.delete() 逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/deletion.py",
+        "object": "Collector.delete",
+        "lines": "262-327",
+        "reason": "Issue 明确指向了此文件和方法（Django.db.models.deletion:276-281）。源码片段 1 显示，在方法末尾有更新实例主键为 None 的代码（第 323-324 行），但可能在某些路径（如快速删除优化）下未被执行。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，模型 A 可能通过外键关系（setnull, cascade）与其他模型关联。",
+        "target_pattern": "创建一个没有任何外键依赖的简单模型实例，然后调用 .delete()。",
+        "reason": "Issue 明确指出问题发生在‘model with no dependencies’。这可能导致执行 Collector.delete() 中的快速删除（fast delete）优化路径，该路径可能遗漏了 pk 置 None 的步骤。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，通过 `a.setnull.delete()` 或 `a.cascade.delete()` 触发删除，这涉及级联关系。",
+        "target_pattern": "直接对模型实例调用 `instance.delete()`，而不通过任何相关管理器。",
+        "reason": "确保删除操作直接作用于目标实例，避免因级联逻辑掩盖了无依赖场景下的问题。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在模型实例被删除后，其主键（pk）属性应被设置为 None。",
+      "evidence": [
+        "Issue 描述：'It should be set to None after .delete() call.'",
+        "相关测试 1 (test_instance_update) 中，删除后断言 `self.assertIsNone(obj.pk)` 验证了此行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "instance.pk 在调用 instance.delete() 之前和之后的值。",
+        "reason": "Issue 的核心是 pk 在删除后未被置为 None。直接观察此状态变化是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "执行删除操作时生成的 SQL 查询（如果可能），以判断是否走了快速删除（fast delete）路径。",
+        "reason": "源码片段 1 第 272-278 行显示存在针对单对象无依赖的快速删除优化。观察 SQL 有助于确认执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在删除操作后，被删除模型实例的 .pk 属性为 None。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或数据库行数，除非它们与 pk 状态直接相关。避免断言内部 Collector 数据结构。",
+        "reason": "Issue 的期望行为是 pk 变为 None。使用 `assertIsNone(instance.pk)` 直接、稳定地验证这一语义目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Collector.delete() 方法中，具体是哪条代码路径（例如，快速删除优化 vs 常规删除）导致了 pk 未被置 None。",
+    "除了 pk 属性，是否还有其他实例内部状态（如 `_state`）需要在删除后更新。",
+    "问题是否只影响特定数据库后端或事务配置。"
+  ],
+  "raw": {
+    "issue_summary": "删除没有依赖关系的模型实例后，主键（PK）未被设置为 None。",
+    "trigger_condition": {
+      "text": "对一个没有任何依赖关系的模型实例调用 .delete() 方法。",
+      "evidence": [
+        "Issue 描述：'Deleting any model with no dependencies not updates the PK on the model.'",
+        "源码片段 1 第 262-327 行展示了 Collector.delete() 方法，其中包含处理无依赖实例的逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 .delete() 后，模型实例的主键（pk）属性未被更新为 None。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'It should be set to None after .delete() call.'",
+        "相关测试 1 (test_instance_update) 中，删除后检查 `self.assertIsNone(obj.pk)`，表明这是期望行为。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在模型实例被删除后，其主键（pk）属性应被设置为 None。",
+      "evidence": [
+        "Issue 描述：'It should be set to None after .delete() call.'",
+        "相关测试 1 (test_instance_update) 中，删除后断言 `self.assertIsNone(obj.pk)` 验证了此行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.deletion.Collector.delete",
+        "kind": "method",
+        "source_path": "django/db/models/deletion.py",
+        "reason": "Issue 直接引用了此方法（Django.db.models.deletion:276-281），它是执行删除操作的核心逻辑，负责更新实例状态。"
+      },
+      {
+        "name": "django.db.models.Model.delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用户通常直接调用模型实例的 .delete() 方法，这会触发 Collector.delete() 逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/deletion.py",
+        "object": "Collector.delete",
+        "lines": "262-327",
+        "reason": "Issue 明确指向了此文件和方法（Django.db.models.deletion:276-281）。源码片段 1 显示，在方法末尾有更新实例主键为 None 的代码（第 323-324 行），但可能在某些路径（如快速删除优化）下未被执行。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DeletionTests.test_instance_update",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接验证了删除后实例的 pk 应为 None，与 Issue 描述的核心问题完全一致。",
+        "reusable_parts": [
+          "测试类 DeletionTests(TestCase)",
+          "使用 signals.pre_delete 收集被删除对象",
+          "断言风格 `self.assertIsNone(obj.pk)`"
+        ],
+        "possible_gap": "该测试可能涉及有依赖关系的模型（如 R、A），而 Issue 强调‘没有任何依赖关系’的模型。测试可能未覆盖快速删除（fast delete）的优化路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，模型 A 可能通过外键关系（setnull, cascade）与其他模型关联。",
+        "target_pattern": "创建一个没有任何外键依赖的简单模型实例，然后调用 .delete()。",
+        "reason": "Issue 明确指出问题发生在‘model with no dependencies’。这可能导致执行 Collector.delete() 中的快速删除（fast delete）优化路径，该路径可能遗漏了 pk 置 None 的步骤。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，通过 `a.setnull.delete()` 或 `a.cascade.delete()` 触发删除，这涉及级联关系。",
+        "target_pattern": "直接对模型实例调用 `instance.delete()`，而不通过任何相关管理器。",
+        "reason": "确保删除操作直接作用于目标实例，避免因级联逻辑掩盖了无依赖场景下的问题。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "instance.pk 在调用 instance.delete() 之前和之后的值。",
+        "reason": "Issue 的核心是 pk 在删除后未被置为 None。直接观察此状态变化是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "执行删除操作时生成的 SQL 查询（如果可能），以判断是否走了快速删除（fast delete）路径。",
+        "reason": "源码片段 1 第 272-278 行显示存在针对单对象无依赖的快速删除优化。观察 SQL 有助于确认执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在删除操作后，被删除模型实例的 .pk 属性为 None。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或数据库行数，除非它们与 pk 状态直接相关。避免断言内部 Collector 数据结构。",
+        "reason": "Issue 的期望行为是 pk 变为 None。使用 `assertIsNone(instance.pk)` 直接、稳定地验证这一语义目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型，该模型没有指向其他模型的外键，也没有其他模型指向它。使用 TestCase 和数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要连接 pre_delete 或 post_delete 信号来捕获被删除的实例对象，以便在信号处理函数或测试中检查其 pk。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Collector.delete() 方法中，具体是哪条代码路径（例如，快速删除优化 vs 常规删除）导致了 pk 未被置 None。",
+      "除了 pk 属性，是否还有其他实例内部状态（如 `_state`）需要在删除后更新。",
+      "问题是否只影响特定数据库后端或事务配置。"
+    ]
+  }
+}

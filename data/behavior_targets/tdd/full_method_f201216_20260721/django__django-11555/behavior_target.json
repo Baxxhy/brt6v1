@@ -1,0 +1,344 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11555",
+  "issue_summary": "当 Meta.ordering 包含表达式时，对父模型使用 order_by() 会导致崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义使用多表继承的模型（父类和子类）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "父模型的 Meta.ordering 需要设置为包含一个查询表达式，如 F('some_field')。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_default_ordering_by_f_expression",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "它测试了在 Meta.ordering 中使用 F 表达式，这是 Issue 触发条件的一部分。",
+        "reusable_parts": [
+          "使用 F 表达式定义模型 Meta.ordering 的模式。",
+          "使用 assertQuerysetEqual 验证排序结果。"
+        ],
+        "possible_gap": "它没有涉及多表继承，也没有对父模型调用 order_by()。"
+      },
+      {
+        "test_name": "test_order_by_f_expression",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "它测试了在 order_by() 调用中直接使用 F 表达式，展示了正常情况下的用法。",
+        "reusable_parts": [
+          "使用 F 表达式作为 order_by 参数的调用模式。",
+          "使用 assertQuerysetEqual 验证排序结果。"
+        ],
+        "possible_gap": "它没有涉及多表继承，也没有测试 Meta.ordering 已包含表达式时再调用 order_by() 的情况。"
+      },
+      {
+        "test_name": "test_multi_table_inheritance",
+        "test_file": "tests/select_related_regress/tests.py",
+        "why_relevant": "它涉及多表继承模型，这是 Issue 触发条件的另一个关键部分。",
+        "reusable_parts": [
+          "多表继承模型的创建和查询模式。",
+          "使用 select_related 和 order_by 的组合。"
+        ],
+        "possible_gap": "它没有在 Meta.ordering 或 order_by 中使用查询表达式。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在多表继承场景下，父模型的 Meta.ordering 包含查询表达式（如 F 表达式），然后对该父模型的 QuerySet 调用 order_by() 方法。",
+      "evidence": [
+        "Issue 描述提到 'using a query expression for ordering during multi-table inheritance' 和 'order_by() a parent model crash when Meta.ordering contains expressions'。",
+        "相关测试 1 和 4 展示了在 Meta.ordering 和 order_by 中使用 F 表达式。",
+        "相关测试 5 展示了多表继承场景。",
+        "源码片段 1 是 order_by 方法。",
+        "源码片段 2 是 OrderBy 类。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在测试数据库设置期间发生崩溃，错误可能源于 get_order_dir 函数期望字段是字符串，但实际收到了 OrderBy 对象。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述提到 'The bug occurs because the field is an OrderBy object, not a string, during get_order_dir.' 和 'The linked stacktrace should make the issue obvious'。",
+        "源码片段 3 的 get_order_dir 函数对输入字段进行字符串索引操作（field[0]）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接提到 order_by() 方法导致崩溃。"
+      },
+      {
+        "name": "OrderBy",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 指出问题涉及 OrderBy 对象被错误处理。"
+      },
+      {
+        "name": "get_order_dir",
+        "kind": "function",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 明确指出崩溃发生在 get_order_dir 函数中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "get_order_dir",
+        "lines": "2212-2223",
+        "reason": "Issue 明确指出该函数期望字符串但收到了 OrderBy 对象，其代码包含对输入字段的字符串索引操作。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.order_by",
+        "lines": "1066-1073",
+        "reason": "这是触发问题的 API 入口点，可能涉及将 OrderBy 对象传递给底层查询逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，模型的 Meta.ordering 要么是普通字段，要么是 F 表达式，但未与多表继承结合。",
+        "target_pattern": "创建一个使用多表继承的父模型，其 Meta.ordering 包含一个查询表达式（如 F 表达式）。",
+        "reason": "Issue 表明 bug 需要多表继承和 Meta.ordering 包含表达式这两个条件同时满足。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中，对 QuerySet 调用 order_by() 时，参数是普通字段名或 F 表达式。",
+        "target_pattern": "对上述父模型的 QuerySet 调用 order_by() 方法，可能不带参数或带其他字段参数。",
+        "reason": "Issue 描述是 'order_by() a parent model crash'，表明调用 order_by() 是触发点。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当父模型的 Meta.ordering 包含查询表达式时，对该父模型的 QuerySet 调用 order_by() 应能正常工作，不引发异常。",
+      "evidence": [
+        "Issue 描述暗示这是一个 bug，期望修复。",
+        "相关测试 1 和 4 展示了在非多表继承场景下，使用 F 表达式进行排序是正常工作的。",
+        "相关测试 5 展示了多表继承场景下的正常查询。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 order_by() 后尝试执行查询（如迭代、求值）时是否抛出异常。",
+        "reason": "Issue 报告了崩溃，观察异常是直接证据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 get_order_dir 函数内部或调用前，检查传入的 'field' 参数的类型。",
+        "reason": "Issue 明确指出问题在于 field 是 OrderBy 对象而非字符串。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，观察 ORDER BY 子句是否正确处理了表达式。",
+        "reason": "排序问题通常反映在 SQL 生成上。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对父模型 QuerySet 调用 order_by() 后，执行查询（如 list(queryset)）不应引发异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的 repr 输出。",
+        "reason": "Issue 的核心是崩溃（异常），修复后应不再抛出。因此断言不应引发异常是稳定且直接的目标。"
+      },
+      {
+        "assertion_goal": "查询应成功执行并返回结果，排序行为可能符合预期或至少不崩溃。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言结果的具体顺序，除非 Issue 明确说明顺序错误。",
+        "reason": "当前 Issue 焦点是崩溃，而非排序结果错误。断言查询能完成是首要目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 提到 bug 只发生在测试数据库设置期间，而在 REPL 或脚本中不失败，具体原因未知。",
+    "get_order_dir 函数在哪个具体调用链中被触发，以及 OrderBy 对象如何传递到那里。",
+    "修复后，当 Meta.ordering 包含表达式时，order_by() 的具体行为（例如，是覆盖、合并还是忽略默认排序）是什么。"
+  ],
+  "raw": {
+    "issue_summary": "当 Meta.ordering 包含表达式时，对父模型使用 order_by() 会导致崩溃。",
+    "trigger_condition": {
+      "text": "在多表继承场景下，父模型的 Meta.ordering 包含查询表达式（如 F 表达式），然后对该父模型的 QuerySet 调用 order_by() 方法。",
+      "evidence": [
+        "Issue 描述提到 'using a query expression for ordering during multi-table inheritance' 和 'order_by() a parent model crash when Meta.ordering contains expressions'。",
+        "相关测试 1 和 4 展示了在 Meta.ordering 和 order_by 中使用 F 表达式。",
+        "相关测试 5 展示了多表继承场景。",
+        "源码片段 1 是 order_by 方法。",
+        "源码片段 2 是 OrderBy 类。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在测试数据库设置期间发生崩溃，错误可能源于 get_order_dir 函数期望字段是字符串，但实际收到了 OrderBy 对象。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述提到 'The bug occurs because the field is an OrderBy object, not a string, during get_order_dir.' 和 'The linked stacktrace should make the issue obvious'。",
+        "源码片段 3 的 get_order_dir 函数对输入字段进行字符串索引操作（field[0]）。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当父模型的 Meta.ordering 包含查询表达式时，对该父模型的 QuerySet 调用 order_by() 应能正常工作，不引发异常。",
+      "evidence": [
+        "Issue 描述暗示这是一个 bug，期望修复。",
+        "相关测试 1 和 4 展示了在非多表继承场景下，使用 F 表达式进行排序是正常工作的。",
+        "相关测试 5 展示了多表继承场景下的正常查询。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接提到 order_by() 方法导致崩溃。"
+      },
+      {
+        "name": "OrderBy",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 指出问题涉及 OrderBy 对象被错误处理。"
+      },
+      {
+        "name": "get_order_dir",
+        "kind": "function",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 明确指出崩溃发生在 get_order_dir 函数中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "get_order_dir",
+        "lines": "2212-2223",
+        "reason": "Issue 明确指出该函数期望字符串但收到了 OrderBy 对象，其代码包含对输入字段的字符串索引操作。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.order_by",
+        "lines": "1066-1073",
+        "reason": "这是触发问题的 API 入口点，可能涉及将 OrderBy 对象传递给底层查询逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_default_ordering_by_f_expression",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "它测试了在 Meta.ordering 中使用 F 表达式，这是 Issue 触发条件的一部分。",
+        "reusable_parts": [
+          "使用 F 表达式定义模型 Meta.ordering 的模式。",
+          "使用 assertQuerysetEqual 验证排序结果。"
+        ],
+        "possible_gap": "它没有涉及多表继承，也没有对父模型调用 order_by()。"
+      },
+      {
+        "test_name": "test_order_by_f_expression",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "它测试了在 order_by() 调用中直接使用 F 表达式，展示了正常情况下的用法。",
+        "reusable_parts": [
+          "使用 F 表达式作为 order_by 参数的调用模式。",
+          "使用 assertQuerysetEqual 验证排序结果。"
+        ],
+        "possible_gap": "它没有涉及多表继承，也没有测试 Meta.ordering 已包含表达式时再调用 order_by() 的情况。"
+      },
+      {
+        "test_name": "test_multi_table_inheritance",
+        "test_file": "tests/select_related_regress/tests.py",
+        "why_relevant": "它涉及多表继承模型，这是 Issue 触发条件的另一个关键部分。",
+        "reusable_parts": [
+          "多表继承模型的创建和查询模式。",
+          "使用 select_related 和 order_by 的组合。"
+        ],
+        "possible_gap": "它没有在 Meta.ordering 或 order_by 中使用查询表达式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，模型的 Meta.ordering 要么是普通字段，要么是 F 表达式，但未与多表继承结合。",
+        "target_pattern": "创建一个使用多表继承的父模型，其 Meta.ordering 包含一个查询表达式（如 F 表达式）。",
+        "reason": "Issue 表明 bug 需要多表继承和 Meta.ordering 包含表达式这两个条件同时满足。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中，对 QuerySet 调用 order_by() 时，参数是普通字段名或 F 表达式。",
+        "target_pattern": "对上述父模型的 QuerySet 调用 order_by() 方法，可能不带参数或带其他字段参数。",
+        "reason": "Issue 描述是 'order_by() a parent model crash'，表明调用 order_by() 是触发点。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 order_by() 后尝试执行查询（如迭代、求值）时是否抛出异常。",
+        "reason": "Issue 报告了崩溃，观察异常是直接证据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 get_order_dir 函数内部或调用前，检查传入的 'field' 参数的类型。",
+        "reason": "Issue 明确指出问题在于 field 是 OrderBy 对象而非字符串。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，观察 ORDER BY 子句是否正确处理了表达式。",
+        "reason": "排序问题通常反映在 SQL 生成上。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对父模型 QuerySet 调用 order_by() 后，执行查询（如 list(queryset)）不应引发异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的 repr 输出。",
+        "reason": "Issue 的核心是崩溃（异常），修复后应不再抛出。因此断言不应引发异常是稳定且直接的目标。"
+      },
+      {
+        "assertion_goal": "查询应成功执行并返回结果，排序行为可能符合预期或至少不崩溃。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言结果的具体顺序，除非 Issue 明确说明顺序错误。",
+        "reason": "当前 Issue 焦点是崩溃，而非排序结果错误。断言查询能完成是首要目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义使用多表继承的模型（父类和子类）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "父模型的 Meta.ordering 需要设置为包含一个查询表达式，如 F('some_field')。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 提到 bug 只发生在测试数据库设置期间，而在 REPL 或脚本中不失败，具体原因未知。",
+      "get_order_dir 函数在哪个具体调用链中被触发，以及 OrderBy 对象如何传递到那里。",
+      "修复后，当 Meta.ordering 包含表达式时，order_by() 的具体行为（例如，是覆盖、合并还是忽略默认排序）是什么。"
+    ]
+  }
+}

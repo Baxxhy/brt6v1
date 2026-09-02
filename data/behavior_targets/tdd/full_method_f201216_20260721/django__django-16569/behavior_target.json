@@ -1,0 +1,306 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16569",
+  "issue_summary": "当 FormSet 的 can_delete=True 且 can_delete_extra=False 时，调用 empty_form() 会因 add_fields() 方法中 index 参数为 None 而引发 TypeError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要配置 Django 设置（settings.configure）并调用 django.setup()，因为 Issue 中的示例代码包含了这些步骤。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或类似的 Django 测试基类，因为相关测试都继承自 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 forms 模块和 formset_factory 函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_disable_delete_extra_formset_forms",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "这个测试直接使用了 `can_delete=True, can_delete_extra=False` 的配置，并检查了 DELETE 字段在不同表单中的存在性，与 Issue 的触发条件高度相关。",
+        "reusable_parts": [
+          "formset_factory 的调用模式（can_delete=True, can_delete_extra=False）",
+          "对 formset.forms 的索引访问和字段检查（如 `self.assertIn(\"DELETE\", formset.forms[0].fields)`）",
+          "SimpleTestCase 的使用"
+        ],
+        "possible_gap": "该测试没有调用或检查 empty_form 属性，也没有让 index 参数为 None 的场景。它测试的是已实例化的表单（index 为整数），而不是 empty_form 的创建过程。"
+      },
+      {
+        "test_name": "test_formset_with_deletion",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "测试了 can_delete=True 的 FormSet 的基本功能，包括字段渲染和数据验证，提供了 FormSet 构造和使用的通用模式。",
+        "reusable_parts": [
+          "formset_factory 的调用",
+          "FormSet 的初始化和数据绑定",
+          "对 formset.forms 和字段的断言风格"
+        ],
+        "possible_gap": "没有涉及 can_delete_extra=False 的配置，也没有测试 empty_form。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 FormSet，其 can_delete=True 且 can_delete_extra=False，然后访问其 empty_form 属性或调用 empty_form() 方法。",
+      "evidence": [
+        "Issue 描述：'When a FormSet has the attributes self.can_delete == True and self.can_delete_extra == False, calling the add_fields() method on that FormSet fails if the argument index is None. This occurs for example when calling FormSet.empty_form().'",
+        "Issue 中的代码示例展示了如何创建这样的 FormSet 并访问 empty_form。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: '<' not supported between instances of 'NoneType' and 'int' 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'The result is that the method raises the exception TypeError: '<' not supported between instances of 'NoneType' and 'int'.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.formsets.BaseFormSet.empty_form",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 中明确提到调用 empty_form() 会触发 bug。"
+      },
+      {
+        "name": "django.forms.formsets.BaseFormSet.add_fields",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 指出问题发生在 add_fields() 方法中，当 index 为 None 时。"
+      },
+      {
+        "name": "django.forms.formsets.formset_factory",
+        "kind": "function",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 和测试中都用它来创建具有特定属性（can_delete, can_delete_extra）的 FormSet。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/formsets.py",
+        "object": "BaseFormSet.add_fields",
+        "lines": "475-498",
+        "reason": "Issue 指出问题在于 add_fields 方法中第 493 行（或附近）的 if 条件 `if self.can_delete and (self.can_delete_extra or index < initial_form_count):`，当 index 为 None 时，`index < initial_form_count` 会引发 TypeError。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，FormSet 实例化后直接访问 forms 属性（如 formset.forms[0]），这些表单的 index 是整数（0, 1, 2...）。",
+        "target_pattern": "需要变异为访问 FormSet 的 empty_form 属性，这会内部调用 add_fields(form, None)，使 index 参数为 None。",
+        "reason": "Issue 明确指出当 index 为 None 时，add_fields 中的比较操作会失败。访问 empty_form 是触发此场景的直接方式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，FormSet 的配置可能同时包含 can_delete=True 和 can_delete_extra=True（默认），或者 can_delete_extra=False 但测试未触发 index=None 的场景。",
+        "target_pattern": "需要确保 FormSet 配置为 can_delete=True 且 can_delete_extra=False，这是触发 bug 的必要条件。",
+        "reason": "Issue 描述和源码片段 1 显示，只有当 can_delete=True 且 can_delete_extra=False 时，条件 `self.can_delete_extra or index < initial_form_count` 才会在 index 为 None 时尝试比较。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使 index 为 None，add_fields() 方法也应能正常执行，不会抛出 TypeError 异常，并且 empty_form 应能成功创建并返回一个表单实例。",
+      "evidence": [
+        "Issue 中建议的修复：'Checking for index not None should fix the issue'，暗示了修复后的预期行为是 index 为 None 时条件判断不会出错。",
+        "源码片段 2 显示 empty_form 方法期望 self.add_fields(form, None) 能成功执行并返回 form。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `formset.empty_form` 或 `formset.empty_form()` 时捕获的异常。",
+        "reason": "Issue 描述的错误现象是抛出 TypeError 异常。观测是否抛出此异常是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用 `formset.empty_form` 后的返回值类型和结构（应是一个 Form 实例）。",
+        "reason": "修复后，empty_form 应能正常返回一个表单实例，而不是抛出异常。观测返回值可以验证预期行为。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 add_fields 方法内部，观察 index 参数的值以及 `self.can_delete` 和 `self.can_delete_extra` 的状态。",
+        "reason": "这有助于确认执行路径是否进入了有问题的条件分支。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在触发条件下，访问 empty_form 不会抛出 TypeError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言异常消息的完整字符串，因为可能因 Python 版本或环境略有不同。",
+        "reason": "Issue 的核心是异常的发生。修复后，这个异常应该不再出现。使用 `assertRaises` 或其上下文管理器可以清晰地测试这一点。"
+      },
+      {
+        "assertion_goal": "验证 empty_form 成功返回一个表单实例。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言表单字段的完整字典或精确的 HTML 输出，这些可能因其他因素变化。",
+        "reason": "修复后，empty_form 应能正常工作。检查返回的对象是否是预期的表单类型是一个稳定的断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "initial_form_count() 在 empty_form 被调用时的具体返回值是多少（可能为 0）？这会影响条件判断 `index < initial_form_count` 的逻辑，但 index 为 None 时比较本身就会失败。",
+    "除了 empty_form，是否还有其他代码路径会以 index=None 调用 add_fields 方法？",
+    "修复后，empty_form 返回的表单中是否应该包含 DELETE 字段？根据 can_delete_extra=False 的逻辑，可能不应该包含，但这需要更深入分析源码逻辑。"
+  ],
+  "raw": {
+    "issue_summary": "当 FormSet 的 can_delete=True 且 can_delete_extra=False 时，调用 empty_form() 会因 add_fields() 方法中 index 参数为 None 而引发 TypeError 异常。",
+    "trigger_condition": {
+      "text": "创建一个 FormSet，其 can_delete=True 且 can_delete_extra=False，然后访问其 empty_form 属性或调用 empty_form() 方法。",
+      "evidence": [
+        "Issue 描述：'When a FormSet has the attributes self.can_delete == True and self.can_delete_extra == False, calling the add_fields() method on that FormSet fails if the argument index is None. This occurs for example when calling FormSet.empty_form().'",
+        "Issue 中的代码示例展示了如何创建这样的 FormSet 并访问 empty_form。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: '<' not supported between instances of 'NoneType' and 'int' 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'The result is that the method raises the exception TypeError: '<' not supported between instances of 'NoneType' and 'int'.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使 index 为 None，add_fields() 方法也应能正常执行，不会抛出 TypeError 异常，并且 empty_form 应能成功创建并返回一个表单实例。",
+      "evidence": [
+        "Issue 中建议的修复：'Checking for index not None should fix the issue'，暗示了修复后的预期行为是 index 为 None 时条件判断不会出错。",
+        "源码片段 2 显示 empty_form 方法期望 self.add_fields(form, None) 能成功执行并返回 form。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.formsets.BaseFormSet.empty_form",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 中明确提到调用 empty_form() 会触发 bug。"
+      },
+      {
+        "name": "django.forms.formsets.BaseFormSet.add_fields",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 指出问题发生在 add_fields() 方法中，当 index 为 None 时。"
+      },
+      {
+        "name": "django.forms.formsets.formset_factory",
+        "kind": "function",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 和测试中都用它来创建具有特定属性（can_delete, can_delete_extra）的 FormSet。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/formsets.py",
+        "object": "BaseFormSet.add_fields",
+        "lines": "475-498",
+        "reason": "Issue 指出问题在于 add_fields 方法中第 493 行（或附近）的 if 条件 `if self.can_delete and (self.can_delete_extra or index < initial_form_count):`，当 index 为 None 时，`index < initial_form_count` 会引发 TypeError。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_disable_delete_extra_formset_forms",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "这个测试直接使用了 `can_delete=True, can_delete_extra=False` 的配置，并检查了 DELETE 字段在不同表单中的存在性，与 Issue 的触发条件高度相关。",
+        "reusable_parts": [
+          "formset_factory 的调用模式（can_delete=True, can_delete_extra=False）",
+          "对 formset.forms 的索引访问和字段检查（如 `self.assertIn(\"DELETE\", formset.forms[0].fields)`）",
+          "SimpleTestCase 的使用"
+        ],
+        "possible_gap": "该测试没有调用或检查 empty_form 属性，也没有让 index 参数为 None 的场景。它测试的是已实例化的表单（index 为整数），而不是 empty_form 的创建过程。"
+      },
+      {
+        "test_name": "test_formset_with_deletion",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "测试了 can_delete=True 的 FormSet 的基本功能，包括字段渲染和数据验证，提供了 FormSet 构造和使用的通用模式。",
+        "reusable_parts": [
+          "formset_factory 的调用",
+          "FormSet 的初始化和数据绑定",
+          "对 formset.forms 和字段的断言风格"
+        ],
+        "possible_gap": "没有涉及 can_delete_extra=False 的配置，也没有测试 empty_form。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，FormSet 实例化后直接访问 forms 属性（如 formset.forms[0]），这些表单的 index 是整数（0, 1, 2...）。",
+        "target_pattern": "需要变异为访问 FormSet 的 empty_form 属性，这会内部调用 add_fields(form, None)，使 index 参数为 None。",
+        "reason": "Issue 明确指出当 index 为 None 时，add_fields 中的比较操作会失败。访问 empty_form 是触发此场景的直接方式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，FormSet 的配置可能同时包含 can_delete=True 和 can_delete_extra=True（默认），或者 can_delete_extra=False 但测试未触发 index=None 的场景。",
+        "target_pattern": "需要确保 FormSet 配置为 can_delete=True 且 can_delete_extra=False，这是触发 bug 的必要条件。",
+        "reason": "Issue 描述和源码片段 1 显示，只有当 can_delete=True 且 can_delete_extra=False 时，条件 `self.can_delete_extra or index < initial_form_count` 才会在 index 为 None 时尝试比较。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `formset.empty_form` 或 `formset.empty_form()` 时捕获的异常。",
+        "reason": "Issue 描述的错误现象是抛出 TypeError 异常。观测是否抛出此异常是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用 `formset.empty_form` 后的返回值类型和结构（应是一个 Form 实例）。",
+        "reason": "修复后，empty_form 应能正常返回一个表单实例，而不是抛出异常。观测返回值可以验证预期行为。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 add_fields 方法内部，观察 index 参数的值以及 `self.can_delete` 和 `self.can_delete_extra` 的状态。",
+        "reason": "这有助于确认执行路径是否进入了有问题的条件分支。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在触发条件下，访问 empty_form 不会抛出 TypeError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言异常消息的完整字符串，因为可能因 Python 版本或环境略有不同。",
+        "reason": "Issue 的核心是异常的发生。修复后，这个异常应该不再出现。使用 `assertRaises` 或其上下文管理器可以清晰地测试这一点。"
+      },
+      {
+        "assertion_goal": "验证 empty_form 成功返回一个表单实例。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言表单字段的完整字典或精确的 HTML 输出，这些可能因其他因素变化。",
+        "reason": "修复后，empty_form 应能正常工作。检查返回的对象是否是预期的表单类型是一个稳定的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要配置 Django 设置（settings.configure）并调用 django.setup()，因为 Issue 中的示例代码包含了这些步骤。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或类似的 Django 测试基类，因为相关测试都继承自 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 forms 模块和 formset_factory 函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "initial_form_count() 在 empty_form 被调用时的具体返回值是多少（可能为 0）？这会影响条件判断 `index < initial_form_count` 的逻辑，但 index 为 None 时比较本身就会失败。",
+      "除了 empty_form，是否还有其他代码路径会以 index=None 调用 add_fields 方法？",
+      "修复后，empty_form 返回的表单中是否应该包含 DELETE 字段？根据 can_delete_extra=False 的逻辑，可能不应该包含，但这需要更深入分析源码逻辑。"
+    ]
+  }
+}

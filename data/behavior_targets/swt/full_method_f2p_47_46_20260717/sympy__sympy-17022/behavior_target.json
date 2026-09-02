@@ -1,0 +1,342 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-17022",
+  "issue_summary": "lambdify 函数在处理包含单位矩阵的矩阵表达式时，错误地将单位矩阵符号 I 解释为 Python 的复数虚部单位，导致计算结果错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "测试需要导入 sympy (symbols, MatrixSymbol, Identity, lambdify) 和 numpy。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "如果 numpy 未安装，测试应该被跳过。相关测试中都使用了 `if not numpy: skip(...)` 模式。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个具体的 NumPy 数组作为输入，其维度应与 Identity 矩阵的符号大小在数值上匹配。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_issue_15827",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试直接使用 lambdify 处理 MatrixSymbol 和标量乘法，展示了构造 lambdify 函数、传入 NumPy 数组并使用 numpy.array_equal 进行断言的基本模式。",
+        "reusable_parts": [
+          "导入模式（如 `if not numpy: skip`）",
+          "MatrixSymbol 的构造",
+          "lambdify 的调用方式",
+          "使用 NumPy 数组作为输入",
+          "使用 numpy.array_equal 或 numpy.allclose 进行数组比较的断言风格"
+        ],
+        "possible_gap": "该测试处理的是 MatrixSymbol 与标量的乘法，没有涉及 Identity 矩阵的加法，因此不会触发当前 Issue 中的 bug。"
+      },
+      {
+        "test_name": "test_MatrixSymbol_issue_15578",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试使用 lambdify 处理 MatrixSymbol 的矩阵幂运算，展示了针对 MatrixSymbol 的 lambdify 测试结构。",
+        "reusable_parts": [
+          "MatrixSymbol 的构造和 lambdify 调用",
+          "使用 numpy.allclose 进行数值比较",
+          "使用具体 NumPy 数组作为输入"
+        ],
+        "possible_gap": "该测试处理的是矩阵的幂运算，而非与 Identity 矩阵的加法。"
+      },
+      {
+        "test_name": "test_numpy_matrix",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试使用 lambdify 将普通 Matrix 对象转换为 NumPy 数组，并验证了返回类型和数值正确性，展示了矩阵表达式 lambdify 的基本测试模式。",
+        "reusable_parts": [
+          "lambdify 的调用和参数设置",
+          "使用 numpy.testing.assert_allclose 进行数值断言",
+          "检查返回类型 `isinstance(f(...), numpy.ndarray)`"
+        ],
+        "possible_gap": "该测试使用具体的 Matrix 对象（如 `Matrix([[x, x*y], ...])`），而不是 MatrixSymbol 和 Identity 的符号表达式。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 lambdify 编译一个包含 Identity(n) 和 MatrixSymbol 的表达式，然后传入一个具体的 NumPy 数组进行求值。",
+      "evidence": [
+        "Issue 中的代码示例：`f = lambdify(A, A + Identity(n))` 和 `f(a)`，其中 `A = MatrixSymbol(\"A\", n, n)`，`a = np.array([[1, 2], [3, 4]])`。",
+        "相关测试 1 (test_issue_15827) 展示了使用 lambdify 处理 MatrixSymbol 和标量乘法的模式。",
+        "相关测试 4 (test_MatrixSymbol_issue_15578) 展示了使用 lambdify 处理 MatrixSymbol 和矩阵幂的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回了错误的数值结果，将单位矩阵的加法变成了与复数 1j 的加法，导致输出数组元素变为复数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中显示的输出：`array([[1.+1.j, 2.+1.j], [3.+1.j, 4.+1.j]])`。",
+        "Issue 中通过检查生成函数的源代码和全局变量，发现 `I` 被绑定为 `1j`：`f.__globals__['I']` 返回 `1j`。",
+        "Issue 中预期的正确输出是 `array([[2, 2], [3, 5]])`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 的核心是 lambdify 函数在处理特定表达式时行为不正确。"
+      },
+      {
+        "name": "Identity",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中触发错误的表达式包含了 Identity 矩阵。"
+      },
+      {
+        "name": "MatrixSymbol",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中表达式的另一个组成部分是 MatrixSymbol。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify 函数及其相关的代码打印逻辑",
+        "lines": "",
+        "reason": "Issue 指出问题源于代码打印机将 `I` 打印为 Python 复数，而不是处理为单位矩阵。lambdify 负责生成代码，因此其内部或使用的 printer 是可疑点。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，lambdify 的表达式是 MatrixSymbol 与标量的乘法（如 `2*A`、`(2+k)*A`）或矩阵幂（如 `A**(-1)`、`A**3`）。",
+        "target_pattern": "将表达式变异为 MatrixSymbol 与 Identity 矩阵的加法，如 `A + Identity(n)`。",
+        "reason": "Issue 表明，当表达式包含 Identity 矩阵时，lambdify 的代码生成会出错，将 `I` 误认为复数。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，传入 lambdify 的输入是具体的 NumPy 数组（如 `numpy.array([[1, 2], [3, 4]])`）。",
+        "target_pattern": "保持传入具体的 NumPy 数组，但需要确保其维度与 Identity 矩阵的符号维度 `n` 在求值时匹配。",
+        "reason": "Issue 的触发需要用一个具体数组来求值生成的函数，以观察错误的数值输出。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "lambdify 应正确地将 SymPy 的 Identity 矩阵转换为等价的 NumPy 操作，使得对输入数组加上单位矩阵的操作能产生正确的数值结果。",
+      "evidence": [
+        "Issue 中明确说明输出应为 `array([[2, 2], [3, 5]])`，即对输入数组的每个对角线元素加 1。",
+        "相关测试 3 (test_Identity) 展示了 Identity 矩阵在符号层面的数学性质（如 `A*Im == A`），暗示了其数值语义应为单位矩阵。",
+        "相关测试 2 (test_numpy_matrix) 和测试 5 (test_lambdify_matrix) 展示了 lambdify 成功将矩阵表达式转换为 NumPy 数组并正确求值的例子。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 lambdify 生成的函数 `f(a)` 的返回值，特别是其数值和数据类型。",
+        "reason": "Issue 的核心错误是返回值不正确（变成了复数）。观察返回值可以直接判断 bug 是否被触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "生成的函数 `f` 的源代码字符串（例如通过 `inspect.getsource(f)`）。",
+        "reason": "Issue 通过检查源代码发现生成了 `(I + A)`，这有助于理解错误的根源在于代码打印阶段。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "返回值的数据类型，例如 `type(f(a))` 和 `f(a).dtype`。",
+        "reason": "错误结果的数据类型变成了复数（如 `complex`），而预期应为实数。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 lambdify 生成的函数对输入数组执行“加单位矩阵”操作后，得到正确的数值结果（对角线元素加1，非对角线元素不变）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免直接断言生成的源代码字符串完全等于某个特定字符串，因为这可能依赖于 printer 的内部实现细节。",
+        "reason": "Issue 给出了明确的预期数值输出，因此可以直接使用 numpy.array_equal 或 numpy.allclose 比较结果数组。"
+      },
+      {
+        "assertion_goal": "验证返回的数组数据类型不是复数类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言具体的 dtype 字符串表示，除非 Issue 明确要求。",
+        "reason": "错误的一个明显症状是结果变成了复数数组，而预期应为实数数组。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "lambdify 内部具体是哪个模块或 printer 负责将 Identity 翻译成 `I` 导致冲突。",
+    "除了加法，其他包含 Identity 的矩阵运算（如乘法）是否也存在同样问题。",
+    "修复后，`I` 在生成的代码中应该被替换成什么（例如一个生成单位矩阵的函数调用）。",
+    "是否所有使用 `I` 作为标识符的上下文都会受到影响，还是仅限于特定 printer（如 NumPyPrinter）。"
+  ],
+  "raw": {
+    "issue_summary": "lambdify 函数在处理包含单位矩阵的矩阵表达式时，错误地将单位矩阵符号 I 解释为 Python 的复数虚部单位，导致计算结果错误。",
+    "trigger_condition": {
+      "text": "使用 lambdify 编译一个包含 Identity(n) 和 MatrixSymbol 的表达式，然后传入一个具体的 NumPy 数组进行求值。",
+      "evidence": [
+        "Issue 中的代码示例：`f = lambdify(A, A + Identity(n))` 和 `f(a)`，其中 `A = MatrixSymbol(\"A\", n, n)`，`a = np.array([[1, 2], [3, 4]])`。",
+        "相关测试 1 (test_issue_15827) 展示了使用 lambdify 处理 MatrixSymbol 和标量乘法的模式。",
+        "相关测试 4 (test_MatrixSymbol_issue_15578) 展示了使用 lambdify 处理 MatrixSymbol 和矩阵幂的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回了错误的数值结果，将单位矩阵的加法变成了与复数 1j 的加法，导致输出数组元素变为复数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中显示的输出：`array([[1.+1.j, 2.+1.j], [3.+1.j, 4.+1.j]])`。",
+        "Issue 中通过检查生成函数的源代码和全局变量，发现 `I` 被绑定为 `1j`：`f.__globals__['I']` 返回 `1j`。",
+        "Issue 中预期的正确输出是 `array([[2, 2], [3, 5]])`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "lambdify 应正确地将 SymPy 的 Identity 矩阵转换为等价的 NumPy 操作，使得对输入数组加上单位矩阵的操作能产生正确的数值结果。",
+      "evidence": [
+        "Issue 中明确说明输出应为 `array([[2, 2], [3, 5]])`，即对输入数组的每个对角线元素加 1。",
+        "相关测试 3 (test_Identity) 展示了 Identity 矩阵在符号层面的数学性质（如 `A*Im == A`），暗示了其数值语义应为单位矩阵。",
+        "相关测试 2 (test_numpy_matrix) 和测试 5 (test_lambdify_matrix) 展示了 lambdify 成功将矩阵表达式转换为 NumPy 数组并正确求值的例子。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 的核心是 lambdify 函数在处理特定表达式时行为不正确。"
+      },
+      {
+        "name": "Identity",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中触发错误的表达式包含了 Identity 矩阵。"
+      },
+      {
+        "name": "MatrixSymbol",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中表达式的另一个组成部分是 MatrixSymbol。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify 函数及其相关的代码打印逻辑",
+        "lines": "",
+        "reason": "Issue 指出问题源于代码打印机将 `I` 打印为 Python 复数，而不是处理为单位矩阵。lambdify 负责生成代码，因此其内部或使用的 printer 是可疑点。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_issue_15827",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试直接使用 lambdify 处理 MatrixSymbol 和标量乘法，展示了构造 lambdify 函数、传入 NumPy 数组并使用 numpy.array_equal 进行断言的基本模式。",
+        "reusable_parts": [
+          "导入模式（如 `if not numpy: skip`）",
+          "MatrixSymbol 的构造",
+          "lambdify 的调用方式",
+          "使用 NumPy 数组作为输入",
+          "使用 numpy.array_equal 或 numpy.allclose 进行数组比较的断言风格"
+        ],
+        "possible_gap": "该测试处理的是 MatrixSymbol 与标量的乘法，没有涉及 Identity 矩阵的加法，因此不会触发当前 Issue 中的 bug。"
+      },
+      {
+        "test_name": "test_MatrixSymbol_issue_15578",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试使用 lambdify 处理 MatrixSymbol 的矩阵幂运算，展示了针对 MatrixSymbol 的 lambdify 测试结构。",
+        "reusable_parts": [
+          "MatrixSymbol 的构造和 lambdify 调用",
+          "使用 numpy.allclose 进行数值比较",
+          "使用具体 NumPy 数组作为输入"
+        ],
+        "possible_gap": "该测试处理的是矩阵的幂运算，而非与 Identity 矩阵的加法。"
+      },
+      {
+        "test_name": "test_numpy_matrix",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试使用 lambdify 将普通 Matrix 对象转换为 NumPy 数组，并验证了返回类型和数值正确性，展示了矩阵表达式 lambdify 的基本测试模式。",
+        "reusable_parts": [
+          "lambdify 的调用和参数设置",
+          "使用 numpy.testing.assert_allclose 进行数值断言",
+          "检查返回类型 `isinstance(f(...), numpy.ndarray)`"
+        ],
+        "possible_gap": "该测试使用具体的 Matrix 对象（如 `Matrix([[x, x*y], ...])`），而不是 MatrixSymbol 和 Identity 的符号表达式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，lambdify 的表达式是 MatrixSymbol 与标量的乘法（如 `2*A`、`(2+k)*A`）或矩阵幂（如 `A**(-1)`、`A**3`）。",
+        "target_pattern": "将表达式变异为 MatrixSymbol 与 Identity 矩阵的加法，如 `A + Identity(n)`。",
+        "reason": "Issue 表明，当表达式包含 Identity 矩阵时，lambdify 的代码生成会出错，将 `I` 误认为复数。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，传入 lambdify 的输入是具体的 NumPy 数组（如 `numpy.array([[1, 2], [3, 4]])`）。",
+        "target_pattern": "保持传入具体的 NumPy 数组，但需要确保其维度与 Identity 矩阵的符号维度 `n` 在求值时匹配。",
+        "reason": "Issue 的触发需要用一个具体数组来求值生成的函数，以观察错误的数值输出。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 lambdify 生成的函数 `f(a)` 的返回值，特别是其数值和数据类型。",
+        "reason": "Issue 的核心错误是返回值不正确（变成了复数）。观察返回值可以直接判断 bug 是否被触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "生成的函数 `f` 的源代码字符串（例如通过 `inspect.getsource(f)`）。",
+        "reason": "Issue 通过检查源代码发现生成了 `(I + A)`，这有助于理解错误的根源在于代码打印阶段。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "返回值的数据类型，例如 `type(f(a))` 和 `f(a).dtype`。",
+        "reason": "错误结果的数据类型变成了复数（如 `complex`），而预期应为实数。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 lambdify 生成的函数对输入数组执行“加单位矩阵”操作后，得到正确的数值结果（对角线元素加1，非对角线元素不变）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免直接断言生成的源代码字符串完全等于某个特定字符串，因为这可能依赖于 printer 的内部实现细节。",
+        "reason": "Issue 给出了明确的预期数值输出，因此可以直接使用 numpy.array_equal 或 numpy.allclose 比较结果数组。"
+      },
+      {
+        "assertion_goal": "验证返回的数组数据类型不是复数类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言具体的 dtype 字符串表示，除非 Issue 明确要求。",
+        "reason": "错误的一个明显症状是结果变成了复数数组，而预期应为实数数组。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "测试需要导入 sympy (symbols, MatrixSymbol, Identity, lambdify) 和 numpy。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "如果 numpy 未安装，测试应该被跳过。相关测试中都使用了 `if not numpy: skip(...)` 模式。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个具体的 NumPy 数组作为输入，其维度应与 Identity 矩阵的符号大小在数值上匹配。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "lambdify 内部具体是哪个模块或 printer 负责将 Identity 翻译成 `I` 导致冲突。",
+      "除了加法，其他包含 Identity 的矩阵运算（如乘法）是否也存在同样问题。",
+      "修复后，`I` 在生成的代码中应该被替换成什么（例如一个生成单位矩阵的函数调用）。",
+      "是否所有使用 `I` 作为标识符的上下文都会受到影响，还是仅限于特定 printer（如 NumPyPrinter）。"
+    ]
+  }
+}

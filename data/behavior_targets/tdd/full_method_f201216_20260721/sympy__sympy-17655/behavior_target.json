@@ -1,0 +1,320 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-17655",
+  "issue_summary": "Point 对象与 sympify 后的数值进行乘法运算时，因操作数顺序不同导致一个正常执行而另一个抛出异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.geometry 和 sympy.sympify。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的测试函数中运行，无需特殊 fixture 或数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_point",
+        "test_file": "sympy/geometry/tests/test_point.py",
+        "why_relevant": "该测试包含 Point 对象的算术运算（如 `p4*5`）和加法（如 `p3 + p4`），以及验证 `raises(ValueError, lambda: Point(1, 2) + 1)`，与 Issue 中涉及的 API 和操作类似。",
+        "reusable_parts": [
+          "imports (from sympy.geometry import Point, etc.)",
+          "Point 对象的构造方式",
+          "使用 assert 进行结果验证",
+          "使用 raises 验证异常"
+        ],
+        "possible_gap": "现有测试主要测试 Point 与标量（整数、浮点数）的乘法，以及 Point 与 Point 的加法，但未测试 Point 与 SymPy 表达式（如 sympify 结果）的乘法，也未测试乘法操作数顺序的影响。"
+      },
+      {
+        "test_name": "test_arguments",
+        "test_file": "sympy/geometry/tests/test_point.py",
+        "why_relevant": "该测试专门验证接受 Point 对象的函数也能接受元组、列表并自动转换，涉及 `__add__` 方法，并测试了 `evaluate=False` 的情况。",
+        "reusable_parts": [
+          "测试不同输入类型（元组、列表、Point）的自动转换模式",
+          "使用 `evaluate=False` 的测试模式"
+        ],
+        "possible_gap": "该测试未涉及 Point 与 SymPy Mul 表达式的交互，也未测试当 `other` 是 Mul 表达式时 `__add__` 的行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 sympy.sympify(2.0) 与 Point 对象进行乘法运算，且 sympify 后的数值作为左操作数，Point 作为右操作数。",
+      "evidence": [
+        "Issue 中：`point1 + sympy.sympify(2.0) * point2` 引发异常。",
+        "Issue 中：`point1 + point2 * sympy.sympify(2.0)` 正常工作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 `point1 + sympy.sympify(2.0) * point2` 时抛出 GeometryError: \"Don't know how to add 2.0*Point2D(1, 1) and a Point object\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中完整的异常堆栈跟踪显示 GeometryError。",
+        "源码片段 2 中 __add__ 方法在捕获 TypeError 后会抛出 GeometryError。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.geometry.point.Point.__add__",
+        "kind": "method",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Issue 中的异常直接由该方法的调用触发，它处理 Point 与其它对象的加法。"
+      },
+      {
+        "name": "sympy.geometry.point.Point.__mul__",
+        "kind": "method",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Issue 涉及 Point 与数值的乘法运算，该方法是乘法的入口。"
+      },
+      {
+        "name": "sympy.geometry.point.Point.__new__",
+        "kind": "method",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "异常堆栈显示，在 __add__ 中尝试 `Point(other, evaluate=False)` 时，__new__ 方法因参数类型问题抛出了 TypeError。"
+      },
+      {
+        "name": "sympy.sympify",
+        "kind": "function",
+        "source_path": "sympy/core/sympify.py",
+        "reason": "Issue 中使用了 sympify 将浮点数转换为 SymPy 表达式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/geometry/point.py",
+        "object": "Point.__add__",
+        "lines": "185-222",
+        "reason": "该方法尝试将 `other` 参数转换为 Point 对象，当 `other` 是 `sympify(2.0) * point2` 这样的 Mul 表达式时，转换失败。"
+      },
+      {
+        "path": "sympy/geometry/point.py",
+        "object": "Point.__new__",
+        "lines": "108-178",
+        "reason": "当传入 `coords` 参数是 Mul 表达式时，`is_sequence(coords)` 检查失败，抛出 TypeError，导致 __add__ 中的转换异常。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中多为 `Point * scalar` 或 `Point + Point`。",
+        "target_pattern": "将乘法操作数顺序改为 `scalar * Point`，其中 scalar 是 sympify 后的 SymPy 数值表达式。",
+        "reason": "Issue 表明 `scalar * Point` 会产生 Mul 表达式，该表达式作为参数传递给 `Point.__add__` 时会导致内部转换失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中加法运算的 `other` 参数通常是 Point、元组或列表。",
+        "target_pattern": "使 `other` 参数为一个 SymPy Mul 表达式（如 `sympify(2.0) * Point(1,1)`）。",
+        "reason": "`Point.__add__` 中的 `Point(other, evaluate=False)` 调用无法处理 Mul 表达式，会触发 TypeError。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Point 对象与 sympify 后的数值进行乘法运算时，无论数值作为左操作数还是右操作数，都应得到相同的结果，且加法运算能正常进行。",
+      "evidence": [
+        "Issue 中用户明确说明：\"The expected behaviour is, that both lines give the same result\"。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 `point1 + sympy.sympify(2.0) * point2` 时是否抛出 GeometryError 或其内部的 TypeError。",
+        "reason": "Issue 的核心错误现象就是抛出 GeometryError，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`sympy.sympify(2.0) * point2` 的返回值类型和 repr。",
+        "reason": "需要确认该表达式是否生成了 Mul 对象，以及该对象的结构，以理解为何后续加法失败。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 `Point.__add__` 内部，`other` 参数在 `Point(other, evaluate=False)` 调用前的类型。",
+        "reason": "确认 `other` 是否为 Mul 类型，这有助于定位 __new__ 方法中的类型检查失败点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `point1 + sympy.sympify(2.0) * point2` 与 `point1 + point2 * sympy.sympify(2.0)` 的结果相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经简化的坐标表达式字符串相等，因为浮点数的表示可能因 evaluate 设置而变化。",
+        "reason": "Issue 的期望行为是两者结果相同，直接比较结果坐标是最稳定的断言。"
+      },
+      {
+        "assertion_goal": "验证 `sympy.sympify(2.0) * point2` 和 `point2 * sympy.sympify(2.0)` 都返回有效的、可与 Point 相加的对象。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言返回对象的精确内部 repr 字符串。",
+        "reason": "修复后，两种乘法顺序都应产生兼容的对象，确保加法可行。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Point.__mul__ 方法的具体实现是否处理了左乘和右乘的对称性？",
+    "修复后，`sympy.sympify(2.0) * point2` 应该返回什么类型的对象？是 Point 还是某种包装类型？",
+    "除了 sympify 产生的数值，其他 SymPy 表达式（如符号表达式）与 Point 相乘是否也存在同样问题？"
+  ],
+  "raw": {
+    "issue_summary": "Point 对象与 sympify 后的数值进行乘法运算时，因操作数顺序不同导致一个正常执行而另一个抛出异常。",
+    "trigger_condition": {
+      "text": "使用 sympy.sympify(2.0) 与 Point 对象进行乘法运算，且 sympify 后的数值作为左操作数，Point 作为右操作数。",
+      "evidence": [
+        "Issue 中：`point1 + sympy.sympify(2.0) * point2` 引发异常。",
+        "Issue 中：`point1 + point2 * sympy.sympify(2.0)` 正常工作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 `point1 + sympy.sympify(2.0) * point2` 时抛出 GeometryError: \"Don't know how to add 2.0*Point2D(1, 1) and a Point object\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中完整的异常堆栈跟踪显示 GeometryError。",
+        "源码片段 2 中 __add__ 方法在捕获 TypeError 后会抛出 GeometryError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Point 对象与 sympify 后的数值进行乘法运算时，无论数值作为左操作数还是右操作数，都应得到相同的结果，且加法运算能正常进行。",
+      "evidence": [
+        "Issue 中用户明确说明：\"The expected behaviour is, that both lines give the same result\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.geometry.point.Point.__add__",
+        "kind": "method",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Issue 中的异常直接由该方法的调用触发，它处理 Point 与其它对象的加法。"
+      },
+      {
+        "name": "sympy.geometry.point.Point.__mul__",
+        "kind": "method",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Issue 涉及 Point 与数值的乘法运算，该方法是乘法的入口。"
+      },
+      {
+        "name": "sympy.geometry.point.Point.__new__",
+        "kind": "method",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "异常堆栈显示，在 __add__ 中尝试 `Point(other, evaluate=False)` 时，__new__ 方法因参数类型问题抛出了 TypeError。"
+      },
+      {
+        "name": "sympy.sympify",
+        "kind": "function",
+        "source_path": "sympy/core/sympify.py",
+        "reason": "Issue 中使用了 sympify 将浮点数转换为 SymPy 表达式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/geometry/point.py",
+        "object": "Point.__add__",
+        "lines": "185-222",
+        "reason": "该方法尝试将 `other` 参数转换为 Point 对象，当 `other` 是 `sympify(2.0) * point2` 这样的 Mul 表达式时，转换失败。"
+      },
+      {
+        "path": "sympy/geometry/point.py",
+        "object": "Point.__new__",
+        "lines": "108-178",
+        "reason": "当传入 `coords` 参数是 Mul 表达式时，`is_sequence(coords)` 检查失败，抛出 TypeError，导致 __add__ 中的转换异常。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_point",
+        "test_file": "sympy/geometry/tests/test_point.py",
+        "why_relevant": "该测试包含 Point 对象的算术运算（如 `p4*5`）和加法（如 `p3 + p4`），以及验证 `raises(ValueError, lambda: Point(1, 2) + 1)`，与 Issue 中涉及的 API 和操作类似。",
+        "reusable_parts": [
+          "imports (from sympy.geometry import Point, etc.)",
+          "Point 对象的构造方式",
+          "使用 assert 进行结果验证",
+          "使用 raises 验证异常"
+        ],
+        "possible_gap": "现有测试主要测试 Point 与标量（整数、浮点数）的乘法，以及 Point 与 Point 的加法，但未测试 Point 与 SymPy 表达式（如 sympify 结果）的乘法，也未测试乘法操作数顺序的影响。"
+      },
+      {
+        "test_name": "test_arguments",
+        "test_file": "sympy/geometry/tests/test_point.py",
+        "why_relevant": "该测试专门验证接受 Point 对象的函数也能接受元组、列表并自动转换，涉及 `__add__` 方法，并测试了 `evaluate=False` 的情况。",
+        "reusable_parts": [
+          "测试不同输入类型（元组、列表、Point）的自动转换模式",
+          "使用 `evaluate=False` 的测试模式"
+        ],
+        "possible_gap": "该测试未涉及 Point 与 SymPy Mul 表达式的交互，也未测试当 `other` 是 Mul 表达式时 `__add__` 的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中多为 `Point * scalar` 或 `Point + Point`。",
+        "target_pattern": "将乘法操作数顺序改为 `scalar * Point`，其中 scalar 是 sympify 后的 SymPy 数值表达式。",
+        "reason": "Issue 表明 `scalar * Point` 会产生 Mul 表达式，该表达式作为参数传递给 `Point.__add__` 时会导致内部转换失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中加法运算的 `other` 参数通常是 Point、元组或列表。",
+        "target_pattern": "使 `other` 参数为一个 SymPy Mul 表达式（如 `sympify(2.0) * Point(1,1)`）。",
+        "reason": "`Point.__add__` 中的 `Point(other, evaluate=False)` 调用无法处理 Mul 表达式，会触发 TypeError。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 `point1 + sympy.sympify(2.0) * point2` 时是否抛出 GeometryError 或其内部的 TypeError。",
+        "reason": "Issue 的核心错误现象就是抛出 GeometryError，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`sympy.sympify(2.0) * point2` 的返回值类型和 repr。",
+        "reason": "需要确认该表达式是否生成了 Mul 对象，以及该对象的结构，以理解为何后续加法失败。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 `Point.__add__` 内部，`other` 参数在 `Point(other, evaluate=False)` 调用前的类型。",
+        "reason": "确认 `other` 是否为 Mul 类型，这有助于定位 __new__ 方法中的类型检查失败点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `point1 + sympy.sympify(2.0) * point2` 与 `point1 + point2 * sympy.sympify(2.0)` 的结果相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经简化的坐标表达式字符串相等，因为浮点数的表示可能因 evaluate 设置而变化。",
+        "reason": "Issue 的期望行为是两者结果相同，直接比较结果坐标是最稳定的断言。"
+      },
+      {
+        "assertion_goal": "验证 `sympy.sympify(2.0) * point2` 和 `point2 * sympy.sympify(2.0)` 都返回有效的、可与 Point 相加的对象。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言返回对象的精确内部 repr 字符串。",
+        "reason": "修复后，两种乘法顺序都应产生兼容的对象，确保加法可行。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.geometry 和 sympy.sympify。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的测试函数中运行，无需特殊 fixture 或数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Point.__mul__ 方法的具体实现是否处理了左乘和右乘的对称性？",
+      "修复后，`sympy.sympify(2.0) * point2` 应该返回什么类型的对象？是 Point 还是某种包装类型？",
+      "除了 sympify 产生的数值，其他 SymPy 表达式（如符号表达式）与 Point 相乘是否也存在同样问题？"
+    ]
+  }
+}

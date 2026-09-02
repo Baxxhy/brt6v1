@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13109",
+  "issue_summary": "ForeignKey.validate() 使用默认管理器而非基管理器进行验证，导致自定义管理器过滤后的实例无法通过验证。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义具有自定义默认管理器的模型（例如，过滤掉 archived=True 的 Article），以及一个引用它的 ForeignKey 模型（例如 FavoriteArticle）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个 ModelForm 用于 ForeignKey 模型，并在其 __init__ 中将字段的 queryset 设置为关联模型的 _base_manager.all()。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 django.test.TestCase 以确保数据库事务和清理。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_foreign_key_validation",
+        "test_file": "tests/multiple_database/tests.py",
+        "why_relevant": "它直接测试了 ForeignKey.validate() 方法，并验证了其在多数据库场景下的正确性。",
+        "reusable_parts": [
+          "测试用例结构 (TestCase)",
+          "使用 full_clean() 触发验证的模式",
+          "assertIsNone 断言风格"
+        ],
+        "possible_gap": "它没有测试默认管理器过滤掉实例的场景，也没有测试使用 _base_manager 的 queryset。"
+      },
+      {
+        "test_name": "test_filtered_default_manager",
+        "test_file": "tests/custom_managers/tests.py",
+        "why_relevant": "它测试了当默认管理器过滤记录时，保存这些被过滤实例的能力，这与 Issue 的核心问题（管理器过滤）相关。",
+        "reusable_parts": [
+          "创建具有自定义管理器的模型实例",
+          "使用 .save() 操作",
+          "通过计数断言验证状态"
+        ],
+        "possible_gap": "它测试的是保存操作，而不是 ForeignKey 字段验证或 ModelForm 验证。"
+      },
+      {
+        "test_name": "test_blank_false_with_null_true_foreign_key_field",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了 ModelForm 中 ForeignKey 字段的验证行为，特别是当字段非必填时的处理。",
+        "reusable_parts": [
+          "ModelForm 子类的定义",
+          "在 __init__ 中操作字段属性",
+          "使用 form.is_valid() 和 form.save()",
+          "assertTrue 和 assertIsNone 断言"
+        ],
+        "possible_gap": "它没有涉及自定义管理器或 _base_manager 的使用。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当 ForeignKey 字段验证一个被关联模型的默认管理器过滤掉的实例时（例如，一个被标记为 archived 的 Article），即使表单的 queryset 显式设置为使用基管理器（_base_manager），验证也会失败。",
+      "evidence": [
+        "Issue 描述：'The above form will never validate as True when a user selects an archived article.'",
+        "Issue 描述：'This is because the ForeignKey validation always uses _default_manager instead of _base_manager.'",
+        "源码片段 1 第 915 行：'qs = self.remote_field.model._default_manager.using(using).filter(...)'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "表单验证失败，并引发 ValidationError，错误消息类似于 'article instance with id 123 does not exist.'，尽管该实例在数据库中存在。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'The user facing error message is \"article instance with id 123 does not exist.\" (quite confusing to typical users).'",
+        "源码片段 1 第 920-928 行：'raise exceptions.ValidationError(...)'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.fields.related.ForeignKey.validate",
+        "kind": "method",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "这是 Issue 报告的有缺陷的方法，它错误地使用了 _default_manager。"
+      },
+      {
+        "name": "django.db.models.base.ModelBase._base_manager",
+        "kind": "class_function",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 建议的解决方案是使用基管理器，此属性提供了对它的访问。"
+      },
+      {
+        "name": "django.forms.ModelForm",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中触发问题的场景涉及一个 ModelForm，它显式设置了字段的 queryset 为 _base_manager.all()。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ForeignKey.validate",
+        "lines": "909-929",
+        "reason": "Issue 直接指向此方法，并指出它使用了 _default_manager（第 915 行），而应该使用 _base_manager。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试通常使用默认管理器创建和操作实例。",
+        "target_pattern": "创建一个被关联模型默认管理器过滤掉的实例（例如，archived=True 的 Article），并尝试通过一个显式使用 _base_manager 的 ModelForm 来验证或保存引用它的 ForeignKey。",
+        "reason": "Issue 表明，当实例被默认管理器过滤时，即使表单允许，验证也会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用 full_clean() 或通过 ModelForm.is_valid() 间接触发验证。",
+        "target_pattern": "在 ModelForm 的 __init__ 中，将 ForeignKey 字段的 queryset 设置为 Article._base_manager.all()，然后尝试用被过滤的实例验证表单。",
+        "reason": "Issue 中的场景正是通过这种方式触发的。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ForeignKey.validate() 应使用关联模型的基管理器（_base_manager）进行验证，以确保即使默认管理器过滤了某些实例，这些实例在显式允许的情况下也能通过验证。",
+      "evidence": [
+        "Issue 描述：'Suggested solution: the ForeignKey validation should use the _base_manager instead which does not include the default filters.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "form.errors 或捕获的 ValidationError 及其 message 或 params",
+        "reason": "Issue 描述了具体的错误消息，观测验证是否失败以及失败信息是否符合预期。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "form.is_valid() 的返回值",
+        "reason": "Issue 指出表单永远不会验证为 True，观测验证结果是否符合预期。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在验证过程中执行的 SQL 查询（例如，通过 connection.queries 或日志）",
+        "reason": "可以观察验证查询是否使用了错误的过滤器（来自默认管理器），从而找不到实例。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当表单字段的 queryset 设置为 _base_manager.all() 时，即使实例被默认管理器过滤，表单验证也应成功（is_valid() 返回 True）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的错误消息字符串，因为具体措辞可能变化。",
+        "reason": "Issue 的核心是验证逻辑应允许基管理器查询到的实例通过。"
+      },
+      {
+        "assertion_goal": "验证不应引发 ValidationError，或者 form.errors 字典中不应包含该 ForeignKey 字段的错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言异常消息的精确措辞。",
+        "reason": "修复后，被过滤的实例应该被接受，没有验证错误。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "除了 ForeignKey.validate()，其他相关字段（如 OneToOneField）的验证是否也存在同样的问题？",
+    "limit_choices_to 参数与 _base_manager 的交互行为在修复后应如何？",
+    "在多数据库场景下，使用 _base_manager 时数据库路由（router.db_for_read）的行为是否与使用 _default_manager 时完全一致？"
+  ],
+  "raw": {
+    "issue_summary": "ForeignKey.validate() 使用默认管理器而非基管理器进行验证，导致自定义管理器过滤后的实例无法通过验证。",
+    "trigger_condition": {
+      "text": "当 ForeignKey 字段验证一个被关联模型的默认管理器过滤掉的实例时（例如，一个被标记为 archived 的 Article），即使表单的 queryset 显式设置为使用基管理器（_base_manager），验证也会失败。",
+      "evidence": [
+        "Issue 描述：'The above form will never validate as True when a user selects an archived article.'",
+        "Issue 描述：'This is because the ForeignKey validation always uses _default_manager instead of _base_manager.'",
+        "源码片段 1 第 915 行：'qs = self.remote_field.model._default_manager.using(using).filter(...)'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "表单验证失败，并引发 ValidationError，错误消息类似于 'article instance with id 123 does not exist.'，尽管该实例在数据库中存在。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'The user facing error message is \"article instance with id 123 does not exist.\" (quite confusing to typical users).'",
+        "源码片段 1 第 920-928 行：'raise exceptions.ValidationError(...)'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ForeignKey.validate() 应使用关联模型的基管理器（_base_manager）进行验证，以确保即使默认管理器过滤了某些实例，这些实例在显式允许的情况下也能通过验证。",
+      "evidence": [
+        "Issue 描述：'Suggested solution: the ForeignKey validation should use the _base_manager instead which does not include the default filters.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.fields.related.ForeignKey.validate",
+        "kind": "method",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "这是 Issue 报告的有缺陷的方法，它错误地使用了 _default_manager。"
+      },
+      {
+        "name": "django.db.models.base.ModelBase._base_manager",
+        "kind": "class_function",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 建议的解决方案是使用基管理器，此属性提供了对它的访问。"
+      },
+      {
+        "name": "django.forms.ModelForm",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中触发问题的场景涉及一个 ModelForm，它显式设置了字段的 queryset 为 _base_manager.all()。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ForeignKey.validate",
+        "lines": "909-929",
+        "reason": "Issue 直接指向此方法，并指出它使用了 _default_manager（第 915 行），而应该使用 _base_manager。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_foreign_key_validation",
+        "test_file": "tests/multiple_database/tests.py",
+        "why_relevant": "它直接测试了 ForeignKey.validate() 方法，并验证了其在多数据库场景下的正确性。",
+        "reusable_parts": [
+          "测试用例结构 (TestCase)",
+          "使用 full_clean() 触发验证的模式",
+          "assertIsNone 断言风格"
+        ],
+        "possible_gap": "它没有测试默认管理器过滤掉实例的场景，也没有测试使用 _base_manager 的 queryset。"
+      },
+      {
+        "test_name": "test_filtered_default_manager",
+        "test_file": "tests/custom_managers/tests.py",
+        "why_relevant": "它测试了当默认管理器过滤记录时，保存这些被过滤实例的能力，这与 Issue 的核心问题（管理器过滤）相关。",
+        "reusable_parts": [
+          "创建具有自定义管理器的模型实例",
+          "使用 .save() 操作",
+          "通过计数断言验证状态"
+        ],
+        "possible_gap": "它测试的是保存操作，而不是 ForeignKey 字段验证或 ModelForm 验证。"
+      },
+      {
+        "test_name": "test_blank_false_with_null_true_foreign_key_field",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了 ModelForm 中 ForeignKey 字段的验证行为，特别是当字段非必填时的处理。",
+        "reusable_parts": [
+          "ModelForm 子类的定义",
+          "在 __init__ 中操作字段属性",
+          "使用 form.is_valid() 和 form.save()",
+          "assertTrue 和 assertIsNone 断言"
+        ],
+        "possible_gap": "它没有涉及自定义管理器或 _base_manager 的使用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试通常使用默认管理器创建和操作实例。",
+        "target_pattern": "创建一个被关联模型默认管理器过滤掉的实例（例如，archived=True 的 Article），并尝试通过一个显式使用 _base_manager 的 ModelForm 来验证或保存引用它的 ForeignKey。",
+        "reason": "Issue 表明，当实例被默认管理器过滤时，即使表单允许，验证也会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用 full_clean() 或通过 ModelForm.is_valid() 间接触发验证。",
+        "target_pattern": "在 ModelForm 的 __init__ 中，将 ForeignKey 字段的 queryset 设置为 Article._base_manager.all()，然后尝试用被过滤的实例验证表单。",
+        "reason": "Issue 中的场景正是通过这种方式触发的。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "form.errors 或捕获的 ValidationError 及其 message 或 params",
+        "reason": "Issue 描述了具体的错误消息，观测验证是否失败以及失败信息是否符合预期。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "form.is_valid() 的返回值",
+        "reason": "Issue 指出表单永远不会验证为 True，观测验证结果是否符合预期。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在验证过程中执行的 SQL 查询（例如，通过 connection.queries 或日志）",
+        "reason": "可以观察验证查询是否使用了错误的过滤器（来自默认管理器），从而找不到实例。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当表单字段的 queryset 设置为 _base_manager.all() 时，即使实例被默认管理器过滤，表单验证也应成功（is_valid() 返回 True）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的错误消息字符串，因为具体措辞可能变化。",
+        "reason": "Issue 的核心是验证逻辑应允许基管理器查询到的实例通过。"
+      },
+      {
+        "assertion_goal": "验证不应引发 ValidationError，或者 form.errors 字典中不应包含该 ForeignKey 字段的错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言异常消息的精确措辞。",
+        "reason": "修复后，被过滤的实例应该被接受，没有验证错误。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义具有自定义默认管理器的模型（例如，过滤掉 archived=True 的 Article），以及一个引用它的 ForeignKey 模型（例如 FavoriteArticle）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个 ModelForm 用于 ForeignKey 模型，并在其 __init__ 中将字段的 queryset 设置为关联模型的 _base_manager.all()。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 django.test.TestCase 以确保数据库事务和清理。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 ForeignKey.validate()，其他相关字段（如 OneToOneField）的验证是否也存在同样的问题？",
+      "limit_choices_to 参数与 _base_manager 的交互行为在修复后应如何？",
+      "在多数据库场景下，使用 _base_manager 时数据库路由（router.db_for_read）的行为是否与使用 _default_manager 时完全一致？"
+    ]
+  }
+}

@@ -1,0 +1,344 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16899",
+  "issue_summary": "ModelAdmin 的 readonly_fields 检查错误信息未包含字段名，而其他字段（如 list_editable）的错误信息包含字段名。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 装饰器来配置 INSTALLED_APPS，包含自定义的测试应用（如 'admin_checks'）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入并定义测试中使用的模型（如 Song, City, State）及其对应的 ModelAdmin 或 Inline 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 SimpleTestCase 或 TestCase，因为涉及系统检查而不需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_nonexistent_field",
+        "test_file": "tests/admin_checks/tests.py",
+        "why_relevant": "该测试直接针对 ModelAdmin 的 readonly_fields 配置不存在的字段，并检查返回的错误信息，与 Issue 场景高度匹配。",
+        "reusable_parts": [
+          "测试类 SystemChecksTestCase 的装饰器 @override_settings",
+          "创建 SongAdmin 子类并设置 readonly_fields",
+          "调用 admin_instance.check() 并断言错误",
+          "使用 checks.Error 对象进行预期结果对比"
+        ],
+        "possible_gap": "该测试的预期错误信息（expected）正是 Issue 描述的当前有问题的格式（不包含字段名）。要复现 Issue，需要变异测试，使其期望的错误信息包含字段名，但这需要先知道修复后的正确格式。"
+      },
+      {
+        "test_name": "test_nonexistent_field_on_inline",
+        "test_file": "tests/admin_checks/tests.py",
+        "why_relevant": "该测试针对内联（Inline）的 readonly_fields 进行检查，展示了问题也存在于 ModelAdmin 的子类中。",
+        "reusable_parts": [
+          "创建 CityInline 子类",
+          "设置 readonly_fields 为不存在的字段",
+          "调用 inline_instance.check()"
+        ],
+        "possible_gap": "同样，其预期错误信息是当前有问题的格式。"
+      },
+      {
+        "test_name": "test_readonly_and_editable",
+        "test_file": "tests/admin_checks/tests.py",
+        "why_relevant": "该测试展示了 list_editable 字段的错误信息格式，其中包含了字段名（'original_release'），这正是 Issue 期望 readonly_fields 应该达到的效果。",
+        "reusable_parts": [
+          "展示了包含字段名的错误信息格式模板：'refers to \\'original_release\\''",
+          "展示了如何配置 list_editable 和 list_display 来触发特定检查"
+        ],
+        "possible_gap": "该测试检查的是 list_editable 与 readonly 字段的冲突，而非 readonly_fields 本身的字段名缺失问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 ModelAdmin 或其子类（如 TabularInline）的 readonly_fields 属性中，配置一个不存在的字段名或无效值。",
+      "evidence": [
+        "Issue 描述提到 'When subclassing a ModelAdmin, the current error message for the readonly_fields would indicate the index of the value at fault...'",
+        "相关测试 1 和 2 展示了在 readonly_fields 中配置不存在的字段名（如 'nonexistent' 或 'i_dont_exist'）的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "系统检查（check()）返回的错误信息中，对于 readonly_fields 的错误，只包含索引（如 'readonly_fields[0]'），而不包含导致问题的具体字段名。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中给出的错误信息示例：'The value of 'readonly_fields[0]' is not a callable, an attribute of 'CityInline', or an attribute of 'admin_checks.City'.'",
+        "相关测试 1 和 2 的 expected 错误信息也证实了这一点，它们只包含索引，不包含字段名。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelAdmin.check",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 描述的错误信息是通过调用 ModelAdmin 或其子类的 check() 方法产生的。相关测试也调用了此方法。"
+      },
+      {
+        "name": "ModelAdminChecks",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "ModelAdmin 的 checks_class 属性指向 ModelAdminChecks，该类很可能包含生成错误信息的逻辑。"
+      },
+      {
+        "name": "admin.ModelAdmin",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 的核心是关于 ModelAdmin 及其子类的 readonly_fields 属性检查。"
+      },
+      {
+        "name": "admin.TabularInline",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 2 使用了 TabularInline，它是 ModelAdmin 的一种内联形式，也受此问题影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdminChecks",
+        "lines": "",
+        "reason": "负责执行 ModelAdmin 系统检查的类，很可能包含生成 readonly_fields 错误信息的代码。Issue 暗示不同字段的错误信息生成逻辑不一致。"
+      },
+      {
+        "path": "django/contrib/admin/checks.py",
+        "object": "",
+        "lines": "",
+        "reason": "Django admin 的系统检查（checks）通常定义在 checks.py 文件中，其中可能包含生成错误信息（如 E035）的具体函数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "在相似测试 test_nonexistent_field 中，readonly_fields 被设置为 ('title', 'nonexistent')，其中 'nonexistent' 是不存在的字段。",
+        "target_pattern": "保持使用不存在的字段名（如 'nonexistent'），但期望的错误信息格式需要改变。然而，由于 Issue 未给出修复后的精确字符串，目标模式是“错误信息应包含字段名 'nonexistent'”。",
+        "reason": "Issue 的核心是错误信息内容（格式）的差异，而非触发条件。触发条件（输入不存在的字段）在现有测试中已存在。变异点在于对 check() 返回的错误信息字符串的断言部分。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用特定的 Song 模型和 SongAdmin。",
+        "target_pattern": "可以尝试使用不同的 ModelAdmin 子类或内联类，以及不同的不存在的字段名，以验证错误信息生成逻辑的通用性。",
+        "reason": "Issue 提到子类化 ModelAdmin 时出现问题，且测试 2 使用了内联。确保变异能覆盖不同上下文。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于 readonly_fields 的检查，其错误信息应与其他字段（如 list_editable）保持一致，在错误信息中包含导致问题的具体字段名。",
+      "evidence": [
+        "Issue 描述提到 'Other fields like list_editable, raw_id_fields, list_display, etc. would also include this value:' 并给出了包含字段名的示例：'The value of 'list_editable[0]' refers to 'original_release', which is not contained in 'list_display'.'",
+        "Issue 描述明确期望统一并包含字段名：'It would be good if we can unify this and include the field name in the readonly_fields checks...'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "admin_instance.check() 返回的错误列表（list of checks.Error）中，每个 Error 对象的 .msg 属性（错误信息字符串）。",
+        "reason": "Issue 描述的错误现象直接体现在错误信息字符串的内容上。需要观察该字符串是否包含了导致问题的字段名。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "系统检查产生的错误（admin.E035）本身。",
+        "reason": "错误 ID (admin.E035) 是稳定的，但错误信息内容是需要观测和比较的核心。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言当 readonly_fields 包含不存在的字段时，check() 返回的错误信息字符串中包含该字段的名称。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、固定的错误信息字符串相等，因为 Issue 未给出修复后的精确措辞。避免断言错误列表的长度等无关属性。",
+        "reason": "Issue 明确期望错误信息“包含字段名”。使用 contains_fragment 可以稳定地检查字段名是否出现在错误信息中，而不依赖于信息的具体措辞或格式微调。"
+      },
+      {
+        "assertion_goal": "断言对于 list_editable 和 readonly_fields 在类似错误场景下，错误信息都包含字段名（在修复后）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免直接比较 list_editable 和 readonly_fields 的错误信息字符串是否完全相同。",
+        "reason": "Issue 的目标是“统一”错误信息格式，使其都包含字段名，但不一定要求措辞完全一致。检查两者都包含字段名即可验证统一性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后，错误信息的确切措辞和格式是什么？Issue 只给出了 list_editable 的示例，但未说明 readonly_fields 修复后的完整字符串。",
+    "生成 readonly_fields 错误信息的具体代码位于哪个文件的哪个函数中？",
+    "除了不存在的字段，其他类型的无效值（如非 callable 且非属性的对象）的错误信息是否也同样缺少字段名？"
+  ],
+  "raw": {
+    "issue_summary": "ModelAdmin 的 readonly_fields 检查错误信息未包含字段名，而其他字段（如 list_editable）的错误信息包含字段名。",
+    "trigger_condition": {
+      "text": "在 ModelAdmin 或其子类（如 TabularInline）的 readonly_fields 属性中，配置一个不存在的字段名或无效值。",
+      "evidence": [
+        "Issue 描述提到 'When subclassing a ModelAdmin, the current error message for the readonly_fields would indicate the index of the value at fault...'",
+        "相关测试 1 和 2 展示了在 readonly_fields 中配置不存在的字段名（如 'nonexistent' 或 'i_dont_exist'）的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "系统检查（check()）返回的错误信息中，对于 readonly_fields 的错误，只包含索引（如 'readonly_fields[0]'），而不包含导致问题的具体字段名。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中给出的错误信息示例：'The value of 'readonly_fields[0]' is not a callable, an attribute of 'CityInline', or an attribute of 'admin_checks.City'.'",
+        "相关测试 1 和 2 的 expected 错误信息也证实了这一点，它们只包含索引，不包含字段名。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于 readonly_fields 的检查，其错误信息应与其他字段（如 list_editable）保持一致，在错误信息中包含导致问题的具体字段名。",
+      "evidence": [
+        "Issue 描述提到 'Other fields like list_editable, raw_id_fields, list_display, etc. would also include this value:' 并给出了包含字段名的示例：'The value of 'list_editable[0]' refers to 'original_release', which is not contained in 'list_display'.'",
+        "Issue 描述明确期望统一并包含字段名：'It would be good if we can unify this and include the field name in the readonly_fields checks...'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelAdmin.check",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 描述的错误信息是通过调用 ModelAdmin 或其子类的 check() 方法产生的。相关测试也调用了此方法。"
+      },
+      {
+        "name": "ModelAdminChecks",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "ModelAdmin 的 checks_class 属性指向 ModelAdminChecks，该类很可能包含生成错误信息的逻辑。"
+      },
+      {
+        "name": "admin.ModelAdmin",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 的核心是关于 ModelAdmin 及其子类的 readonly_fields 属性检查。"
+      },
+      {
+        "name": "admin.TabularInline",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 2 使用了 TabularInline，它是 ModelAdmin 的一种内联形式，也受此问题影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdminChecks",
+        "lines": "",
+        "reason": "负责执行 ModelAdmin 系统检查的类，很可能包含生成 readonly_fields 错误信息的代码。Issue 暗示不同字段的错误信息生成逻辑不一致。"
+      },
+      {
+        "path": "django/contrib/admin/checks.py",
+        "object": "",
+        "lines": "",
+        "reason": "Django admin 的系统检查（checks）通常定义在 checks.py 文件中，其中可能包含生成错误信息（如 E035）的具体函数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_nonexistent_field",
+        "test_file": "tests/admin_checks/tests.py",
+        "why_relevant": "该测试直接针对 ModelAdmin 的 readonly_fields 配置不存在的字段，并检查返回的错误信息，与 Issue 场景高度匹配。",
+        "reusable_parts": [
+          "测试类 SystemChecksTestCase 的装饰器 @override_settings",
+          "创建 SongAdmin 子类并设置 readonly_fields",
+          "调用 admin_instance.check() 并断言错误",
+          "使用 checks.Error 对象进行预期结果对比"
+        ],
+        "possible_gap": "该测试的预期错误信息（expected）正是 Issue 描述的当前有问题的格式（不包含字段名）。要复现 Issue，需要变异测试，使其期望的错误信息包含字段名，但这需要先知道修复后的正确格式。"
+      },
+      {
+        "test_name": "test_nonexistent_field_on_inline",
+        "test_file": "tests/admin_checks/tests.py",
+        "why_relevant": "该测试针对内联（Inline）的 readonly_fields 进行检查，展示了问题也存在于 ModelAdmin 的子类中。",
+        "reusable_parts": [
+          "创建 CityInline 子类",
+          "设置 readonly_fields 为不存在的字段",
+          "调用 inline_instance.check()"
+        ],
+        "possible_gap": "同样，其预期错误信息是当前有问题的格式。"
+      },
+      {
+        "test_name": "test_readonly_and_editable",
+        "test_file": "tests/admin_checks/tests.py",
+        "why_relevant": "该测试展示了 list_editable 字段的错误信息格式，其中包含了字段名（'original_release'），这正是 Issue 期望 readonly_fields 应该达到的效果。",
+        "reusable_parts": [
+          "展示了包含字段名的错误信息格式模板：'refers to \\'original_release\\''",
+          "展示了如何配置 list_editable 和 list_display 来触发特定检查"
+        ],
+        "possible_gap": "该测试检查的是 list_editable 与 readonly 字段的冲突，而非 readonly_fields 本身的字段名缺失问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "在相似测试 test_nonexistent_field 中，readonly_fields 被设置为 ('title', 'nonexistent')，其中 'nonexistent' 是不存在的字段。",
+        "target_pattern": "保持使用不存在的字段名（如 'nonexistent'），但期望的错误信息格式需要改变。然而，由于 Issue 未给出修复后的精确字符串，目标模式是“错误信息应包含字段名 'nonexistent'”。",
+        "reason": "Issue 的核心是错误信息内容（格式）的差异，而非触发条件。触发条件（输入不存在的字段）在现有测试中已存在。变异点在于对 check() 返回的错误信息字符串的断言部分。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用特定的 Song 模型和 SongAdmin。",
+        "target_pattern": "可以尝试使用不同的 ModelAdmin 子类或内联类，以及不同的不存在的字段名，以验证错误信息生成逻辑的通用性。",
+        "reason": "Issue 提到子类化 ModelAdmin 时出现问题，且测试 2 使用了内联。确保变异能覆盖不同上下文。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "admin_instance.check() 返回的错误列表（list of checks.Error）中，每个 Error 对象的 .msg 属性（错误信息字符串）。",
+        "reason": "Issue 描述的错误现象直接体现在错误信息字符串的内容上。需要观察该字符串是否包含了导致问题的字段名。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "系统检查产生的错误（admin.E035）本身。",
+        "reason": "错误 ID (admin.E035) 是稳定的，但错误信息内容是需要观测和比较的核心。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言当 readonly_fields 包含不存在的字段时，check() 返回的错误信息字符串中包含该字段的名称。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、固定的错误信息字符串相等，因为 Issue 未给出修复后的精确措辞。避免断言错误列表的长度等无关属性。",
+        "reason": "Issue 明确期望错误信息“包含字段名”。使用 contains_fragment 可以稳定地检查字段名是否出现在错误信息中，而不依赖于信息的具体措辞或格式微调。"
+      },
+      {
+        "assertion_goal": "断言对于 list_editable 和 readonly_fields 在类似错误场景下，错误信息都包含字段名（在修复后）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免直接比较 list_editable 和 readonly_fields 的错误信息字符串是否完全相同。",
+        "reason": "Issue 的目标是“统一”错误信息格式，使其都包含字段名，但不一定要求措辞完全一致。检查两者都包含字段名即可验证统一性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 装饰器来配置 INSTALLED_APPS，包含自定义的测试应用（如 'admin_checks'）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入并定义测试中使用的模型（如 Song, City, State）及其对应的 ModelAdmin 或 Inline 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 SimpleTestCase 或 TestCase，因为涉及系统检查而不需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后，错误信息的确切措辞和格式是什么？Issue 只给出了 list_editable 的示例，但未说明 readonly_fields 修复后的完整字符串。",
+      "生成 readonly_fields 错误信息的具体代码位于哪个文件的哪个函数中？",
+      "除了不存在的字段，其他类型的无效值（如非 callable 且非属性的对象）的错误信息是否也同样缺少字段名？"
+    ]
+  }
+}

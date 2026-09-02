@@ -1,0 +1,298 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14559",
+  "issue_summary": "bulk_update() 方法没有返回匹配的行数，而 update() 方法会返回。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase，并设置好测试数据库。可能需要创建多个模型对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能涉及事务，因为 bulk_update() 在 atomic 块中运行。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_large_batch",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它调用了 bulk_update() 并验证了基本功能，但没有检查返回值。",
+        "reusable_parts": [
+          "BulkUpdateTests 测试类",
+          "Note 模型对象的创建和更新",
+          "bulk_update() 的调用方式"
+        ],
+        "possible_gap": "测试没有对 bulk_update() 的返回值进行任何断言，无法检测返回值缺失的问题。"
+      },
+      {
+        "test_name": "test_datetime_field",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它展示了 bulk_update() 更新特定字段的典型用法，并使用了 assertCountEqual 进行状态验证。",
+        "reusable_parts": [
+          "Article 模型的创建和更新",
+          "字段赋值模式",
+          "使用 assertCountEqual 验证数据库状态"
+        ],
+        "possible_gap": "测试只验证了数据库状态，没有检查 bulk_update() 的返回值。"
+      },
+      {
+        "test_name": "test_bulk_update",
+        "test_file": "tests/postgres_tests/test_bulk_update.py",
+        "why_relevant": "它测试了多种模型和字段类型的 bulk_update()，并验证了更新后的数据库状态。",
+        "reusable_parts": [
+          "多种模型的测试数据构造",
+          "循环更新字段值",
+          "使用 assertSequenceEqual 验证结果"
+        ],
+        "possible_gap": "测试同样只关注数据库状态，没有断言 bulk_update() 的返回值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 QuerySet.bulk_update() 方法更新一批对象。",
+      "evidence": [
+        "Issue 描述指出 bulk_update() 返回 None，而 update() 返回匹配的行数。",
+        "源码片段 1 显示 bulk_update() 方法没有 return 语句返回行数。",
+        "相关测试 1-5 都展示了调用 bulk_update() 的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "bulk_update() 方法返回 None，而不是像 update() 那样返回匹配的行数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述明确指出：'Currently, bulk_update() returns None, unlike update(), which returns the number of rows matched.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.bulk_update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "这是 Issue 报告的直接目标方法，需要修改其返回值。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "bulk_update() 内部循环调用 update()，其返回值是计算总行数的关键。"
+      },
+      {
+        "name": "django.db.transaction.atomic",
+        "kind": "function",
+        "source_path": "",
+        "reason": "bulk_update() 在事务中执行，可能影响返回值的行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_update",
+        "lines": "527-568",
+        "reason": "Issue 链接指向该方法的第 568 行，且该方法没有返回行数，而 update() 有返回。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "调用 bulk_update() 后，只验证数据库状态（如使用 assertCountEqual）。",
+        "target_pattern": "调用 bulk_update() 后，捕获其返回值并进行断言。",
+        "reason": "当前测试忽略了返回值，变异后可以检查返回值是否为 None（当前缺陷）或一个整数（期望行为）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中 bulk_update() 的调用通常更新所有对象。",
+        "target_pattern": "可以构造部分对象匹配更新条件，部分不匹配的场景。",
+        "reason": "为了验证返回值是否准确反映了实际匹配的行数，而不仅仅是更新的对象数。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "bulk_update() 方法应该返回所有批次更新操作中匹配的总行数。",
+      "evidence": [
+        "Issue 描述建议：'the return values could simply be added and returned.'，即累加 update() 的返回值并返回。",
+        "源码片段 2 显示 update() 方法返回 rows（匹配的行数）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "bulk_update() 的调用结果，例如 result = Model.objects.bulk_update(...)。",
+        "reason": "直接观察返回值是 None 还是一个整数，是判断缺陷是否触发的核心。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 bulk_update() 前后，数据库中受影响的行数，例如 Model.objects.filter(...).count()。",
+        "reason": "将返回值与数据库实际变化进行对比，验证返回值的正确性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 bulk_update() 的返回值是一个整数，并且等于实际被更新的数据库行数。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回值是 None（这描述了当前缺陷，而非期望行为）。避免断言完整的 SQL 字符串。",
+        "reason": "Issue 期望 bulk_update() 返回匹配的行数，因此断言返回值是整数并与数据库状态一致是稳定且相关的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "bulk_update() 内部批处理时，如果某个批次的 update() 返回 0（例如由于并发修改），总返回值应如何计算？",
+    "bulk_update() 在事务中执行，如果事务回滚，返回值的行为是什么？",
+    "是否所有支持的数据库后端（如 PostgreSQL、MySQL、SQLite）的 update() 返回值语义都一致？"
+  ],
+  "raw": {
+    "issue_summary": "bulk_update() 方法没有返回匹配的行数，而 update() 方法会返回。",
+    "trigger_condition": {
+      "text": "调用 QuerySet.bulk_update() 方法更新一批对象。",
+      "evidence": [
+        "Issue 描述指出 bulk_update() 返回 None，而 update() 返回匹配的行数。",
+        "源码片段 1 显示 bulk_update() 方法没有 return 语句返回行数。",
+        "相关测试 1-5 都展示了调用 bulk_update() 的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "bulk_update() 方法返回 None，而不是像 update() 那样返回匹配的行数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述明确指出：'Currently, bulk_update() returns None, unlike update(), which returns the number of rows matched.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "bulk_update() 方法应该返回所有批次更新操作中匹配的总行数。",
+      "evidence": [
+        "Issue 描述建议：'the return values could simply be added and returned.'，即累加 update() 的返回值并返回。",
+        "源码片段 2 显示 update() 方法返回 rows（匹配的行数）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.bulk_update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "这是 Issue 报告的直接目标方法，需要修改其返回值。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "bulk_update() 内部循环调用 update()，其返回值是计算总行数的关键。"
+      },
+      {
+        "name": "django.db.transaction.atomic",
+        "kind": "function",
+        "source_path": "",
+        "reason": "bulk_update() 在事务中执行，可能影响返回值的行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_update",
+        "lines": "527-568",
+        "reason": "Issue 链接指向该方法的第 568 行，且该方法没有返回行数，而 update() 有返回。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_large_batch",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它调用了 bulk_update() 并验证了基本功能，但没有检查返回值。",
+        "reusable_parts": [
+          "BulkUpdateTests 测试类",
+          "Note 模型对象的创建和更新",
+          "bulk_update() 的调用方式"
+        ],
+        "possible_gap": "测试没有对 bulk_update() 的返回值进行任何断言，无法检测返回值缺失的问题。"
+      },
+      {
+        "test_name": "test_datetime_field",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它展示了 bulk_update() 更新特定字段的典型用法，并使用了 assertCountEqual 进行状态验证。",
+        "reusable_parts": [
+          "Article 模型的创建和更新",
+          "字段赋值模式",
+          "使用 assertCountEqual 验证数据库状态"
+        ],
+        "possible_gap": "测试只验证了数据库状态，没有检查 bulk_update() 的返回值。"
+      },
+      {
+        "test_name": "test_bulk_update",
+        "test_file": "tests/postgres_tests/test_bulk_update.py",
+        "why_relevant": "它测试了多种模型和字段类型的 bulk_update()，并验证了更新后的数据库状态。",
+        "reusable_parts": [
+          "多种模型的测试数据构造",
+          "循环更新字段值",
+          "使用 assertSequenceEqual 验证结果"
+        ],
+        "possible_gap": "测试同样只关注数据库状态，没有断言 bulk_update() 的返回值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "调用 bulk_update() 后，只验证数据库状态（如使用 assertCountEqual）。",
+        "target_pattern": "调用 bulk_update() 后，捕获其返回值并进行断言。",
+        "reason": "当前测试忽略了返回值，变异后可以检查返回值是否为 None（当前缺陷）或一个整数（期望行为）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中 bulk_update() 的调用通常更新所有对象。",
+        "target_pattern": "可以构造部分对象匹配更新条件，部分不匹配的场景。",
+        "reason": "为了验证返回值是否准确反映了实际匹配的行数，而不仅仅是更新的对象数。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "bulk_update() 的调用结果，例如 result = Model.objects.bulk_update(...)。",
+        "reason": "直接观察返回值是 None 还是一个整数，是判断缺陷是否触发的核心。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 bulk_update() 前后，数据库中受影响的行数，例如 Model.objects.filter(...).count()。",
+        "reason": "将返回值与数据库实际变化进行对比，验证返回值的正确性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 bulk_update() 的返回值是一个整数，并且等于实际被更新的数据库行数。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回值是 None（这描述了当前缺陷，而非期望行为）。避免断言完整的 SQL 字符串。",
+        "reason": "Issue 期望 bulk_update() 返回匹配的行数，因此断言返回值是整数并与数据库状态一致是稳定且相关的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase，并设置好测试数据库。可能需要创建多个模型对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能涉及事务，因为 bulk_update() 在 atomic 块中运行。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "bulk_update() 内部批处理时，如果某个批次的 update() 返回 0（例如由于并发修改），总返回值应如何计算？",
+      "bulk_update() 在事务中执行，如果事务回滚，返回值的行为是什么？",
+      "是否所有支持的数据库后端（如 PostgreSQL、MySQL、SQLite）的 update() 返回值语义都一致？"
+    ]
+  }
+}

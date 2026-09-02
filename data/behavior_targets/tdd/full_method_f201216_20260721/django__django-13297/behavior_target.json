@@ -1,0 +1,354 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13297",
+  "issue_summary": "TemplateView.get_context_data() 返回的 kwargs 中包含 SimpleLazyObject 对象，导致在后续查询时因类型问题而崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个基于 TemplateView 的测试视图类，其 get_context_data 方法模仿 Issue 中的示例，从 kwargs 获取参数并尝试使用 get_object_or_404。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 URL 路由，将测试请求映射到该视图，并传递 URL 捕获的参数（如 slug）。这可能需要使用 RequestFactory 或测试客户端来模拟请求。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置测试数据库，并预先创建用于 get_object_or_404 查询的模型实例（如 Account 模型）。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要使用 SimpleLazyObject 来包装传递给视图的 URL 参数值，以模拟 Django URL 解析器在特定版本下的行为。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GetContextDataTest.test_get_context_data_super",
+        "test_file": "tests/generic_views/test_base.py",
+        "why_relevant": "该测试直接测试了 get_context_data 方法，验证了其接收和返回 kwargs 的行为，这与 Issue 中描述的使用场景（在 get_context_data 中处理 kwargs）高度相似。",
+        "reusable_parts": [
+          "测试类结构 (GetContextDataTest)",
+          "调用 get_context_data 并传入 kwargs 的模式",
+          "对返回的 context 字典进行断言检查的模式"
+        ],
+        "possible_gap": "该测试传入的是普通字符串 ('kwarg_value')，而非从 URL 解析器传来的、可能包装为 SimpleLazyObject 的值。它没有模拟 URL 捕获参数传入视图并最终进入 get_context_data 的完整流程，也没有涉及数据库查询。"
+      },
+      {
+        "test_name": "LazyObjectTestCase.test_cmp",
+        "test_file": "tests/utils_tests/test_lazyobject.py",
+        "why_relevant": "该测试涉及 LazyObject（SimpleLazyObject 的父类）与普通值的比较，有助于理解 SimpleLazyObject 在比较操作中的行为，而 Issue 中问题的本质是 SimpleLazyObject 在数据库查询参数绑定中未被正确解析。",
+        "reusable_parts": [
+          "使用 lazy_wrap 方法创建 LazyObject 的测试模式",
+          "对 LazyObject 与普通值进行相等性比较的断言"
+        ],
+        "possible_gap": "该测试关注的是比较操作（__eq__），而非将 LazyObject 作为参数传递给第三方函数（如数据库查询）时可能发生的隐式类型转换或解析问题。"
+      },
+      {
+        "test_name": "SimpleLazyObjectTestCase.test_repr",
+        "test_file": "tests/utils_tests/test_lazyobject.py",
+        "why_relevant": "该测试专门针对 SimpleLazyObject，测试其 repr 行为以及触发评估的时机，有助于理解 SimpleLazyObject 的惰性求值特性，这与 Issue 中值未被及时“解析”有关。",
+        "reusable_parts": [
+          "创建 SimpleLazyObject 实例的模式",
+          "检查 _wrapped 属性以判断是否已评估的模式"
+        ],
+        "possible_gap": "该测试不涉及将 SimpleLazyObject 作为函数参数传递的场景，也不涉及数据库或 URL 调度。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用基于 TemplateView 的视图类，在其 get_context_data 方法中从 kwargs 参数获取 URL 捕获的 slug 值（例如 <slug:offer_slug>），并将该值直接传递给 get_object_or_404 进行数据库查询。",
+      "evidence": [
+        "Issue 中提供的 OfferView 示例代码，展示了从 kwargs.get('offer_slug') 获取值并传递给 get_object_or_404。",
+        "Issue 中描述了 URL 配置为 path('/offers/<slug:offer_slug>/', OfferView.as_view(), name='offer_view')。",
+        "Issue 指出在 Django 3.1 中，从 kwargs.get 获取的 offer_slug 是 SimpleLazyObject 类型。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当使用从 kwargs 获取的 SimpleLazyObject 值作为查询参数时，数据库后端（如 SQLite）会抛出类型错误，提示 'Error binding parameter 0 - probably unsupported type'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确给出了错误信息：'Error binding parameter 0 - probably unsupported type'，并指出来自 django/db/backends/sqlite3/operations.py 的第 144 行。",
+        "Issue 描述了在未使用 str() 转换时，get_object_or_404 行为异常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "TemplateView.get_context_data",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "Issue 的核心是此方法返回的 kwargs 参数值类型发生了变化。"
+      },
+      {
+        "name": "get_object_or_404",
+        "kind": "function",
+        "source_path": "django/shortcuts.py",
+        "reason": "Issue 中崩溃发生在将 kwargs 中的值传递给此函数进行查询时。"
+      },
+      {
+        "name": "SimpleLazyObject",
+        "kind": "class",
+        "source_path": "django/utils/functional.py",
+        "reason": "Issue 指出导致问题的类型是 SimpleLazyObject。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/views/generic/base.py",
+        "object": "ContextMixin.get_context_data",
+        "lines": "26-30",
+        "reason": "Issue 明确指出 TemplateView.get_context_data() 的 kwargs 返回了 SimpleLazyObjects。此方法是处理传入 kwargs 并返回上下文的地方。"
+      },
+      {
+        "path": "django/views/generic/base.py",
+        "object": "TemplateView",
+        "lines": "157-164",
+        "reason": "Issue 涉及的是 TemplateView 的子类。TemplateView 是使用 ContextMixin 的视图，其 get 方法会调用 get_context_data。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中，直接向 get_context_data 传入普通字符串参数（如 'kwarg_value'）。",
+        "target_pattern": "需要模拟 URL 解析器传入的参数，使得进入 get_context_data 的 kwargs 中的某个值（如 'offer_slug'）是一个 SimpleLazyObject 实例，其内部包装了一个字符串。",
+        "reason": "Issue 表明问题仅在 kwargs 中的值为 SimpleLazyObject 时触发。将普通参数变异为 SimpleLazyObject 包装的参数，可以模拟缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，调用 get_context_data 后直接对返回的 context 进行断言。",
+        "target_pattern": "在调用 get_context_data 获取 context 后，需要从 context 中提取出那个 SimpleLazyObject 值，并将其作为参数传递给 get_object_or_404（或类似的数据库查询函数）。",
+        "reason": "Issue 中的崩溃发生在将值传递给 get_object_or_404 进行查询时。仅仅检查 context 内容不足以触发错误，必须模拟后续的使用场景。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "从 TemplateView.get_context_data() 的 kwargs 参数中获取的 URL 捕获值（如 slug），在传递给数据库查询函数（如 get_object_or_404）时，应能自动或正确地被解析为预期的字符串类型，使得查询能够正常执行，而无需手动调用 str() 进行转换。",
+      "evidence": [
+        "Issue 中提到在 Django 3.0 中相同的代码可以工作。",
+        "Issue 中展示了修复方法是将 kwargs.get('offer_slug', '') 的结果用 str() 包装，这暗示了期望的行为是查询参数应为字符串类型。",
+        "相关源码片段 4 中 get_object_or_404 的文档说明其参数用于 get() 查询，暗示参数应为可查询的类型。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "从 get_context_data 返回的 kwargs 字典中获取特定键（如 'offer_slug'）后的值的类型。",
+        "reason": "Issue 的核心是值的类型从普通字符串变成了 SimpleLazyObject。观察类型变化是确认测试是否走上缺陷路径的第一步。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 get_object_or_404(..., slug=slug_value) 时是否抛出异常，以及异常的类型和消息。",
+        "reason": "Issue 明确描述了崩溃和错误信息。观测此调用是否抛出 'Error binding parameter' 相关的异常是判断缺陷是否触发的直接证据。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "在传递给 get_object_or_404 之前，观察 slug_value 的 repr 或 str 表示。",
+        "reason": "SimpleLazyObject 的 repr 有其特定格式（如 '<SimpleLazyObject: ...>'），这有助于在调试中识别它。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当从 get_context_data 的 kwargs 中获取一个 URL 捕获的参数并直接用于 get_object_or_404 查询时，查询应成功执行而不抛出类型错误异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的、完整的 SQL 错误字符串，因为数据库后端可能不同。避免断言 get_object_or_404 返回的具体对象 ID，因为这依赖于测试数据库状态。",
+        "reason": "Issue 描述的是会抛出异常。一个稳定的断言是验证在特定条件下（使用 SimpleLazyObject 参数）是否会引发异常。修复后，此断言应不再引发异常（或引发其他预期异常，如 Http404）。"
+      },
+      {
+        "assertion_goal": "从 get_context_data 返回的上下文数据中，URL 参数的值在用于查询前，其类型或字符串表示应能满足数据库查询的要求。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言值一定是 str 类型，因为修复可能涉及其他类型的自动转换。避免断言 _wrapped 属性的具体值。",
+        "reason": "更稳定的断言是检查值是否是可用的查询参数类型（如 str），或者检查其字符串表示是否与预期原始值相等，而不是依赖于内部实现细节。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Django 3.0 到 3.1 之间，是什么具体的代码变更导致 kwargs 中的值变成了 SimpleLazyObject？是 URL 解析器、视图基类，还是中间件的变化？",
+    "除了 get_object_or_404，其他接受来自 kwargs 的 SimpleLazyObject 作为参数的函数或方法是否也会遇到类似问题？",
+    "SimpleLazyObject 在什么条件下会自动解析为字符串？在数据库查询参数绑定的上下文中，为什么自动解析失败了？",
+    "修复是应该在 TemplateView.get_context_data 内部解析所有 SimpleLazyObject，还是在更底层（如数据库后端）处理，或是修改 URL 解析器的返回值类型？"
+  ],
+  "raw": {
+    "issue_summary": "TemplateView.get_context_data() 返回的 kwargs 中包含 SimpleLazyObject 对象，导致在后续查询时因类型问题而崩溃。",
+    "trigger_condition": {
+      "text": "使用基于 TemplateView 的视图类，在其 get_context_data 方法中从 kwargs 参数获取 URL 捕获的 slug 值（例如 <slug:offer_slug>），并将该值直接传递给 get_object_or_404 进行数据库查询。",
+      "evidence": [
+        "Issue 中提供的 OfferView 示例代码，展示了从 kwargs.get('offer_slug') 获取值并传递给 get_object_or_404。",
+        "Issue 中描述了 URL 配置为 path('/offers/<slug:offer_slug>/', OfferView.as_view(), name='offer_view')。",
+        "Issue 指出在 Django 3.1 中，从 kwargs.get 获取的 offer_slug 是 SimpleLazyObject 类型。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当使用从 kwargs 获取的 SimpleLazyObject 值作为查询参数时，数据库后端（如 SQLite）会抛出类型错误，提示 'Error binding parameter 0 - probably unsupported type'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确给出了错误信息：'Error binding parameter 0 - probably unsupported type'，并指出来自 django/db/backends/sqlite3/operations.py 的第 144 行。",
+        "Issue 描述了在未使用 str() 转换时，get_object_or_404 行为异常。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "从 TemplateView.get_context_data() 的 kwargs 参数中获取的 URL 捕获值（如 slug），在传递给数据库查询函数（如 get_object_or_404）时，应能自动或正确地被解析为预期的字符串类型，使得查询能够正常执行，而无需手动调用 str() 进行转换。",
+      "evidence": [
+        "Issue 中提到在 Django 3.0 中相同的代码可以工作。",
+        "Issue 中展示了修复方法是将 kwargs.get('offer_slug', '') 的结果用 str() 包装，这暗示了期望的行为是查询参数应为字符串类型。",
+        "相关源码片段 4 中 get_object_or_404 的文档说明其参数用于 get() 查询，暗示参数应为可查询的类型。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "TemplateView.get_context_data",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "Issue 的核心是此方法返回的 kwargs 参数值类型发生了变化。"
+      },
+      {
+        "name": "get_object_or_404",
+        "kind": "function",
+        "source_path": "django/shortcuts.py",
+        "reason": "Issue 中崩溃发生在将 kwargs 中的值传递给此函数进行查询时。"
+      },
+      {
+        "name": "SimpleLazyObject",
+        "kind": "class",
+        "source_path": "django/utils/functional.py",
+        "reason": "Issue 指出导致问题的类型是 SimpleLazyObject。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/views/generic/base.py",
+        "object": "ContextMixin.get_context_data",
+        "lines": "26-30",
+        "reason": "Issue 明确指出 TemplateView.get_context_data() 的 kwargs 返回了 SimpleLazyObjects。此方法是处理传入 kwargs 并返回上下文的地方。"
+      },
+      {
+        "path": "django/views/generic/base.py",
+        "object": "TemplateView",
+        "lines": "157-164",
+        "reason": "Issue 涉及的是 TemplateView 的子类。TemplateView 是使用 ContextMixin 的视图，其 get 方法会调用 get_context_data。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GetContextDataTest.test_get_context_data_super",
+        "test_file": "tests/generic_views/test_base.py",
+        "why_relevant": "该测试直接测试了 get_context_data 方法，验证了其接收和返回 kwargs 的行为，这与 Issue 中描述的使用场景（在 get_context_data 中处理 kwargs）高度相似。",
+        "reusable_parts": [
+          "测试类结构 (GetContextDataTest)",
+          "调用 get_context_data 并传入 kwargs 的模式",
+          "对返回的 context 字典进行断言检查的模式"
+        ],
+        "possible_gap": "该测试传入的是普通字符串 ('kwarg_value')，而非从 URL 解析器传来的、可能包装为 SimpleLazyObject 的值。它没有模拟 URL 捕获参数传入视图并最终进入 get_context_data 的完整流程，也没有涉及数据库查询。"
+      },
+      {
+        "test_name": "LazyObjectTestCase.test_cmp",
+        "test_file": "tests/utils_tests/test_lazyobject.py",
+        "why_relevant": "该测试涉及 LazyObject（SimpleLazyObject 的父类）与普通值的比较，有助于理解 SimpleLazyObject 在比较操作中的行为，而 Issue 中问题的本质是 SimpleLazyObject 在数据库查询参数绑定中未被正确解析。",
+        "reusable_parts": [
+          "使用 lazy_wrap 方法创建 LazyObject 的测试模式",
+          "对 LazyObject 与普通值进行相等性比较的断言"
+        ],
+        "possible_gap": "该测试关注的是比较操作（__eq__），而非将 LazyObject 作为参数传递给第三方函数（如数据库查询）时可能发生的隐式类型转换或解析问题。"
+      },
+      {
+        "test_name": "SimpleLazyObjectTestCase.test_repr",
+        "test_file": "tests/utils_tests/test_lazyobject.py",
+        "why_relevant": "该测试专门针对 SimpleLazyObject，测试其 repr 行为以及触发评估的时机，有助于理解 SimpleLazyObject 的惰性求值特性，这与 Issue 中值未被及时“解析”有关。",
+        "reusable_parts": [
+          "创建 SimpleLazyObject 实例的模式",
+          "检查 _wrapped 属性以判断是否已评估的模式"
+        ],
+        "possible_gap": "该测试不涉及将 SimpleLazyObject 作为函数参数传递的场景，也不涉及数据库或 URL 调度。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中，直接向 get_context_data 传入普通字符串参数（如 'kwarg_value'）。",
+        "target_pattern": "需要模拟 URL 解析器传入的参数，使得进入 get_context_data 的 kwargs 中的某个值（如 'offer_slug'）是一个 SimpleLazyObject 实例，其内部包装了一个字符串。",
+        "reason": "Issue 表明问题仅在 kwargs 中的值为 SimpleLazyObject 时触发。将普通参数变异为 SimpleLazyObject 包装的参数，可以模拟缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，调用 get_context_data 后直接对返回的 context 进行断言。",
+        "target_pattern": "在调用 get_context_data 获取 context 后，需要从 context 中提取出那个 SimpleLazyObject 值，并将其作为参数传递给 get_object_or_404（或类似的数据库查询函数）。",
+        "reason": "Issue 中的崩溃发生在将值传递给 get_object_or_404 进行查询时。仅仅检查 context 内容不足以触发错误，必须模拟后续的使用场景。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "从 get_context_data 返回的 kwargs 字典中获取特定键（如 'offer_slug'）后的值的类型。",
+        "reason": "Issue 的核心是值的类型从普通字符串变成了 SimpleLazyObject。观察类型变化是确认测试是否走上缺陷路径的第一步。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 get_object_or_404(..., slug=slug_value) 时是否抛出异常，以及异常的类型和消息。",
+        "reason": "Issue 明确描述了崩溃和错误信息。观测此调用是否抛出 'Error binding parameter' 相关的异常是判断缺陷是否触发的直接证据。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "在传递给 get_object_or_404 之前，观察 slug_value 的 repr 或 str 表示。",
+        "reason": "SimpleLazyObject 的 repr 有其特定格式（如 '<SimpleLazyObject: ...>'），这有助于在调试中识别它。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当从 get_context_data 的 kwargs 中获取一个 URL 捕获的参数并直接用于 get_object_or_404 查询时，查询应成功执行而不抛出类型错误异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的、完整的 SQL 错误字符串，因为数据库后端可能不同。避免断言 get_object_or_404 返回的具体对象 ID，因为这依赖于测试数据库状态。",
+        "reason": "Issue 描述的是会抛出异常。一个稳定的断言是验证在特定条件下（使用 SimpleLazyObject 参数）是否会引发异常。修复后，此断言应不再引发异常（或引发其他预期异常，如 Http404）。"
+      },
+      {
+        "assertion_goal": "从 get_context_data 返回的上下文数据中，URL 参数的值在用于查询前，其类型或字符串表示应能满足数据库查询的要求。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言值一定是 str 类型，因为修复可能涉及其他类型的自动转换。避免断言 _wrapped 属性的具体值。",
+        "reason": "更稳定的断言是检查值是否是可用的查询参数类型（如 str），或者检查其字符串表示是否与预期原始值相等，而不是依赖于内部实现细节。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个基于 TemplateView 的测试视图类，其 get_context_data 方法模仿 Issue 中的示例，从 kwargs 获取参数并尝试使用 get_object_or_404。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 URL 路由，将测试请求映射到该视图，并传递 URL 捕获的参数（如 slug）。这可能需要使用 RequestFactory 或测试客户端来模拟请求。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置测试数据库，并预先创建用于 get_object_or_404 查询的模型实例（如 Account 模型）。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要使用 SimpleLazyObject 来包装传递给视图的 URL 参数值，以模拟 Django URL 解析器在特定版本下的行为。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Django 3.0 到 3.1 之间，是什么具体的代码变更导致 kwargs 中的值变成了 SimpleLazyObject？是 URL 解析器、视图基类，还是中间件的变化？",
+      "除了 get_object_or_404，其他接受来自 kwargs 的 SimpleLazyObject 作为参数的函数或方法是否也会遇到类似问题？",
+      "SimpleLazyObject 在什么条件下会自动解析为字符串？在数据库查询参数绑定的上下文中，为什么自动解析失败了？",
+      "修复是应该在 TemplateView.get_context_data 内部解析所有 SimpleLazyObject，还是在更底层（如数据库后端）处理，或是修改 URL 解析器的返回值类型？"
+    ]
+  }
+}

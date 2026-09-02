@@ -1,0 +1,362 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16041",
+  "issue_summary": "当通过form_kwargs显式设置empty_permitted参数时，渲染formset的empty_form会引发KeyError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用TestCase（如SimpleTestCase或TestCase），因为涉及表单和模板渲染。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义一个简单的Django Model或使用一个已有的测试Model（如tests/forms_tests/models.py中的Article或Choice），用于modelformset_factory。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置Django设置（如INSTALLED_APPS包含测试应用）以确保模型可用。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FormsFormsetTestCase.test_form_kwargs_empty_form",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "此测试直接验证了form_kwargs中的参数是否能正确传递到empty_form对象中，与Issue中form_kwargs传递empty_permitted的场景高度相似。",
+        "reusable_parts": [
+          "formset_factory的使用",
+          "form_kwargs参数的设置",
+          "对empty_form属性的断言检查"
+        ],
+        "possible_gap": "该测试传递的是自定义参数'custom_kwarg'，而Issue传递的是表单内置参数'empty_permitted'，行为可能不同。该测试没有触发KeyError，也没有涉及模板渲染。"
+      },
+      {
+        "test_name": "FormsTestCase.test_empty_permitted",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "此测试详细演示了empty_permitted参数在单个表单中的行为，有助于理解该参数的含义和预期效果。",
+        "reusable_parts": [
+          "Form类的定义",
+          "empty_permitted参数的使用",
+          "表单验证的断言"
+        ],
+        "possible_gap": "该测试针对单个Form，而非FormSet及其empty_form。"
+      },
+      {
+        "test_name": "TestIsBoundBehavior.test_empty_forms_are_unbound",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "此测试直接操作了formset.empty_form，并检查其属性，与Issue中操作empty_form的场景相关。",
+        "reusable_parts": [
+          "ArticleFormSet的创建",
+          "对empty_form.is_bound的断言",
+          "同时使用未绑定和绑定formset的empty_form"
+        ],
+        "possible_gap": "该测试没有设置form_kwargs，也没有触发渲染或KeyError。"
+      },
+      {
+        "test_name": "FormsFormsetTestCase.test_more_initial_data",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "此测试检查了formset.empty_form.empty_permitted属性，并断言其为True，这与Issue中empty_permitted应被忽略的预期行为形成对比。",
+        "reusable_parts": [
+          "formset_factory的使用",
+          "检查empty_form.empty_permitted属性",
+          "使用assertHTMLEqual进行渲染输出比较"
+        ],
+        "possible_gap": "该测试没有通过form_kwargs设置empty_permitted，因此没有触发冲突。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用modelformset_factory创建表单集时，在form_kwargs中显式设置'empty_permitted'为True或False，然后尝试渲染模板中的formset.empty_form。",
+      "evidence": [
+        "Issue描述：'When explicitly setting form_kwargs = {'empty_permitted':True} or form_kwargs = {'empty_permitted':False} , a KeyError occurs when rendering a template that uses a formset's empty_form.'",
+        "Issue中的Steps to Reproduce代码展示了触发条件。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "渲染模板时抛出KeyError异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue描述：'a KeyError occurs when rendering a template that uses a formset's empty_form.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "modelformset_factory",
+        "kind": "function",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue中用于创建表单集的工厂函数。"
+      },
+      {
+        "name": "BaseFormSet.empty_form",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue的核心是渲染empty_form时出错，此方法负责生成empty_form。"
+      },
+      {
+        "name": "BaseFormSet.get_form_kwargs",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "empty_form方法调用get_form_kwargs(None)来获取表单参数，可能与empty_permitted的传递有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/formsets.py",
+        "object": "BaseFormSet.empty_form",
+        "lines": "259-269",
+        "reason": "empty_form方法在构造表单时，通过**self.get_form_kwargs(None)传递了参数，这可能将form_kwargs中的empty_permitted传递给表单构造函数，而empty_form方法自身已显式设置了empty_permitted=True，可能导致冲突或KeyError。"
+      },
+      {
+        "path": "django/forms/formsets.py",
+        "object": "BaseFormSet.get_form_kwargs",
+        "lines": "",
+        "reason": "此方法负责返回用于构造表单的参数字典。如果它返回的字典包含了从form_kwargs传入的empty_permitted键，而empty_form方法又显式传递了empty_permitted参数，可能导致重复键错误或参数覆盖问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中form_kwargs传递的是自定义参数（如'custom_kwarg': 1）。",
+        "target_pattern": "将form_kwargs设置为包含内置参数'empty_permitted'，值为True或False。",
+        "reason": "Issue明确指出当form_kwargs显式设置empty_permitted时会触发KeyError，而自定义参数不会。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接访问empty_form属性或调用其方法（如.as_p()）。",
+        "target_pattern": "在模板渲染上下文中访问empty_form（模拟Issue中的{{ formset.empty_form }}）。这可能涉及调用empty_form的渲染方法或访问其内部状态。",
+        "reason": "Issue中的错误发生在渲染模板时，而不仅仅是Python对象访问。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "empty_form的渲染应忽略通过form_kwargs传递的empty_permitted参数，因为empty_form不用于提交数据验证，empty_permitted参数对其不相关。",
+      "evidence": [
+        "Issue的Expected Behavior：'empty_permitted is ignored for formset.empty_form since empty_permitted is irrelevant for empty_form, as empty_form is not meant to be used to pass data and therefore does not need to be validated.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在尝试渲染formset.empty_form（例如调用.as_table(), .as_p()或直接在其上迭代）时捕获的异常。",
+        "reason": "Issue的核心症状是渲染时抛出KeyError，直接观测此异常是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "formset.empty_form构造后，检查其empty_permitted属性的值。",
+        "reason": "根据源码，empty_form方法显式设置了empty_permitted=True，但Issue预期应忽略form_kwargs中的设置。观测此值有助于理解参数传递的冲突。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在empty_form方法内部，观察self.get_form_kwargs(None)返回的字典内容，特别是是否包含'empty_permitted'键。",
+        "reason": "KeyError可能源于尝试将重复的'empty_permitted'键解包到表单构造函数中。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当通过form_kwargs设置empty_permitted时，渲染formset.empty_form不会引发KeyError（或任何异常）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息字符串，因为消息可能随版本变化。",
+        "reason": "修复后，渲染操作应正常进行，不抛出异常。使用assertNotRaises或检查无异常更稳定。"
+      },
+      {
+        "assertion_goal": "验证empty_form的渲染输出包含预期的表单HTML控件（例如input字段），表明渲染成功。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、精确的HTML字符串相等，因为HTML结构可能因Django版本或渲染器而微调。",
+        "reason": "渲染成功意味着生成了表单HTML，检查关键片段（如name属性包含'__prefix__'）比完整字符串更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "KeyError的具体键名是什么？是'empty_permitted'还是其他键？",
+    "错误是发生在empty_form方法内部，还是在表单构造函数中，亦或是在模板渲染引擎中？",
+    "empty_form方法中显式设置的empty_permitted=True和通过get_form_kwargs传入的empty_permitted参数，哪个优先级更高？或者它们冲突导致了重复键错误？",
+    "除了KeyError，是否还有其他副作用（如empty_permitted值被错误设置）？"
+  ],
+  "raw": {
+    "issue_summary": "当通过form_kwargs显式设置empty_permitted参数时，渲染formset的empty_form会引发KeyError。",
+    "trigger_condition": {
+      "text": "使用modelformset_factory创建表单集时，在form_kwargs中显式设置'empty_permitted'为True或False，然后尝试渲染模板中的formset.empty_form。",
+      "evidence": [
+        "Issue描述：'When explicitly setting form_kwargs = {'empty_permitted':True} or form_kwargs = {'empty_permitted':False} , a KeyError occurs when rendering a template that uses a formset's empty_form.'",
+        "Issue中的Steps to Reproduce代码展示了触发条件。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "渲染模板时抛出KeyError异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue描述：'a KeyError occurs when rendering a template that uses a formset's empty_form.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "empty_form的渲染应忽略通过form_kwargs传递的empty_permitted参数，因为empty_form不用于提交数据验证，empty_permitted参数对其不相关。",
+      "evidence": [
+        "Issue的Expected Behavior：'empty_permitted is ignored for formset.empty_form since empty_permitted is irrelevant for empty_form, as empty_form is not meant to be used to pass data and therefore does not need to be validated.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "modelformset_factory",
+        "kind": "function",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue中用于创建表单集的工厂函数。"
+      },
+      {
+        "name": "BaseFormSet.empty_form",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue的核心是渲染empty_form时出错，此方法负责生成empty_form。"
+      },
+      {
+        "name": "BaseFormSet.get_form_kwargs",
+        "kind": "method",
+        "source_path": "django/forms/formsets.py",
+        "reason": "empty_form方法调用get_form_kwargs(None)来获取表单参数，可能与empty_permitted的传递有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/formsets.py",
+        "object": "BaseFormSet.empty_form",
+        "lines": "259-269",
+        "reason": "empty_form方法在构造表单时，通过**self.get_form_kwargs(None)传递了参数，这可能将form_kwargs中的empty_permitted传递给表单构造函数，而empty_form方法自身已显式设置了empty_permitted=True，可能导致冲突或KeyError。"
+      },
+      {
+        "path": "django/forms/formsets.py",
+        "object": "BaseFormSet.get_form_kwargs",
+        "lines": "",
+        "reason": "此方法负责返回用于构造表单的参数字典。如果它返回的字典包含了从form_kwargs传入的empty_permitted键，而empty_form方法又显式传递了empty_permitted参数，可能导致重复键错误或参数覆盖问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FormsFormsetTestCase.test_form_kwargs_empty_form",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "此测试直接验证了form_kwargs中的参数是否能正确传递到empty_form对象中，与Issue中form_kwargs传递empty_permitted的场景高度相似。",
+        "reusable_parts": [
+          "formset_factory的使用",
+          "form_kwargs参数的设置",
+          "对empty_form属性的断言检查"
+        ],
+        "possible_gap": "该测试传递的是自定义参数'custom_kwarg'，而Issue传递的是表单内置参数'empty_permitted'，行为可能不同。该测试没有触发KeyError，也没有涉及模板渲染。"
+      },
+      {
+        "test_name": "FormsTestCase.test_empty_permitted",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "此测试详细演示了empty_permitted参数在单个表单中的行为，有助于理解该参数的含义和预期效果。",
+        "reusable_parts": [
+          "Form类的定义",
+          "empty_permitted参数的使用",
+          "表单验证的断言"
+        ],
+        "possible_gap": "该测试针对单个Form，而非FormSet及其empty_form。"
+      },
+      {
+        "test_name": "TestIsBoundBehavior.test_empty_forms_are_unbound",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "此测试直接操作了formset.empty_form，并检查其属性，与Issue中操作empty_form的场景相关。",
+        "reusable_parts": [
+          "ArticleFormSet的创建",
+          "对empty_form.is_bound的断言",
+          "同时使用未绑定和绑定formset的empty_form"
+        ],
+        "possible_gap": "该测试没有设置form_kwargs，也没有触发渲染或KeyError。"
+      },
+      {
+        "test_name": "FormsFormsetTestCase.test_more_initial_data",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "此测试检查了formset.empty_form.empty_permitted属性，并断言其为True，这与Issue中empty_permitted应被忽略的预期行为形成对比。",
+        "reusable_parts": [
+          "formset_factory的使用",
+          "检查empty_form.empty_permitted属性",
+          "使用assertHTMLEqual进行渲染输出比较"
+        ],
+        "possible_gap": "该测试没有通过form_kwargs设置empty_permitted，因此没有触发冲突。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中form_kwargs传递的是自定义参数（如'custom_kwarg': 1）。",
+        "target_pattern": "将form_kwargs设置为包含内置参数'empty_permitted'，值为True或False。",
+        "reason": "Issue明确指出当form_kwargs显式设置empty_permitted时会触发KeyError，而自定义参数不会。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接访问empty_form属性或调用其方法（如.as_p()）。",
+        "target_pattern": "在模板渲染上下文中访问empty_form（模拟Issue中的{{ formset.empty_form }}）。这可能涉及调用empty_form的渲染方法或访问其内部状态。",
+        "reason": "Issue中的错误发生在渲染模板时，而不仅仅是Python对象访问。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在尝试渲染formset.empty_form（例如调用.as_table(), .as_p()或直接在其上迭代）时捕获的异常。",
+        "reason": "Issue的核心症状是渲染时抛出KeyError，直接观测此异常是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "formset.empty_form构造后，检查其empty_permitted属性的值。",
+        "reason": "根据源码，empty_form方法显式设置了empty_permitted=True，但Issue预期应忽略form_kwargs中的设置。观测此值有助于理解参数传递的冲突。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在empty_form方法内部，观察self.get_form_kwargs(None)返回的字典内容，特别是是否包含'empty_permitted'键。",
+        "reason": "KeyError可能源于尝试将重复的'empty_permitted'键解包到表单构造函数中。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当通过form_kwargs设置empty_permitted时，渲染formset.empty_form不会引发KeyError（或任何异常）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息字符串，因为消息可能随版本变化。",
+        "reason": "修复后，渲染操作应正常进行，不抛出异常。使用assertNotRaises或检查无异常更稳定。"
+      },
+      {
+        "assertion_goal": "验证empty_form的渲染输出包含预期的表单HTML控件（例如input字段），表明渲染成功。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、精确的HTML字符串相等，因为HTML结构可能因Django版本或渲染器而微调。",
+        "reason": "渲染成功意味着生成了表单HTML，检查关键片段（如name属性包含'__prefix__'）比完整字符串更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用TestCase（如SimpleTestCase或TestCase），因为涉及表单和模板渲染。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义一个简单的Django Model或使用一个已有的测试Model（如tests/forms_tests/models.py中的Article或Choice），用于modelformset_factory。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置Django设置（如INSTALLED_APPS包含测试应用）以确保模型可用。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "KeyError的具体键名是什么？是'empty_permitted'还是其他键？",
+      "错误是发生在empty_form方法内部，还是在表单构造函数中，亦或是在模板渲染引擎中？",
+      "empty_form方法中显式设置的empty_permitted=True和通过get_form_kwargs传入的empty_permitted参数，哪个优先级更高？或者它们冲突导致了重复键错误？",
+      "除了KeyError，是否还有其他副作用（如empty_permitted值被错误设置）？"
+    ]
+  }
+}

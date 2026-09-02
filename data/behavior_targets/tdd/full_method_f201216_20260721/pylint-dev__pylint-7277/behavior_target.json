@@ -1,0 +1,248 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pylint-dev__pylint-7277",
+  "issue_summary": "pylint 在通过 runpy 运行时错误地移除了 sys.path 的第一个条目，即使该条目不是空字符串、点号或当前工作目录。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 runpy 模块，并可能使用 `_test_sys_path` 或类似工具来控制 sys.path 的初始状态。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要模拟或隔离环境，确保测试不依赖实际安装的 pylint 扩展。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRunTC.test_modify_sys_path",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试直接测试了 modify_sys_path 函数，该函数很可能与 sys.path 的修改逻辑相关，并且测试了多种 sys.path 初始配置。",
+        "reusable_parts": [
+          "使用 `_test_sys_path` 上下文管理器",
+          "使用 `_test_environ_pythonpath` 上下文管理器",
+          "对 sys.path 进行赋值和断言"
+        ],
+        "possible_gap": "该测试可能没有覆盖通过 runpy 运行 pylint 的场景，也没有测试当第一个条目是任意字符串（如 \"something\"）时的行为。"
+      },
+      {
+        "test_name": "test__test_sys_path",
+        "test_file": "tests/testutils/test_testutils_utils.py",
+        "why_relevant": "该测试使用了 `_test_sys_path` 上下文管理器来操作 sys.path，这与 Issue 中 sys.path 被修改的场景相关。",
+        "reusable_parts": [
+          "`_test_sys_path` 上下文管理器的使用模式",
+          "对 sys.path 进行断言"
+        ],
+        "possible_gap": "该测试是通用工具测试，不直接涉及 pylint 的启动逻辑或 runpy 调用。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "通过 runpy.run_module 以编程方式运行 pylint，且 sys.path 的第一个条目不是 \"\"、\".\" 或 os.getcwd()。",
+      "evidence": [
+        "Issue 中的命令：`runpy.run_module('pylint', run_name=\"__main__\", alter_sys=True)`",
+        "Issue 描述：`sys.path.insert(0, \"something\")`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "pylint 移除了 sys.path 的第一个条目，导致依赖于该路径的扩展（如捆绑库的扩展）加载失败。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：`Pylint removes the first entry from sys path causing it to fail to load.`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "runpy.run_module",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于触发 bug 的 API 调用。"
+      },
+      {
+        "name": "pylint.__init__",
+        "kind": "module",
+        "source_path": "pylint/__init__.py",
+        "reason": "Issue 中引用的源码文件，其中第 99 行是疑似 bug 位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/__init__.py",
+        "object": "",
+        "lines": "99",
+        "reason": "Issue 中明确指向的行号，该行移除了 sys.path 的第一个条目。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中 sys.path 的第一个条目通常是 \"\"、\".\"、cwd 或自定义路径，且测试在特定上下文管理器内运行。",
+        "target_pattern": "sys.path 的第一个条目是任意非空字符串（如 \"something\"），并且通过 runpy.run_module 启动 pylint。",
+        "reason": "Issue 表明当第一个条目不是预期值时，pylint 会错误地移除它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 modify_sys_path 函数或使用工具函数。",
+        "target_pattern": "通过 runpy.run_module 间接启动 pylint，触发其初始化代码。",
+        "reason": "Issue 的触发条件是 runpy 运行，这可能涉及不同的代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "pylint 在移除 sys.path 的第一个条目前，应检查该条目是否为 \"\"、\".\" 或 os.getcwd()，只有满足这些条件时才移除。",
+      "evidence": [
+        "Issue 中的预期行为：`Check if \"\", \".\" or os.getcwd() before removing the first item from sys.path`"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "sys.path 在 pylint 运行前后的变化，特别是第一个条目是否被移除。",
+        "reason": "Issue 的核心是 sys.path 被错误修改，直接观察其状态变化能判断 bug 是否触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 sys.path[0] 是 \"something\" 时，运行 pylint 后它应该仍然存在。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 sys.path 列表，因为其他条目可能因环境而异。",
+        "reason": "Issue 期望非空、非点号、非cwd的路径条目不被移除，断言其保留与预期行为一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "pylint/__init__.py 第 99 行具体的代码逻辑和上下文是什么？",
+    "modify_sys_path 函数是否就是被调用来修改 sys.path 的函数？",
+    "通过 runpy 运行 pylint 时，是否一定会执行到有问题的代码行？"
+  ],
+  "raw": {
+    "issue_summary": "pylint 在通过 runpy 运行时错误地移除了 sys.path 的第一个条目，即使该条目不是空字符串、点号或当前工作目录。",
+    "trigger_condition": {
+      "text": "通过 runpy.run_module 以编程方式运行 pylint，且 sys.path 的第一个条目不是 \"\"、\".\" 或 os.getcwd()。",
+      "evidence": [
+        "Issue 中的命令：`runpy.run_module('pylint', run_name=\"__main__\", alter_sys=True)`",
+        "Issue 描述：`sys.path.insert(0, \"something\")`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "pylint 移除了 sys.path 的第一个条目，导致依赖于该路径的扩展（如捆绑库的扩展）加载失败。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：`Pylint removes the first entry from sys path causing it to fail to load.`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pylint 在移除 sys.path 的第一个条目前，应检查该条目是否为 \"\"、\".\" 或 os.getcwd()，只有满足这些条件时才移除。",
+      "evidence": [
+        "Issue 中的预期行为：`Check if \"\", \".\" or os.getcwd() before removing the first item from sys.path`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "runpy.run_module",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于触发 bug 的 API 调用。"
+      },
+      {
+        "name": "pylint.__init__",
+        "kind": "module",
+        "source_path": "pylint/__init__.py",
+        "reason": "Issue 中引用的源码文件，其中第 99 行是疑似 bug 位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/__init__.py",
+        "object": "",
+        "lines": "99",
+        "reason": "Issue 中明确指向的行号，该行移除了 sys.path 的第一个条目。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRunTC.test_modify_sys_path",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试直接测试了 modify_sys_path 函数，该函数很可能与 sys.path 的修改逻辑相关，并且测试了多种 sys.path 初始配置。",
+        "reusable_parts": [
+          "使用 `_test_sys_path` 上下文管理器",
+          "使用 `_test_environ_pythonpath` 上下文管理器",
+          "对 sys.path 进行赋值和断言"
+        ],
+        "possible_gap": "该测试可能没有覆盖通过 runpy 运行 pylint 的场景，也没有测试当第一个条目是任意字符串（如 \"something\"）时的行为。"
+      },
+      {
+        "test_name": "test__test_sys_path",
+        "test_file": "tests/testutils/test_testutils_utils.py",
+        "why_relevant": "该测试使用了 `_test_sys_path` 上下文管理器来操作 sys.path，这与 Issue 中 sys.path 被修改的场景相关。",
+        "reusable_parts": [
+          "`_test_sys_path` 上下文管理器的使用模式",
+          "对 sys.path 进行断言"
+        ],
+        "possible_gap": "该测试是通用工具测试，不直接涉及 pylint 的启动逻辑或 runpy 调用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中 sys.path 的第一个条目通常是 \"\"、\".\"、cwd 或自定义路径，且测试在特定上下文管理器内运行。",
+        "target_pattern": "sys.path 的第一个条目是任意非空字符串（如 \"something\"），并且通过 runpy.run_module 启动 pylint。",
+        "reason": "Issue 表明当第一个条目不是预期值时，pylint 会错误地移除它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 modify_sys_path 函数或使用工具函数。",
+        "target_pattern": "通过 runpy.run_module 间接启动 pylint，触发其初始化代码。",
+        "reason": "Issue 的触发条件是 runpy 运行，这可能涉及不同的代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "sys.path 在 pylint 运行前后的变化，特别是第一个条目是否被移除。",
+        "reason": "Issue 的核心是 sys.path 被错误修改，直接观察其状态变化能判断 bug 是否触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 sys.path[0] 是 \"something\" 时，运行 pylint 后它应该仍然存在。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 sys.path 列表，因为其他条目可能因环境而异。",
+        "reason": "Issue 期望非空、非点号、非cwd的路径条目不被移除，断言其保留与预期行为一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 runpy 模块，并可能使用 `_test_sys_path` 或类似工具来控制 sys.path 的初始状态。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要模拟或隔离环境，确保测试不依赖实际安装的 pylint 扩展。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "uncertainties": [
+      "pylint/__init__.py 第 99 行具体的代码逻辑和上下文是什么？",
+      "modify_sys_path 函数是否就是被调用来修改 sys.path 的函数？",
+      "通过 runpy 运行 pylint 时，是否一定会执行到有问题的代码行？"
+    ]
+  }
+}

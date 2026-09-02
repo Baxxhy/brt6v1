@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11276",
+  "issue_summary": "Django的escape函数与Python标准库html.escape功能重复且性能较差，建议替换但需注意单引号转义格式的微小差异。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入django.utils.html.escape和标准库html.escape",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用SimpleTestCase作为测试基类",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要性能测试相关的setup",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_escape",
+        "test_file": "tests/utils_tests/test_html.py",
+        "why_relevant": "直接测试escape函数，覆盖了所有需要转义的特殊字符",
+        "reusable_parts": [
+          "测试用例结构",
+          "items元组定义特殊字符和期望输出",
+          "patterns测试模式",
+          "check_output调用方式"
+        ],
+        "possible_gap": "当前测试验证的是Django实现的输出（包括单引号转义为&#39），而替换后单引号转义会变为&#x27"
+      },
+      {
+        "test_name": "test_escape",
+        "test_file": "tests/template_tests/filter_tests/test_force_escape.py",
+        "why_relevant": "测试force_escape过滤器，该过滤器内部可能使用escape函数",
+        "reusable_parts": [
+          "SimpleTestCase继承",
+          "assertEqual和assertIsInstance断言风格"
+        ],
+        "possible_gap": "测试的是模板过滤器而非直接测试escape函数"
+      },
+      {
+        "test_name": "test_escape03",
+        "test_file": "tests/template_tests/filter_tests/test_escape.py",
+        "why_relevant": "测试escape过滤器的双重转义行为",
+        "reusable_parts": [
+          "@setup装饰器使用",
+          "模板渲染测试模式"
+        ],
+        "possible_gap": "测试的是模板上下文中的行为，不是直接函数调用"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用django.utils.html.escape()函数，输入包含需要转义的HTML特殊字符（如&, <, >, \", '）的字符串。",
+      "evidence": [
+        "Issue中提到了调用escape(copyright)进行性能测试",
+        "源码片段1显示了escape函数的定义",
+        "相关测试1中测试了各种字符的转义"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前实现使用.translate()方法，相比Python标准库的html.escape()使用.replace()方法性能更差，且单引号转义输出为&#39而非标准库的&#x27。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue中提供了性能对比数据：master分支4.03 usec vs branch分支2.45 usec",
+        "Issue明确指出单引号转义差异：'转换为&#x27而非&#39"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.html.escape",
+        "kind": "function",
+        "source_path": "django/utils/html.py",
+        "reason": "这是Issue直接讨论的需要替换的函数"
+      },
+      {
+        "name": "html.escape",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue建议用Python标准库的html.escape替换Django的实现"
+      },
+      {
+        "name": "django.utils.html.conditional_escape",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试4中测试了此函数，且源码注释提到如果担心双重转义应使用此函数"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/html.py",
+        "object": "escape",
+        "lines": "37-46",
+        "reason": "源码片段1显示当前实现使用str(text).translate(_html_escapes)，而Issue指出这比标准库的.replace()慢"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用预定义的字符集（&, <, >, \", '）",
+        "target_pattern": "包含单引号的输入字符串，用于验证转义格式差异",
+        "reason": "Issue明确指出单引号转义格式从&#39变为&#x27是唯一的功能差异",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用django.utils.html.escape",
+        "target_pattern": "比较django.utils.html.escape和html.escape的输出",
+        "reason": "需要验证两个函数在功能上是否等效，特别是单引号转义差异",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "escape函数应使用Python标准库html.escape()实现，保持功能正确性同时提升性能，接受单引号转义格式从&#39变为&#x27的微小变化。",
+      "evidence": [
+        "Issue描述建议替换为Python标准库html.escape()",
+        "Issue提到两种单引号转义格式功能等效但文字不同"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "escape('\\'')的输出字符串",
+        "reason": "Issue明确指出单引号转义格式差异：当前输出&#39，标准库输出&#x27"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "函数执行时间",
+        "reason": "Issue主要关注性能改进，提供了具体的性能对比数据"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "escape('&')的输出，验证不会双重转义",
+        "reason": "相关测试1中验证了不会双重替换&"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证escape函数对所有特殊字符的正确转义，接受单引号转义格式差异",
+        "preferred_assertion_style": "equals",
+        "avoid": "硬编码完整的转义输出字符串，特别是单引号转义部分",
+        "reason": "单引号转义格式从&#39变为&#x27是预期的微小变化，两者功能等效"
+      },
+      {
+        "assertion_goal": "验证不会对已转义的&进行双重转义",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅测试单个字符而不测试组合情况",
+        "reason": "相关测试1中明确测试了不会双重替换&"
+      }
+    ]
+  },
+  "uncertainties": [
+    "当前Django实现中_html_escapes的具体定义未提供",
+    "除了单引号转义格式差异外，两个函数在其他边界情况下的行为是否完全一致",
+    "conditional_escape函数是否也会受到影响",
+    "性能测试的具体环境和条件"
+  ],
+  "raw": {
+    "issue_summary": "Django的escape函数与Python标准库html.escape功能重复且性能较差，建议替换但需注意单引号转义格式的微小差异。",
+    "trigger_condition": {
+      "text": "调用django.utils.html.escape()函数，输入包含需要转义的HTML特殊字符（如&, <, >, \", '）的字符串。",
+      "evidence": [
+        "Issue中提到了调用escape(copyright)进行性能测试",
+        "源码片段1显示了escape函数的定义",
+        "相关测试1中测试了各种字符的转义"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前实现使用.translate()方法，相比Python标准库的html.escape()使用.replace()方法性能更差，且单引号转义输出为&#39而非标准库的&#x27。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue中提供了性能对比数据：master分支4.03 usec vs branch分支2.45 usec",
+        "Issue明确指出单引号转义差异：'转换为&#x27而非&#39"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "escape函数应使用Python标准库html.escape()实现，保持功能正确性同时提升性能，接受单引号转义格式从&#39变为&#x27的微小变化。",
+      "evidence": [
+        "Issue描述建议替换为Python标准库html.escape()",
+        "Issue提到两种单引号转义格式功能等效但文字不同"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.html.escape",
+        "kind": "function",
+        "source_path": "django/utils/html.py",
+        "reason": "这是Issue直接讨论的需要替换的函数"
+      },
+      {
+        "name": "html.escape",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue建议用Python标准库的html.escape替换Django的实现"
+      },
+      {
+        "name": "django.utils.html.conditional_escape",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试4中测试了此函数，且源码注释提到如果担心双重转义应使用此函数"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/html.py",
+        "object": "escape",
+        "lines": "37-46",
+        "reason": "源码片段1显示当前实现使用str(text).translate(_html_escapes)，而Issue指出这比标准库的.replace()慢"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_escape",
+        "test_file": "tests/utils_tests/test_html.py",
+        "why_relevant": "直接测试escape函数，覆盖了所有需要转义的特殊字符",
+        "reusable_parts": [
+          "测试用例结构",
+          "items元组定义特殊字符和期望输出",
+          "patterns测试模式",
+          "check_output调用方式"
+        ],
+        "possible_gap": "当前测试验证的是Django实现的输出（包括单引号转义为&#39），而替换后单引号转义会变为&#x27"
+      },
+      {
+        "test_name": "test_escape",
+        "test_file": "tests/template_tests/filter_tests/test_force_escape.py",
+        "why_relevant": "测试force_escape过滤器，该过滤器内部可能使用escape函数",
+        "reusable_parts": [
+          "SimpleTestCase继承",
+          "assertEqual和assertIsInstance断言风格"
+        ],
+        "possible_gap": "测试的是模板过滤器而非直接测试escape函数"
+      },
+      {
+        "test_name": "test_escape03",
+        "test_file": "tests/template_tests/filter_tests/test_escape.py",
+        "why_relevant": "测试escape过滤器的双重转义行为",
+        "reusable_parts": [
+          "@setup装饰器使用",
+          "模板渲染测试模式"
+        ],
+        "possible_gap": "测试的是模板上下文中的行为，不是直接函数调用"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用预定义的字符集（&, <, >, \", '）",
+        "target_pattern": "包含单引号的输入字符串，用于验证转义格式差异",
+        "reason": "Issue明确指出单引号转义格式从&#39变为&#x27是唯一的功能差异",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用django.utils.html.escape",
+        "target_pattern": "比较django.utils.html.escape和html.escape的输出",
+        "reason": "需要验证两个函数在功能上是否等效，特别是单引号转义差异",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "escape('\\'')的输出字符串",
+        "reason": "Issue明确指出单引号转义格式差异：当前输出&#39，标准库输出&#x27"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "函数执行时间",
+        "reason": "Issue主要关注性能改进，提供了具体的性能对比数据"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "escape('&')的输出，验证不会双重转义",
+        "reason": "相关测试1中验证了不会双重替换&"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证escape函数对所有特殊字符的正确转义，接受单引号转义格式差异",
+        "preferred_assertion_style": "equals",
+        "avoid": "硬编码完整的转义输出字符串，特别是单引号转义部分",
+        "reason": "单引号转义格式从&#39变为&#x27是预期的微小变化，两者功能等效"
+      },
+      {
+        "assertion_goal": "验证不会对已转义的&进行双重转义",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅测试单个字符而不测试组合情况",
+        "reason": "相关测试1中明确测试了不会双重替换&"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入django.utils.html.escape和标准库html.escape",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用SimpleTestCase作为测试基类",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要性能测试相关的setup",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "当前Django实现中_html_escapes的具体定义未提供",
+      "除了单引号转义格式差异外，两个函数在其他边界情况下的行为是否完全一致",
+      "conditional_escape函数是否也会受到影响",
+      "性能测试的具体环境和条件"
+    ]
+  }
+}

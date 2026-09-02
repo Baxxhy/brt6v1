@@ -1,0 +1,334 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-13372",
+  "issue_summary": "Mul 对象在特定参数顺序下调用 evalf() 时，遇到未在 evalf_table 中注册的函数（如 Max）会引发 UnboundLocalError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 Mul, Max, symbols (如 x, y)。测试可能在一个普通的函数中，不需要特殊的 TestCase 或 fixture。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 evaluate=False 来创建 Mul 对象是关键。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_evalf_bugs",
+        "test_file": "sympy/core/tests/test_evalf.py",
+        "why_relevant": "它测试了 evalf 的各种边界情况和已知 bug，包含了对 Mul 和复杂表达式求值的测试。",
+        "reusable_parts": [
+          "导入模式（如 NS 函数的使用）",
+          "使用 subs 参数进行求值",
+          "对包含符号和特殊值（如 oo, I）的表达式进行求值的 assert 风格"
+        ],
+        "possible_gap": "现有测试没有专门测试 evaluate=False 的 Mul 对象，也没有测试当参数顺序变化时，遇到未在 evalf_table 中注册的函数（如 Max）的行为。"
+      },
+      {
+        "test_name": "test_Max",
+        "test_file": "sympy/functions/elementary/tests/test_miscellaneous.py",
+        "why_relevant": "它测试了 Max 函数的基本行为和与其他符号的交互，展示了如何构造包含 Max 的表达式。",
+        "reusable_parts": [
+          "Max 对象的构造方式",
+          "符号（如 x, y）的定义和使用",
+          "对 Max 表达式进行 subs 和求值的模式"
+        ],
+        "possible_gap": "该测试主要关注 Max 本身的语义，没有将其放入 Mul(evaluate=False) 的上下文中调用 evalf。"
+      },
+      {
+        "test_name": "test_Mul_with_zero_infinite",
+        "test_file": "sympy/core/tests/test_arit.py",
+        "why_relevant": "它测试了使用 evaluate=False 创建 Mul 对象，并检查其属性，这与 Issue 中创建 Mul 对象的方式相似。",
+        "reusable_parts": [
+          "使用 Mul(..., evaluate=False) 的构造模式",
+          "对未求值 Mul 对象进行属性断言的方法"
+        ],
+        "possible_gap": "该测试没有调用 evalf() 方法，也没有涉及 Max 函数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 evaluate=False 的 Mul 对象，其参数中包含 Max(0, y) 和 x，且 Max 作为第一个参数时调用 evalf()。",
+      "evidence": [
+        "Issue 中给出了两个示例：Mul(x, Max(0, y), evaluate=False).evalf() 正常，而 Mul(Max(0, y), x, evaluate=False).evalf() 触发错误。",
+        "Issue 提到 'I found this after changing the order of Mul args'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 UnboundLocalError: local variable 'reprec' referenced before assignment 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的完整错误堆栈显示在 sympy/core/evalf.py 第 1308 行抛出 UnboundLocalError。",
+        "错误堆栈显示异常源于 KeyError: Max，随后在处理该异常时引发了 UnboundLocalError。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Mul.evalf",
+        "kind": "method",
+        "source_path": "sympy/core/evalf.py",
+        "reason": "Issue 中直接调用的方法，错误堆栈也指向此方法。"
+      },
+      {
+        "name": "evalf",
+        "kind": "function",
+        "source_path": "sympy/core/evalf.py",
+        "reason": "错误堆栈中 Mul.evalf 调用了此顶层函数，并且是 KeyError 和 UnboundLocalError 发生的位置。"
+      },
+      {
+        "name": "evalf_mul",
+        "kind": "function",
+        "source_path": "sympy/core/evalf.py",
+        "reason": "相关源码片段 5 显示这是处理乘法求值的核心函数，被 evalf 调用。"
+      },
+      {
+        "name": "Max",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/miscellaneous.py",
+        "reason": "Issue 中触发 KeyError 的对象，是未在 evalf_table 中注册的函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/evalf.py",
+        "object": "evalf",
+        "lines": "1285-1308",
+        "reason": "错误堆栈显示 KeyError 发生在第 1285 行，UnboundLocalError 发生在第 1308 行。Issue 描述者指出定义 reprec 和 imprec 的 elif 子句可能缺少 else 分支。"
+      },
+      {
+        "path": "sympy/core/evalf.py",
+        "object": "evalf_table",
+        "lines": "",
+        "reason": "相关源码片段 4 显示它是一个全局变量，KeyError 表明 Max 不在这个表中，导致后续异常处理路径出错。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中，Mul 的参数通常是数字、符号或简单函数（如 sqrt, sin）。",
+        "target_pattern": "将 Max(0, y) 作为参数之一放入 Mul(evaluate=False) 中，并确保 Max 出现在参数列表的特定位置（如第一个）。",
+        "reason": "Issue 表明参数顺序是关键触发条件，当 Max 作为第一个参数时，evalf 的内部处理路径可能不同，导致未处理的 KeyError 进而引发 UnboundLocalError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常直接对表达式调用 .n() 或 NS()，或者对已求值的表达式进行测试。",
+        "target_pattern": "先使用 evaluate=False 创建 Mul 对象，然后显式调用其 .evalf() 方法。",
+        "reason": "Issue 中的错误是在调用 .evalf() 时触发的，而不是在构造时。evaluate=False 阻止了构造时的简化，将求值推迟到 .evalf() 调用。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论 Mul 对象的参数顺序如何，当遇到未在 evalf_table 中注册的函数时，evalf() 应能妥善处理，例如返回一个未求值的表达式或抛出明确的 NotImplementedError，而不是引发 UnboundLocalError。",
+      "evidence": [
+        "Issue 描述者建议 'elif clauses that define reprec and imprec should have an `else: raise NotImplementedError`'，这暗示了期望的修复方向。",
+        "第一个示例 Mul(x, Max(0, y), evaluate=False).evalf() 返回了未求值的表达式 'x*Max(0, y)'，这可能是期望的行为之一。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获调用 Mul(...).evalf() 时抛出的异常，检查其类型和消息。",
+        "reason": "Issue 的核心现象是 UnboundLocalError，观测是否抛出此异常或其前驱 KeyError 可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在正常路径下（如第一个示例），观察 .evalf() 的返回值，可能是一个未完全求值的表达式。",
+        "reason": "为了理解期望行为，需要知道当缺陷未触发时，函数返回什么（例如 'x*Max(0, y)'）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于包含 Max 且参数顺序特定的 Mul(evaluate=False) 对象，调用 evalf() 不会引发 UnboundLocalError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言返回值的完整字符串表示，因为未求值表达式的具体格式可能变化。",
+        "reason": "Issue 的核心是异常，因此断言不引发特定异常是直接且稳定的。修复后可能仍会引发其他异常（如 NotImplementedError），但不应是 UnboundLocalError。"
+      },
+      {
+        "assertion_goal": "验证当缺陷修复后，两种参数顺序的 Mul 调用 evalf() 的行为应一致（要么都成功返回，要么都抛出相同的明确异常）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免依赖内部未公开的 evalf_table 内容进行断言。",
+        "reason": "Issue 强调了参数顺序的影响，一个健壮的修复应消除这种顺序依赖性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "为什么参数顺序会影响错误的发生？是 evalf_mul 函数中处理参数的顺序导致的，还是其他机制？",
+    "除了 Max，还有哪些函数不在 evalf_table 中并可能触发类似错误？",
+    "修复后，对于此类未注册函数，evalf() 的确切期望返回值或异常类型是什么？是返回未求值表达式，还是抛出 NotImplementedError？",
+    "错误堆栈中第 1308 行 'r = re, im, reprec, imprec' 的具体上下文和 reprec/imprec 变量的定义位置需要进一步查看源码确认。"
+  ],
+  "raw": {
+    "issue_summary": "Mul 对象在特定参数顺序下调用 evalf() 时，遇到未在 evalf_table 中注册的函数（如 Max）会引发 UnboundLocalError 异常。",
+    "trigger_condition": {
+      "text": "创建一个 evaluate=False 的 Mul 对象，其参数中包含 Max(0, y) 和 x，且 Max 作为第一个参数时调用 evalf()。",
+      "evidence": [
+        "Issue 中给出了两个示例：Mul(x, Max(0, y), evaluate=False).evalf() 正常，而 Mul(Max(0, y), x, evaluate=False).evalf() 触发错误。",
+        "Issue 提到 'I found this after changing the order of Mul args'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 UnboundLocalError: local variable 'reprec' referenced before assignment 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的完整错误堆栈显示在 sympy/core/evalf.py 第 1308 行抛出 UnboundLocalError。",
+        "错误堆栈显示异常源于 KeyError: Max，随后在处理该异常时引发了 UnboundLocalError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论 Mul 对象的参数顺序如何，当遇到未在 evalf_table 中注册的函数时，evalf() 应能妥善处理，例如返回一个未求值的表达式或抛出明确的 NotImplementedError，而不是引发 UnboundLocalError。",
+      "evidence": [
+        "Issue 描述者建议 'elif clauses that define reprec and imprec should have an `else: raise NotImplementedError`'，这暗示了期望的修复方向。",
+        "第一个示例 Mul(x, Max(0, y), evaluate=False).evalf() 返回了未求值的表达式 'x*Max(0, y)'，这可能是期望的行为之一。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Mul.evalf",
+        "kind": "method",
+        "source_path": "sympy/core/evalf.py",
+        "reason": "Issue 中直接调用的方法，错误堆栈也指向此方法。"
+      },
+      {
+        "name": "evalf",
+        "kind": "function",
+        "source_path": "sympy/core/evalf.py",
+        "reason": "错误堆栈中 Mul.evalf 调用了此顶层函数，并且是 KeyError 和 UnboundLocalError 发生的位置。"
+      },
+      {
+        "name": "evalf_mul",
+        "kind": "function",
+        "source_path": "sympy/core/evalf.py",
+        "reason": "相关源码片段 5 显示这是处理乘法求值的核心函数，被 evalf 调用。"
+      },
+      {
+        "name": "Max",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/miscellaneous.py",
+        "reason": "Issue 中触发 KeyError 的对象，是未在 evalf_table 中注册的函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/evalf.py",
+        "object": "evalf",
+        "lines": "1285-1308",
+        "reason": "错误堆栈显示 KeyError 发生在第 1285 行，UnboundLocalError 发生在第 1308 行。Issue 描述者指出定义 reprec 和 imprec 的 elif 子句可能缺少 else 分支。"
+      },
+      {
+        "path": "sympy/core/evalf.py",
+        "object": "evalf_table",
+        "lines": "",
+        "reason": "相关源码片段 4 显示它是一个全局变量，KeyError 表明 Max 不在这个表中，导致后续异常处理路径出错。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_evalf_bugs",
+        "test_file": "sympy/core/tests/test_evalf.py",
+        "why_relevant": "它测试了 evalf 的各种边界情况和已知 bug，包含了对 Mul 和复杂表达式求值的测试。",
+        "reusable_parts": [
+          "导入模式（如 NS 函数的使用）",
+          "使用 subs 参数进行求值",
+          "对包含符号和特殊值（如 oo, I）的表达式进行求值的 assert 风格"
+        ],
+        "possible_gap": "现有测试没有专门测试 evaluate=False 的 Mul 对象，也没有测试当参数顺序变化时，遇到未在 evalf_table 中注册的函数（如 Max）的行为。"
+      },
+      {
+        "test_name": "test_Max",
+        "test_file": "sympy/functions/elementary/tests/test_miscellaneous.py",
+        "why_relevant": "它测试了 Max 函数的基本行为和与其他符号的交互，展示了如何构造包含 Max 的表达式。",
+        "reusable_parts": [
+          "Max 对象的构造方式",
+          "符号（如 x, y）的定义和使用",
+          "对 Max 表达式进行 subs 和求值的模式"
+        ],
+        "possible_gap": "该测试主要关注 Max 本身的语义，没有将其放入 Mul(evaluate=False) 的上下文中调用 evalf。"
+      },
+      {
+        "test_name": "test_Mul_with_zero_infinite",
+        "test_file": "sympy/core/tests/test_arit.py",
+        "why_relevant": "它测试了使用 evaluate=False 创建 Mul 对象，并检查其属性，这与 Issue 中创建 Mul 对象的方式相似。",
+        "reusable_parts": [
+          "使用 Mul(..., evaluate=False) 的构造模式",
+          "对未求值 Mul 对象进行属性断言的方法"
+        ],
+        "possible_gap": "该测试没有调用 evalf() 方法，也没有涉及 Max 函数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中，Mul 的参数通常是数字、符号或简单函数（如 sqrt, sin）。",
+        "target_pattern": "将 Max(0, y) 作为参数之一放入 Mul(evaluate=False) 中，并确保 Max 出现在参数列表的特定位置（如第一个）。",
+        "reason": "Issue 表明参数顺序是关键触发条件，当 Max 作为第一个参数时，evalf 的内部处理路径可能不同，导致未处理的 KeyError 进而引发 UnboundLocalError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常直接对表达式调用 .n() 或 NS()，或者对已求值的表达式进行测试。",
+        "target_pattern": "先使用 evaluate=False 创建 Mul 对象，然后显式调用其 .evalf() 方法。",
+        "reason": "Issue 中的错误是在调用 .evalf() 时触发的，而不是在构造时。evaluate=False 阻止了构造时的简化，将求值推迟到 .evalf() 调用。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获调用 Mul(...).evalf() 时抛出的异常，检查其类型和消息。",
+        "reason": "Issue 的核心现象是 UnboundLocalError，观测是否抛出此异常或其前驱 KeyError 可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在正常路径下（如第一个示例），观察 .evalf() 的返回值，可能是一个未完全求值的表达式。",
+        "reason": "为了理解期望行为，需要知道当缺陷未触发时，函数返回什么（例如 'x*Max(0, y)'）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于包含 Max 且参数顺序特定的 Mul(evaluate=False) 对象，调用 evalf() 不会引发 UnboundLocalError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言返回值的完整字符串表示，因为未求值表达式的具体格式可能变化。",
+        "reason": "Issue 的核心是异常，因此断言不引发特定异常是直接且稳定的。修复后可能仍会引发其他异常（如 NotImplementedError），但不应是 UnboundLocalError。"
+      },
+      {
+        "assertion_goal": "验证当缺陷修复后，两种参数顺序的 Mul 调用 evalf() 的行为应一致（要么都成功返回，要么都抛出相同的明确异常）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免依赖内部未公开的 evalf_table 内容进行断言。",
+        "reason": "Issue 强调了参数顺序的影响，一个健壮的修复应消除这种顺序依赖性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 Mul, Max, symbols (如 x, y)。测试可能在一个普通的函数中，不需要特殊的 TestCase 或 fixture。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 evaluate=False 来创建 Mul 对象是关键。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "为什么参数顺序会影响错误的发生？是 evalf_mul 函数中处理参数的顺序导致的，还是其他机制？",
+      "除了 Max，还有哪些函数不在 evalf_table 中并可能触发类似错误？",
+      "修复后，对于此类未注册函数，evalf() 的确切期望返回值或异常类型是什么？是返回未求值表达式，还是抛出 NotImplementedError？",
+      "错误堆栈中第 1308 行 'r = re, im, reprec, imprec' 的具体上下文和 reprec/imprec 变量的定义位置需要进一步查看源码确认。"
+    ]
+  }
+}

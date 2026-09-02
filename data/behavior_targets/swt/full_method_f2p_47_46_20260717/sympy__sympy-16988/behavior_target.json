@@ -1,0 +1,350 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-16988",
+  "issue_summary": "Intersection 在参数包含重复集合时错误地返回 EmptySet，而不是正确处理重复或保持未求值。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 相关模块：Intersection, FiniteSet, Symbol, Piecewise, Eq, S。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 evaluate=False 来观察未求值行为。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_intersection",
+        "test_file": "sympy/sets/tests/test_sets.py",
+        "why_relevant": "该测试直接测试 Intersection 的各种行为，包括符号和有限集。",
+        "reusable_parts": [
+          "imports",
+          "Intersection 构造",
+          "assert 风格",
+          "使用 Symbol('x', real=True)"
+        ],
+        "possible_gap": "现有测试未覆盖参数包含重复集合的场景。"
+      },
+      {
+        "test_name": "test_finite_set_intersection",
+        "test_file": "sympy/sets/tests/test_sets.py",
+        "why_relevant": "该测试专门测试有限集的交集，包括符号处理，使用了 Intersection._handle_finite_sets。",
+        "reusable_parts": [
+          "imports",
+          "FiniteSet 构造",
+          "Intersection._handle_finite_sets 调用",
+          "assert 风格"
+        ],
+        "possible_gap": "未测试重复集合参数，且可能未涉及 Piecewise 输出。"
+      },
+      {
+        "test_name": "test_intersect1",
+        "test_file": "sympy/sets/tests/test_sets.py",
+        "why_relevant": "该测试包含大量 Intersection 用例，包括符号和 FiniteSet。",
+        "reusable_parts": [
+          "imports",
+          "Symbol 定义",
+          "FiniteSet 和 Interval 构造",
+          "assert 风格"
+        ],
+        "possible_gap": "未测试重复集合参数，且未涉及 Piecewise 输出。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Intersection 时传入包含重复集合的参数，例如 Intersection({1}, {1}, {x})。",
+      "evidence": [
+        "Issue 中的示例：Intersection({1},{1},{x}) 返回 EmptySet()。",
+        "Issue 描述：'The routine should give the same answer if duplicates are present'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Intersection 返回了 EmptySet()，而预期应返回 Piecewise(({1}, Eq(x, 1)), (S.EmptySet, True)) 或保持未求值。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的示例输出：Intersection({1},{1},{x}) 返回 EmptySet()。",
+        "Issue 中给出的预期答案：'The answer should be `Piecewise(({1}, Eq(x, 1)), (S.EmptySet, True))` or remain unevaluated.'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Intersection",
+        "kind": "class",
+        "source_path": "sympy/sets/sets.py",
+        "reason": "Issue 直接关于 Intersection 类的行为。"
+      },
+      {
+        "name": "Piecewise",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/piecewise.py",
+        "reason": "Issue 中预期输出包含 Piecewise 表达式。"
+      },
+      {
+        "name": "Eq",
+        "kind": "global_var",
+        "source_path": "sympy/core/relational.py",
+        "reason": "Piecewise 表达式中使用了 Eq。"
+      },
+      {
+        "name": "EmptySet",
+        "kind": "class",
+        "source_path": "sympy/sets/sets.py",
+        "reason": "Issue 中返回了 EmptySet() 且预期输出包含 S.EmptySet。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/sets/sets.py",
+        "object": "Intersection.__new__",
+        "lines": "1223-1384",
+        "reason": "Issue 提到重复应在实例化时移除，__new__ 方法可能负责处理参数。"
+      },
+      {
+        "path": "sympy/sets/sets.py",
+        "object": "Intersection._handle_finite_sets",
+        "lines": "",
+        "reason": "相关测试 3 中使用了该方法处理有限集交集，可能与重复处理逻辑相关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Intersection(FiniteSet(1, 2, 3), Interval(2, 5), evaluate=False)",
+        "target_pattern": "Intersection(FiniteSet(1), FiniteSet(1), FiniteSet(x))",
+        "reason": "Issue 触发条件是 Intersection 的参数包含重复集合，且包含符号。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "Intersection(FiniteSet(-oo, x), FiniteSet(x))",
+        "target_pattern": "Intersection(FiniteSet(1), FiniteSet(1), FiniteSet(x))",
+        "reason": "相似测试已有符号参数，但未包含重复集合。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Intersection 在参数包含重复集合时应移除重复，然后正确计算交集，对于包含符号的集合应返回 Piecewise 表达式或保持未求值。",
+      "evidence": [
+        "Issue 描述：'The routine should give the same answer if duplicates are present; my initial guess is that duplicates should just be removed at the outset of instantiation.'",
+        "Issue 中给出的预期答案：'Piecewise(({1}, Eq(x, 1)), (S.EmptySet, True))'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "result = Intersection({1}, {1}, {x}); type(result), repr(result)",
+        "reason": "Issue 的核心是返回值错误，观察返回类型和表示可判断是否触发 bug。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "result.is_EmptySet",
+        "reason": "Issue 中错误返回了 EmptySet，此观测点可直接检测。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "isinstance(result, Piecewise)",
+        "reason": "预期输出包含 Piecewise，可检查是否返回了正确类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Intersection 在参数包含重复集合时不应直接返回 EmptySet，而应正确处理。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "assert result == EmptySet()",
+        "reason": "当前 buggy 行为是返回 EmptySet()，修复后应避免此结果。"
+      },
+      {
+        "assertion_goal": "结果应包含 Piecewise 或保持未求值（如 Intersection 对象）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "完整 repr 字符串相等，因为 Piecewise 内部格式可能变化。",
+        "reason": "Issue 预期输出是 Piecewise 或未求值，类型检查更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "重复移除的确切位置是在 __new__ 还是 _handle_finite_sets 或其他方法中。",
+    "Piecewise 输出的确切格式和条件。",
+    "是否所有重复集合场景都应触发相同行为。"
+  ],
+  "raw": {
+    "issue_summary": "Intersection 在参数包含重复集合时错误地返回 EmptySet，而不是正确处理重复或保持未求值。",
+    "trigger_condition": {
+      "text": "调用 Intersection 时传入包含重复集合的参数，例如 Intersection({1}, {1}, {x})。",
+      "evidence": [
+        "Issue 中的示例：Intersection({1},{1},{x}) 返回 EmptySet()。",
+        "Issue 描述：'The routine should give the same answer if duplicates are present'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Intersection 返回了 EmptySet()，而预期应返回 Piecewise(({1}, Eq(x, 1)), (S.EmptySet, True)) 或保持未求值。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的示例输出：Intersection({1},{1},{x}) 返回 EmptySet()。",
+        "Issue 中给出的预期答案：'The answer should be `Piecewise(({1}, Eq(x, 1)), (S.EmptySet, True))` or remain unevaluated.'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Intersection 在参数包含重复集合时应移除重复，然后正确计算交集，对于包含符号的集合应返回 Piecewise 表达式或保持未求值。",
+      "evidence": [
+        "Issue 描述：'The routine should give the same answer if duplicates are present; my initial guess is that duplicates should just be removed at the outset of instantiation.'",
+        "Issue 中给出的预期答案：'Piecewise(({1}, Eq(x, 1)), (S.EmptySet, True))'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Intersection",
+        "kind": "class",
+        "source_path": "sympy/sets/sets.py",
+        "reason": "Issue 直接关于 Intersection 类的行为。"
+      },
+      {
+        "name": "Piecewise",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/piecewise.py",
+        "reason": "Issue 中预期输出包含 Piecewise 表达式。"
+      },
+      {
+        "name": "Eq",
+        "kind": "global_var",
+        "source_path": "sympy/core/relational.py",
+        "reason": "Piecewise 表达式中使用了 Eq。"
+      },
+      {
+        "name": "EmptySet",
+        "kind": "class",
+        "source_path": "sympy/sets/sets.py",
+        "reason": "Issue 中返回了 EmptySet() 且预期输出包含 S.EmptySet。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/sets/sets.py",
+        "object": "Intersection.__new__",
+        "lines": "1223-1384",
+        "reason": "Issue 提到重复应在实例化时移除，__new__ 方法可能负责处理参数。"
+      },
+      {
+        "path": "sympy/sets/sets.py",
+        "object": "Intersection._handle_finite_sets",
+        "lines": "",
+        "reason": "相关测试 3 中使用了该方法处理有限集交集，可能与重复处理逻辑相关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_intersection",
+        "test_file": "sympy/sets/tests/test_sets.py",
+        "why_relevant": "该测试直接测试 Intersection 的各种行为，包括符号和有限集。",
+        "reusable_parts": [
+          "imports",
+          "Intersection 构造",
+          "assert 风格",
+          "使用 Symbol('x', real=True)"
+        ],
+        "possible_gap": "现有测试未覆盖参数包含重复集合的场景。"
+      },
+      {
+        "test_name": "test_finite_set_intersection",
+        "test_file": "sympy/sets/tests/test_sets.py",
+        "why_relevant": "该测试专门测试有限集的交集，包括符号处理，使用了 Intersection._handle_finite_sets。",
+        "reusable_parts": [
+          "imports",
+          "FiniteSet 构造",
+          "Intersection._handle_finite_sets 调用",
+          "assert 风格"
+        ],
+        "possible_gap": "未测试重复集合参数，且可能未涉及 Piecewise 输出。"
+      },
+      {
+        "test_name": "test_intersect1",
+        "test_file": "sympy/sets/tests/test_sets.py",
+        "why_relevant": "该测试包含大量 Intersection 用例，包括符号和 FiniteSet。",
+        "reusable_parts": [
+          "imports",
+          "Symbol 定义",
+          "FiniteSet 和 Interval 构造",
+          "assert 风格"
+        ],
+        "possible_gap": "未测试重复集合参数，且未涉及 Piecewise 输出。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Intersection(FiniteSet(1, 2, 3), Interval(2, 5), evaluate=False)",
+        "target_pattern": "Intersection(FiniteSet(1), FiniteSet(1), FiniteSet(x))",
+        "reason": "Issue 触发条件是 Intersection 的参数包含重复集合，且包含符号。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "Intersection(FiniteSet(-oo, x), FiniteSet(x))",
+        "target_pattern": "Intersection(FiniteSet(1), FiniteSet(1), FiniteSet(x))",
+        "reason": "相似测试已有符号参数，但未包含重复集合。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "result = Intersection({1}, {1}, {x}); type(result), repr(result)",
+        "reason": "Issue 的核心是返回值错误，观察返回类型和表示可判断是否触发 bug。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "result.is_EmptySet",
+        "reason": "Issue 中错误返回了 EmptySet，此观测点可直接检测。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "isinstance(result, Piecewise)",
+        "reason": "预期输出包含 Piecewise，可检查是否返回了正确类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Intersection 在参数包含重复集合时不应直接返回 EmptySet，而应正确处理。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "assert result == EmptySet()",
+        "reason": "当前 buggy 行为是返回 EmptySet()，修复后应避免此结果。"
+      },
+      {
+        "assertion_goal": "结果应包含 Piecewise 或保持未求值（如 Intersection 对象）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "完整 repr 字符串相等，因为 Piecewise 内部格式可能变化。",
+        "reason": "Issue 预期输出是 Piecewise 或未求值，类型检查更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 相关模块：Intersection, FiniteSet, Symbol, Piecewise, Eq, S。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 evaluate=False 来观察未求值行为。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "重复移除的确切位置是在 __new__ 还是 _handle_finite_sets 或其他方法中。",
+      "Piecewise 输出的确切格式和条件。",
+      "是否所有重复集合场景都应触发相同行为。"
+    ]
+  }
+}

@@ -1,0 +1,252 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15851",
+  "issue_summary": "PostgreSQL 的 dbshell 命令在传递额外参数时，参数顺序错误导致 psql 忽略这些参数。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 PostgreSQL 数据库配置（settings）来实例化测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类继承自 SimpleTestCase，可能不需要真实的数据库连接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_parameters",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "它直接测试了向 `dbshell` 传递额外参数（`--help`）的场景，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试类结构（PostgreSqlDbshellCommandTestCase）",
+          "调用 `settings_to_cmd_args_env` 的方法",
+          "使用 `self.assertEqual` 进行断言"
+        ],
+        "possible_gap": "该测试传递的参数 `--help` 可能不是触发顺序错误的参数类型；它可能没有覆盖 Issue 中提到的 `-c` 等参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 PostgreSQL 后端，运行 `manage.py dbshell` 命令并传递额外参数（例如 `-- -c \"select * from some_table;\"`）。",
+      "evidence": [
+        "Issue 描述中提供了命令示例和错误输出。",
+        "相关测试 1 表明 `dbshell` 命令支持传递额外参数（如 `--help`）。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "psql 发出警告，提示额外的命令行参数被忽略，命令未按预期执行。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中显示了 psql 的警告信息：\"psql: warning: extra command-line argument \\\"-c\\\" ignored\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.commands.dbshell.Command",
+        "kind": "class",
+        "source_path": "django/core/management/commands/dbshell.py",
+        "reason": "Issue 是关于 `dbshell` 管理命令的。"
+      },
+      {
+        "name": "PostgreSqlDbshellCommandTestCase.settings_to_cmd_args_env",
+        "kind": "method",
+        "source_path": "tests/dbshell/test_postgresql.py",
+        "reason": "相关测试使用此方法来构建命令参数和环境变量，与 Issue 中参数顺序问题直接相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/dbshell.py",
+        "object": "Command",
+        "lines": "",
+        "reason": "Issue 指出参数列表构造顺序错误，这很可能发生在构建 psql 命令行的代码中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "测试 `test_parameters` 中传递的参数是 `[\"--help\"]`。",
+        "target_pattern": "传递类似 `[\"-c\", \"select * from some_table;\"]` 的参数。",
+        "reason": "Issue 表明 `-c` 参数被忽略，改变参数类型可能触发缺陷路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "order",
+        "current_pattern": "测试 `test_parameters` 的预期结果是 `[\"psql\", \"dbname\", \"--help\"]`，数据库名称在参数之前。",
+        "target_pattern": "根据 Issue，数据库名称应放在参数列表末尾，例如 `[\"psql\", \"--help\", \"dbname\"]` 可能是错误的顺序。",
+        "reason": "Issue 明确指出参数顺序错误，变异参数顺序可能暴露问题。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "传递给 `dbshell` 的额外参数应正确传递给 psql 命令并生效，不应被忽略。",
+      "evidence": [
+        "Issue 描述指出，参数列表需要以正确的顺序构建，将数据库名称放在参数列表的末尾。",
+        "相关测试 1 展示了参数（如 `--help`）应出现在数据库名称之后。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "由 `settings_to_cmd_args_env` 返回的命令参数列表（第一个元素）。",
+        "reason": "观察参数列表中数据库名称和额外参数的相对顺序，可以判断是否符合 psql 的要求。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "运行生成的 psql 命令时的标准错误输出（stderr）。",
+        "reason": "Issue 中观察到的错误现象是 psql 发出的警告，表明参数被忽略。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证构建的命令参数列表中，数据库名称位于所有额外参数之后。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "避免断言完整的命令字符串，因为路径或环境可能变化。",
+        "reason": "Issue 的核心是参数顺序，直接验证顺序关系最稳定且与问题对齐。"
+      },
+      {
+        "assertion_goal": "验证运行生成的命令时，标准错误输出中不包含“extra command-line argument ... ignored”的警告。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的 stderr 输出字符串。",
+        "reason": "Issue 中观察到的错误症状是特定的警告信息，其缺失表明参数被正确接受。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "构建错误参数列表的具体代码位置和逻辑尚不确定。",
+    "除了 `-c` 之外，是否还有其他类型的参数会触发此问题。",
+    "`settings_to_cmd_args_env` 方法的具体实现和内部逻辑未知。"
+  ],
+  "raw": {
+    "issue_summary": "PostgreSQL 的 dbshell 命令在传递额外参数时，参数顺序错误导致 psql 忽略这些参数。",
+    "trigger_condition": {
+      "text": "使用 PostgreSQL 后端，运行 `manage.py dbshell` 命令并传递额外参数（例如 `-- -c \"select * from some_table;\"`）。",
+      "evidence": [
+        "Issue 描述中提供了命令示例和错误输出。",
+        "相关测试 1 表明 `dbshell` 命令支持传递额外参数（如 `--help`）。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "psql 发出警告，提示额外的命令行参数被忽略，命令未按预期执行。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中显示了 psql 的警告信息：\"psql: warning: extra command-line argument \\\"-c\\\" ignored\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "传递给 `dbshell` 的额外参数应正确传递给 psql 命令并生效，不应被忽略。",
+      "evidence": [
+        "Issue 描述指出，参数列表需要以正确的顺序构建，将数据库名称放在参数列表的末尾。",
+        "相关测试 1 展示了参数（如 `--help`）应出现在数据库名称之后。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.commands.dbshell.Command",
+        "kind": "class",
+        "source_path": "django/core/management/commands/dbshell.py",
+        "reason": "Issue 是关于 `dbshell` 管理命令的。"
+      },
+      {
+        "name": "PostgreSqlDbshellCommandTestCase.settings_to_cmd_args_env",
+        "kind": "method",
+        "source_path": "tests/dbshell/test_postgresql.py",
+        "reason": "相关测试使用此方法来构建命令参数和环境变量，与 Issue 中参数顺序问题直接相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/dbshell.py",
+        "object": "Command",
+        "lines": "",
+        "reason": "Issue 指出参数列表构造顺序错误，这很可能发生在构建 psql 命令行的代码中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_parameters",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "它直接测试了向 `dbshell` 传递额外参数（`--help`）的场景，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试类结构（PostgreSqlDbshellCommandTestCase）",
+          "调用 `settings_to_cmd_args_env` 的方法",
+          "使用 `self.assertEqual` 进行断言"
+        ],
+        "possible_gap": "该测试传递的参数 `--help` 可能不是触发顺序错误的参数类型；它可能没有覆盖 Issue 中提到的 `-c` 等参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "测试 `test_parameters` 中传递的参数是 `[\"--help\"]`。",
+        "target_pattern": "传递类似 `[\"-c\", \"select * from some_table;\"]` 的参数。",
+        "reason": "Issue 表明 `-c` 参数被忽略，改变参数类型可能触发缺陷路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "order",
+        "current_pattern": "测试 `test_parameters` 的预期结果是 `[\"psql\", \"dbname\", \"--help\"]`，数据库名称在参数之前。",
+        "target_pattern": "根据 Issue，数据库名称应放在参数列表末尾，例如 `[\"psql\", \"--help\", \"dbname\"]` 可能是错误的顺序。",
+        "reason": "Issue 明确指出参数顺序错误，变异参数顺序可能暴露问题。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "由 `settings_to_cmd_args_env` 返回的命令参数列表（第一个元素）。",
+        "reason": "观察参数列表中数据库名称和额外参数的相对顺序，可以判断是否符合 psql 的要求。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "运行生成的 psql 命令时的标准错误输出（stderr）。",
+        "reason": "Issue 中观察到的错误现象是 psql 发出的警告，表明参数被忽略。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证构建的命令参数列表中，数据库名称位于所有额外参数之后。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "避免断言完整的命令字符串，因为路径或环境可能变化。",
+        "reason": "Issue 的核心是参数顺序，直接验证顺序关系最稳定且与问题对齐。"
+      },
+      {
+        "assertion_goal": "验证运行生成的命令时，标准错误输出中不包含“extra command-line argument ... ignored”的警告。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的 stderr 输出字符串。",
+        "reason": "Issue 中观察到的错误症状是特定的警告信息，其缺失表明参数被正确接受。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 PostgreSQL 数据库配置（settings）来实例化测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类继承自 SimpleTestCase，可能不需要真实的数据库连接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "构建错误参数列表的具体代码位置和逻辑尚不确定。",
+      "除了 `-c` 之外，是否还有其他类型的参数会触发此问题。",
+      "`settings_to_cmd_args_env` 方法的具体实现和内部逻辑未知。"
+    ]
+  }
+}

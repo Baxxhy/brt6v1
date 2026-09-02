@@ -1,0 +1,328 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16877",
+  "issue_summary": "Issue 提议添加一个新的模板过滤器 `escapeseq`，用于在自动转义关闭时对序列中的每个元素进行转义。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 EngineHandler 或 DjangoTemplates 配置一个 autoescape 为 False 的模板引擎。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能继承自 SimpleTestCase 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DjangoTemplatesTests.test_autoescape_off",
+        "test_file": "tests/template_backends/test_django.py",
+        "why_relevant": "它测试了 autoescape 关闭的配置，这与 Issue 中 `escapeseq` 的使用场景（autoescape off）直接相关。",
+        "reusable_parts": [
+          "EngineHandler 的配置方式",
+          "使用 engines[\"django\"].from_string 渲染模板的模式",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有使用任何序列过滤器，也没有测试 `escapeseq` 的具体行为。"
+      },
+      {
+        "test_name": "DjangoTemplatesTests.test_autoescape_default",
+        "test_file": "tests/template_backends/test_django.py",
+        "why_relevant": "它测试了默认的自动转义行为，可以作为对比，帮助理解转义上下文。",
+        "reusable_parts": [
+          "模板渲染的基本结构",
+          "对转义输出（&amp;）的断言"
+        ],
+        "possible_gap": "它测试的是单个变量的转义，而不是序列的转义。"
+      },
+      {
+        "test_name": "TestTemplates.test_javascript_escaping",
+        "test_file": "tests/admin_inlines/test_templates.py",
+        "why_relevant": "它测试了 JavaScript 上下文中的转义输出，涉及转义和字符串连接，与 `escapeseq` 后接 `join` 的用例有概念相似性。",
+        "reusable_parts": [
+          "使用 render_to_string",
+          "使用 assertIn 检查输出中的转义片段"
+        ],
+        "possible_gap": "它测试的是特定管理模板，而不是通用的模板过滤器。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 模板中，当 autoescape 设置为 False 时，使用一个名为 `escapeseq` 的新过滤器处理一个序列（如列表）。",
+      "evidence": [
+        "Issue 描述中提到：'This usage makes sense in a context where autoescape is off.'",
+        "相关测试 1 展示了 autoescape 设置为 False 的配置。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前不存在 `escapeseq` 过滤器，因此在模板中使用它会导致错误（如 TemplateSyntaxError）。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述表明这是一个新功能请求，暗示当前缺少该过滤器。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.template.Engine",
+        "kind": "class",
+        "source_path": "django/template/engine.py",
+        "reason": "模板引擎负责加载和渲染模板，是添加新过滤器的核心组件。"
+      },
+      {
+        "name": "django.template.defaultfilters",
+        "kind": "module",
+        "source_path": "django/template/defaultfilters.py",
+        "reason": "这是 Django 内置模板过滤器的模块，新过滤器 `escapeseq` 可能需要在此注册或实现。"
+      },
+      {
+        "name": "django.template.backends.django.DjangoTemplates",
+        "kind": "class",
+        "source_path": "django/template/backends/django.py",
+        "reason": "相关测试使用了这个后端类来测试模板行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/defaultfilters.py",
+        "object": "注册过滤器的位置或 escape 相关函数",
+        "lines": "",
+        "reason": "新过滤器 `escapeseq` 需要在此模块中实现和注册。"
+      },
+      {
+        "path": "django/template/library.py",
+        "object": "Library",
+        "lines": "",
+        "reason": "模板标签和过滤器通过 Library 实例注册。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用单个字符串变量（如 'Bob & Jim'）作为模板输入。",
+        "target_pattern": "使用一个字符串列表作为模板输入，例如 ['a&b', 'c<d']。",
+        "reason": "Issue 中的 `escapeseq` 设计用于处理序列（列表），变异输入为列表可以触发对新过滤器的需求。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 将 OPTIONS 中的 'autoescape' 设置为 False。",
+        "target_pattern": "保持 'autoescape': False 的配置。",
+        "reason": "Issue 明确指出 `escapeseq` 在 autoescape 关闭的上下文中有意义，因此需要此配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中的模板是简单的变量插值，如 'Hello, {{ name }}'。",
+        "target_pattern": "使用过滤器链，如 '{{ some_list|escapeseq|join:\",\" }}'。",
+        "reason": "Issue 的示例展示了 `escapeseq` 与 `join` 过滤器链式使用，这是预期的使用模式。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当在模板中使用 `escapeseq` 过滤器时，它应该对输入序列中的每个元素进行 HTML 转义，然后可以安全地与其他过滤器（如 `join`）结合使用。",
+      "evidence": [
+        "Issue 描述提供了使用示例：'{{ some_list|escapeseq|join:\",\" }}'，并说明其目的是在 autoescape 关闭时对每个项目进行转义。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "渲染后的模板输出字符串。",
+        "reason": "可以检查输出是否对列表中的每个元素进行了正确的 HTML 转义。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "模板渲染过程中是否抛出 TemplateSyntaxError 或其他异常。",
+        "reason": "如果 `escapeseq` 过滤器未实现，渲染会失败并抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 `escapeseq` 过滤器后，列表中的每个元素都被正确转义，并且 `join` 操作能产生预期的连接字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、硬编码的 HTML 字符串，因为转义规则可能细微调整。",
+        "reason": "直接比较最终输出字符串可以清晰验证过滤器的整体效果。"
+      },
+      {
+        "assertion_goal": "验证在 autoescape 关闭时，不使用 `escapeseq` 的输出是不转义的，而使用后是转义的。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免仅断言输出包含特定字符而不考虑上下文。",
+        "reason": "这能凸显 `escapeseq` 在 autoescape off 上下文中的必要性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`escapeseq` 过滤器的确切实现位置和注册方式未知。",
+    "`escapeseq` 是否应该处理非字符串序列元素（如数字）的行为不确定。",
+    "`escapeseq` 在 autoescape 开启的上下文中是否应有不同行为不确定。"
+  ],
+  "raw": {
+    "issue_summary": "Issue 提议添加一个新的模板过滤器 `escapeseq`，用于在自动转义关闭时对序列中的每个元素进行转义。",
+    "trigger_condition": {
+      "text": "在 Django 模板中，当 autoescape 设置为 False 时，使用一个名为 `escapeseq` 的新过滤器处理一个序列（如列表）。",
+      "evidence": [
+        "Issue 描述中提到：'This usage makes sense in a context where autoescape is off.'",
+        "相关测试 1 展示了 autoescape 设置为 False 的配置。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前不存在 `escapeseq` 过滤器，因此在模板中使用它会导致错误（如 TemplateSyntaxError）。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述表明这是一个新功能请求，暗示当前缺少该过滤器。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当在模板中使用 `escapeseq` 过滤器时，它应该对输入序列中的每个元素进行 HTML 转义，然后可以安全地与其他过滤器（如 `join`）结合使用。",
+      "evidence": [
+        "Issue 描述提供了使用示例：'{{ some_list|escapeseq|join:\",\" }}'，并说明其目的是在 autoescape 关闭时对每个项目进行转义。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.template.Engine",
+        "kind": "class",
+        "source_path": "django/template/engine.py",
+        "reason": "模板引擎负责加载和渲染模板，是添加新过滤器的核心组件。"
+      },
+      {
+        "name": "django.template.defaultfilters",
+        "kind": "module",
+        "source_path": "django/template/defaultfilters.py",
+        "reason": "这是 Django 内置模板过滤器的模块，新过滤器 `escapeseq` 可能需要在此注册或实现。"
+      },
+      {
+        "name": "django.template.backends.django.DjangoTemplates",
+        "kind": "class",
+        "source_path": "django/template/backends/django.py",
+        "reason": "相关测试使用了这个后端类来测试模板行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/defaultfilters.py",
+        "object": "注册过滤器的位置或 escape 相关函数",
+        "lines": "",
+        "reason": "新过滤器 `escapeseq` 需要在此模块中实现和注册。"
+      },
+      {
+        "path": "django/template/library.py",
+        "object": "Library",
+        "lines": "",
+        "reason": "模板标签和过滤器通过 Library 实例注册。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DjangoTemplatesTests.test_autoescape_off",
+        "test_file": "tests/template_backends/test_django.py",
+        "why_relevant": "它测试了 autoescape 关闭的配置，这与 Issue 中 `escapeseq` 的使用场景（autoescape off）直接相关。",
+        "reusable_parts": [
+          "EngineHandler 的配置方式",
+          "使用 engines[\"django\"].from_string 渲染模板的模式",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有使用任何序列过滤器，也没有测试 `escapeseq` 的具体行为。"
+      },
+      {
+        "test_name": "DjangoTemplatesTests.test_autoescape_default",
+        "test_file": "tests/template_backends/test_django.py",
+        "why_relevant": "它测试了默认的自动转义行为，可以作为对比，帮助理解转义上下文。",
+        "reusable_parts": [
+          "模板渲染的基本结构",
+          "对转义输出（&amp;）的断言"
+        ],
+        "possible_gap": "它测试的是单个变量的转义，而不是序列的转义。"
+      },
+      {
+        "test_name": "TestTemplates.test_javascript_escaping",
+        "test_file": "tests/admin_inlines/test_templates.py",
+        "why_relevant": "它测试了 JavaScript 上下文中的转义输出，涉及转义和字符串连接，与 `escapeseq` 后接 `join` 的用例有概念相似性。",
+        "reusable_parts": [
+          "使用 render_to_string",
+          "使用 assertIn 检查输出中的转义片段"
+        ],
+        "possible_gap": "它测试的是特定管理模板，而不是通用的模板过滤器。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用单个字符串变量（如 'Bob & Jim'）作为模板输入。",
+        "target_pattern": "使用一个字符串列表作为模板输入，例如 ['a&b', 'c<d']。",
+        "reason": "Issue 中的 `escapeseq` 设计用于处理序列（列表），变异输入为列表可以触发对新过滤器的需求。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 将 OPTIONS 中的 'autoescape' 设置为 False。",
+        "target_pattern": "保持 'autoescape': False 的配置。",
+        "reason": "Issue 明确指出 `escapeseq` 在 autoescape 关闭的上下文中有意义，因此需要此配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中的模板是简单的变量插值，如 'Hello, {{ name }}'。",
+        "target_pattern": "使用过滤器链，如 '{{ some_list|escapeseq|join:\",\" }}'。",
+        "reason": "Issue 的示例展示了 `escapeseq` 与 `join` 过滤器链式使用，这是预期的使用模式。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "渲染后的模板输出字符串。",
+        "reason": "可以检查输出是否对列表中的每个元素进行了正确的 HTML 转义。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "模板渲染过程中是否抛出 TemplateSyntaxError 或其他异常。",
+        "reason": "如果 `escapeseq` 过滤器未实现，渲染会失败并抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 `escapeseq` 过滤器后，列表中的每个元素都被正确转义，并且 `join` 操作能产生预期的连接字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、硬编码的 HTML 字符串，因为转义规则可能细微调整。",
+        "reason": "直接比较最终输出字符串可以清晰验证过滤器的整体效果。"
+      },
+      {
+        "assertion_goal": "验证在 autoescape 关闭时，不使用 `escapeseq` 的输出是不转义的，而使用后是转义的。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免仅断言输出包含特定字符而不考虑上下文。",
+        "reason": "这能凸显 `escapeseq` 在 autoescape off 上下文中的必要性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 EngineHandler 或 DjangoTemplates 配置一个 autoescape 为 False 的模板引擎。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能继承自 SimpleTestCase 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`escapeseq` 过滤器的确切实现位置和注册方式未知。",
+      "`escapeseq` 是否应该处理非字符串序列元素（如数字）的行为不确定。",
+      "`escapeseq` 在 autoescape 开启的上下文中是否应有不同行为不确定。"
+    ]
+  }
+}

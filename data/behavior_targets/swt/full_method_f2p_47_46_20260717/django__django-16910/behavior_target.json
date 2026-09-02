@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16910",
+  "issue_summary": "QuerySet.only() 与 select_related() 在反向 OneToOneField 关系上使用时，生成的 SQL 查询未能正确限制相关模型的字段。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建测试数据库并定义与 Issue 描述类似的模型：一个主模型（如 `Main`）和一个通过 `OneToOneField` 与之关联且设置了 `related_name` 的模型（如 `Secondary`）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 Django 的 `TestCase` 以使用数据库事务和清理功能。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `connection.queries` 或 `assertNumQueries` 来监控和断言 SQL 查询。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inheritance_deferred",
+        "test_file": "tests/select_related_onetoone/tests.py",
+        "why_relevant": "该测试使用了 `select_related` 与 `only` 的组合，并且涉及反向 OneToOne 关系（`Parent2` 反向关联 `Child1`）。",
+        "reusable_parts": [
+          "测试类 `ReverseSelectRelatedTestCase`",
+          "使用 `select_related` 和 `only` 链式调用的模式",
+          "使用 `assertNumQueries` 来验证查询数量",
+          "对延迟加载字段的断言风格"
+        ],
+        "possible_gap": "该测试使用的是继承场景（`Parent2` 和 `Child1` 是继承关系），而 Issue 描述的是普通的反向 OneToOneField 关系（`Main` 和 `Secondary` 无继承）。此外，该测试的 `only` 参数可能没有完全覆盖 Issue 中描述的字段排除失败场景。"
+      },
+      {
+        "test_name": "test_reverse_one_to_one_select_related",
+        "test_file": "tests/known_related_objects/tests.py",
+        "why_relevant": "该测试明确针对反向 OneToOne 关系的 `select_related` 进行测试，并验证了查询数量。",
+        "reusable_parts": [
+          "使用 `select_related` 与反向 OneToOne 关系名（`poolstyle`）",
+          "使用 `assertNumQueries`",
+          "验证相关对象身份（`assertIs`）"
+        ],
+        "possible_gap": "该测试没有使用 `only()` 方法，因此没有覆盖 `only()` 与 `select_related()` 组合的缺陷路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 4.2 中，对具有反向 OneToOneField 关系的模型（例如 `Main` 通过 `related_name='secondary'` 反向关联到 `Secondary`）构建 QuerySet，依次调用 `select_related('secondary')` 和 `only('main_field_1', 'secondary__secondary_field_1')`。",
+      "evidence": [
+        "Issue 描述：'On Django 4.2 calling only() with select_related() on a query using the reverse lookup for a OneToOne relation does not generate the correct query.'",
+        "Issue 中的示例代码：`Main.objects.select_related('secondary').only('main_field_1', 'secondary__secondary_field_1')`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询包含了 `only()` 方法指定要排除的相关模型（`Secondary`）的所有字段（`secondary_field_2`, `secondary_field_3`），而不是仅包含指定的字段（`secondary__secondary_field_1`）。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中对比了 Django 4.2.1 和 4.1.9 的生成 SQL。4.2.1 的 SQL 包含 `\"bugtest_secondary\".\"secondary_field_2\", \"bugtest_secondary\".\"secondary_field_3\"`，而 4.1.9 的 SQL 不包含这些字段。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是 `only()` 方法在与 `select_related()` 结合用于反向 OneToOne 关系时行为不正确。"
+      },
+      {
+        "name": "QuerySet.select_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 涉及 `select_related()` 与 `only()` 的链式调用。"
+      },
+      {
+        "name": "OneToOneField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 明确指出问题发生在反向 OneToOneField 关系上。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.only",
+        "lines": "1728-1747",
+        "reason": "`only()` 方法的实现负责添加立即加载字段，可能与处理反向关系字段的逻辑有关。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.select_related",
+        "lines": "1546-1568",
+        "reason": "`select_related()` 方法负责添加关联选择，其与 `only()` 的交互逻辑可能是缺陷点。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.query",
+        "lines": "",
+        "reason": "实际的 SQL 生成逻辑在 `Query` 对象中，处理 `select_related` 和 `only` 的组合，特别是对于反向 OneToOne 关系。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 `test_inheritance_deferred` 中 `only()` 的参数是 `'id2', 'child1__value'`，并且模型是继承关系。",
+        "target_pattern": "将模型改为非继承的、具有反向 OneToOneField 关系的普通模型（如 Issue 中的 `Main` 和 `Secondary`），并且 `only()` 的参数应包含主模型字段和相关模型字段（如 `'main_field_1', 'secondary__secondary_field_1'`）。",
+        "reason": "Issue 明确指出问题发生在非继承的反向 OneToOne 关系上，并且 `only()` 需要指定相关模型的字段。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中可能先创建对象，然后进行查询和断言。",
+        "target_pattern": "确保查询链是 `Model.objects.select_related('related_name').only('field1', 'related_name__field2')`，并且不包含其他可能影响查询生成的操作。",
+        "reason": "Issue 的触发条件非常具体，需要精确复现 API 调用顺序和参数。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "生成的 SQL 查询应仅包含 `only()` 方法明确指定的字段（包括主模型和相关模型的字段），不应包含相关模型的其他未指定字段。",
+      "evidence": [
+        "Issue 中展示了 Django 4.1.9 版本下正确的 SQL 生成行为：`SELECT ... \"bugtest_secondary\".\"secondary_field_1\" ...`，没有 `secondary_field_2` 和 `secondary_field_3`。",
+        "`only()` 方法的文档字符串描述：'Only the fields passed into this method ... are loaded immediately when the queryset is evaluated.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串（例如通过 `str(queryset.query)` 或数据库日志获取）。",
+        "reason": "Issue 的核心错误现象是生成的 SQL 不正确，包含了多余的字段。观察 SQL 可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询结果对象及其相关对象的属性访问（例如 `obj.secondary.secondary_field_2` 是否会触发额外查询）。",
+        "reason": "如果 `only()` 生效，访问未指定的相关模型字段应触发新的查询（延迟加载）；如果缺陷存在，这些字段可能已被加载，不会触发额外查询。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 查询字符串不包含相关模型中未被 `only()` 指定的字段名（例如 `secondary_field_2` 和 `secondary_field_3`）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串完全等于某个特定字符串，因为不同数据库适配器或 Django 版本可能产生微小差异。",
+        "reason": "Issue 的关键在于 SQL 中包含了不该有的字段。检查 SQL 片段缺失比检查完整 SQL 更稳定。"
+      },
+      {
+        "assertion_goal": "验证访问相关模型中未被 `only()` 指定的字段会触发额外的数据库查询（延迟加载）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言绝对查询次数为某个固定值，除非测试环境完全受控。",
+        "reason": "如果 `only()` 工作正常，未指定的字段应被延迟加载。这可以通过 `assertNumQueries` 在访问字段前后进行验证。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只存在于 Django 4.2，还是其他版本也有？Issue 只对比了 4.2.1 和 4.1.9。",
+    "除了反向 OneToOneField，其他类型的反向关系（如 `ForeignKey`）或正向关系是否也存在此问题？",
+    "`only()` 中字段参数的顺序或数量是否会影响缺陷的触发？",
+    "具体的缺陷代码位置在 `QuerySet`、`Query` 还是 SQL 编译器层？"
+  ],
+  "raw": {
+    "issue_summary": "QuerySet.only() 与 select_related() 在反向 OneToOneField 关系上使用时，生成的 SQL 查询未能正确限制相关模型的字段。",
+    "trigger_condition": {
+      "text": "在 Django 4.2 中，对具有反向 OneToOneField 关系的模型（例如 `Main` 通过 `related_name='secondary'` 反向关联到 `Secondary`）构建 QuerySet，依次调用 `select_related('secondary')` 和 `only('main_field_1', 'secondary__secondary_field_1')`。",
+      "evidence": [
+        "Issue 描述：'On Django 4.2 calling only() with select_related() on a query using the reverse lookup for a OneToOne relation does not generate the correct query.'",
+        "Issue 中的示例代码：`Main.objects.select_related('secondary').only('main_field_1', 'secondary__secondary_field_1')`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询包含了 `only()` 方法指定要排除的相关模型（`Secondary`）的所有字段（`secondary_field_2`, `secondary_field_3`），而不是仅包含指定的字段（`secondary__secondary_field_1`）。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中对比了 Django 4.2.1 和 4.1.9 的生成 SQL。4.2.1 的 SQL 包含 `\"bugtest_secondary\".\"secondary_field_2\", \"bugtest_secondary\".\"secondary_field_3\"`，而 4.1.9 的 SQL 不包含这些字段。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "生成的 SQL 查询应仅包含 `only()` 方法明确指定的字段（包括主模型和相关模型的字段），不应包含相关模型的其他未指定字段。",
+      "evidence": [
+        "Issue 中展示了 Django 4.1.9 版本下正确的 SQL 生成行为：`SELECT ... \"bugtest_secondary\".\"secondary_field_1\" ...`，没有 `secondary_field_2` 和 `secondary_field_3`。",
+        "`only()` 方法的文档字符串描述：'Only the fields passed into this method ... are loaded immediately when the queryset is evaluated.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是 `only()` 方法在与 `select_related()` 结合用于反向 OneToOne 关系时行为不正确。"
+      },
+      {
+        "name": "QuerySet.select_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 涉及 `select_related()` 与 `only()` 的链式调用。"
+      },
+      {
+        "name": "OneToOneField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 明确指出问题发生在反向 OneToOneField 关系上。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.only",
+        "lines": "1728-1747",
+        "reason": "`only()` 方法的实现负责添加立即加载字段，可能与处理反向关系字段的逻辑有关。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.select_related",
+        "lines": "1546-1568",
+        "reason": "`select_related()` 方法负责添加关联选择，其与 `only()` 的交互逻辑可能是缺陷点。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.query",
+        "lines": "",
+        "reason": "实际的 SQL 生成逻辑在 `Query` 对象中，处理 `select_related` 和 `only` 的组合，特别是对于反向 OneToOne 关系。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inheritance_deferred",
+        "test_file": "tests/select_related_onetoone/tests.py",
+        "why_relevant": "该测试使用了 `select_related` 与 `only` 的组合，并且涉及反向 OneToOne 关系（`Parent2` 反向关联 `Child1`）。",
+        "reusable_parts": [
+          "测试类 `ReverseSelectRelatedTestCase`",
+          "使用 `select_related` 和 `only` 链式调用的模式",
+          "使用 `assertNumQueries` 来验证查询数量",
+          "对延迟加载字段的断言风格"
+        ],
+        "possible_gap": "该测试使用的是继承场景（`Parent2` 和 `Child1` 是继承关系），而 Issue 描述的是普通的反向 OneToOneField 关系（`Main` 和 `Secondary` 无继承）。此外，该测试的 `only` 参数可能没有完全覆盖 Issue 中描述的字段排除失败场景。"
+      },
+      {
+        "test_name": "test_reverse_one_to_one_select_related",
+        "test_file": "tests/known_related_objects/tests.py",
+        "why_relevant": "该测试明确针对反向 OneToOne 关系的 `select_related` 进行测试，并验证了查询数量。",
+        "reusable_parts": [
+          "使用 `select_related` 与反向 OneToOne 关系名（`poolstyle`）",
+          "使用 `assertNumQueries`",
+          "验证相关对象身份（`assertIs`）"
+        ],
+        "possible_gap": "该测试没有使用 `only()` 方法，因此没有覆盖 `only()` 与 `select_related()` 组合的缺陷路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 `test_inheritance_deferred` 中 `only()` 的参数是 `'id2', 'child1__value'`，并且模型是继承关系。",
+        "target_pattern": "将模型改为非继承的、具有反向 OneToOneField 关系的普通模型（如 Issue 中的 `Main` 和 `Secondary`），并且 `only()` 的参数应包含主模型字段和相关模型字段（如 `'main_field_1', 'secondary__secondary_field_1'`）。",
+        "reason": "Issue 明确指出问题发生在非继承的反向 OneToOne 关系上，并且 `only()` 需要指定相关模型的字段。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中可能先创建对象，然后进行查询和断言。",
+        "target_pattern": "确保查询链是 `Model.objects.select_related('related_name').only('field1', 'related_name__field2')`，并且不包含其他可能影响查询生成的操作。",
+        "reason": "Issue 的触发条件非常具体，需要精确复现 API 调用顺序和参数。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串（例如通过 `str(queryset.query)` 或数据库日志获取）。",
+        "reason": "Issue 的核心错误现象是生成的 SQL 不正确，包含了多余的字段。观察 SQL 可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询结果对象及其相关对象的属性访问（例如 `obj.secondary.secondary_field_2` 是否会触发额外查询）。",
+        "reason": "如果 `only()` 生效，访问未指定的相关模型字段应触发新的查询（延迟加载）；如果缺陷存在，这些字段可能已被加载，不会触发额外查询。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 查询字符串不包含相关模型中未被 `only()` 指定的字段名（例如 `secondary_field_2` 和 `secondary_field_3`）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串完全等于某个特定字符串，因为不同数据库适配器或 Django 版本可能产生微小差异。",
+        "reason": "Issue 的关键在于 SQL 中包含了不该有的字段。检查 SQL 片段缺失比检查完整 SQL 更稳定。"
+      },
+      {
+        "assertion_goal": "验证访问相关模型中未被 `only()` 指定的字段会触发额外的数据库查询（延迟加载）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言绝对查询次数为某个固定值，除非测试环境完全受控。",
+        "reason": "如果 `only()` 工作正常，未指定的字段应被延迟加载。这可以通过 `assertNumQueries` 在访问字段前后进行验证。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建测试数据库并定义与 Issue 描述类似的模型：一个主模型（如 `Main`）和一个通过 `OneToOneField` 与之关联且设置了 `related_name` 的模型（如 `Secondary`）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 Django 的 `TestCase` 以使用数据库事务和清理功能。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `connection.queries` 或 `assertNumQueries` 来监控和断言 SQL 查询。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只存在于 Django 4.2，还是其他版本也有？Issue 只对比了 4.2.1 和 4.1.9。",
+      "除了反向 OneToOneField，其他类型的反向关系（如 `ForeignKey`）或正向关系是否也存在此问题？",
+      "`only()` 中字段参数的顺序或数量是否会影响缺陷的触发？",
+      "具体的缺陷代码位置在 `QuerySet`、`Query` 还是 SQL 编译器层？"
+    ]
+  }
+}

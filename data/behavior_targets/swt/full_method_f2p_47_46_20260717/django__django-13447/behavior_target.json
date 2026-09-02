@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13447",
+  "issue_summary": "Issue 提出者希望在自定义 admin 视图中操作 app_list，并希望 app_list 中的字典包含模型类，而不仅仅是序列化模型信息，同时建议将 _build_app_dict 方法公开。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用一个已注册到 admin 站点的模型，并创建一个具有相应权限的用户来登录和访问 admin 视图。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings(ROOT_URLCONF='admin_views.urls') 来确保正确的 URL 配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 AdminViewBasicTestCase 或类似的测试基类，以复用已有的设置和客户端。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminViewBasicTest.test_app_index_context",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试验证了 app_index 视图的上下文内容，包括 title 和 app_label，与 Issue 关注的 app_list 上下文直接相关。",
+        "reusable_parts": [
+          "测试类 AdminViewBasicTestCase",
+          "使用 self.client.get 和 reverse 访问 admin 视图",
+          "使用 assertContains 和 assertEqual 检查响应上下文"
+        ],
+        "possible_gap": "该测试只检查了 title 和 app_label，没有检查 app_list 中模型字典的具体内容，特别是是否包含模型类。"
+      },
+      {
+        "test_name": "CustomModelAdminTest.test_custom_admin_site_app_index_view_and_template",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试涉及自定义 admin 站点和模板，与 Issue 中提到的自定义 admin 视图场景相似。",
+        "reusable_parts": [
+          "使用 @override_settings",
+          "访问自定义 admin 站点的 app_list 视图",
+          "检查 TemplateResponse 和模板使用"
+        ],
+        "possible_gap": "该测试主要关注模板和响应类型，没有深入检查上下文中的 app_list 数据结构。"
+      },
+      {
+        "test_name": "AdminViewPermissionsTest.test_app_list_permissions",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试验证了 app_list 视图在权限变化下的行为（404 vs 200），展示了如何构造请求和检查响应状态。",
+        "reusable_parts": [
+          "设置用户权限",
+          "使用 force_login",
+          "检查响应状态码"
+        ],
+        "possible_gap": "该测试关注权限逻辑，不涉及 app_list 上下文的具体内容。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在自定义 admin 视图中访问 admin 站点的 index 或 app_index 视图，并期望从上下文的 app_list 中获取模型类。",
+      "evidence": [
+        "Issue 描述：'I need to manipulate the app_list in my custom admin view, and the easiest way to get the result is to have access to the model class (currently the dictionary is a serialized model).'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前 app_list 上下文中的模型信息是序列化后的字典，不包含原始的模型类对象，导致在自定义视图中无法直接操作模型类。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述：'currently the dictionary is a serialized model'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AdminSite._build_app_dict",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 明确提到该方法，并建议将其公开，它是构建 app_dict 的核心方法，其输出直接影响 app_list 的内容。"
+      },
+      {
+        "name": "AdminSite.index",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 提到 _build_app_dict 被 index 视图使用，index 视图负责生成主 admin 页面的上下文。"
+      },
+      {
+        "name": "AdminSite.app_index",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 提到 _build_app_dict 被 app_index 视图使用，app_index 视图负责生成特定应用的 admin 页面上下文。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite._build_app_dict",
+        "lines": "433-499",
+        "reason": "该方法构建的 model_dict 字典中只包含序列化的模型信息（如 'name', 'object_name'），没有包含原始的模型类对象。Issue 希望在此处添加模型类。"
+      },
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.index",
+        "lines": "517-534",
+        "reason": "该视图通过 self.get_app_list(request) 获取 app_list 并放入上下文，其数据源是 _build_app_dict 的输出。"
+      },
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.app_index",
+        "lines": "536-556",
+        "reason": "该视图直接调用 _build_app_dict 并将结果放入上下文，同样受 _build_app_dict 输出内容的影响。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中直接访问 admin 视图并检查响应上下文中的现有字段（如 title, app_label）。",
+        "target_pattern": "在测试中访问 admin 视图后，检查响应上下文的 app_list 中每个模型的字典是否包含模型类对象（例如 'model' 键）。",
+        "reason": "Issue 的核心诉求是 app_list 中的模型字典应包含模型类，而当前测试没有验证这一点。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试使用默认的 AdminSite 实例和注册的模型。",
+        "target_pattern": "测试可能需要创建一个自定义的 admin 视图，该视图尝试从 app_list 上下文中提取模型类并进行操作。",
+        "reason": "Issue 提到需要在自定义 admin 视图中操作 app_list，因此测试可能需要模拟这种自定义视图的使用场景。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "app_list 上下文中的模型字典应包含模型类，以便在自定义 admin 视图中可以直接访问和操作模型类。",
+      "evidence": [
+        "Issue 描述：'to have access to the model class'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.context['app_list'] 中每个模型字典的键集合和类型。",
+        "reason": "可以观察模型字典是否包含模型类对象（例如一个 'model' 键，其值为一个模型类），以判断 Issue 描述的问题是否存在。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(model_dict.get('model')) 如果存在的话。",
+        "reason": "确认获取到的对象是否是预期的模型类类型，而不是字符串或其他序列化形式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 app_list 上下文中的每个模型字典包含一个代表模型类的键（例如 'model'），并且其值是一个模型类。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的字典结构或具体的序列化字符串，因为具体实现可能变化。",
+        "reason": "Issue 的核心是能够访问模型类，因此断言模型类对象的存在和类型是稳定且与 Issue 对齐的。"
+      },
+      {
+        "assertion_goal": "验证从 app_list 中提取的模型类可以被用于预期的操作（例如获取模型元信息）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的模型元信息值，除非它们是稳定的。",
+        "reason": "这可以证明模型类是可用的，而不仅仅是存储了一个引用。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 'serialized model' 具体指什么数据结构？是仅包含字符串的字典，还是包含其他非类对象？",
+    "期望的模型类在 app_list 字典中应该以什么键名出现？Issue 没有指定，可能是 'model'、'model_class' 或其他。",
+    "将 _build_app_dict 方法公开（public）是否意味着需要改变其访问权限（从 _build_app_dict 到 build_app_dict），或者只是文档上的说明？Issue 描述不够精确。",
+    "除了添加模型类，是否还需要对 _build_app_dict 方法做其他修改？"
+  ],
+  "raw": {
+    "issue_summary": "Issue 提出者希望在自定义 admin 视图中操作 app_list，并希望 app_list 中的字典包含模型类，而不仅仅是序列化模型信息，同时建议将 _build_app_dict 方法公开。",
+    "trigger_condition": {
+      "text": "在自定义 admin 视图中访问 admin 站点的 index 或 app_index 视图，并期望从上下文的 app_list 中获取模型类。",
+      "evidence": [
+        "Issue 描述：'I need to manipulate the app_list in my custom admin view, and the easiest way to get the result is to have access to the model class (currently the dictionary is a serialized model).'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前 app_list 上下文中的模型信息是序列化后的字典，不包含原始的模型类对象，导致在自定义视图中无法直接操作模型类。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述：'currently the dictionary is a serialized model'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "app_list 上下文中的模型字典应包含模型类，以便在自定义 admin 视图中可以直接访问和操作模型类。",
+      "evidence": [
+        "Issue 描述：'to have access to the model class'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AdminSite._build_app_dict",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 明确提到该方法，并建议将其公开，它是构建 app_dict 的核心方法，其输出直接影响 app_list 的内容。"
+      },
+      {
+        "name": "AdminSite.index",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 提到 _build_app_dict 被 index 视图使用，index 视图负责生成主 admin 页面的上下文。"
+      },
+      {
+        "name": "AdminSite.app_index",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 提到 _build_app_dict 被 app_index 视图使用，app_index 视图负责生成特定应用的 admin 页面上下文。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite._build_app_dict",
+        "lines": "433-499",
+        "reason": "该方法构建的 model_dict 字典中只包含序列化的模型信息（如 'name', 'object_name'），没有包含原始的模型类对象。Issue 希望在此处添加模型类。"
+      },
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.index",
+        "lines": "517-534",
+        "reason": "该视图通过 self.get_app_list(request) 获取 app_list 并放入上下文，其数据源是 _build_app_dict 的输出。"
+      },
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.app_index",
+        "lines": "536-556",
+        "reason": "该视图直接调用 _build_app_dict 并将结果放入上下文，同样受 _build_app_dict 输出内容的影响。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminViewBasicTest.test_app_index_context",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试验证了 app_index 视图的上下文内容，包括 title 和 app_label，与 Issue 关注的 app_list 上下文直接相关。",
+        "reusable_parts": [
+          "测试类 AdminViewBasicTestCase",
+          "使用 self.client.get 和 reverse 访问 admin 视图",
+          "使用 assertContains 和 assertEqual 检查响应上下文"
+        ],
+        "possible_gap": "该测试只检查了 title 和 app_label，没有检查 app_list 中模型字典的具体内容，特别是是否包含模型类。"
+      },
+      {
+        "test_name": "CustomModelAdminTest.test_custom_admin_site_app_index_view_and_template",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试涉及自定义 admin 站点和模板，与 Issue 中提到的自定义 admin 视图场景相似。",
+        "reusable_parts": [
+          "使用 @override_settings",
+          "访问自定义 admin 站点的 app_list 视图",
+          "检查 TemplateResponse 和模板使用"
+        ],
+        "possible_gap": "该测试主要关注模板和响应类型，没有深入检查上下文中的 app_list 数据结构。"
+      },
+      {
+        "test_name": "AdminViewPermissionsTest.test_app_list_permissions",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试验证了 app_list 视图在权限变化下的行为（404 vs 200），展示了如何构造请求和检查响应状态。",
+        "reusable_parts": [
+          "设置用户权限",
+          "使用 force_login",
+          "检查响应状态码"
+        ],
+        "possible_gap": "该测试关注权限逻辑，不涉及 app_list 上下文的具体内容。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中直接访问 admin 视图并检查响应上下文中的现有字段（如 title, app_label）。",
+        "target_pattern": "在测试中访问 admin 视图后，检查响应上下文的 app_list 中每个模型的字典是否包含模型类对象（例如 'model' 键）。",
+        "reason": "Issue 的核心诉求是 app_list 中的模型字典应包含模型类，而当前测试没有验证这一点。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试使用默认的 AdminSite 实例和注册的模型。",
+        "target_pattern": "测试可能需要创建一个自定义的 admin 视图，该视图尝试从 app_list 上下文中提取模型类并进行操作。",
+        "reason": "Issue 提到需要在自定义 admin 视图中操作 app_list，因此测试可能需要模拟这种自定义视图的使用场景。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.context['app_list'] 中每个模型字典的键集合和类型。",
+        "reason": "可以观察模型字典是否包含模型类对象（例如一个 'model' 键，其值为一个模型类），以判断 Issue 描述的问题是否存在。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(model_dict.get('model')) 如果存在的话。",
+        "reason": "确认获取到的对象是否是预期的模型类类型，而不是字符串或其他序列化形式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 app_list 上下文中的每个模型字典包含一个代表模型类的键（例如 'model'），并且其值是一个模型类。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的字典结构或具体的序列化字符串，因为具体实现可能变化。",
+        "reason": "Issue 的核心是能够访问模型类，因此断言模型类对象的存在和类型是稳定且与 Issue 对齐的。"
+      },
+      {
+        "assertion_goal": "验证从 app_list 中提取的模型类可以被用于预期的操作（例如获取模型元信息）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的模型元信息值，除非它们是稳定的。",
+        "reason": "这可以证明模型类是可用的，而不仅仅是存储了一个引用。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用一个已注册到 admin 站点的模型，并创建一个具有相应权限的用户来登录和访问 admin 视图。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings(ROOT_URLCONF='admin_views.urls') 来确保正确的 URL 配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 AdminViewBasicTestCase 或类似的测试基类，以复用已有的设置和客户端。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 'serialized model' 具体指什么数据结构？是仅包含字符串的字典，还是包含其他非类对象？",
+      "期望的模型类在 app_list 字典中应该以什么键名出现？Issue 没有指定，可能是 'model'、'model_class' 或其他。",
+      "将 _build_app_dict 方法公开（public）是否意味着需要改变其访问权限（从 _build_app_dict 到 build_app_dict），或者只是文档上的说明？Issue 描述不够精确。",
+      "除了添加模型类，是否还需要对 _build_app_dict 方法做其他修改？"
+    ]
+  }
+}

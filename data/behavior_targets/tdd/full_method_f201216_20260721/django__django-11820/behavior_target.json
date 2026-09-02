@@ -1,0 +1,270 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11820",
+  "issue_summary": "当 Meta.ordering 包含相关字段的 __pk 时，错误地引发了 models.E015 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离应用，避免模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 SimpleTestCase，因为不涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义具有 ForeignKey 或其它关系字段的 Django 模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "OtherModelTests.test_ordering_pointing_to_missing_related_field",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了当 ordering 包含不存在的相关字段查找时，会正确引发 models.E015 错误。",
+        "reusable_parts": [
+          "测试类结构（@isolate_apps, SimpleTestCase）",
+          "模型定义模式",
+          "使用 Model.check() 并断言返回 Error 对象",
+          "Error 对象的 id='models.E015'"
+        ],
+        "possible_gap": "该测试使用 'missing_related__id' 作为无效查找，而 Issue 中的 'related_field__pk' 本应是有效查找，但被错误地标记为无效。"
+      },
+      {
+        "test_name": "OtherModelTests.test_ordering_pointing_to_missing_related_model_field",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了 ordering 指向相关模型中缺失字段的情况，错误类型与 Issue 相同。",
+        "reusable_parts": [
+          "定义具有 ForeignKey 的父子模型结构",
+          "在子模型的 Meta.ordering 中使用 'parent__missing_field' 模式"
+        ],
+        "possible_gap": "它测试的是字段确实不存在的情况，而 Issue 中 '__pk' 应该被视为有效的主键查找。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个 Django 模型，其 Meta.ordering 属性包含一个指向相关模型主键的字段查找，例如 'related_field__pk'。",
+      "evidence": [
+        "Issue 描述：'models.E015 is raised when Meta.ordering contains __pk of a related field, e.g.: test_app.SomeModel: (models.E015) 'ordering' refers to the nonexistent field, related field, or lookup 'option__pk'."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行模型检查（如 Model.check()）时，会引发一个 models.E015 错误，提示 ordering 引用了不存在的字段、相关字段或查找。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'models.E015 is raised...'",
+        "相关测试代码中均使用 self.assertEqual(Model.check(), [Error(..., id='models.E015')]) 来验证错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中提到的 models.E015 错误是通过运行模型检查触发的，相关测试也使用此方法验证错误。"
+      },
+      {
+        "name": "django.db.models.Model.Meta.ordering",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 的核心是 Meta.ordering 属性的验证逻辑存在问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 提到回归发生在特定提交（440505cb2cadbe1a5b9fba246bcde6c04f51d07e），但未提供具体源码片段。缺陷可能位于处理 ordering 字段查找的验证逻辑中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，ordering 包含不存在的字段查找，如 'missing_related__id', 'parent__missing_field'。",
+        "target_pattern": "ordering 包含指向相关模型主键的查找，如 'related_field__pk'。",
+        "reason": "Issue 表明 '__pk' 查找被错误地判定为无效，而相似测试使用的是无效查找。将无效查找变异为 '__pk' 应能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，模型定义是独立的，没有实际数据库表。",
+        "target_pattern": "模型定义保持不变，但 ordering 值变为 '__pk'。",
+        "reason": "触发条件的关键是 ordering 的配置值，而非模型结构。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 Meta.ordering 包含指向相关模型主键的 __pk 查找时，模型检查应通过，不引发 models.E015 错误。",
+      "evidence": [
+        "Issue 描述暗示这是一个回归（Regression），意味着在某个提交之前，'__pk' 查找应该是被允许的。修复后应恢复此行为。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "Model.check() 的返回值，特别是其中是否包含 id 为 'models.E015' 的 Error 对象。",
+        "reason": "Issue 的核心错误现象就是 models.E015 异常。观察检查结果可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "Model.check() 返回的列表内容。",
+        "reason": "修复后，对于有效的 '__pk' 查找，检查应返回空列表（无错误）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 ordering 包含 'related_field__pk' 时，模型检查不引发 models.E015 错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误消息字符串相等，因为消息格式可能变化。避免断言返回列表完全为空，因为可能存在其他无关错误。",
+        "reason": "Issue 的预期行为是 '__pk' 查找有效。因此，断言检查结果中不包含 id 为 'models.E015' 的错误，能稳定地验证修复目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "确切的修复后行为：是 '__pk' 查找被完全支持，还是仅在某些特定类型的相关字段（如 ForeignKey）上支持？",
+    "引发错误的精确代码位置和逻辑。",
+    "除了 '__pk'，是否还有其他类似的有效查找（如 '__id'）也受到此回归影响？"
+  ],
+  "raw": {
+    "issue_summary": "当 Meta.ordering 包含相关字段的 __pk 时，错误地引发了 models.E015 异常。",
+    "trigger_condition": {
+      "text": "定义一个 Django 模型，其 Meta.ordering 属性包含一个指向相关模型主键的字段查找，例如 'related_field__pk'。",
+      "evidence": [
+        "Issue 描述：'models.E015 is raised when Meta.ordering contains __pk of a related field, e.g.: test_app.SomeModel: (models.E015) 'ordering' refers to the nonexistent field, related field, or lookup 'option__pk'."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行模型检查（如 Model.check()）时，会引发一个 models.E015 错误，提示 ordering 引用了不存在的字段、相关字段或查找。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'models.E015 is raised...'",
+        "相关测试代码中均使用 self.assertEqual(Model.check(), [Error(..., id='models.E015')]) 来验证错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 Meta.ordering 包含指向相关模型主键的 __pk 查找时，模型检查应通过，不引发 models.E015 错误。",
+      "evidence": [
+        "Issue 描述暗示这是一个回归（Regression），意味着在某个提交之前，'__pk' 查找应该是被允许的。修复后应恢复此行为。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中提到的 models.E015 错误是通过运行模型检查触发的，相关测试也使用此方法验证错误。"
+      },
+      {
+        "name": "django.db.models.Model.Meta.ordering",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 的核心是 Meta.ordering 属性的验证逻辑存在问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 提到回归发生在特定提交（440505cb2cadbe1a5b9fba246bcde6c04f51d07e），但未提供具体源码片段。缺陷可能位于处理 ordering 字段查找的验证逻辑中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "OtherModelTests.test_ordering_pointing_to_missing_related_field",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了当 ordering 包含不存在的相关字段查找时，会正确引发 models.E015 错误。",
+        "reusable_parts": [
+          "测试类结构（@isolate_apps, SimpleTestCase）",
+          "模型定义模式",
+          "使用 Model.check() 并断言返回 Error 对象",
+          "Error 对象的 id='models.E015'"
+        ],
+        "possible_gap": "该测试使用 'missing_related__id' 作为无效查找，而 Issue 中的 'related_field__pk' 本应是有效查找，但被错误地标记为无效。"
+      },
+      {
+        "test_name": "OtherModelTests.test_ordering_pointing_to_missing_related_model_field",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了 ordering 指向相关模型中缺失字段的情况，错误类型与 Issue 相同。",
+        "reusable_parts": [
+          "定义具有 ForeignKey 的父子模型结构",
+          "在子模型的 Meta.ordering 中使用 'parent__missing_field' 模式"
+        ],
+        "possible_gap": "它测试的是字段确实不存在的情况，而 Issue 中 '__pk' 应该被视为有效的主键查找。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，ordering 包含不存在的字段查找，如 'missing_related__id', 'parent__missing_field'。",
+        "target_pattern": "ordering 包含指向相关模型主键的查找，如 'related_field__pk'。",
+        "reason": "Issue 表明 '__pk' 查找被错误地判定为无效，而相似测试使用的是无效查找。将无效查找变异为 '__pk' 应能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，模型定义是独立的，没有实际数据库表。",
+        "target_pattern": "模型定义保持不变，但 ordering 值变为 '__pk'。",
+        "reason": "触发条件的关键是 ordering 的配置值，而非模型结构。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "Model.check() 的返回值，特别是其中是否包含 id 为 'models.E015' 的 Error 对象。",
+        "reason": "Issue 的核心错误现象就是 models.E015 异常。观察检查结果可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "Model.check() 返回的列表内容。",
+        "reason": "修复后，对于有效的 '__pk' 查找，检查应返回空列表（无错误）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 ordering 包含 'related_field__pk' 时，模型检查不引发 models.E015 错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误消息字符串相等，因为消息格式可能变化。避免断言返回列表完全为空，因为可能存在其他无关错误。",
+        "reason": "Issue 的预期行为是 '__pk' 查找有效。因此，断言检查结果中不包含 id 为 'models.E015' 的错误，能稳定地验证修复目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离应用，避免模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 SimpleTestCase，因为不涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义具有 ForeignKey 或其它关系字段的 Django 模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "确切的修复后行为：是 '__pk' 查找被完全支持，还是仅在某些特定类型的相关字段（如 ForeignKey）上支持？",
+      "引发错误的精确代码位置和逻辑。",
+      "除了 '__pk'，是否还有其他类似的有效查找（如 '__id'）也受到此回归影响？"
+    ]
+  }
+}

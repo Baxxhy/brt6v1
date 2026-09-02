@@ -1,0 +1,316 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14376",
+  "issue_summary": "MySQL backend uses deprecated 'db' and 'passwd' kwargs when connecting via mysqlclient.",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "Use a test case for MySQL backend (e.g., SimpleTestCase with appropriate skip decorator).",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Configure Django DATABASES settings for a MySQL connection, likely in test setup or via override_settings.",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Mock MySQLdb.connect to inspect call arguments without requiring a real database.",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MySqlDbshellCommandTestCase.test_can_connect_using_sockets",
+        "test_file": "tests/dbshell/test_mysql.py",
+        "why_relevant": "Tests MySQL connection configuration, involving USER, PASSWORD, NAME (database) settings.",
+        "reusable_parts": [
+          "Test class structure for MySQL.",
+          "Pattern of defining connection settings dictionary.",
+          "Use of SimpleTestCase."
+        ],
+        "possible_gap": "Tests the dbshell command, not the internal database connection establishment where the kwargs are passed."
+      },
+      {
+        "test_name": "MySqlDbshellCommandTestCase.test_options_password",
+        "test_file": "tests/dbshell/test_mysql.py",
+        "why_relevant": "Tests handling of password in connection OPTIONS, relevant to 'password' vs 'passwd' kwarg.",
+        "reusable_parts": [
+          "Pattern of defining connection settings with OPTIONS.",
+          "Assertion style comparing expected arguments/environment."
+        ],
+        "possible_gap": "Focuses on command-line argument generation for dbshell, not the low-level mysqlclient.connect call."
+      },
+      {
+        "test_name": "DatabaseCreationTests.test_clone_test_db_options_ordering",
+        "test_file": "tests/backends/mysql/test_creation.py",
+        "why_relevant": "Tests MySQL backend database creation/connection logic, mocks subprocess calls.",
+        "reusable_parts": [
+          "Test class for MySQL backend.",
+          "Pattern of mocking and patching connection settings.",
+          "Use of unittest.skipUnless for MySQL."
+        ],
+        "possible_gap": "Focuses on mysqldump command generation, not the initial client connection parameters."
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "Using Django's MySQL backend to connect to a database, which internally uses mysqlclient.",
+      "evidence": [
+        "Issue states the deprecated usage is in django/db/backends/mysql/base.py lines 202-205.",
+        "Issue links to mysqlclient commits marking 'db' and 'passwd' as deprecated."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Use of deprecated kwargs 'db' and 'passwd' when connecting, potentially leading to deprecation warnings.",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue states mysqlclient marked these kwargs as deprecated.",
+        "Issue describes the deprecated usage in Django's code."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.backends.mysql.base.DatabaseWrapper.get_connection_params",
+        "kind": "method",
+        "source_path": "django/db/backends/mysql/base.py",
+        "reason": "Issue points to lines 202-205 in this file where the deprecated kwargs are used."
+      },
+      {
+        "name": "MySQLdb.connect",
+        "kind": "function",
+        "source_path": "",
+        "reason": "The deprecated 'db' and 'passwd' kwargs are passed to this mysqlclient function."
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/mysql/base.py",
+        "object": "DatabaseWrapper.get_connection_params",
+        "lines": "202-205",
+        "reason": "Issue explicitly cites these lines as the location of the deprecated 'db' and 'passwd' usage."
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "Tests often define connection settings with keys like 'NAME', 'USER', 'PASSWORD', 'HOST', 'PORT', 'OPTIONS'.",
+        "target_pattern": "Ensure the test configures a MySQL connection, triggering the internal path to mysqlclient.connect.",
+        "reason": "The bug is in the translation of Django settings to mysqlclient.connect kwargs.",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "Some tests mock subprocess.Popen or other external calls.",
+        "target_pattern": "Mock MySQLdb.connect to intercept and inspect the kwargs passed to it.",
+        "reason": "Direct observation of the kwargs passed to mysqlclient.connect is needed to see if 'db'/'passwd' or 'database'/'password' are used.",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "MySQL backend should use the non-deprecated kwargs 'database' and 'password' when connecting via mysqlclient (version >=1.3.8).",
+      "evidence": [
+        "Issue states mysqlclient added support for 'database' and 'password' in 1.3.8.",
+        "Issue states Django 2.2, 3.1, and 3.2 require a minimum mysqlclient version newer than 1.3.8."
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings to capture DeprecationWarning from mysqlclient.",
+        "reason": "The primary symptom is the use of deprecated kwargs, which may emit warnings."
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "The dictionary of connection parameters returned by DatabaseWrapper.get_connection_params().",
+        "reason": "This dictionary contains the kwargs that will be passed to mysqlclient.connect."
+      },
+      {
+        "kind": "config",
+        "expression_hint": "The kwargs dictionary passed to the mocked or actual MySQLdb.connect call.",
+        "reason": "Direct observation of which key names ('db' vs 'database', 'passwd' vs 'password') are used."
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "The kwargs passed to mysqlclient.connect should contain 'database' and 'password', not 'db' and 'passwd'.",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "Asserting the exact full dictionary, as other kwargs may vary.",
+        "reason": "The issue is specifically about the key names for database and password parameters."
+      },
+      {
+        "assertion_goal": "No DeprecationWarning should be raised regarding 'db' or 'passwd' kwargs.",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "Asserting no warnings at all, as other unrelated warnings might be acceptable.",
+        "reason": "The fix should eliminate the deprecation warnings mentioned in the issue."
+      }
+    ]
+  },
+  "uncertainties": [
+    "The exact line numbers in the suspected file might have shifted from the issue's reference (202-205).",
+    "Whether the deprecated usage always triggers a visible warning or only under certain mysqlclient versions.",
+    "The full signature and other kwargs of the get_connection_params method and MySQLdb.connect."
+  ],
+  "raw": {
+    "issue_summary": "MySQL backend uses deprecated 'db' and 'passwd' kwargs when connecting via mysqlclient.",
+    "trigger_condition": {
+      "text": "Using Django's MySQL backend to connect to a database, which internally uses mysqlclient.",
+      "evidence": [
+        "Issue states the deprecated usage is in django/db/backends/mysql/base.py lines 202-205.",
+        "Issue links to mysqlclient commits marking 'db' and 'passwd' as deprecated."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Use of deprecated kwargs 'db' and 'passwd' when connecting, potentially leading to deprecation warnings.",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue states mysqlclient marked these kwargs as deprecated.",
+        "Issue describes the deprecated usage in Django's code."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "MySQL backend should use the non-deprecated kwargs 'database' and 'password' when connecting via mysqlclient (version >=1.3.8).",
+      "evidence": [
+        "Issue states mysqlclient added support for 'database' and 'password' in 1.3.8.",
+        "Issue states Django 2.2, 3.1, and 3.2 require a minimum mysqlclient version newer than 1.3.8."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.backends.mysql.base.DatabaseWrapper.get_connection_params",
+        "kind": "method",
+        "source_path": "django/db/backends/mysql/base.py",
+        "reason": "Issue points to lines 202-205 in this file where the deprecated kwargs are used."
+      },
+      {
+        "name": "MySQLdb.connect",
+        "kind": "function",
+        "source_path": "",
+        "reason": "The deprecated 'db' and 'passwd' kwargs are passed to this mysqlclient function."
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/mysql/base.py",
+        "object": "DatabaseWrapper.get_connection_params",
+        "lines": "202-205",
+        "reason": "Issue explicitly cites these lines as the location of the deprecated 'db' and 'passwd' usage."
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MySqlDbshellCommandTestCase.test_can_connect_using_sockets",
+        "test_file": "tests/dbshell/test_mysql.py",
+        "why_relevant": "Tests MySQL connection configuration, involving USER, PASSWORD, NAME (database) settings.",
+        "reusable_parts": [
+          "Test class structure for MySQL.",
+          "Pattern of defining connection settings dictionary.",
+          "Use of SimpleTestCase."
+        ],
+        "possible_gap": "Tests the dbshell command, not the internal database connection establishment where the kwargs are passed."
+      },
+      {
+        "test_name": "MySqlDbshellCommandTestCase.test_options_password",
+        "test_file": "tests/dbshell/test_mysql.py",
+        "why_relevant": "Tests handling of password in connection OPTIONS, relevant to 'password' vs 'passwd' kwarg.",
+        "reusable_parts": [
+          "Pattern of defining connection settings with OPTIONS.",
+          "Assertion style comparing expected arguments/environment."
+        ],
+        "possible_gap": "Focuses on command-line argument generation for dbshell, not the low-level mysqlclient.connect call."
+      },
+      {
+        "test_name": "DatabaseCreationTests.test_clone_test_db_options_ordering",
+        "test_file": "tests/backends/mysql/test_creation.py",
+        "why_relevant": "Tests MySQL backend database creation/connection logic, mocks subprocess calls.",
+        "reusable_parts": [
+          "Test class for MySQL backend.",
+          "Pattern of mocking and patching connection settings.",
+          "Use of unittest.skipUnless for MySQL."
+        ],
+        "possible_gap": "Focuses on mysqldump command generation, not the initial client connection parameters."
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "Tests often define connection settings with keys like 'NAME', 'USER', 'PASSWORD', 'HOST', 'PORT', 'OPTIONS'.",
+        "target_pattern": "Ensure the test configures a MySQL connection, triggering the internal path to mysqlclient.connect.",
+        "reason": "The bug is in the translation of Django settings to mysqlclient.connect kwargs.",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "Some tests mock subprocess.Popen or other external calls.",
+        "target_pattern": "Mock MySQLdb.connect to intercept and inspect the kwargs passed to it.",
+        "reason": "Direct observation of the kwargs passed to mysqlclient.connect is needed to see if 'db'/'passwd' or 'database'/'password' are used.",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings to capture DeprecationWarning from mysqlclient.",
+        "reason": "The primary symptom is the use of deprecated kwargs, which may emit warnings."
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "The dictionary of connection parameters returned by DatabaseWrapper.get_connection_params().",
+        "reason": "This dictionary contains the kwargs that will be passed to mysqlclient.connect."
+      },
+      {
+        "kind": "config",
+        "expression_hint": "The kwargs dictionary passed to the mocked or actual MySQLdb.connect call.",
+        "reason": "Direct observation of which key names ('db' vs 'database', 'passwd' vs 'password') are used."
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "The kwargs passed to mysqlclient.connect should contain 'database' and 'password', not 'db' and 'passwd'.",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "Asserting the exact full dictionary, as other kwargs may vary.",
+        "reason": "The issue is specifically about the key names for database and password parameters."
+      },
+      {
+        "assertion_goal": "No DeprecationWarning should be raised regarding 'db' or 'passwd' kwargs.",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "Asserting no warnings at all, as other unrelated warnings might be acceptable.",
+        "reason": "The fix should eliminate the deprecation warnings mentioned in the issue."
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "Use a test case for MySQL backend (e.g., SimpleTestCase with appropriate skip decorator).",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Configure Django DATABASES settings for a MySQL connection, likely in test setup or via override_settings.",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "Mock MySQLdb.connect to inspect call arguments without requiring a real database.",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "The exact line numbers in the suspected file might have shifted from the issue's reference (202-205).",
+      "Whether the deprecated usage always triggers a visible warning or only under certain mysqlclient versions.",
+      "The full signature and other kwargs of the get_connection_params method and MySQLdb.connect."
+    ]
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12050",
+  "issue_summary": "Query.resolve_lookup_value 方法在处理列表类型的输入值时，会将其强制转换为元组，破坏了精确值查询，特别是影响依赖于输入类型匹配的 ORM 字段类型（如 PickledField）。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个包含 PickledField 或类似依赖输入类型的自定义字段的 Django 模型，以及相应的数据库 fixture。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要使用 Django 的 TestCase 来管理数据库事务和模型实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "LookupTests.test_in_keeps_value_ordering",
+        "test_file": "tests/lookup/tests.py",
+        "why_relevant": "该测试使用了 `__in` 查找，这可能会调用 `resolve_lookup_value` 方法，并且涉及列表输入。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "Article 模型 fixture 的构造模式",
+          "filter(slug__in=...) 的调用方式"
+        ],
+        "possible_gap": "该测试主要验证 SQL 字符串中的顺序，并未直接断言输入值的类型是否被保留。"
+      },
+      {
+        "test_name": "RelatedLookupTypeTests.test_values_queryset_lookup",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试使用了 `__in` 查找，并且传入了一个 `values_list` 查询集，这可能涉及列表/元组值的处理。",
+        "reusable_parts": [
+          "ObjectB 模型 fixture 的构造模式",
+          "filter(objecta__in=...) 的调用方式",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试关注的是 ValueQuerySet 的兼容性，而不是输入值类型的保持。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Query.resolve_lookup_value 方法，并传入一个列表（list）类型的 value 参数。",
+      "evidence": [
+        "Issue 描述指出 'input value list' 被强制转换为 tuple。",
+        "源码片段 1 显示当 value 是 list 或 tuple 时，会进入一个分支，最终将 value 赋值为 tuple(resolved_values)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "输入的列表值被强制转换为元组，导致依赖于输入类型精确匹配的查询（例如 PickledField）失败。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述指出 'coerces value of type list to tuple breaking exact value queries'。",
+        "Issue 提到 'The expected iterable return type should match input iterable type.'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Query.resolve_lookup_value",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 直接指出了该方法的问题，并且源码片段 1 展示了该方法的具体实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.resolve_lookup_value",
+        "lines": "1053-1077",
+        "reason": "源码片段 1 显示，在处理 list/tuple 输入时，无论输入是 list 还是 tuple，最终都执行了 `value = tuple(resolved_values)`，这导致了类型强制转换。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中可能使用字符串列表作为 `__in` 查找的输入（例如 `['a1', 'a2']`）。",
+        "target_pattern": "构造一个测试，其中 `__in` 查找的输入是一个列表（list）对象，并且该列表的值是 PickledField 等依赖类型匹配的字段类型。",
+        "reason": "Issue 指出问题在于列表被强制转换为元组，因此需要明确使用列表作为输入，并观察其类型变化。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能通过 `filter(field__in=[...])` 间接调用 `resolve_lookup_value`。",
+        "target_pattern": "直接调用 `Query.resolve_lookup_value` 方法，并传入一个列表值，以隔离和观察其行为。",
+        "reason": "直接调用可以更精确地控制输入和观测输出，避免 ORM 其他层的干扰。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Query.resolve_lookup_value 方法返回的可迭代类型应与输入的可迭代类型保持一致（例如，输入列表则返回列表，输入元组则返回元组）。",
+      "evidence": [
+        "Issue 描述明确指出 'The expected iterable return type should match input iterable type.'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "调用 `resolve_lookup_value` 后返回值的类型，例如 `type(result)`。",
+        "reason": "Issue 的核心是返回类型与输入类型不匹配，直接观测类型变化是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 `resolve_lookup_value` 后返回的值本身，特别是其元素顺序和内容。",
+        "reason": "除了类型，还需要确认值的内容（顺序、元素）在处理过程中没有被意外改变。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `resolve_lookup_value` 返回的可迭代对象类型与输入的可迭代对象类型相同。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的 SQL 字符串或完整的 repr 字符串，因为它们可能不稳定且与类型问题无关。",
+        "reason": "Issue 的核心是类型匹配，使用 isinstance 断言可以稳定地验证这一语义目标。"
+      },
+      {
+        "assertion_goal": "验证 `resolve_lookup_value` 返回的值内容（顺序和元素）与输入值一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言返回值的 id 或内存地址。",
+        "reason": "在类型正确的基础上，还需要确保值的内容没有被破坏。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 PickledField 的具体使用场景和如何构造一个能触发类型不匹配问题的精确查询尚不明确。",
+    "除了 `__in` 查找，还有哪些查找类型会调用 `resolve_lookup_value` 并受此影响？",
+    "修复后的预期行为是返回与输入完全相同的对象（例如，同一个列表实例），还是仅类型相同的新对象？"
+  ],
+  "raw": {
+    "issue_summary": "Query.resolve_lookup_value 方法在处理列表类型的输入值时，会将其强制转换为元组，破坏了精确值查询，特别是影响依赖于输入类型匹配的 ORM 字段类型（如 PickledField）。",
+    "trigger_condition": {
+      "text": "调用 Query.resolve_lookup_value 方法，并传入一个列表（list）类型的 value 参数。",
+      "evidence": [
+        "Issue 描述指出 'input value list' 被强制转换为 tuple。",
+        "源码片段 1 显示当 value 是 list 或 tuple 时，会进入一个分支，最终将 value 赋值为 tuple(resolved_values)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "输入的列表值被强制转换为元组，导致依赖于输入类型精确匹配的查询（例如 PickledField）失败。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述指出 'coerces value of type list to tuple breaking exact value queries'。",
+        "Issue 提到 'The expected iterable return type should match input iterable type.'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Query.resolve_lookup_value 方法返回的可迭代类型应与输入的可迭代类型保持一致（例如，输入列表则返回列表，输入元组则返回元组）。",
+      "evidence": [
+        "Issue 描述明确指出 'The expected iterable return type should match input iterable type.'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Query.resolve_lookup_value",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 直接指出了该方法的问题，并且源码片段 1 展示了该方法的具体实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.resolve_lookup_value",
+        "lines": "1053-1077",
+        "reason": "源码片段 1 显示，在处理 list/tuple 输入时，无论输入是 list 还是 tuple，最终都执行了 `value = tuple(resolved_values)`，这导致了类型强制转换。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "LookupTests.test_in_keeps_value_ordering",
+        "test_file": "tests/lookup/tests.py",
+        "why_relevant": "该测试使用了 `__in` 查找，这可能会调用 `resolve_lookup_value` 方法，并且涉及列表输入。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "Article 模型 fixture 的构造模式",
+          "filter(slug__in=...) 的调用方式"
+        ],
+        "possible_gap": "该测试主要验证 SQL 字符串中的顺序，并未直接断言输入值的类型是否被保留。"
+      },
+      {
+        "test_name": "RelatedLookupTypeTests.test_values_queryset_lookup",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试使用了 `__in` 查找，并且传入了一个 `values_list` 查询集，这可能涉及列表/元组值的处理。",
+        "reusable_parts": [
+          "ObjectB 模型 fixture 的构造模式",
+          "filter(objecta__in=...) 的调用方式",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试关注的是 ValueQuerySet 的兼容性，而不是输入值类型的保持。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中可能使用字符串列表作为 `__in` 查找的输入（例如 `['a1', 'a2']`）。",
+        "target_pattern": "构造一个测试，其中 `__in` 查找的输入是一个列表（list）对象，并且该列表的值是 PickledField 等依赖类型匹配的字段类型。",
+        "reason": "Issue 指出问题在于列表被强制转换为元组，因此需要明确使用列表作为输入，并观察其类型变化。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能通过 `filter(field__in=[...])` 间接调用 `resolve_lookup_value`。",
+        "target_pattern": "直接调用 `Query.resolve_lookup_value` 方法，并传入一个列表值，以隔离和观察其行为。",
+        "reason": "直接调用可以更精确地控制输入和观测输出，避免 ORM 其他层的干扰。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "调用 `resolve_lookup_value` 后返回值的类型，例如 `type(result)`。",
+        "reason": "Issue 的核心是返回类型与输入类型不匹配，直接观测类型变化是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 `resolve_lookup_value` 后返回的值本身，特别是其元素顺序和内容。",
+        "reason": "除了类型，还需要确认值的内容（顺序、元素）在处理过程中没有被意外改变。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `resolve_lookup_value` 返回的可迭代对象类型与输入的可迭代对象类型相同。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免断言完整的 SQL 字符串或完整的 repr 字符串，因为它们可能不稳定且与类型问题无关。",
+        "reason": "Issue 的核心是类型匹配，使用 isinstance 断言可以稳定地验证这一语义目标。"
+      },
+      {
+        "assertion_goal": "验证 `resolve_lookup_value` 返回的值内容（顺序和元素）与输入值一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言返回值的 id 或内存地址。",
+        "reason": "在类型正确的基础上，还需要确保值的内容没有被破坏。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个包含 PickledField 或类似依赖输入类型的自定义字段的 Django 模型，以及相应的数据库 fixture。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要使用 Django 的 TestCase 来管理数据库事务和模型实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 PickledField 的具体使用场景和如何构造一个能触发类型不匹配问题的精确查询尚不明确。",
+      "除了 `__in` 查找，还有哪些查找类型会调用 `resolve_lookup_value` 并受此影响？",
+      "修复后的预期行为是返回与输入完全相同的对象（例如，同一个列表实例），还是仅类型相同的新对象？"
+    ]
+  }
+}

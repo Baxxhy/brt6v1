@@ -1,0 +1,298 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16527",
+  "issue_summary": "Django admin 的 'show_save_as_new' 按钮在用户没有 'add' 权限时错误地显示。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用具有不同权限组合（只有 change， 只有 add， 两者都有）的测试用户。相关测试 1 中定义了 adduser, changeuser, superuser。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个已存在的模型对象来访问其修改页面（change view）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings 来配置正确的 URL 和模板上下文处理器，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminViewPermissionsTest.test_change_view_save_as_new",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它直接测试了不同权限用户（adduser, changeuser, superuser）执行 'Save as new' 操作的行为，与 Issue 主题高度匹配。",
+        "reusable_parts": [
+          "测试类装饰器（@override_settings）",
+          "用户权限设置（adduser, changeuser）",
+          "POST 请求构造（包含 '_saveasnew' 键）",
+          "使用 assertRedirects 和 assertEqual 检查重定向和对象计数。"
+        ],
+        "possible_gap": "该测试通过检查 POST 请求的响应状态码（403）来验证权限，但 Issue 关注的是按钮在 GET 请求（渲染页面时）是否可见。测试没有直接检查 'show_save_as_new' 上下文变量。"
+      },
+      {
+        "test_name": "SaveAsTests.test_save_as_new_with_validation_errors",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它检查了在验证错误场景下 'show_save_as_new' 上下文变量的值，展示了如何访问和断言这个变量。",
+        "reusable_parts": [
+          "对 response.context['show_save_as_new'] 的断言模式（assertTrue）。"
+        ],
+        "possible_gap": "该测试没有涉及用户权限，它假设用户有足够权限，只是测试按钮在特定 UI 状态下的可见性。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "用户只有 'change' 权限但没有 'add' 权限时，访问一个已存在对象的 admin 修改页面。",
+      "evidence": [
+        "Issue 描述中提到 'save_as_new' 是一种添加操作，但当前代码只检查了 has_change_permission。",
+        "相关测试 1 中明确测试了 'Change user cannot perform \"Save as new\" (no 'add' permission)。'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 admin 修改页面上，'Save as new' 按钮对没有 'add' 权限的用户可见，并且他们可以尝试提交该操作。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述指出，在 'django/contrib/admin/templatetags/admin_modify.py' 文件的第 102 行，'show_save_as_new' 的计算缺少对 'has_add_permission' 的检查。",
+        "相关测试 2 和 5 检查了 'show_save_as_new' 在响应上下文中的值。",
+        "相关测试 1 表明，没有 'add' 权限的用户提交 '_saveasnew' 请求会导致 403 状态码，但 Issue 暗示按钮本不应显示。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "has_add_permission",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 的核心是缺少对此权限方法的检查。它是决定 'show_save_as_new' 按钮是否应显示的关键条件之一。"
+      },
+      {
+        "name": "has_change_permission",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "当前 'show_save_as_new' 的计算已经包含了此方法，它是权限检查的另一个组成部分。"
+      },
+      {
+        "name": "admin_modify",
+        "kind": "module",
+        "source_path": "django/contrib/admin/templatetags/admin_modify.py",
+        "reason": "Issue 明确指出问题位于此模块中，具体是计算 'show_save_as_new' 上下文变量的模板标签代码。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/templatetags/admin_modify.py",
+        "object": "inclusion_tag 函数（可能是 `submit_row`）",
+        "lines": "102",
+        "reason": "Issue 明确指出了文件路径和行号，并描述了该行缺少 'has_add_permission' 检查。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，changeuser 只有 'change' 权限，没有 'add' 权限。测试断言其 POST 请求返回 403。",
+        "target_pattern": "需要变异测试，使其在 GET 请求（渲染修改页面）时，检查 changeuser 的响应上下文中 'show_save_as_new' 是否为 False。",
+        "reason": "Issue 描述的错误是按钮错误显示，这发生在页面渲染时（GET），而不是表单提交时（POST）。需要将测试的关注点从 POST 请求的权限拒绝转移到 GET 请求的上下文变量。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 2 都使用了具有特定权限的用户（如 changeuser, adduser）。",
+        "target_pattern": "创建一个只有 'change' 权限而没有 'add' 权限的用户，并用其登录访问对象的修改页面。",
+        "reason": "这是触发缺陷所需的精确权限配置。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "只有同时拥有 'add' 和 'change' 权限的用户才能在 admin 修改页面上看到并使用 'Save as new' 按钮。",
+      "evidence": [
+        "Issue 描述中用户建议的修复是：'show_save_as_new': not is_popup and has_add_permission and has_change_permission and change and save_as。",
+        "相关测试 1 的文档字符串说明：'Save as new' should raise PermissionDenied for users without the 'add' permission。 这暗示了预期的权限检查。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "response.context.get('show_save_as_new')",
+        "reason": "这是 Issue 中讨论的核心变量。观察其布尔值可以判断按钮是否会被渲染。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "has_add_permission(request)",
+        "reason": "需要确认在测试场景下，has_add_permission 方法是否返回了正确的值（应为 False）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于没有 'add' 权限的用户，admin 修改页面的响应上下文中 'show_save_as_new' 应为 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 输出中包含或不包含特定按钮字符串，因为这可能因模板微小改动而失效。",
+        "reason": "直接断言上下文变量更稳定，且与 Issue 中描述的修复逻辑（计算布尔表达式）直接对应。"
+      },
+      {
+        "assertion_goal": "对于同时拥有 'add' 和 'change' 权限的用户，'show_save_as_new' 在适当条件下应为 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言没有 'add' 权限的情况，这无法证明修复后功能正常。",
+        "reason": "需要确保修复不会破坏原本应有的功能。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 'django/contrib/admin/templatetags/admin_modify.py' 第 102 行具体代码的完整上下文（除了提到的布尔表达式外）尚不确定。",
+    "除了 'show_save_as_new' 的显示问题，是否还有其他副作用（例如，如果按钮显示但被点击，后端处理逻辑是否已有正确的权限检查）？相关测试 1 表明 POST 请求已有 403 检查。",
+    "'save_as' 和 'change' 变量在触发缺陷的场景中通常是什么值？它们是否总是 True？"
+  ],
+  "raw": {
+    "issue_summary": "Django admin 的 'show_save_as_new' 按钮在用户没有 'add' 权限时错误地显示。",
+    "trigger_condition": {
+      "text": "用户只有 'change' 权限但没有 'add' 权限时，访问一个已存在对象的 admin 修改页面。",
+      "evidence": [
+        "Issue 描述中提到 'save_as_new' 是一种添加操作，但当前代码只检查了 has_change_permission。",
+        "相关测试 1 中明确测试了 'Change user cannot perform \"Save as new\" (no 'add' permission)。'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 admin 修改页面上，'Save as new' 按钮对没有 'add' 权限的用户可见，并且他们可以尝试提交该操作。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述指出，在 'django/contrib/admin/templatetags/admin_modify.py' 文件的第 102 行，'show_save_as_new' 的计算缺少对 'has_add_permission' 的检查。",
+        "相关测试 2 和 5 检查了 'show_save_as_new' 在响应上下文中的值。",
+        "相关测试 1 表明，没有 'add' 权限的用户提交 '_saveasnew' 请求会导致 403 状态码，但 Issue 暗示按钮本不应显示。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "只有同时拥有 'add' 和 'change' 权限的用户才能在 admin 修改页面上看到并使用 'Save as new' 按钮。",
+      "evidence": [
+        "Issue 描述中用户建议的修复是：'show_save_as_new': not is_popup and has_add_permission and has_change_permission and change and save_as。",
+        "相关测试 1 的文档字符串说明：'Save as new' should raise PermissionDenied for users without the 'add' permission。 这暗示了预期的权限检查。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "has_add_permission",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 的核心是缺少对此权限方法的检查。它是决定 'show_save_as_new' 按钮是否应显示的关键条件之一。"
+      },
+      {
+        "name": "has_change_permission",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "当前 'show_save_as_new' 的计算已经包含了此方法，它是权限检查的另一个组成部分。"
+      },
+      {
+        "name": "admin_modify",
+        "kind": "module",
+        "source_path": "django/contrib/admin/templatetags/admin_modify.py",
+        "reason": "Issue 明确指出问题位于此模块中，具体是计算 'show_save_as_new' 上下文变量的模板标签代码。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/templatetags/admin_modify.py",
+        "object": "inclusion_tag 函数（可能是 `submit_row`）",
+        "lines": "102",
+        "reason": "Issue 明确指出了文件路径和行号，并描述了该行缺少 'has_add_permission' 检查。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminViewPermissionsTest.test_change_view_save_as_new",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它直接测试了不同权限用户（adduser, changeuser, superuser）执行 'Save as new' 操作的行为，与 Issue 主题高度匹配。",
+        "reusable_parts": [
+          "测试类装饰器（@override_settings）",
+          "用户权限设置（adduser, changeuser）",
+          "POST 请求构造（包含 '_saveasnew' 键）",
+          "使用 assertRedirects 和 assertEqual 检查重定向和对象计数。"
+        ],
+        "possible_gap": "该测试通过检查 POST 请求的响应状态码（403）来验证权限，但 Issue 关注的是按钮在 GET 请求（渲染页面时）是否可见。测试没有直接检查 'show_save_as_new' 上下文变量。"
+      },
+      {
+        "test_name": "SaveAsTests.test_save_as_new_with_validation_errors",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它检查了在验证错误场景下 'show_save_as_new' 上下文变量的值，展示了如何访问和断言这个变量。",
+        "reusable_parts": [
+          "对 response.context['show_save_as_new'] 的断言模式（assertTrue）。"
+        ],
+        "possible_gap": "该测试没有涉及用户权限，它假设用户有足够权限，只是测试按钮在特定 UI 状态下的可见性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，changeuser 只有 'change' 权限，没有 'add' 权限。测试断言其 POST 请求返回 403。",
+        "target_pattern": "需要变异测试，使其在 GET 请求（渲染修改页面）时，检查 changeuser 的响应上下文中 'show_save_as_new' 是否为 False。",
+        "reason": "Issue 描述的错误是按钮错误显示，这发生在页面渲染时（GET），而不是表单提交时（POST）。需要将测试的关注点从 POST 请求的权限拒绝转移到 GET 请求的上下文变量。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 2 都使用了具有特定权限的用户（如 changeuser, adduser）。",
+        "target_pattern": "创建一个只有 'change' 权限而没有 'add' 权限的用户，并用其登录访问对象的修改页面。",
+        "reason": "这是触发缺陷所需的精确权限配置。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "response.context.get('show_save_as_new')",
+        "reason": "这是 Issue 中讨论的核心变量。观察其布尔值可以判断按钮是否会被渲染。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "has_add_permission(request)",
+        "reason": "需要确认在测试场景下，has_add_permission 方法是否返回了正确的值（应为 False）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于没有 'add' 权限的用户，admin 修改页面的响应上下文中 'show_save_as_new' 应为 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 输出中包含或不包含特定按钮字符串，因为这可能因模板微小改动而失效。",
+        "reason": "直接断言上下文变量更稳定，且与 Issue 中描述的修复逻辑（计算布尔表达式）直接对应。"
+      },
+      {
+        "assertion_goal": "对于同时拥有 'add' 和 'change' 权限的用户，'show_save_as_new' 在适当条件下应为 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言没有 'add' 权限的情况，这无法证明修复后功能正常。",
+        "reason": "需要确保修复不会破坏原本应有的功能。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用具有不同权限组合（只有 change， 只有 add， 两者都有）的测试用户。相关测试 1 中定义了 adduser, changeuser, superuser。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个已存在的模型对象来访问其修改页面（change view）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings 来配置正确的 URL 和模板上下文处理器，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 'django/contrib/admin/templatetags/admin_modify.py' 第 102 行具体代码的完整上下文（除了提到的布尔表达式外）尚不确定。",
+      "除了 'show_save_as_new' 的显示问题，是否还有其他副作用（例如，如果按钮显示但被点击，后端处理逻辑是否已有正确的权限检查）？相关测试 1 表明 POST 请求已有 403 检查。",
+      "'save_as' 和 'change' 变量在触发缺陷的场景中通常是什么值？它们是否总是 True？"
+    ]
+  }
+}

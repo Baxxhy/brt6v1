@@ -1,0 +1,298 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13779",
+  "issue_summary": "VotingClassifier 在某个 estimator 被设为 None 且传递 sample_weight 时，fit 方法会因未检查 estimator 是否为 None 而失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 VotingClassifier, LogisticRegression, RandomForestClassifier, load_iris, numpy。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 load_iris 加载数据集作为 X 和 y。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 pytest 环境中运行，并使用相关的 filterwarnings 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_set_estimator_none",
+        "test_file": "sklearn/ensemble/tests/test_voting.py",
+        "why_relevant": "该测试专门验证了通过 set_params 将 estimator 设为 None 后 VotingClassifier 的行为，包括 fit 和 predict。",
+        "reusable_parts": [
+          "VotingClassifier 的构造",
+          "set_params 的调用",
+          "fit 的调用",
+          "assert_array_equal 等断言风格"
+        ],
+        "possible_gap": "该测试在调用 fit 时没有传入 sample_weight 参数，因此没有触发 Issue 中描述的 bug。"
+      },
+      {
+        "test_name": "test_sample_weight",
+        "test_file": "sklearn/ensemble/tests/test_voting.py",
+        "why_relevant": "该测试验证了 VotingClassifier 在传入 sample_weight 时的行为。",
+        "reusable_parts": [
+          "sample_weight 参数的构造与传递",
+          "fit 调用",
+          "assert_array_equal 断言风格"
+        ],
+        "possible_gap": "该测试没有将任何 estimator 设为 None，因此没有触发 Issue 中描述的特定组合。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 set_params 将 VotingClassifier 中的一个 estimator 设为 None，然后调用 fit 方法并传入 sample_weight 参数。",
+      "evidence": [
+        "Issue 中的代码示例：voter.set_params(lr=None); voter.fit(X, y, sample_weight=np.ones(y.shape))",
+        "源码片段 3 的 set_params 文档说明 estimator 可以设为 None"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 AttributeError: 'NoneType' object has no attribute 'fit'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：AttributeError: 'NoneType' object has no attribute 'fit'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "VotingClassifier.fit",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/voting.py",
+        "reason": "Issue 中 bug 触发于调用 fit 方法时。"
+      },
+      {
+        "name": "VotingClassifier.set_params",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/voting.py",
+        "reason": "用于将 estimator 设置为 None。"
+      },
+      {
+        "name": "VotingClassifier",
+        "kind": "class",
+        "source_path": "sklearn/ensemble/voting.py",
+        "reason": "缺陷发生的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/ensemble/voting.py",
+        "object": "fit",
+        "lines": "240-273",
+        "reason": "Issue 指出问题在于 fit 方法中未检查 estimator 是否为 None 就尝试调用其 fit 方法，尤其是在处理 sample_weight 时。"
+      },
+      {
+        "path": "sklearn/ensemble/voting.py",
+        "object": "_BaseVoting.fit",
+        "lines": "",
+        "reason": "VotingClassifier.fit 调用了 super().fit，缺陷可能位于父类的 fit 方法中，该父类方法可能未正确处理 estimator 为 None 且 sample_weight 不为 None 的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，VotingClassifier 的所有 estimator 都是有效的对象（非 None）。",
+        "target_pattern": "在调用 fit 之前，使用 set_params 将其中一个 estimator 设置为 None。",
+        "reason": "Issue 表明，当 estimator 为 None 且 sample_weight 被传递时，fit 会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 test_set_estimator_none 中，fit 调用时不传递 sample_weight 参数。",
+        "target_pattern": "在 fit 调用时，显式传递 sample_weight 参数（例如 np.ones(y.shape)）。",
+        "reason": "Issue 表明，仅当 sample_weight 被传递时，才会触发此缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使某个 estimator 被设为 None，VotingClassifier 在传入 sample_weight 时也应能正常完成 fit 过程，忽略 None 的 estimator。",
+      "evidence": [
+        "相关测试 1 (test_set_estimator_none) 展示了在无 sample_weight 时，将 estimator 设为 None 后 fit 可以正常工作",
+        "源码片段 1 的文档说明 estimator 可以设为 None"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 voter.fit(X, y, sample_weight=weights) 时是否抛出 AttributeError，且错误信息包含 'NoneType' object has no attribute 'fit'。",
+        "reason": "Issue 中明确给出了此异常作为错误现象。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 set_params 后 voter.estimators_ 或 voter.named_estimators_ 中对应 estimator 的状态（是否为 None）。",
+        "reason": "确认 estimator 确实被成功设置为 None，这是触发条件的一部分。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 estimator 为 None 且传递 sample_weight 时，fit 方法不应抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为具体行号可能变化。",
+        "reason": "修复后，fit 应该成功完成，而不是抛出关于 NoneType 的 AttributeError。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 VotingClassifier.fit 还是其父类 _BaseVoting.fit 中。",
+    "修复后，当 estimator 为 None 时，sample_weight 参数应如何被处理（例如，是否应被忽略或传递给其他 estimator）。",
+    "是否还有其他边缘情况（例如，多个 estimator 为 None，或 voting='soft'/'hard' 的影响）。"
+  ],
+  "raw": {
+    "issue_summary": "VotingClassifier 在某个 estimator 被设为 None 且传递 sample_weight 时，fit 方法会因未检查 estimator 是否为 None 而失败。",
+    "trigger_condition": {
+      "text": "使用 set_params 将 VotingClassifier 中的一个 estimator 设为 None，然后调用 fit 方法并传入 sample_weight 参数。",
+      "evidence": [
+        "Issue 中的代码示例：voter.set_params(lr=None); voter.fit(X, y, sample_weight=np.ones(y.shape))",
+        "源码片段 3 的 set_params 文档说明 estimator 可以设为 None"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 AttributeError: 'NoneType' object has no attribute 'fit'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：AttributeError: 'NoneType' object has no attribute 'fit'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使某个 estimator 被设为 None，VotingClassifier 在传入 sample_weight 时也应能正常完成 fit 过程，忽略 None 的 estimator。",
+      "evidence": [
+        "相关测试 1 (test_set_estimator_none) 展示了在无 sample_weight 时，将 estimator 设为 None 后 fit 可以正常工作",
+        "源码片段 1 的文档说明 estimator 可以设为 None"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "VotingClassifier.fit",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/voting.py",
+        "reason": "Issue 中 bug 触发于调用 fit 方法时。"
+      },
+      {
+        "name": "VotingClassifier.set_params",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/voting.py",
+        "reason": "用于将 estimator 设置为 None。"
+      },
+      {
+        "name": "VotingClassifier",
+        "kind": "class",
+        "source_path": "sklearn/ensemble/voting.py",
+        "reason": "缺陷发生的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/ensemble/voting.py",
+        "object": "fit",
+        "lines": "240-273",
+        "reason": "Issue 指出问题在于 fit 方法中未检查 estimator 是否为 None 就尝试调用其 fit 方法，尤其是在处理 sample_weight 时。"
+      },
+      {
+        "path": "sklearn/ensemble/voting.py",
+        "object": "_BaseVoting.fit",
+        "lines": "",
+        "reason": "VotingClassifier.fit 调用了 super().fit，缺陷可能位于父类的 fit 方法中，该父类方法可能未正确处理 estimator 为 None 且 sample_weight 不为 None 的情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_set_estimator_none",
+        "test_file": "sklearn/ensemble/tests/test_voting.py",
+        "why_relevant": "该测试专门验证了通过 set_params 将 estimator 设为 None 后 VotingClassifier 的行为，包括 fit 和 predict。",
+        "reusable_parts": [
+          "VotingClassifier 的构造",
+          "set_params 的调用",
+          "fit 的调用",
+          "assert_array_equal 等断言风格"
+        ],
+        "possible_gap": "该测试在调用 fit 时没有传入 sample_weight 参数，因此没有触发 Issue 中描述的 bug。"
+      },
+      {
+        "test_name": "test_sample_weight",
+        "test_file": "sklearn/ensemble/tests/test_voting.py",
+        "why_relevant": "该测试验证了 VotingClassifier 在传入 sample_weight 时的行为。",
+        "reusable_parts": [
+          "sample_weight 参数的构造与传递",
+          "fit 调用",
+          "assert_array_equal 断言风格"
+        ],
+        "possible_gap": "该测试没有将任何 estimator 设为 None，因此没有触发 Issue 中描述的特定组合。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，VotingClassifier 的所有 estimator 都是有效的对象（非 None）。",
+        "target_pattern": "在调用 fit 之前，使用 set_params 将其中一个 estimator 设置为 None。",
+        "reason": "Issue 表明，当 estimator 为 None 且 sample_weight 被传递时，fit 会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 test_set_estimator_none 中，fit 调用时不传递 sample_weight 参数。",
+        "target_pattern": "在 fit 调用时，显式传递 sample_weight 参数（例如 np.ones(y.shape)）。",
+        "reason": "Issue 表明，仅当 sample_weight 被传递时，才会触发此缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 voter.fit(X, y, sample_weight=weights) 时是否抛出 AttributeError，且错误信息包含 'NoneType' object has no attribute 'fit'。",
+        "reason": "Issue 中明确给出了此异常作为错误现象。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 set_params 后 voter.estimators_ 或 voter.named_estimators_ 中对应 estimator 的状态（是否为 None）。",
+        "reason": "确认 estimator 确实被成功设置为 None，这是触发条件的一部分。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 estimator 为 None 且传递 sample_weight 时，fit 方法不应抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为具体行号可能变化。",
+        "reason": "修复后，fit 应该成功完成，而不是抛出关于 NoneType 的 AttributeError。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 VotingClassifier, LogisticRegression, RandomForestClassifier, load_iris, numpy。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 load_iris 加载数据集作为 X 和 y。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 pytest 环境中运行，并使用相关的 filterwarnings 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 VotingClassifier.fit 还是其父类 _BaseVoting.fit 中。",
+      "修复后，当 estimator 为 None 时，sample_weight 参数应如何被处理（例如，是否应被忽略或传递给其他 estimator）。",
+      "是否还有其他边缘情况（例如，多个 estimator 为 None，或 voting='soft'/'hard' 的影响）。"
+    ]
+  }
+}

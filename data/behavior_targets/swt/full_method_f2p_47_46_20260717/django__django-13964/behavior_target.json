@@ -1,0 +1,364 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13964",
+  "issue_summary": "当父对象的外键指向一个主键为非自增字符字段的子对象时，如果先赋值空子对象再设置其主键并保存，会导致父对象的外键字段被错误地设置为空字符串。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义两个模型：一个以 CharField 作为 primary_key 的模型（如 Product），另一个包含指向它的 ForeignKey 的模型（如 Order）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在事务块（`transaction.atomic()`）内执行，以观察最终约束检查。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `TestCase` 或 `TransactionTestCase` 来管理数据库事务和回滚。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ForeignKeyTests.test_empty_string_fk",
+        "test_file": "tests/model_fields/test_foreignkey.py",
+        "why_relevant": "该测试直接处理外键指向字符主键且值为空字符串的情况，涉及模型构造、保存和查询断言，与 Issue 的数据模型和查询场景高度相似。",
+        "reusable_parts": [
+          "模型定义模式（CharField 作为主键的外键关系）",
+          "使用 TestCase",
+          "创建对象和查询的断言风格（self.assertEqual）"
+        ],
+        "possible_gap": "该测试创建时主键就是空字符串，并验证空字符串能正确关联。而 Issue 的 bug 是主键从空变为非空时，父对象的外键未更新。测试没有模拟先赋值空对象再设置主键的动态过程。"
+      },
+      {
+        "test_name": "TestAsPrimaryKeyTransactionTests.test_unsaved_fk",
+        "test_file": "tests/model_fields/test_uuid.py",
+        "why_relevant": "该测试处理未保存对象作为外键赋值的情况，并检查是否会引发 IntegrityError，与 Issue 中事务最终失败相关。",
+        "reusable_parts": [
+          "使用 TransactionTestCase",
+          "在事务块内操作",
+          "使用 assertRaises 检查 IntegrityError"
+        ],
+        "possible_gap": "该测试使用 UUID 主键，且直接尝试保存，而 Issue 的 bug 发生在保存顺序和状态更新上，并且主键是 CharField。"
+      },
+      {
+        "test_name": "FkConstraintsTests.test_check_constraints",
+        "test_file": "tests/backends/tests.py",
+        "why_relevant": "该测试涉及外键约束检查、事务回滚和 IntegrityError，与 Issue 中提到的外键约束延迟检查和最终违反相关。",
+        "reusable_parts": [
+          "在事务块内操作",
+          "使用 connection.constraint_checks_disabled",
+          "检查约束并断言 IntegrityError"
+        ],
+        "possible_gap": "该测试主要关注数据库层面的约束检查，而 Issue 的 bug 更侧重于 Django ORM 层在对象状态同步时的逻辑错误。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个父对象（如Order），为其外键字段（如product）赋值为一个未保存的子对象（如Product），该子对象的主键字段（如sku）初始为空，然后在赋值后设置子对象的主键值（如sku='foo'），接着保存子对象，最后保存父对象。",
+      "evidence": [
+        "Issue 中给出的代码示例：order = Order(); order.product = Product(); order.product.sku = \"foo\"; order.product.save(); order.save();"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "父对象的外键字段（product_id）被错误地设置为空字符串（\"\"），而不是子对象实际的主键值（\"foo\"）。这导致通过外键值（product_id=\"\"）的查询成功，而通过关系对象（product=order.product）的查询失败。最终事务提交时会因外键约束违反（ForeignKeyViolation）而失败。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中描述：assert Order.objects.filter(product_id=\"\").exists() # Succeeds, but shouldn't",
+        "Issue 中描述：assert Order.objects.filter(product=order.product).exists() # Fails",
+        "Issue 中描述：The transaction does correctly fail on commit with a ForeignKeyViolation"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及外键关系的处理，特别是当外键指向非自增主键时，赋值和保存的机制。"
+      },
+      {
+        "name": "save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心操作是调用子对象和父对象的 save() 方法，bug 出现在保存顺序和状态更新中。"
+      },
+      {
+        "name": "transaction.atomic",
+        "kind": "function",
+        "source_path": "django/db/transaction.py",
+        "reason": "Issue 中的操作在事务块内执行，并且最终事务提交会因外键约束失败。"
+      },
+      {
+        "name": "CharField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "子对象的主键是 CharField，Issue 讨论了非自增（非数字）主键的影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ForeignKey",
+        "lines": "",
+        "reason": "Issue 明确指出可能与 ForeignKey 在赋值时如何处理 Order.product_id 字段有关，特别是处理从相关实例获取自增与非自增主键的方式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，外键关联的对象通常在创建时就已经具有确定的主键值（无论是空字符串还是非空）。",
+        "target_pattern": "先创建一个主键为空的外键关联对象，在关联建立后才设置其主键值，然后保存。",
+        "reason": "Issue 表明，这种对象状态变化的顺序（先关联空对象，后设置主键）是触发 bug 的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "常见的测试模式是：创建子对象并保存 -> 创建父对象并关联已保存的子对象 -> 保存父对象。",
+        "target_pattern": "创建父对象 -> 创建空子对象并关联到父对象 -> 设置子对象主键 -> 保存子对象 -> 保存父对象。",
+        "reason": "Issue 中的错误操作序列正是这个顺序，而正确的序列（在关联前就初始化主键）则工作正常。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "父对象的外键字段（product_id）应正确更新为子对象保存后的主键值（\"foo\"），使得通过外键值和通过关系对象的查询都能成功找到该父对象，并且事务可以成功提交。",
+      "evidence": [
+        "Issue 中给出的正确行为示例：order.product = Product(sku=\"foo\"); ... assert Order.objects.filter(product=order.product).exists() # succeeds",
+        "Issue 中隐含的期望：product_id 应被正确填充为 product.sku"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "父对象实例的 `product_id` 属性值，在子对象保存前后。",
+        "reason": "Issue 的核心是 `product_id` 没有被正确更新为子对象保存后的主键值。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "执行 `order.save()` 时生成的 INSERT SQL 语句，特别是 `product_id` 字段的值。",
+        "reason": "可以确认数据库实际接收到的外键值是否是空字符串。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`Order.objects.filter(product_id=\"\").exists()` 和 `Order.objects.filter(product=order.product).exists()` 的返回值。",
+        "reason": "Issue 明确描述了这两个查询结果的矛盾现象。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "事务提交时是否抛出 `IntegrityError` 及其详细信息。",
+        "reason": "Issue 提到由于外键约束违反，事务最终会失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "父对象保存后，其外键字段值（product_id）应等于子对象的主键值（sku）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 SQL 字符串或依赖内部 repr。",
+        "reason": "直接验证对象状态是否符合预期，这是 Issue 的核心错误。"
+      },
+      {
+        "assertion_goal": "通过外键值（product_id）和通过关系对象（product）查询父对象，结果应一致（都应成功找到）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免只断言一个查询成功而另一个失败，应断言两者结果相同。",
+        "reason": "Issue 展示了两种查询方式结果不一致的矛盾现象。"
+      },
+      {
+        "assertion_goal": "在正确的操作序列下（关联前初始化主键），事务应能成功提交。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的异常消息文本。",
+        "reason": "对比错误序列和正确序列的行为差异，验证修复后正确序列仍正常工作。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切源码位置和触发机制（例如，是 ForeignKeyDeferredAttribute 还是 save 方法中的某段逻辑）。",
+    "是否所有非自增主键类型（如 UUID、自定义字段）都会受此影响，还是仅限于 CharField。",
+    "在嵌套事务或更复杂的保存链中，行为是否一致。"
+  ],
+  "raw": {
+    "issue_summary": "当父对象的外键指向一个主键为非自增字符字段的子对象时，如果先赋值空子对象再设置其主键并保存，会导致父对象的外键字段被错误地设置为空字符串。",
+    "trigger_condition": {
+      "text": "创建一个父对象（如Order），为其外键字段（如product）赋值为一个未保存的子对象（如Product），该子对象的主键字段（如sku）初始为空，然后在赋值后设置子对象的主键值（如sku='foo'），接着保存子对象，最后保存父对象。",
+      "evidence": [
+        "Issue 中给出的代码示例：order = Order(); order.product = Product(); order.product.sku = \"foo\"; order.product.save(); order.save();"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "父对象的外键字段（product_id）被错误地设置为空字符串（\"\"），而不是子对象实际的主键值（\"foo\"）。这导致通过外键值（product_id=\"\"）的查询成功，而通过关系对象（product=order.product）的查询失败。最终事务提交时会因外键约束违反（ForeignKeyViolation）而失败。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中描述：assert Order.objects.filter(product_id=\"\").exists() # Succeeds, but shouldn't",
+        "Issue 中描述：assert Order.objects.filter(product=order.product).exists() # Fails",
+        "Issue 中描述：The transaction does correctly fail on commit with a ForeignKeyViolation"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "父对象的外键字段（product_id）应正确更新为子对象保存后的主键值（\"foo\"），使得通过外键值和通过关系对象的查询都能成功找到该父对象，并且事务可以成功提交。",
+      "evidence": [
+        "Issue 中给出的正确行为示例：order.product = Product(sku=\"foo\"); ... assert Order.objects.filter(product=order.product).exists() # succeeds",
+        "Issue 中隐含的期望：product_id 应被正确填充为 product.sku"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及外键关系的处理，特别是当外键指向非自增主键时，赋值和保存的机制。"
+      },
+      {
+        "name": "save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心操作是调用子对象和父对象的 save() 方法，bug 出现在保存顺序和状态更新中。"
+      },
+      {
+        "name": "transaction.atomic",
+        "kind": "function",
+        "source_path": "django/db/transaction.py",
+        "reason": "Issue 中的操作在事务块内执行，并且最终事务提交会因外键约束失败。"
+      },
+      {
+        "name": "CharField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "子对象的主键是 CharField，Issue 讨论了非自增（非数字）主键的影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ForeignKey",
+        "lines": "",
+        "reason": "Issue 明确指出可能与 ForeignKey 在赋值时如何处理 Order.product_id 字段有关，特别是处理从相关实例获取自增与非自增主键的方式。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ForeignKeyTests.test_empty_string_fk",
+        "test_file": "tests/model_fields/test_foreignkey.py",
+        "why_relevant": "该测试直接处理外键指向字符主键且值为空字符串的情况，涉及模型构造、保存和查询断言，与 Issue 的数据模型和查询场景高度相似。",
+        "reusable_parts": [
+          "模型定义模式（CharField 作为主键的外键关系）",
+          "使用 TestCase",
+          "创建对象和查询的断言风格（self.assertEqual）"
+        ],
+        "possible_gap": "该测试创建时主键就是空字符串，并验证空字符串能正确关联。而 Issue 的 bug 是主键从空变为非空时，父对象的外键未更新。测试没有模拟先赋值空对象再设置主键的动态过程。"
+      },
+      {
+        "test_name": "TestAsPrimaryKeyTransactionTests.test_unsaved_fk",
+        "test_file": "tests/model_fields/test_uuid.py",
+        "why_relevant": "该测试处理未保存对象作为外键赋值的情况，并检查是否会引发 IntegrityError，与 Issue 中事务最终失败相关。",
+        "reusable_parts": [
+          "使用 TransactionTestCase",
+          "在事务块内操作",
+          "使用 assertRaises 检查 IntegrityError"
+        ],
+        "possible_gap": "该测试使用 UUID 主键，且直接尝试保存，而 Issue 的 bug 发生在保存顺序和状态更新上，并且主键是 CharField。"
+      },
+      {
+        "test_name": "FkConstraintsTests.test_check_constraints",
+        "test_file": "tests/backends/tests.py",
+        "why_relevant": "该测试涉及外键约束检查、事务回滚和 IntegrityError，与 Issue 中提到的外键约束延迟检查和最终违反相关。",
+        "reusable_parts": [
+          "在事务块内操作",
+          "使用 connection.constraint_checks_disabled",
+          "检查约束并断言 IntegrityError"
+        ],
+        "possible_gap": "该测试主要关注数据库层面的约束检查，而 Issue 的 bug 更侧重于 Django ORM 层在对象状态同步时的逻辑错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，外键关联的对象通常在创建时就已经具有确定的主键值（无论是空字符串还是非空）。",
+        "target_pattern": "先创建一个主键为空的外键关联对象，在关联建立后才设置其主键值，然后保存。",
+        "reason": "Issue 表明，这种对象状态变化的顺序（先关联空对象，后设置主键）是触发 bug 的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "常见的测试模式是：创建子对象并保存 -> 创建父对象并关联已保存的子对象 -> 保存父对象。",
+        "target_pattern": "创建父对象 -> 创建空子对象并关联到父对象 -> 设置子对象主键 -> 保存子对象 -> 保存父对象。",
+        "reason": "Issue 中的错误操作序列正是这个顺序，而正确的序列（在关联前就初始化主键）则工作正常。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "父对象实例的 `product_id` 属性值，在子对象保存前后。",
+        "reason": "Issue 的核心是 `product_id` 没有被正确更新为子对象保存后的主键值。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "执行 `order.save()` 时生成的 INSERT SQL 语句，特别是 `product_id` 字段的值。",
+        "reason": "可以确认数据库实际接收到的外键值是否是空字符串。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`Order.objects.filter(product_id=\"\").exists()` 和 `Order.objects.filter(product=order.product).exists()` 的返回值。",
+        "reason": "Issue 明确描述了这两个查询结果的矛盾现象。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "事务提交时是否抛出 `IntegrityError` 及其详细信息。",
+        "reason": "Issue 提到由于外键约束违反，事务最终会失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "父对象保存后，其外键字段值（product_id）应等于子对象的主键值（sku）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 SQL 字符串或依赖内部 repr。",
+        "reason": "直接验证对象状态是否符合预期，这是 Issue 的核心错误。"
+      },
+      {
+        "assertion_goal": "通过外键值（product_id）和通过关系对象（product）查询父对象，结果应一致（都应成功找到）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免只断言一个查询成功而另一个失败，应断言两者结果相同。",
+        "reason": "Issue 展示了两种查询方式结果不一致的矛盾现象。"
+      },
+      {
+        "assertion_goal": "在正确的操作序列下（关联前初始化主键），事务应能成功提交。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的异常消息文本。",
+        "reason": "对比错误序列和正确序列的行为差异，验证修复后正确序列仍正常工作。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义两个模型：一个以 CharField 作为 primary_key 的模型（如 Product），另一个包含指向它的 ForeignKey 的模型（如 Order）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在事务块（`transaction.atomic()`）内执行，以观察最终约束检查。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `TestCase` 或 `TransactionTestCase` 来管理数据库事务和回滚。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切源码位置和触发机制（例如，是 ForeignKeyDeferredAttribute 还是 save 方法中的某段逻辑）。",
+      "是否所有非自增主键类型（如 UUID、自定义字段）都会受此影响，还是仅限于 CharField。",
+      "在嵌套事务或更复杂的保存链中，行为是否一致。"
+    ]
+  }
+}

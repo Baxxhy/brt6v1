@@ -1,0 +1,334 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-23117",
+  "issue_summary": "使用空列表构造 sympy.Array 会引发 ValueError 异常，而 sympy.Matrix([]) 可以正常工作。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 或直接从 sympy.tensor.array 导入 Array 和 ImmutableDenseNDimArray。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要复杂的 fixture，因为缺陷是纯逻辑的，不涉及文件、数据库或网络。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以使用 pytest 的 `raises` 上下文管理器或断言来检查异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ndim_array_initiation",
+        "test_file": "sympy/tensor/array/tests/test_immutable_ndim_array.py",
+        "why_relevant": "该测试包含了多种数组初始化场景，包括使用 `ImmutableDenseNDimArray` 创建空数组（通过指定形状 `(0,)`），以及测试空数组和空形状组合会引发错误。",
+        "reusable_parts": [
+          "导入 `ImmutableDenseNDimArray` 和 `ImmutableSparseNDimArray`",
+          "使用 `raises(ValueError, ...)` 来断言异常",
+          "数组构造和属性断言（如 `len`, `shape`, `rank`）的模式。"
+        ],
+        "possible_gap": "该测试通过显式指定 `shape=(0,)` 来创建空数组，但没有测试仅传递空列表 `[]` 而不指定形状的情况，而这正是 Issue 中触发 bug 的场景。"
+      },
+      {
+        "test_name": "test_ndim_array_initiation",
+        "test_file": "sympy/tensor/array/tests/test_mutable_ndim_array.py",
+        "why_relevant": "该测试与不可变版本的测试类似，测试了 `MutableDenseNDimArray` 的初始化，可以作为创建可变数组的参考。",
+        "reusable_parts": [
+          "导入 `MutableDenseNDimArray` 和 `MutableSparseNDimArray`",
+          "基本的数组构造和断言模式。"
+        ],
+        "possible_gap": "同样，没有测试仅用空列表 `[]` 初始化可变数组的情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 sympy.Array([]) 或 ImmutableDenseNDimArray([]) 来构造一个空的 N 维数组。",
+      "evidence": [
+        "Issue 中用户执行了 `a = Array([])` 并得到了错误。",
+        "Issue 中错误堆栈指向 `_scan_iterable_shape` 函数。",
+        "相关测试 1 中 `raises(ValueError, lambda: ImmutableDenseNDimArray([], shape=()))` 表明空数组在某些情况下会引发错误。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "引发 ValueError: not enough values to unpack (expected 2, got 0) 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示 `ValueError: not enough values to unpack (expected 2, got 0)` 来自 `ndim_array.py` 文件的 `_scan_iterable_shape` 函数。",
+        "相关源码片段 6 中的 `elems, shapes = zip(*[f(i) for i in pointer])` 行是可能的异常来源。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.Array",
+        "kind": "class",
+        "source_path": "sympy/tensor/array/__init__.py",
+        "reason": "Issue 中直接调用的 API，用于创建数组。"
+      },
+      {
+        "name": "ImmutableDenseNDimArray",
+        "kind": "class",
+        "source_path": "sympy/tensor/array/dense_ndim_array.py",
+        "reason": "根据源码片段 1，`Array` 是 `ImmutableDenseNDimArray` 的别名，是实际实现类。"
+      },
+      {
+        "name": "NDimArray._scan_iterable_shape",
+        "kind": "method",
+        "source_path": "sympy/tensor/array/ndim_array.py",
+        "reason": "错误堆栈指向此方法，它负责扫描可迭代对象以确定形状，是缺陷触发的关键路径。"
+      },
+      {
+        "name": "NDimArray._handle_ndarray_creation_inputs",
+        "kind": "method",
+        "source_path": "sympy/tensor/array/ndim_array.py",
+        "reason": "源码片段 5 显示此方法处理输入，并可能调用 `_scan_iterable_shape`。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/tensor/array/ndim_array.py",
+        "object": "NDimArray._scan_iterable_shape",
+        "lines": "192-205",
+        "reason": "Issue 的错误堆栈指向此方法，其中 `zip(*[f(i) for i in pointer])` 在 `pointer` 为空列表时会导致 `zip(*[])`，从而引发 ValueError。"
+      },
+      {
+        "path": "sympy/tensor/array/ndim_array.py",
+        "object": "NDimArray._handle_ndarray_creation_inputs",
+        "lines": "208-252",
+        "reason": "此方法决定何时调用 `_scan_iterable_shape`。对于空列表输入，它可能错误地进入了 `elif isinstance(iterable, Iterable):` 分支，而没有正确处理空可迭代对象的特殊情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中 `arr_with_no_elements = ImmutableDenseNDimArray([], shape=(0,))` 通过显式指定 `shape` 参数来创建空数组。",
+        "target_pattern": "仅使用空列表作为输入，不指定 `shape` 参数：`ImmutableDenseNDimArray([])` 或 `Array([])`。",
+        "reason": "Issue 表明当不指定形状时，空列表输入会触发缺陷路径，导致 `_scan_iterable_shape` 内部出错。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中 `raises(ValueError, lambda: ImmutableDenseNDimArray([], shape=()))` 测试了空列表与空形状 `()` 的组合会引发错误。",
+        "target_pattern": "测试空列表作为唯一参数，让形状推断逻辑处理。",
+        "reason": "缺陷可能在于形状推断逻辑（`_scan_iterable_shape`）无法处理空列表，而显式传递 `shape=()` 可能走了另一条代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用空列表构造 sympy.Array 应该成功，返回一个形状为 (0,) 或 () 的有效空数组对象，类似于 sympy.Matrix([]) 的行为。",
+      "evidence": [
+        "Issue 标题和描述暗示 sympy.Matrix([]) 可以工作，因此期望 sympy.Array([]) 也能工作。",
+        "相关测试 1 中 `arr_with_no_elements = ImmutableDenseNDimArray([], shape=(0,))` 表明可以通过指定形状 `(0,)` 来创建空数组，暗示可能期望不指定形状也能工作。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `Array([])` 或 `ImmutableDenseNDimArray([])` 时是否引发 `ValueError` 及其消息。",
+        "reason": "Issue 的核心是调用会引发异常。观测异常类型和消息可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功构造后返回的数组对象的 `shape` 和 `rank` 属性。",
+        "reason": "修复后，空数组应该有一个合理的形状（例如 `(0,)` 或 `()`），并且可以访问其属性而不崩溃。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "成功构造后返回对象的类型，例如 `isinstance(result, ImmutableDenseNDimArray)`。",
+        "reason": "确保构造成功返回了正确类型的对象。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用空列表构造 Array 不应引发 ValueError 异常，应返回一个有效的数组对象。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能改变。避免断言具体的内部表示（如 `_array` 列表内容）。",
+        "reason": "Issue 的核心是当前会引发异常，修复后应不再引发。使用 `raises` 的否定形式（即不引发）或直接构造并断言属性更稳定。"
+      },
+      {
+        "assertion_goal": "成功构造的空数组应具有合理的形状（例如 rank 为 1，shape 为 (0,) 或 rank 为 0，shape 为 ()）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 `len(arr) == 0` 可能不够，因为形状信息更重要。避免对内部 `_scan_iterable_shape` 的实现细节进行断言。",
+        "reason": "修复后，空数组的形状应该被明确定义，并且与类似功能（如 Matrix）或现有测试（指定 shape=(0,)）保持一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后空 Array 的确切预期形状是什么？是 (0,) 还是 ()？Issue 和现有测试没有明确说明。",
+    "`sympy.Matrix([])` 返回的对象的形状是什么？这可能是期望行为的参考，但 Issue 中没有给出。",
+    "除了 `Array([])`，其他类似的空可迭代对象（如 `tuple()`）是否也会触发相同的缺陷？",
+    "缺陷是否也影响 `MutableDenseNDimArray` 和稀疏数组变体？"
+  ],
+  "raw": {
+    "issue_summary": "使用空列表构造 sympy.Array 会引发 ValueError 异常，而 sympy.Matrix([]) 可以正常工作。",
+    "trigger_condition": {
+      "text": "调用 sympy.Array([]) 或 ImmutableDenseNDimArray([]) 来构造一个空的 N 维数组。",
+      "evidence": [
+        "Issue 中用户执行了 `a = Array([])` 并得到了错误。",
+        "Issue 中错误堆栈指向 `_scan_iterable_shape` 函数。",
+        "相关测试 1 中 `raises(ValueError, lambda: ImmutableDenseNDimArray([], shape=()))` 表明空数组在某些情况下会引发错误。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "引发 ValueError: not enough values to unpack (expected 2, got 0) 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示 `ValueError: not enough values to unpack (expected 2, got 0)` 来自 `ndim_array.py` 文件的 `_scan_iterable_shape` 函数。",
+        "相关源码片段 6 中的 `elems, shapes = zip(*[f(i) for i in pointer])` 行是可能的异常来源。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用空列表构造 sympy.Array 应该成功，返回一个形状为 (0,) 或 () 的有效空数组对象，类似于 sympy.Matrix([]) 的行为。",
+      "evidence": [
+        "Issue 标题和描述暗示 sympy.Matrix([]) 可以工作，因此期望 sympy.Array([]) 也能工作。",
+        "相关测试 1 中 `arr_with_no_elements = ImmutableDenseNDimArray([], shape=(0,))` 表明可以通过指定形状 `(0,)` 来创建空数组，暗示可能期望不指定形状也能工作。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.Array",
+        "kind": "class",
+        "source_path": "sympy/tensor/array/__init__.py",
+        "reason": "Issue 中直接调用的 API，用于创建数组。"
+      },
+      {
+        "name": "ImmutableDenseNDimArray",
+        "kind": "class",
+        "source_path": "sympy/tensor/array/dense_ndim_array.py",
+        "reason": "根据源码片段 1，`Array` 是 `ImmutableDenseNDimArray` 的别名，是实际实现类。"
+      },
+      {
+        "name": "NDimArray._scan_iterable_shape",
+        "kind": "method",
+        "source_path": "sympy/tensor/array/ndim_array.py",
+        "reason": "错误堆栈指向此方法，它负责扫描可迭代对象以确定形状，是缺陷触发的关键路径。"
+      },
+      {
+        "name": "NDimArray._handle_ndarray_creation_inputs",
+        "kind": "method",
+        "source_path": "sympy/tensor/array/ndim_array.py",
+        "reason": "源码片段 5 显示此方法处理输入，并可能调用 `_scan_iterable_shape`。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/tensor/array/ndim_array.py",
+        "object": "NDimArray._scan_iterable_shape",
+        "lines": "192-205",
+        "reason": "Issue 的错误堆栈指向此方法，其中 `zip(*[f(i) for i in pointer])` 在 `pointer` 为空列表时会导致 `zip(*[])`，从而引发 ValueError。"
+      },
+      {
+        "path": "sympy/tensor/array/ndim_array.py",
+        "object": "NDimArray._handle_ndarray_creation_inputs",
+        "lines": "208-252",
+        "reason": "此方法决定何时调用 `_scan_iterable_shape`。对于空列表输入，它可能错误地进入了 `elif isinstance(iterable, Iterable):` 分支，而没有正确处理空可迭代对象的特殊情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ndim_array_initiation",
+        "test_file": "sympy/tensor/array/tests/test_immutable_ndim_array.py",
+        "why_relevant": "该测试包含了多种数组初始化场景，包括使用 `ImmutableDenseNDimArray` 创建空数组（通过指定形状 `(0,)`），以及测试空数组和空形状组合会引发错误。",
+        "reusable_parts": [
+          "导入 `ImmutableDenseNDimArray` 和 `ImmutableSparseNDimArray`",
+          "使用 `raises(ValueError, ...)` 来断言异常",
+          "数组构造和属性断言（如 `len`, `shape`, `rank`）的模式。"
+        ],
+        "possible_gap": "该测试通过显式指定 `shape=(0,)` 来创建空数组，但没有测试仅传递空列表 `[]` 而不指定形状的情况，而这正是 Issue 中触发 bug 的场景。"
+      },
+      {
+        "test_name": "test_ndim_array_initiation",
+        "test_file": "sympy/tensor/array/tests/test_mutable_ndim_array.py",
+        "why_relevant": "该测试与不可变版本的测试类似，测试了 `MutableDenseNDimArray` 的初始化，可以作为创建可变数组的参考。",
+        "reusable_parts": [
+          "导入 `MutableDenseNDimArray` 和 `MutableSparseNDimArray`",
+          "基本的数组构造和断言模式。"
+        ],
+        "possible_gap": "同样，没有测试仅用空列表 `[]` 初始化可变数组的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中 `arr_with_no_elements = ImmutableDenseNDimArray([], shape=(0,))` 通过显式指定 `shape` 参数来创建空数组。",
+        "target_pattern": "仅使用空列表作为输入，不指定 `shape` 参数：`ImmutableDenseNDimArray([])` 或 `Array([])`。",
+        "reason": "Issue 表明当不指定形状时，空列表输入会触发缺陷路径，导致 `_scan_iterable_shape` 内部出错。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中 `raises(ValueError, lambda: ImmutableDenseNDimArray([], shape=()))` 测试了空列表与空形状 `()` 的组合会引发错误。",
+        "target_pattern": "测试空列表作为唯一参数，让形状推断逻辑处理。",
+        "reason": "缺陷可能在于形状推断逻辑（`_scan_iterable_shape`）无法处理空列表，而显式传递 `shape=()` 可能走了另一条代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `Array([])` 或 `ImmutableDenseNDimArray([])` 时是否引发 `ValueError` 及其消息。",
+        "reason": "Issue 的核心是调用会引发异常。观测异常类型和消息可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功构造后返回的数组对象的 `shape` 和 `rank` 属性。",
+        "reason": "修复后，空数组应该有一个合理的形状（例如 `(0,)` 或 `()`），并且可以访问其属性而不崩溃。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "成功构造后返回对象的类型，例如 `isinstance(result, ImmutableDenseNDimArray)`。",
+        "reason": "确保构造成功返回了正确类型的对象。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用空列表构造 Array 不应引发 ValueError 异常，应返回一个有效的数组对象。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能改变。避免断言具体的内部表示（如 `_array` 列表内容）。",
+        "reason": "Issue 的核心是当前会引发异常，修复后应不再引发。使用 `raises` 的否定形式（即不引发）或直接构造并断言属性更稳定。"
+      },
+      {
+        "assertion_goal": "成功构造的空数组应具有合理的形状（例如 rank 为 1，shape 为 (0,) 或 rank 为 0，shape 为 ()）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 `len(arr) == 0` 可能不够，因为形状信息更重要。避免对内部 `_scan_iterable_shape` 的实现细节进行断言。",
+        "reason": "修复后，空数组的形状应该被明确定义，并且与类似功能（如 Matrix）或现有测试（指定 shape=(0,)）保持一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 或直接从 sympy.tensor.array 导入 Array 和 ImmutableDenseNDimArray。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要复杂的 fixture，因为缺陷是纯逻辑的，不涉及文件、数据库或网络。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以使用 pytest 的 `raises` 上下文管理器或断言来检查异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后空 Array 的确切预期形状是什么？是 (0,) 还是 ()？Issue 和现有测试没有明确说明。",
+      "`sympy.Matrix([])` 返回的对象的形状是什么？这可能是期望行为的参考，但 Issue 中没有给出。",
+      "除了 `Array([])`，其他类似的空可迭代对象（如 `tuple()`）是否也会触发相同的缺陷？",
+      "缺陷是否也影响 `MutableDenseNDimArray` 和稀疏数组变体？"
+    ]
+  }
+}

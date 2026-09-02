@@ -1,0 +1,294 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "psf__requests-1142",
+  "issue_summary": "requests.get 总是发送 content-length 请求头，导致某些服务器（如 amazon.com）返回 503 错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个测试服务器或 mock 来模拟对 'content-length' 头敏感的 GET 请求响应。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 unittest.TestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_HTTP_200_OK_GET_ALTERNATIVE",
+        "test_file": "test_requests.py",
+        "why_relevant": "它使用 requests.Request 和 Session.send 发送 GET 请求，是请求发送的核心流程。",
+        "reusable_parts": [
+          "imports",
+          "class RequestsTestCase",
+          "requests.Request",
+          "requests.Session",
+          "s.send(r.prepare())",
+          "assertEqual on status_code"
+        ],
+        "possible_gap": "它没有检查请求头，也没有模拟对 'content-length' 头敏感的服务器。"
+      },
+      {
+        "test_name": "test_HTTP_200_OK_GET_WITH_PARAMS",
+        "test_file": "test_requests.py",
+        "why_relevant": "它直接使用 requests.get，并设置了自定义请求头，与 Issue 场景相似。",
+        "reusable_parts": [
+          "imports",
+          "class RequestsTestCase",
+          "requests.get",
+          "headers parameter",
+          "assertEqual on status_code"
+        ],
+        "possible_gap": "它没有检查或控制 'content-length' 头的存在，且目标服务器（httpbin）可能不返回 503。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 requests.get 方法发送 GET 请求，且请求可能不包含请求体。",
+      "evidence": [
+        "Issue 中提到 'requests.get is ALWAYS sending content length' 和 'GET requests'。",
+        "相关测试 1-5 都使用了 requests.get 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "服务器（例如 amazon.com）对包含 'content-length' 请求头的 GET 请求返回 503 状态码。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中提到 'returns 503 for every get request that contains 'content-length' header'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.get",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了 requests.get 方法的问题，且所有相关测试都使用了它。"
+      },
+      {
+        "name": "requests.Session.send",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 1 使用了 s.send(r.prepare())，这是请求发送的关键路径。"
+      },
+      {
+        "name": "requests.Request.prepare",
+        "kind": "method",
+        "source_path": "",
+        "reason": "请求准备过程可能涉及请求头的设置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/structures.py",
+        "object": "CaseInsensitiveDict.get",
+        "lines": "66-70",
+        "reason": "iCoRe 检索出的相关源码，可能与请求头的字典操作有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "向 httpbin 等测试服务器发送 GET 请求。",
+        "target_pattern": "向一个对 GET 请求中 'content-length' 头敏感的服务器（或 mock 服务器）发送请求。",
+        "reason": "Issue 指出某些服务器（如 amazon.com）会因该头返回 503。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "使用默认的请求配置。",
+        "target_pattern": "尝试配置请求以不发送 'content-length' 头。",
+        "reason": "Issue 期望提供不发送该头的可能性。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "GET 请求在无请求体时不应自动添加 'content-length' 请求头，或者应提供不发送该请求头的选项。",
+      "evidence": [
+        "Issue 中提到 'the right behavior is not to add this header automatically in GET requests or add the possibility to not send it'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.status_code",
+        "reason": "Issue 的核心症状是服务器返回 503 状态码。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "request.headers (before sending)",
+        "reason": "需要观察请求头中是否包含 'content-length'。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证向敏感服务器发送 GET 请求时，响应状态码不是 503（或成功）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的响应体或无关的头部信息。",
+        "reason": "Issue 的核心是服务器因特定请求头返回错误状态码。"
+      },
+      {
+        "assertion_goal": "验证请求头中不包含 'content-length'（如果修复后应如此）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言请求头的完整精确字典。",
+        "reason": "Issue 期望 GET 请求不自动添加该头。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发 503 错误的确切服务器条件或 'content-length' 头的具体值是什么？",
+    "requests 库中自动添加 'content-length' 头的具体代码位置在哪里？",
+    "修复后，是默认不添加该头，还是通过一个配置选项来控制？"
+  ],
+  "raw": {
+    "issue_summary": "requests.get 总是发送 content-length 请求头，导致某些服务器（如 amazon.com）返回 503 错误。",
+    "trigger_condition": {
+      "text": "使用 requests.get 方法发送 GET 请求，且请求可能不包含请求体。",
+      "evidence": [
+        "Issue 中提到 'requests.get is ALWAYS sending content length' 和 'GET requests'。",
+        "相关测试 1-5 都使用了 requests.get 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "服务器（例如 amazon.com）对包含 'content-length' 请求头的 GET 请求返回 503 状态码。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中提到 'returns 503 for every get request that contains 'content-length' header'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "GET 请求在无请求体时不应自动添加 'content-length' 请求头，或者应提供不发送该请求头的选项。",
+      "evidence": [
+        "Issue 中提到 'the right behavior is not to add this header automatically in GET requests or add the possibility to not send it'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.get",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了 requests.get 方法的问题，且所有相关测试都使用了它。"
+      },
+      {
+        "name": "requests.Session.send",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 1 使用了 s.send(r.prepare())，这是请求发送的关键路径。"
+      },
+      {
+        "name": "requests.Request.prepare",
+        "kind": "method",
+        "source_path": "",
+        "reason": "请求准备过程可能涉及请求头的设置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/structures.py",
+        "object": "CaseInsensitiveDict.get",
+        "lines": "66-70",
+        "reason": "iCoRe 检索出的相关源码，可能与请求头的字典操作有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_HTTP_200_OK_GET_ALTERNATIVE",
+        "test_file": "test_requests.py",
+        "why_relevant": "它使用 requests.Request 和 Session.send 发送 GET 请求，是请求发送的核心流程。",
+        "reusable_parts": [
+          "imports",
+          "class RequestsTestCase",
+          "requests.Request",
+          "requests.Session",
+          "s.send(r.prepare())",
+          "assertEqual on status_code"
+        ],
+        "possible_gap": "它没有检查请求头，也没有模拟对 'content-length' 头敏感的服务器。"
+      },
+      {
+        "test_name": "test_HTTP_200_OK_GET_WITH_PARAMS",
+        "test_file": "test_requests.py",
+        "why_relevant": "它直接使用 requests.get，并设置了自定义请求头，与 Issue 场景相似。",
+        "reusable_parts": [
+          "imports",
+          "class RequestsTestCase",
+          "requests.get",
+          "headers parameter",
+          "assertEqual on status_code"
+        ],
+        "possible_gap": "它没有检查或控制 'content-length' 头的存在，且目标服务器（httpbin）可能不返回 503。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "向 httpbin 等测试服务器发送 GET 请求。",
+        "target_pattern": "向一个对 GET 请求中 'content-length' 头敏感的服务器（或 mock 服务器）发送请求。",
+        "reason": "Issue 指出某些服务器（如 amazon.com）会因该头返回 503。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "使用默认的请求配置。",
+        "target_pattern": "尝试配置请求以不发送 'content-length' 头。",
+        "reason": "Issue 期望提供不发送该头的可能性。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.status_code",
+        "reason": "Issue 的核心症状是服务器返回 503 状态码。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "request.headers (before sending)",
+        "reason": "需要观察请求头中是否包含 'content-length'。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证向敏感服务器发送 GET 请求时，响应状态码不是 503（或成功）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的响应体或无关的头部信息。",
+        "reason": "Issue 的核心是服务器因特定请求头返回错误状态码。"
+      },
+      {
+        "assertion_goal": "验证请求头中不包含 'content-length'（如果修复后应如此）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言请求头的完整精确字典。",
+        "reason": "Issue 期望 GET 请求不自动添加该头。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个测试服务器或 mock 来模拟对 'content-length' 头敏感的 GET 请求响应。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 unittest.TestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发 503 错误的确切服务器条件或 'content-length' 头的具体值是什么？",
+      "requests 库中自动添加 'content-length' 头的具体代码位置在哪里？",
+      "修复后，是默认不添加该头，还是通过一个配置选项来控制？"
+    ]
+  }
+}

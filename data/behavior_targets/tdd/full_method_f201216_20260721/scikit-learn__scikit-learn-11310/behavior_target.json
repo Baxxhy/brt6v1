@@ -1,0 +1,306 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-11310",
+  "issue_summary": "BaseSearchCV 缺少记录 refit 时间的属性，导致无法在并行设置下准确获取超参数优化后重新拟合最佳模型所需的时间。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用简单的分类数据集（如 iris）和简单的参数网格。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 ignore_warnings 装饰器来忽略可能的警告。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_search_cv_timing",
+        "test_file": "sklearn/model_selection/tests/test_search.py",
+        "why_relevant": "该测试专门验证搜索 CV 的时间相关属性（mean_fit_time, mean_score_time），与 Issue 关注的计时功能高度相关。",
+        "reusable_parts": [
+          "导入相关类（GridSearchCV, RandomizedSearchCV）",
+          "构造简单数据集（X, y）",
+          "使用 assert 验证时间属性值范围"
+        ],
+        "possible_gap": "该测试只验证了 cv_results_ 中已有的时间属性，没有测试或断言 refit_time_ 属性的存在和正确性。"
+      },
+      {
+        "test_name": "test_refit",
+        "test_file": "sklearn/model_selection/tests/test_search.py",
+        "why_relevant": "该测试验证了 refit 参数的行为，与 Issue 中 refit 步骤的计时直接相关。",
+        "reusable_parts": [
+          "使用 refit=True 的配置",
+          "调用 fit 方法"
+        ],
+        "possible_gap": "该测试不涉及时间测量或 refit_time_ 属性。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 GridSearchCV 或 RandomizedSearchCV 进行超参数搜索，设置 refit=True 和 n_jobs != 1，然后调用 fit 方法。",
+      "evidence": [
+        "Issue 中提到 'when setting n_jobs != 1' 和 'refit the best model on the full data'。",
+        "源码片段 2 中 GridSearchCV 的 __init__ 参数包含 refit 和 n_jobs。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "BaseSearchCV 实例缺少 refit_time_ 属性，无法获取重新拟合最佳模型所花费的时间。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述 'it would be great to have an attribute refit_time_'，表明当前缺失该属性。",
+        "相关测试 1 中只验证了 cv_results_ 中的 fit_time 和 score_time，未提及 refit_time_。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.model_selection.GridSearchCV",
+        "kind": "class",
+        "source_path": "sklearn/grid_search.py",
+        "reason": "Issue 中使用的类，是 BaseSearchCV 的子类，需要添加 refit_time_ 属性。"
+      },
+      {
+        "name": "sklearn.model_selection.BaseSearchCV._fit",
+        "kind": "method",
+        "source_path": "sklearn/grid_search.py",
+        "reason": "负责拟合过程，可能需要在其中计时 refit 步骤。"
+      },
+      {
+        "name": "sklearn.model_selection.GridSearchCV.fit",
+        "kind": "method",
+        "source_path": "sklearn/grid_search.py",
+        "reason": "用户调用的主要 API，最终会调用 _fit。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/grid_search.py",
+        "object": "BaseSearchCV._fit",
+        "lines": "",
+        "reason": "该方法负责整个搜索和拟合流程，包括 refit 步骤，是添加计时逻辑的候选位置。"
+      },
+      {
+        "path": "sklearn/grid_search.py",
+        "object": "BaseSearchCV.__init__",
+        "lines": "",
+        "reason": "可能需要初始化 refit_time_ 属性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中默认使用 n_jobs=1（未显式设置）。",
+        "target_pattern": "设置 n_jobs 为不等于 1 的值（例如 n_jobs=2）。",
+        "reason": "Issue 指出当 n_jobs != 1 时，无法通过简单减法获得 refit 时间，这凸显了添加 refit_time_ 属性的必要性。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 在拟合后断言 cv_results_ 中的时间属性。",
+        "target_pattern": "在拟合后断言 search 对象具有 refit_time_ 属性，且其值非负。",
+        "reason": "Issue 期望添加 refit_time_ 属性，测试需要验证其存在和合理性。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "BaseSearchCV 实例在拟合后应具有一个 refit_time_ 属性，其值为重新拟合最佳模型所花费的时间。",
+      "evidence": [
+        "Issue 中明确期望 'an attribute refit_time_ which is simply the time it took to refit the best model'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "search_instance.refit_time_",
+        "reason": "直接观察 Issue 期望添加的属性是否存在及其值。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "hasattr(search_instance, 'refit_time_')",
+        "reason": "验证拟合后对象是否具有该属性。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(search_instance.refit_time_)",
+        "reason": "验证 refit_time_ 的类型应为数值类型（如 float）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 BaseSearchCV 实例在拟合后具有 refit_time_ 属性。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 refit_time_ 等于某个精确值，因为运行时间会变化。",
+        "reason": "属性存在性是核心要求，其值应为非负浮点数。"
+      },
+      {
+        "assertion_goal": "验证 refit_time_ 的值是非负的。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 refit_time_ 大于某个特定阈值。",
+        "reason": "时间值应 >= 0，这是合理的基本约束。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "refit_time_ 应该在哪个具体的方法中被计算和赋值（例如在 _fit 方法内部）。",
+    "当 refit=False 时，refit_time_ 属性是否应该存在，其值应为 None 还是 0？",
+    "refit_time_ 的计算是否应该包括模型选择后的任何额外处理时间？"
+  ],
+  "raw": {
+    "issue_summary": "BaseSearchCV 缺少记录 refit 时间的属性，导致无法在并行设置下准确获取超参数优化后重新拟合最佳模型所需的时间。",
+    "trigger_condition": {
+      "text": "使用 GridSearchCV 或 RandomizedSearchCV 进行超参数搜索，设置 refit=True 和 n_jobs != 1，然后调用 fit 方法。",
+      "evidence": [
+        "Issue 中提到 'when setting n_jobs != 1' 和 'refit the best model on the full data'。",
+        "源码片段 2 中 GridSearchCV 的 __init__ 参数包含 refit 和 n_jobs。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "BaseSearchCV 实例缺少 refit_time_ 属性，无法获取重新拟合最佳模型所花费的时间。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述 'it would be great to have an attribute refit_time_'，表明当前缺失该属性。",
+        "相关测试 1 中只验证了 cv_results_ 中的 fit_time 和 score_time，未提及 refit_time_。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "BaseSearchCV 实例在拟合后应具有一个 refit_time_ 属性，其值为重新拟合最佳模型所花费的时间。",
+      "evidence": [
+        "Issue 中明确期望 'an attribute refit_time_ which is simply the time it took to refit the best model'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.model_selection.GridSearchCV",
+        "kind": "class",
+        "source_path": "sklearn/grid_search.py",
+        "reason": "Issue 中使用的类，是 BaseSearchCV 的子类，需要添加 refit_time_ 属性。"
+      },
+      {
+        "name": "sklearn.model_selection.BaseSearchCV._fit",
+        "kind": "method",
+        "source_path": "sklearn/grid_search.py",
+        "reason": "负责拟合过程，可能需要在其中计时 refit 步骤。"
+      },
+      {
+        "name": "sklearn.model_selection.GridSearchCV.fit",
+        "kind": "method",
+        "source_path": "sklearn/grid_search.py",
+        "reason": "用户调用的主要 API，最终会调用 _fit。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/grid_search.py",
+        "object": "BaseSearchCV._fit",
+        "lines": "",
+        "reason": "该方法负责整个搜索和拟合流程，包括 refit 步骤，是添加计时逻辑的候选位置。"
+      },
+      {
+        "path": "sklearn/grid_search.py",
+        "object": "BaseSearchCV.__init__",
+        "lines": "",
+        "reason": "可能需要初始化 refit_time_ 属性。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_search_cv_timing",
+        "test_file": "sklearn/model_selection/tests/test_search.py",
+        "why_relevant": "该测试专门验证搜索 CV 的时间相关属性（mean_fit_time, mean_score_time），与 Issue 关注的计时功能高度相关。",
+        "reusable_parts": [
+          "导入相关类（GridSearchCV, RandomizedSearchCV）",
+          "构造简单数据集（X, y）",
+          "使用 assert 验证时间属性值范围"
+        ],
+        "possible_gap": "该测试只验证了 cv_results_ 中已有的时间属性，没有测试或断言 refit_time_ 属性的存在和正确性。"
+      },
+      {
+        "test_name": "test_refit",
+        "test_file": "sklearn/model_selection/tests/test_search.py",
+        "why_relevant": "该测试验证了 refit 参数的行为，与 Issue 中 refit 步骤的计时直接相关。",
+        "reusable_parts": [
+          "使用 refit=True 的配置",
+          "调用 fit 方法"
+        ],
+        "possible_gap": "该测试不涉及时间测量或 refit_time_ 属性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中默认使用 n_jobs=1（未显式设置）。",
+        "target_pattern": "设置 n_jobs 为不等于 1 的值（例如 n_jobs=2）。",
+        "reason": "Issue 指出当 n_jobs != 1 时，无法通过简单减法获得 refit 时间，这凸显了添加 refit_time_ 属性的必要性。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 在拟合后断言 cv_results_ 中的时间属性。",
+        "target_pattern": "在拟合后断言 search 对象具有 refit_time_ 属性，且其值非负。",
+        "reason": "Issue 期望添加 refit_time_ 属性，测试需要验证其存在和合理性。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "search_instance.refit_time_",
+        "reason": "直接观察 Issue 期望添加的属性是否存在及其值。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "hasattr(search_instance, 'refit_time_')",
+        "reason": "验证拟合后对象是否具有该属性。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(search_instance.refit_time_)",
+        "reason": "验证 refit_time_ 的类型应为数值类型（如 float）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 BaseSearchCV 实例在拟合后具有 refit_time_ 属性。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 refit_time_ 等于某个精确值，因为运行时间会变化。",
+        "reason": "属性存在性是核心要求，其值应为非负浮点数。"
+      },
+      {
+        "assertion_goal": "验证 refit_time_ 的值是非负的。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 refit_time_ 大于某个特定阈值。",
+        "reason": "时间值应 >= 0，这是合理的基本约束。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用简单的分类数据集（如 iris）和简单的参数网格。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 ignore_warnings 装饰器来忽略可能的警告。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "refit_time_ 应该在哪个具体的方法中被计算和赋值（例如在 _fit 方法内部）。",
+      "当 refit=False 时，refit_time_ 属性是否应该存在，其值应为 None 还是 0？",
+      "refit_time_ 的计算是否应该包括模型选择后的任何额外处理时间？"
+    ]
+  }
+}

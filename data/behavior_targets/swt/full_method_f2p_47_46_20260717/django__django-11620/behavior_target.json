@@ -1,0 +1,382 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11620",
+  "issue_summary": "当 DEBUG=True 时，在路径转换器的 to_python 方法中抛出 Http404 异常不会产生技术性错误响应。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings(DEBUG=True, ROOT_URLCONF=...) 来设置调试模式和自定义 URL 配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义一个自定义路径转换器，并在其 to_python 方法中抛出 Http404。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 SimpleTestCase 或 TestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ConversionExceptionTests.test_resolve_value_error_means_no_match",
+        "test_file": "tests/urlpatterns/tests.py",
+        "why_relevant": "它直接测试了在路径转换器的 to_python 方法中抛出异常（ValueError）对 URL 解析的影响。",
+        "reusable_parts": [
+          "@override_settings 装饰器",
+          "SimpleTestCase 类",
+          "resolve 函数调用",
+          "assertRaises(Resolver404)"
+        ],
+        "possible_gap": "它测试的是 ValueError，而 Issue 是关于 Http404。它没有涉及 DEBUG 设置。"
+      },
+      {
+        "test_name": "DebugViewTests.test_404_empty_path_not_in_urls",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "它测试了在 DEBUG=True 时 404 响应的内容，这正是 Issue 关心的技术性响应。",
+        "reusable_parts": [
+          "@override_settings(DEBUG=True)",
+          "SimpleTestCase 类",
+          "self.client.get",
+          "assertContains 检查响应内容"
+        ],
+        "possible_gap": "它测试的是常规的 404 路径不匹配，而不是在路径转换器内部抛出 Http404 异常。"
+      },
+      {
+        "test_name": "ConverterTests.test_nonmatching_urls",
+        "test_file": "tests/urlpatterns/tests.py",
+        "why_relevant": "它测试了各种内置转换器（int, str, path, slug, uuid）对不匹配 URL 的处理，并期望抛出 Resolver404。",
+        "reusable_parts": [
+          "@override_settings",
+          "SimpleTestCase 类",
+          "resolve 函数调用",
+          "assertRaises(Resolver404)",
+          "subTest 结构"
+        ],
+        "possible_gap": "它测试的是内置转换器的默认不匹配行为（可能引发 ValueError），而不是自定义转换器主动抛出 Http404。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在自定义路径转换器的 to_python 方法中抛出 Http404 异常，且 Django 的 DEBUG 设置设为 True。",
+      "evidence": [
+        "Issue 描述中提到 'When DEBUG is True, raising Http404 in a path converter's to_python method does not result in a technical response'",
+        "Issue 中提到 'One could also make a point that raising a Http404 should be valid way...'",
+        "相关测试 1 展示了在 to_python 中抛出 ValueError 的测试模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "用户收到一个不友好的通用错误消息 'A server error occurred. Please contact the administrator.'，而不是在 DEBUG=True 时应有的详细技术性响应。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述 'This is the response I get (plain text): A server error occurred. Please contact the administrator.'",
+        "Issue 中提到 'the error message was not very helpful'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Http404",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 的核心是关于在 to_python 中抛出 Http404 异常的行为。"
+      },
+      {
+        "name": "get_object_or_404",
+        "kind": "function",
+        "source_path": "django/shortcuts.py",
+        "reason": "Issue 中提到此函数作为在路径转换器中抛出 Http404 可能有用的例子。"
+      },
+      {
+        "name": "resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "多个相关测试都使用 resolve 函数来触发 URL 解析，这是触发路径转换器逻辑的关键。"
+      },
+      {
+        "name": "to_python",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出问题发生在路径转换器的 to_python 方法中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "URL 解析器处理路径转换器异常的代码",
+        "lines": "",
+        "reason": "Issue 暗示 URL 解析器可能没有正确处理 to_python 方法中抛出的 Http404 异常，而是将其视为服务器错误。"
+      },
+      {
+        "path": "django/http/response.py",
+        "object": "Http404",
+        "lines": "559-560",
+        "reason": "这是被抛出的异常类，其处理方式可能是问题的关键。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，to_python 方法抛出 ValueError。",
+        "target_pattern": "to_python 方法应抛出 Http404('Some message')。",
+        "reason": "Issue 明确指出问题发生在抛出 Http404 而非 ValueError 时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 3 没有显式设置 DEBUG。",
+        "target_pattern": "需要设置 DEBUG=True。",
+        "reason": "Issue 强调问题发生在 DEBUG=True 时，错误响应不友好。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 和 3 直接调用 resolve 并断言 Resolver404。",
+        "target_pattern": "可能需要通过 self.client.get 发起请求来观察完整的 HTTP 响应，而不仅仅是 resolve 函数的异常。",
+        "reason": "Issue 描述的是用户看到的 HTTP 响应文本，而不仅仅是解析器内部异常。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 DEBUG=True 时，在路径转换器的 to_python 方法中抛出 Http404 异常应产生一个包含有用调试信息（例如尝试过的 URL 模式）的技术性 404 响应页面。",
+      "evidence": [
+        "Issue 中提到 'including a helpful error message when DEBUG is True instead of the default 'Django tried these URL patterns''",
+        "相关测试 5 展示了在 DEBUG=True 时，404 响应应包含特定调试信息。",
+        "相关测试 2 展示了 Resolver404 异常包含 'tried' URL 列表的格式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "当 DEBUG=True 时，对触发路径的 HTTP 响应（response.content 或 response.context）。",
+        "reason": "Issue 的核心是观察到的错误响应内容，需要检查响应是否包含有用的调试信息。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 resolve 时捕获的异常类型（是 Resolver404 还是其他异常？）。",
+        "reason": "需要确认抛出 Http404 是否被正确转换为 Resolver404 或导致其他错误。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.DEBUG 的值。",
+        "reason": "Issue 明确指出行为依赖于 DEBUG 设置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 DEBUG=True 且 to_python 抛出 Http404 时，HTTP 响应应包含有用的调试信息（例如 'Django tried these URL patterns' 或类似内容）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的响应 HTML 字符串相等。",
+        "reason": "Issue 期望看到有帮助的错误消息，断言包含特定片段比完整字符串更稳定。"
+      },
+      {
+        "assertion_goal": "HTTP 响应的状态码应为 404。",
+        "preferred_assertion_style": "equals",
+        "avoid": "",
+        "reason": "抛出 Http404 应导致 404 状态码，这是基本预期。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "抛出 Http404 时，URL 解析器内部具体抛出的是什么异常（Resolver404 还是其他）？",
+    "在 DEBUG=False 时，当前行为是什么？Issue 没有明确说明，但可能也是不正确的。",
+    "技术性响应具体应包含哪些确切内容？Issue 只提到了 'helpful error message' 和 'Django tried these URL patterns' 作为例子。",
+    "除了 to_python，在其他路径转换器方法（如 to_url）中抛出 Http404 是否有类似问题？"
+  ],
+  "raw": {
+    "issue_summary": "当 DEBUG=True 时，在路径转换器的 to_python 方法中抛出 Http404 异常不会产生技术性错误响应。",
+    "trigger_condition": {
+      "text": "在自定义路径转换器的 to_python 方法中抛出 Http404 异常，且 Django 的 DEBUG 设置设为 True。",
+      "evidence": [
+        "Issue 描述中提到 'When DEBUG is True, raising Http404 in a path converter's to_python method does not result in a technical response'",
+        "Issue 中提到 'One could also make a point that raising a Http404 should be valid way...'",
+        "相关测试 1 展示了在 to_python 中抛出 ValueError 的测试模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "用户收到一个不友好的通用错误消息 'A server error occurred. Please contact the administrator.'，而不是在 DEBUG=True 时应有的详细技术性响应。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述 'This is the response I get (plain text): A server error occurred. Please contact the administrator.'",
+        "Issue 中提到 'the error message was not very helpful'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 DEBUG=True 时，在路径转换器的 to_python 方法中抛出 Http404 异常应产生一个包含有用调试信息（例如尝试过的 URL 模式）的技术性 404 响应页面。",
+      "evidence": [
+        "Issue 中提到 'including a helpful error message when DEBUG is True instead of the default 'Django tried these URL patterns''",
+        "相关测试 5 展示了在 DEBUG=True 时，404 响应应包含特定调试信息。",
+        "相关测试 2 展示了 Resolver404 异常包含 'tried' URL 列表的格式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Http404",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 的核心是关于在 to_python 中抛出 Http404 异常的行为。"
+      },
+      {
+        "name": "get_object_or_404",
+        "kind": "function",
+        "source_path": "django/shortcuts.py",
+        "reason": "Issue 中提到此函数作为在路径转换器中抛出 Http404 可能有用的例子。"
+      },
+      {
+        "name": "resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "多个相关测试都使用 resolve 函数来触发 URL 解析，这是触发路径转换器逻辑的关键。"
+      },
+      {
+        "name": "to_python",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出问题发生在路径转换器的 to_python 方法中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "URL 解析器处理路径转换器异常的代码",
+        "lines": "",
+        "reason": "Issue 暗示 URL 解析器可能没有正确处理 to_python 方法中抛出的 Http404 异常，而是将其视为服务器错误。"
+      },
+      {
+        "path": "django/http/response.py",
+        "object": "Http404",
+        "lines": "559-560",
+        "reason": "这是被抛出的异常类，其处理方式可能是问题的关键。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ConversionExceptionTests.test_resolve_value_error_means_no_match",
+        "test_file": "tests/urlpatterns/tests.py",
+        "why_relevant": "它直接测试了在路径转换器的 to_python 方法中抛出异常（ValueError）对 URL 解析的影响。",
+        "reusable_parts": [
+          "@override_settings 装饰器",
+          "SimpleTestCase 类",
+          "resolve 函数调用",
+          "assertRaises(Resolver404)"
+        ],
+        "possible_gap": "它测试的是 ValueError，而 Issue 是关于 Http404。它没有涉及 DEBUG 设置。"
+      },
+      {
+        "test_name": "DebugViewTests.test_404_empty_path_not_in_urls",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "它测试了在 DEBUG=True 时 404 响应的内容，这正是 Issue 关心的技术性响应。",
+        "reusable_parts": [
+          "@override_settings(DEBUG=True)",
+          "SimpleTestCase 类",
+          "self.client.get",
+          "assertContains 检查响应内容"
+        ],
+        "possible_gap": "它测试的是常规的 404 路径不匹配，而不是在路径转换器内部抛出 Http404 异常。"
+      },
+      {
+        "test_name": "ConverterTests.test_nonmatching_urls",
+        "test_file": "tests/urlpatterns/tests.py",
+        "why_relevant": "它测试了各种内置转换器（int, str, path, slug, uuid）对不匹配 URL 的处理，并期望抛出 Resolver404。",
+        "reusable_parts": [
+          "@override_settings",
+          "SimpleTestCase 类",
+          "resolve 函数调用",
+          "assertRaises(Resolver404)",
+          "subTest 结构"
+        ],
+        "possible_gap": "它测试的是内置转换器的默认不匹配行为（可能引发 ValueError），而不是自定义转换器主动抛出 Http404。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，to_python 方法抛出 ValueError。",
+        "target_pattern": "to_python 方法应抛出 Http404('Some message')。",
+        "reason": "Issue 明确指出问题发生在抛出 Http404 而非 ValueError 时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 3 没有显式设置 DEBUG。",
+        "target_pattern": "需要设置 DEBUG=True。",
+        "reason": "Issue 强调问题发生在 DEBUG=True 时，错误响应不友好。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 和 3 直接调用 resolve 并断言 Resolver404。",
+        "target_pattern": "可能需要通过 self.client.get 发起请求来观察完整的 HTTP 响应，而不仅仅是 resolve 函数的异常。",
+        "reason": "Issue 描述的是用户看到的 HTTP 响应文本，而不仅仅是解析器内部异常。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "当 DEBUG=True 时，对触发路径的 HTTP 响应（response.content 或 response.context）。",
+        "reason": "Issue 的核心是观察到的错误响应内容，需要检查响应是否包含有用的调试信息。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 resolve 时捕获的异常类型（是 Resolver404 还是其他异常？）。",
+        "reason": "需要确认抛出 Http404 是否被正确转换为 Resolver404 或导致其他错误。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.DEBUG 的值。",
+        "reason": "Issue 明确指出行为依赖于 DEBUG 设置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 DEBUG=True 且 to_python 抛出 Http404 时，HTTP 响应应包含有用的调试信息（例如 'Django tried these URL patterns' 或类似内容）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的响应 HTML 字符串相等。",
+        "reason": "Issue 期望看到有帮助的错误消息，断言包含特定片段比完整字符串更稳定。"
+      },
+      {
+        "assertion_goal": "HTTP 响应的状态码应为 404。",
+        "preferred_assertion_style": "equals",
+        "avoid": "",
+        "reason": "抛出 Http404 应导致 404 状态码，这是基本预期。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings(DEBUG=True, ROOT_URLCONF=...) 来设置调试模式和自定义 URL 配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义一个自定义路径转换器，并在其 to_python 方法中抛出 Http404。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 SimpleTestCase 或 TestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "抛出 Http404 时，URL 解析器内部具体抛出的是什么异常（Resolver404 还是其他）？",
+      "在 DEBUG=False 时，当前行为是什么？Issue 没有明确说明，但可能也是不正确的。",
+      "技术性响应具体应包含哪些确切内容？Issue 只提到了 'helpful error message' 和 'Django tried these URL patterns' 作为例子。",
+      "除了 to_python，在其他路径转换器方法（如 to_url）中抛出 Http404 是否有类似问题？"
+    ]
+  }
+}

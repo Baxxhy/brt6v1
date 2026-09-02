@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13925",
+  "issue_summary": "在 Django 3.2 alpha 中，继承自已定义主键父类的模型会错误地触发 models.W042 警告，提示使用了自动创建的主键。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 @isolate_apps 装饰器来隔离测试应用，防止模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或 TestCase，因为测试涉及模型定义和检查，不涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 django.core.checks 来引用 Warning 和 Error 类进行断言比较。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_primary_key",
+        "test_file": "tests/invalid_models_tests/test_ordinary_fields.py",
+        "why_relevant": "该测试检查 AutoField 必须设置 primary_key=True，涉及主键字段的验证逻辑。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "SimpleTestCase",
+          "定义内部 Model 类的方式",
+          "使用 field.check() 和 Model.check() 进行检查",
+          "Error 对象的构造和比较"
+        ],
+        "possible_gap": "该测试关注的是单个模型的字段配置错误，而非模型继承场景下主键识别的错误警告。"
+      },
+      {
+        "test_name": "test_single_primary_key",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "该测试检查模型不能有多个主键字段，涉及主键数量的检查逻辑。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "SimpleTestCase",
+          "内部类定义模型",
+          "使用 Model.check() 进行检查",
+          "Error 对象的比较"
+        ],
+        "possible_gap": "该测试关注的是模型内字段冲突，而非继承链上主键的识别问题。"
+      },
+      {
+        "test_name": "test_warning_when_unique_true_on_fk",
+        "test_file": "tests/model_fields/test_foreignkey.py",
+        "why_relevant": "该测试检查模型并验证是否产生特定警告（W342），涉及模型检查系统生成警告的测试模式。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "TestCase",
+          "定义多个关联模型",
+          "调用 model.check()",
+          "checks.Warning 对象的构造和比较"
+        ],
+        "possible_gap": "该测试检查的是 ForeignKey 的 unique=True 警告，而非 models.W042 警告。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 3.2 alpha 中，运行 `make_migrations` 命令检查继承自已定义主键父类的模型。",
+      "evidence": [
+        "Issue 描述：'I have models which inherit from other models, and they should inherit the primary key. This works fine with Django 3.1. However, if I install Django 3.2 alpha, when I run make_migrations I get the following error messages:'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "系统检查发出 models.W042 警告，提示模型使用了自动创建的主键，而实际上模型应继承父类中已定义的主键。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中列出了多个模型的 W042 警告信息，例如：'accounts.ReservedUsername: (models.W042) Auto-created primary key used when not defining a primary key type...'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Model",
+        "kind": "class",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 涉及模型继承和主键定义，这是 Django 模型系统的核心类。"
+      },
+      {
+        "name": "django.core.checks.model_checks.check_model",
+        "kind": "function",
+        "source_path": "django/core/checks/model_checks.py",
+        "reason": "models.W042 警告很可能由模型检查系统生成。"
+      },
+      {
+        "name": "django.db.models.fields.AutoField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "警告信息涉及 AutoField，且相关源码片段 2 和 3 定义了 AutoField 和 BigAutoField。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/checks/model_checks.py",
+        "object": "check_model 或相关检查函数",
+        "lines": "",
+        "reason": "models.W042 警告的生成逻辑可能在此文件中，检查模型主键时可能未正确处理继承情况。"
+      },
+      {
+        "path": "django/db/models/options.py",
+        "object": "Options",
+        "lines": "",
+        "reason": "模型元数据（_meta）处理主键字段和继承逻辑的地方。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试通常定义独立的、不继承的模型类。",
+        "target_pattern": "定义一个继承自已显式设置主键的父类的模型子类。",
+        "reason": "Issue 的核心触发条件是模型继承，且父类已定义主键。这可能导致模型检查系统错误地认为子类没有定义主键类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用默认的 DEFAULT_AUTO_FIELD 设置。",
+        "target_pattern": "可能需要显式设置或保持 DEFAULT_AUTO_FIELD 为默认值（'django.db.models.AutoField'）。",
+        "reason": "警告信息提示配置 DEFAULT_AUTO_FIELD 设置，Issue 表明即使主键已继承，警告仍被触发。配置状态可能影响检查逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "继承自已定义主键父类的模型不应触发 models.W042 警告，系统检查应识别到主键已通过继承定义。",
+      "evidence": [
+        "Issue 描述：'These models should not use auto-created primary keys! I already defined the primary key in the ancestor of the model.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "调用子类模型的 .check() 方法返回的警告列表。",
+        "reason": "Issue 的核心错误现象是 models.W042 警告被错误触发。观察 check() 的输出可以直接验证问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "子类模型 _meta.pk 属性（主键字段对象）。",
+        "reason": "检查子类模型是否正确识别并继承了父类的主键字段，这是预期行为的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证继承自已定义主键父类的模型，其 .check() 方法返回的警告列表中不包含 models.W042。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告列表等于空列表，因为模型可能有其他无关警告。避免断言具体的行号或完整提示字符串。",
+        "reason": "Issue 的预期是 W042 警告不应出现。使用 not_contains_fragment 可以稳定地检查特定警告 ID 的缺失，而不受其他警告内容变化的影响。"
+      },
+      {
+        "assertion_goal": "验证子类模型的主键字段（_meta.pk）与父类定义的主键字段是同一个或正确关联。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言主键字段的完整 repr 字符串。",
+        "reason": "这能直接验证主键继承是否正常工作，是修复后的核心正确状态。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发警告的确切条件是否还需要特定的 DEFAULT_AUTO_FIELD 配置或 AppConfig.default_auto_field 设置。",
+    "模型继承的层级（例如多级继承）或抽象基类是否会影响警告的触发。",
+    "除了运行 make_migrations，在普通模型检查（如调用 check()）时是否也会触发此警告。",
+    "修复后，警告是应该完全消失，还是仅在特定配置下消失。"
+  ],
+  "raw": {
+    "issue_summary": "在 Django 3.2 alpha 中，继承自已定义主键父类的模型会错误地触发 models.W042 警告，提示使用了自动创建的主键。",
+    "trigger_condition": {
+      "text": "在 Django 3.2 alpha 中，运行 `make_migrations` 命令检查继承自已定义主键父类的模型。",
+      "evidence": [
+        "Issue 描述：'I have models which inherit from other models, and they should inherit the primary key. This works fine with Django 3.1. However, if I install Django 3.2 alpha, when I run make_migrations I get the following error messages:'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "系统检查发出 models.W042 警告，提示模型使用了自动创建的主键，而实际上模型应继承父类中已定义的主键。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中列出了多个模型的 W042 警告信息，例如：'accounts.ReservedUsername: (models.W042) Auto-created primary key used when not defining a primary key type...'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "继承自已定义主键父类的模型不应触发 models.W042 警告，系统检查应识别到主键已通过继承定义。",
+      "evidence": [
+        "Issue 描述：'These models should not use auto-created primary keys! I already defined the primary key in the ancestor of the model.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Model",
+        "kind": "class",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 涉及模型继承和主键定义，这是 Django 模型系统的核心类。"
+      },
+      {
+        "name": "django.core.checks.model_checks.check_model",
+        "kind": "function",
+        "source_path": "django/core/checks/model_checks.py",
+        "reason": "models.W042 警告很可能由模型检查系统生成。"
+      },
+      {
+        "name": "django.db.models.fields.AutoField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "警告信息涉及 AutoField，且相关源码片段 2 和 3 定义了 AutoField 和 BigAutoField。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/checks/model_checks.py",
+        "object": "check_model 或相关检查函数",
+        "lines": "",
+        "reason": "models.W042 警告的生成逻辑可能在此文件中，检查模型主键时可能未正确处理继承情况。"
+      },
+      {
+        "path": "django/db/models/options.py",
+        "object": "Options",
+        "lines": "",
+        "reason": "模型元数据（_meta）处理主键字段和继承逻辑的地方。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_primary_key",
+        "test_file": "tests/invalid_models_tests/test_ordinary_fields.py",
+        "why_relevant": "该测试检查 AutoField 必须设置 primary_key=True，涉及主键字段的验证逻辑。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "SimpleTestCase",
+          "定义内部 Model 类的方式",
+          "使用 field.check() 和 Model.check() 进行检查",
+          "Error 对象的构造和比较"
+        ],
+        "possible_gap": "该测试关注的是单个模型的字段配置错误，而非模型继承场景下主键识别的错误警告。"
+      },
+      {
+        "test_name": "test_single_primary_key",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "该测试检查模型不能有多个主键字段，涉及主键数量的检查逻辑。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "SimpleTestCase",
+          "内部类定义模型",
+          "使用 Model.check() 进行检查",
+          "Error 对象的比较"
+        ],
+        "possible_gap": "该测试关注的是模型内字段冲突，而非继承链上主键的识别问题。"
+      },
+      {
+        "test_name": "test_warning_when_unique_true_on_fk",
+        "test_file": "tests/model_fields/test_foreignkey.py",
+        "why_relevant": "该测试检查模型并验证是否产生特定警告（W342），涉及模型检查系统生成警告的测试模式。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "TestCase",
+          "定义多个关联模型",
+          "调用 model.check()",
+          "checks.Warning 对象的构造和比较"
+        ],
+        "possible_gap": "该测试检查的是 ForeignKey 的 unique=True 警告，而非 models.W042 警告。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试通常定义独立的、不继承的模型类。",
+        "target_pattern": "定义一个继承自已显式设置主键的父类的模型子类。",
+        "reason": "Issue 的核心触发条件是模型继承，且父类已定义主键。这可能导致模型检查系统错误地认为子类没有定义主键类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用默认的 DEFAULT_AUTO_FIELD 设置。",
+        "target_pattern": "可能需要显式设置或保持 DEFAULT_AUTO_FIELD 为默认值（'django.db.models.AutoField'）。",
+        "reason": "警告信息提示配置 DEFAULT_AUTO_FIELD 设置，Issue 表明即使主键已继承，警告仍被触发。配置状态可能影响检查逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "调用子类模型的 .check() 方法返回的警告列表。",
+        "reason": "Issue 的核心错误现象是 models.W042 警告被错误触发。观察 check() 的输出可以直接验证问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "子类模型 _meta.pk 属性（主键字段对象）。",
+        "reason": "检查子类模型是否正确识别并继承了父类的主键字段，这是预期行为的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证继承自已定义主键父类的模型，其 .check() 方法返回的警告列表中不包含 models.W042。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告列表等于空列表，因为模型可能有其他无关警告。避免断言具体的行号或完整提示字符串。",
+        "reason": "Issue 的预期是 W042 警告不应出现。使用 not_contains_fragment 可以稳定地检查特定警告 ID 的缺失，而不受其他警告内容变化的影响。"
+      },
+      {
+        "assertion_goal": "验证子类模型的主键字段（_meta.pk）与父类定义的主键字段是同一个或正确关联。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言主键字段的完整 repr 字符串。",
+        "reason": "这能直接验证主键继承是否正常工作，是修复后的核心正确状态。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 @isolate_apps 装饰器来隔离测试应用，防止模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或 TestCase，因为测试涉及模型定义和检查，不涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 django.core.checks 来引用 Warning 和 Error 类进行断言比较。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发警告的确切条件是否还需要特定的 DEFAULT_AUTO_FIELD 配置或 AppConfig.default_auto_field 设置。",
+      "模型继承的层级（例如多级继承）或抽象基类是否会影响警告的触发。",
+      "除了运行 make_migrations，在普通模型检查（如调用 check()）时是否也会触发此警告。",
+      "修复后，警告是应该完全消失，还是仅在特定配置下消失。"
+    ]
+  }
+}

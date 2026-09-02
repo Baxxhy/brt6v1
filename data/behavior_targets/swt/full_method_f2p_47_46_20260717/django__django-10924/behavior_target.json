@@ -1,0 +1,354 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-10924",
+  "issue_summary": "FilePathField 的 path 参数不支持可调用对象，导致 makemigrations 在不同机器上生成硬编码路径。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 os 和 django 相关模块（models, forms）。可能需要一个临时目录来模拟文件路径。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 SimpleTestCase 或 TransactionTestCase，取决于是否涉及数据库。相关检索出的测试都使用 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟不同的路径环境（如使用 tempfile.TemporaryDirectory）来验证路径的动态性。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FilePathFieldTest.test_no_options",
+        "test_file": "tests/forms_tests/field_tests/test_filepathfield.py",
+        "why_relevant": "这是一个基础的 FilePathField 测试，展示了如何实例化 FilePathField 并设置 path 参数。",
+        "reusable_parts": [
+          "FilePathField 的导入和实例化模式",
+          "使用 self.path 作为 path 参数",
+          "assertChoices 断言风格"
+        ],
+        "possible_gap": "该测试使用一个静态字符串路径（self.path），而不是 Issue 中描述的可调用对象（如 os.path.join）。"
+      },
+      {
+        "test_name": "FieldDeconstructionTests.test_file_path_field",
+        "test_file": "tests/field_deconstruction/tests.py",
+        "why_relevant": "该测试直接验证 FilePathField 的 deconstruct 方法，这是迁移序列化的核心。",
+        "reusable_parts": [
+          "字段实例化",
+          "调用 field.deconstruct()",
+          "对返回的 args 和 kwargs 进行断言"
+        ],
+        "possible_gap": "该测试只测试了 match, recursive, allow_folders, max_length 等参数，没有测试 path 参数，更没有测试 path 为可调用对象的情况。"
+      },
+      {
+        "test_name": "PromiseTest.test_FilePathField",
+        "test_file": "tests/model_fields/test_promises.py",
+        "why_relevant": "该测试表明 FilePathField 对 lazy 对象（一种可调用/延迟求值对象）有一定处理逻辑，与 Issue 中希望 path 支持可调用对象的诉求相关。",
+        "reusable_parts": [
+          "使用 lazy 函数创建可调用对象",
+          "调用 FilePathField().get_prep_value()",
+          "使用 assertIsInstance 进行类型断言"
+        ],
+        "possible_gap": "该测试关注的是 get_prep_value 方法对 lazy 对象的处理，而不是 __init__ 或 deconstruct 方法中 path 参数对可调用对象的处理。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在模型字段定义中使用 FilePathField(path=os.path.join(...)) 或任何 path 参数为可调用对象（如函数、lambda）的情况，然后运行 manage.py makemigrations。",
+      "evidence": [
+        "Issue 中用户代码：`file = models.FilePathField(path=os.path.join(settings.LOCAL_FILE_DIR, 'example_dir'))`",
+        "Issue 描述：'Now when running manage.py makemigrations it will resolve the path based on the machine it is being run on.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "makemigrations 生成的迁移文件包含一个硬编码的绝对路径字符串（例如 /home/<username>/server_files/example_dir），而不是保留可调用对象（如 os.path.join(...)）。这导致迁移文件在不同环境（如生产机器）上无法正确工作。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述：'I had to manually change the migration to include the os.path.join() part to not break this when running the migration on production/other machine.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "FilePathField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 的核心是关于 FilePathField 类的 path 参数行为。"
+      },
+      {
+        "name": "FilePathField.__init__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "这是设置 path 参数的地方，需要检查其参数处理逻辑。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 中触发问题的操作是运行 makemigrations 命令。"
+      },
+      {
+        "name": "deconstruct",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 3 (FieldDeconstructionTests.test_file_path_field) 测试了字段的解构，这是迁移序列化的关键步骤，可能与 path 参数的处理有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/fields.py",
+        "object": "FilePathField.__init__",
+        "lines": "1078-1119",
+        "reason": "这是 FilePathField 的构造函数，负责接收和处理 path 参数。可能在这里没有正确处理可调用对象，或者过早地对其求值。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "FilePathField.deconstruct",
+        "lines": "",
+        "reason": "字段的 deconstruct 方法负责为迁移序列化字段参数。如果 path 参数是可调用对象，deconstruct 可能错误地将其求值为字符串而不是保留可调用引用。相关测试 3 测试了 deconstruct，但没有测试 path 为可调用对象的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "FilePathField(path='/static/path') 或 FilePathField(path=self.path)，其中 path 是字符串。",
+        "target_pattern": "FilePathField(path=os.path.join('base', 'subdir')) 或 FilePathField(path=lambda: '/dynamic/path')，其中 path 是可调用对象。",
+        "reason": "Issue 明确指出问题发生在 path 参数为可调用对象（os.path.join）时。将相似测试中的静态字符串 path 替换为可调用对象，可能触发 deconstruct 或迁移生成中的缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "实例化 FilePathField -> 可能直接使用或测试其 choices。",
+        "target_pattern": "实例化 FilePathField (path 为可调用对象) -> 调用 field.deconstruct() -> 检查返回的 kwargs 中的 'path' 值。",
+        "reason": "Issue 的核心是迁移序列化问题。deconstruct 方法是迁移生成的关键步骤。变异测试流程以包含 deconstruct 调用，可以观察 path 参数是否被错误地序列化为硬编码字符串。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "FilePathField 的 path 参数应该能够接受一个可调用对象（如函数），并且在生成迁移文件时，该可调用对象应该被序列化/保留，而不是被立即求值为一个静态路径字符串。",
+      "evidence": [
+        "Issue 描述暗示期望行为：用户希望 path 参数能接受 os.path.join(...) 这样的可调用对象，并在迁移中保留其逻辑，而不是硬编码结果。",
+        "相关测试 4 (PromiseTest.test_FilePathField) 表明 FilePathField 对 lazy 对象有处理逻辑，暗示对可调用/延迟求值有一定支持。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "field.deconstruct() 返回的 kwargs 字典中 'path' 键对应的值。",
+        "reason": "如果缺陷存在，当 path 初始化为可调用对象时，deconstruct() 返回的 kwargs['path'] 可能是一个求值后的字符串，而不是可调用对象本身或其序列化形式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(kwargs['path']) 在 deconstruct() 调用之后。",
+        "reason": "观察 deconstruct 后 path 参数的类型。如果是 str 而不是 types.FunctionType 或类似的可调用类型，则表明可能发生了过早求值。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "makemigrations 命令生成的迁移文件内容（特别是对应 FilePathField 的 path 值）。",
+        "reason": "Issue 的最终表现是迁移文件包含硬编码路径。直接观察生成的迁移文件内容是最直接的证据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 FilePathField 使用可调用对象作为 path 参数初始化时，其 deconstruct() 方法返回的 kwargs 中的 'path' 值应该保持为可调用对象（或其某种可序列化表示），而不是一个立即求值的字符串。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 kwargs['path'] 等于某个具体的绝对路径字符串（如 '/home/...'），因为这是环境相关的。",
+        "reason": "使用 isinstance 检查类型（如 callable）比检查具体的字符串值更稳定，且直接对应 Issue 的核心：支持可调用对象。"
+      },
+      {
+        "assertion_goal": "makemigrations 为包含 path=callable 的 FilePathField 的模型生成的迁移文件，其 path 参数不应是硬编码的绝对路径。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言整个迁移文件字符串完全匹配某个模式。",
+        "reason": "检查迁移文件不包含特定环境下的绝对路径片段（如 '/home/'），这比检查完整路径更健壮，且符合 Issue 描述的跨环境问题。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "FilePathField 的 deconstruct 方法当前对可调用对象的处理逻辑具体是什么？是直接调用 str() 还是完全拒绝？",
+    "除了 os.path.join，其他类型的可调用对象（如 lambda、普通函数）是否也会触发同样的问题？",
+    "缺陷是否只存在于 django.db.models.FilePathField，还是也存在于 django.forms.fields.FilePathField？Issue 中使用了 models.FilePathField，但检索到的相关源码是 forms 中的。",
+    "修复后的预期序列化形式具体是什么？是存储函数引用、字符串化的函数表达式，还是其他机制？"
+  ],
+  "raw": {
+    "issue_summary": "FilePathField 的 path 参数不支持可调用对象，导致 makemigrations 在不同机器上生成硬编码路径。",
+    "trigger_condition": {
+      "text": "在模型字段定义中使用 FilePathField(path=os.path.join(...)) 或任何 path 参数为可调用对象（如函数、lambda）的情况，然后运行 manage.py makemigrations。",
+      "evidence": [
+        "Issue 中用户代码：`file = models.FilePathField(path=os.path.join(settings.LOCAL_FILE_DIR, 'example_dir'))`",
+        "Issue 描述：'Now when running manage.py makemigrations it will resolve the path based on the machine it is being run on.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "makemigrations 生成的迁移文件包含一个硬编码的绝对路径字符串（例如 /home/<username>/server_files/example_dir），而不是保留可调用对象（如 os.path.join(...)）。这导致迁移文件在不同环境（如生产机器）上无法正确工作。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述：'I had to manually change the migration to include the os.path.join() part to not break this when running the migration on production/other machine.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "FilePathField 的 path 参数应该能够接受一个可调用对象（如函数），并且在生成迁移文件时，该可调用对象应该被序列化/保留，而不是被立即求值为一个静态路径字符串。",
+      "evidence": [
+        "Issue 描述暗示期望行为：用户希望 path 参数能接受 os.path.join(...) 这样的可调用对象，并在迁移中保留其逻辑，而不是硬编码结果。",
+        "相关测试 4 (PromiseTest.test_FilePathField) 表明 FilePathField 对 lazy 对象有处理逻辑，暗示对可调用/延迟求值有一定支持。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "FilePathField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 的核心是关于 FilePathField 类的 path 参数行为。"
+      },
+      {
+        "name": "FilePathField.__init__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "这是设置 path 参数的地方，需要检查其参数处理逻辑。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 中触发问题的操作是运行 makemigrations 命令。"
+      },
+      {
+        "name": "deconstruct",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 3 (FieldDeconstructionTests.test_file_path_field) 测试了字段的解构，这是迁移序列化的关键步骤，可能与 path 参数的处理有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/fields.py",
+        "object": "FilePathField.__init__",
+        "lines": "1078-1119",
+        "reason": "这是 FilePathField 的构造函数，负责接收和处理 path 参数。可能在这里没有正确处理可调用对象，或者过早地对其求值。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "FilePathField.deconstruct",
+        "lines": "",
+        "reason": "字段的 deconstruct 方法负责为迁移序列化字段参数。如果 path 参数是可调用对象，deconstruct 可能错误地将其求值为字符串而不是保留可调用引用。相关测试 3 测试了 deconstruct，但没有测试 path 为可调用对象的情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FilePathFieldTest.test_no_options",
+        "test_file": "tests/forms_tests/field_tests/test_filepathfield.py",
+        "why_relevant": "这是一个基础的 FilePathField 测试，展示了如何实例化 FilePathField 并设置 path 参数。",
+        "reusable_parts": [
+          "FilePathField 的导入和实例化模式",
+          "使用 self.path 作为 path 参数",
+          "assertChoices 断言风格"
+        ],
+        "possible_gap": "该测试使用一个静态字符串路径（self.path），而不是 Issue 中描述的可调用对象（如 os.path.join）。"
+      },
+      {
+        "test_name": "FieldDeconstructionTests.test_file_path_field",
+        "test_file": "tests/field_deconstruction/tests.py",
+        "why_relevant": "该测试直接验证 FilePathField 的 deconstruct 方法，这是迁移序列化的核心。",
+        "reusable_parts": [
+          "字段实例化",
+          "调用 field.deconstruct()",
+          "对返回的 args 和 kwargs 进行断言"
+        ],
+        "possible_gap": "该测试只测试了 match, recursive, allow_folders, max_length 等参数，没有测试 path 参数，更没有测试 path 为可调用对象的情况。"
+      },
+      {
+        "test_name": "PromiseTest.test_FilePathField",
+        "test_file": "tests/model_fields/test_promises.py",
+        "why_relevant": "该测试表明 FilePathField 对 lazy 对象（一种可调用/延迟求值对象）有一定处理逻辑，与 Issue 中希望 path 支持可调用对象的诉求相关。",
+        "reusable_parts": [
+          "使用 lazy 函数创建可调用对象",
+          "调用 FilePathField().get_prep_value()",
+          "使用 assertIsInstance 进行类型断言"
+        ],
+        "possible_gap": "该测试关注的是 get_prep_value 方法对 lazy 对象的处理，而不是 __init__ 或 deconstruct 方法中 path 参数对可调用对象的处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "FilePathField(path='/static/path') 或 FilePathField(path=self.path)，其中 path 是字符串。",
+        "target_pattern": "FilePathField(path=os.path.join('base', 'subdir')) 或 FilePathField(path=lambda: '/dynamic/path')，其中 path 是可调用对象。",
+        "reason": "Issue 明确指出问题发生在 path 参数为可调用对象（os.path.join）时。将相似测试中的静态字符串 path 替换为可调用对象，可能触发 deconstruct 或迁移生成中的缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "实例化 FilePathField -> 可能直接使用或测试其 choices。",
+        "target_pattern": "实例化 FilePathField (path 为可调用对象) -> 调用 field.deconstruct() -> 检查返回的 kwargs 中的 'path' 值。",
+        "reason": "Issue 的核心是迁移序列化问题。deconstruct 方法是迁移生成的关键步骤。变异测试流程以包含 deconstruct 调用，可以观察 path 参数是否被错误地序列化为硬编码字符串。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "field.deconstruct() 返回的 kwargs 字典中 'path' 键对应的值。",
+        "reason": "如果缺陷存在，当 path 初始化为可调用对象时，deconstruct() 返回的 kwargs['path'] 可能是一个求值后的字符串，而不是可调用对象本身或其序列化形式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(kwargs['path']) 在 deconstruct() 调用之后。",
+        "reason": "观察 deconstruct 后 path 参数的类型。如果是 str 而不是 types.FunctionType 或类似的可调用类型，则表明可能发生了过早求值。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "makemigrations 命令生成的迁移文件内容（特别是对应 FilePathField 的 path 值）。",
+        "reason": "Issue 的最终表现是迁移文件包含硬编码路径。直接观察生成的迁移文件内容是最直接的证据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 FilePathField 使用可调用对象作为 path 参数初始化时，其 deconstruct() 方法返回的 kwargs 中的 'path' 值应该保持为可调用对象（或其某种可序列化表示），而不是一个立即求值的字符串。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 kwargs['path'] 等于某个具体的绝对路径字符串（如 '/home/...'），因为这是环境相关的。",
+        "reason": "使用 isinstance 检查类型（如 callable）比检查具体的字符串值更稳定，且直接对应 Issue 的核心：支持可调用对象。"
+      },
+      {
+        "assertion_goal": "makemigrations 为包含 path=callable 的 FilePathField 的模型生成的迁移文件，其 path 参数不应是硬编码的绝对路径。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言整个迁移文件字符串完全匹配某个模式。",
+        "reason": "检查迁移文件不包含特定环境下的绝对路径片段（如 '/home/'），这比检查完整路径更健壮，且符合 Issue 描述的跨环境问题。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 os 和 django 相关模块（models, forms）。可能需要一个临时目录来模拟文件路径。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 SimpleTestCase 或 TransactionTestCase，取决于是否涉及数据库。相关检索出的测试都使用 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟不同的路径环境（如使用 tempfile.TemporaryDirectory）来验证路径的动态性。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "FilePathField 的 deconstruct 方法当前对可调用对象的处理逻辑具体是什么？是直接调用 str() 还是完全拒绝？",
+      "除了 os.path.join，其他类型的可调用对象（如 lambda、普通函数）是否也会触发同样的问题？",
+      "缺陷是否只存在于 django.db.models.FilePathField，还是也存在于 django.forms.fields.FilePathField？Issue 中使用了 models.FilePathField，但检索到的相关源码是 forms 中的。",
+      "修复后的预期序列化形式具体是什么？是存储函数引用、字符串化的函数表达式，还是其他机制？"
+    ]
+  }
+}

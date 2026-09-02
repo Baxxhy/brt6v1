@@ -1,0 +1,306 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-13647",
+  "issue_summary": "Matrix.col_insert() 在插入列时，矩阵的剩余部分（插入位置右侧的列）的行顺序发生错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 模块，以及可能用到的 Matrix, eye, ones 等类/函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在特定矩阵类（如 DenseMatrix）的上下文中运行，以触发具体的 _eval_col_insert 实现。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_col_insert",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "它直接测试了 col_insert 方法，并验证了插入后第一行的内容与 Python 列表 insert 操作的结果一致。",
+        "reusable_parts": [
+          "导入 zeros 和 Matrix",
+          "使用 for 循环测试不同插入位置",
+          "使用 flatten 和 .tolist() 提取矩阵元素进行断言",
+          "断言风格：比较列表相等"
+        ],
+        "possible_gap": "它使用零矩阵和列向量进行测试，没有测试在非零矩阵（如单位矩阵）中间插入多列矩阵的场景，而这正是 Issue 触发的情况。"
+      },
+      {
+        "test_name": "test_row_insert",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "它测试了对称的 row_insert 方法，使用 eye(3) 作为初始矩阵，与 Issue 中使用的矩阵类型（单位矩阵）更相似。",
+        "reusable_parts": [
+          "导入 eye 和 Matrix",
+          "使用 for 循环测试不同插入位置",
+          "使用 flatten 和 .tolist() 提取矩阵元素进行断言",
+          "断言风格：比较列表相等"
+        ],
+        "possible_gap": "它测试的是行插入，而非列插入；且插入的是单行矩阵，而非多列矩阵。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个单位矩阵（例如 6x6 的 eye(6)）调用 col_insert，在某个位置（例如第 3 列）插入一个列数与行数匹配的矩阵（例如 6x2 的 2*ones(6,2)）。",
+      "evidence": [
+        "Issue 中的示例代码：M = sm.eye(6); V = 2 * sm.ones(6, 2); M.col_insert(3, V)。",
+        "源码中 col_insert 方法签名：def col_insert(self, pos, other)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "插入操作后，原矩阵中位于插入位置右侧的列（即原矩阵的第 4 列及以后的列）的行顺序发生错乱。具体表现为，原单位矩阵右下角的 3x3 子矩阵（对应底部三行）被错误地放置到了结果矩阵的顶部三行。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述：'The 3 x 3 identify matrix to the right of the columns of twos is shifted from the bottom three rows to the top three rows.'",
+        "Issue 中输出矩阵显示，在插入的两列 '2' 之后，单位矩阵的 '1' 出现在顶部三行，而底部三行对应位置为 '0'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Matrix.col_insert",
+        "kind": "method",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "这是 Issue 中直接报告有问题的 API。"
+      },
+      {
+        "name": "Matrix.eye",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "Issue 中用于构造初始矩阵 M。"
+      },
+      {
+        "name": "Matrix.ones",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "Issue 中用于构造要插入的矩阵 V。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "MatrixShaping.col_insert",
+        "lines": "182-218",
+        "reason": "这是 col_insert 的公共方法，负责参数检查和转发到 _eval_col_insert。问题可能在此方法或其调用的具体实现中。"
+      },
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "_eval_col_insert",
+        "lines": "",
+        "reason": "col_insert 方法最终调用 _eval_col_insert，这是具体矩阵类（如 DenseMatrix）实现插入逻辑的地方，行顺序错误很可能发生在此。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_col_insert 中使用 zeros(3) 作为初始矩阵，插入一个 3x1 的列向量。",
+        "target_pattern": "使用 eye(6) 作为初始矩阵，插入一个 6x2 的矩阵（如 2*ones(6,2)），插入位置为 3。",
+        "reason": "Issue 的触发条件是在单位矩阵中插入多列矩阵，这改变了矩阵的维度结构，可能暴露了底层拼接逻辑的错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试 test_row_insert 中使用 eye(3) 作为初始矩阵，但其行数较少，且插入的是单行。",
+        "target_pattern": "使用更大的单位矩阵（如 6x6），使其在插入后，原矩阵被分割成左右两部分，便于观察行顺序错误。",
+        "reason": "更大的矩阵能更清晰地展示插入位置右侧列的行顺序是否被错误地移位（例如从底部移到顶部）。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "col_insert 操作后，原矩阵中位于插入位置右侧的列应保持其原有的行顺序，正确拼接在结果矩阵中。对于单位矩阵，插入后应保持对角线上 '1' 的正确位置。",
+      "evidence": [
+        "Issue 描述暗示了正确的行为应是右下角的 3x3 单位矩阵保持在底部三行。",
+        "相关测试 test_col_insert 和 test_row_insert 展示了插入操作后行/列顺序应与 Python 列表 insert 操作的结果一致。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "插入操作后结果矩阵的字符串表示（如 str(M.col_insert(3, V))）或其特定子矩阵（如右下角 3x3 部分）。",
+        "reason": "Issue 通过矩阵的打印输出发现了行顺序错误。观察完整结果矩阵或特定区域可以判断错误是否复现。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "结果矩阵中特定列（例如原矩阵第 4 列及以后）的元素顺序，或对角线元素 '1' 的位置。",
+        "reason": "错误本质是行顺序错乱，观察插入位置右侧列的数据顺序可以直接验证。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在单位矩阵中插入列后，原矩阵对角线上的 '1' 仍然位于正确的位置（即它们对应的行索引不变）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经处理的 repr 字符串相等，因为格式可能变化。",
+        "reason": "Issue 的核心是行顺序错误，导致 '1' 的位置错乱。通过提取并比较关键元素（如对角线元素或特定子矩阵）的位置，可以稳定地验证正确性。"
+      },
+      {
+        "assertion_goal": "验证插入操作后，矩阵的维度是正确的（原列数 + 插入列数）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免仅断言维度正确，因为这可能通过但内部数据错误。",
+        "reason": "这是基本正确性检查，但需要结合数据顺序的断言才能完整验证 Issue。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只存在于特定矩阵类（如 DenseMatrix）的 _eval_col_insert 实现中。",
+    "插入位置（pos）是否为触发缺陷的关键因素，还是所有位置都有问题。",
+    "插入矩阵的列数（>1）是否是触发缺陷的必要条件。",
+    "底层具体的错误代码逻辑是什么（例如，是切片错误、循环索引错误还是矩阵块拼接错误）。"
+  ],
+  "raw": {
+    "issue_summary": "Matrix.col_insert() 在插入列时，矩阵的剩余部分（插入位置右侧的列）的行顺序发生错误。",
+    "trigger_condition": {
+      "text": "对一个单位矩阵（例如 6x6 的 eye(6)）调用 col_insert，在某个位置（例如第 3 列）插入一个列数与行数匹配的矩阵（例如 6x2 的 2*ones(6,2)）。",
+      "evidence": [
+        "Issue 中的示例代码：M = sm.eye(6); V = 2 * sm.ones(6, 2); M.col_insert(3, V)。",
+        "源码中 col_insert 方法签名：def col_insert(self, pos, other)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "插入操作后，原矩阵中位于插入位置右侧的列（即原矩阵的第 4 列及以后的列）的行顺序发生错乱。具体表现为，原单位矩阵右下角的 3x3 子矩阵（对应底部三行）被错误地放置到了结果矩阵的顶部三行。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述：'The 3 x 3 identify matrix to the right of the columns of twos is shifted from the bottom three rows to the top three rows.'",
+        "Issue 中输出矩阵显示，在插入的两列 '2' 之后，单位矩阵的 '1' 出现在顶部三行，而底部三行对应位置为 '0'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "col_insert 操作后，原矩阵中位于插入位置右侧的列应保持其原有的行顺序，正确拼接在结果矩阵中。对于单位矩阵，插入后应保持对角线上 '1' 的正确位置。",
+      "evidence": [
+        "Issue 描述暗示了正确的行为应是右下角的 3x3 单位矩阵保持在底部三行。",
+        "相关测试 test_col_insert 和 test_row_insert 展示了插入操作后行/列顺序应与 Python 列表 insert 操作的结果一致。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Matrix.col_insert",
+        "kind": "method",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "这是 Issue 中直接报告有问题的 API。"
+      },
+      {
+        "name": "Matrix.eye",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "Issue 中用于构造初始矩阵 M。"
+      },
+      {
+        "name": "Matrix.ones",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "Issue 中用于构造要插入的矩阵 V。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "MatrixShaping.col_insert",
+        "lines": "182-218",
+        "reason": "这是 col_insert 的公共方法，负责参数检查和转发到 _eval_col_insert。问题可能在此方法或其调用的具体实现中。"
+      },
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "_eval_col_insert",
+        "lines": "",
+        "reason": "col_insert 方法最终调用 _eval_col_insert，这是具体矩阵类（如 DenseMatrix）实现插入逻辑的地方，行顺序错误很可能发生在此。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_col_insert",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "它直接测试了 col_insert 方法，并验证了插入后第一行的内容与 Python 列表 insert 操作的结果一致。",
+        "reusable_parts": [
+          "导入 zeros 和 Matrix",
+          "使用 for 循环测试不同插入位置",
+          "使用 flatten 和 .tolist() 提取矩阵元素进行断言",
+          "断言风格：比较列表相等"
+        ],
+        "possible_gap": "它使用零矩阵和列向量进行测试，没有测试在非零矩阵（如单位矩阵）中间插入多列矩阵的场景，而这正是 Issue 触发的情况。"
+      },
+      {
+        "test_name": "test_row_insert",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "它测试了对称的 row_insert 方法，使用 eye(3) 作为初始矩阵，与 Issue 中使用的矩阵类型（单位矩阵）更相似。",
+        "reusable_parts": [
+          "导入 eye 和 Matrix",
+          "使用 for 循环测试不同插入位置",
+          "使用 flatten 和 .tolist() 提取矩阵元素进行断言",
+          "断言风格：比较列表相等"
+        ],
+        "possible_gap": "它测试的是行插入，而非列插入；且插入的是单行矩阵，而非多列矩阵。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_col_insert 中使用 zeros(3) 作为初始矩阵，插入一个 3x1 的列向量。",
+        "target_pattern": "使用 eye(6) 作为初始矩阵，插入一个 6x2 的矩阵（如 2*ones(6,2)），插入位置为 3。",
+        "reason": "Issue 的触发条件是在单位矩阵中插入多列矩阵，这改变了矩阵的维度结构，可能暴露了底层拼接逻辑的错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试 test_row_insert 中使用 eye(3) 作为初始矩阵，但其行数较少，且插入的是单行。",
+        "target_pattern": "使用更大的单位矩阵（如 6x6），使其在插入后，原矩阵被分割成左右两部分，便于观察行顺序错误。",
+        "reason": "更大的矩阵能更清晰地展示插入位置右侧列的行顺序是否被错误地移位（例如从底部移到顶部）。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "插入操作后结果矩阵的字符串表示（如 str(M.col_insert(3, V))）或其特定子矩阵（如右下角 3x3 部分）。",
+        "reason": "Issue 通过矩阵的打印输出发现了行顺序错误。观察完整结果矩阵或特定区域可以判断错误是否复现。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "结果矩阵中特定列（例如原矩阵第 4 列及以后）的元素顺序，或对角线元素 '1' 的位置。",
+        "reason": "错误本质是行顺序错乱，观察插入位置右侧列的数据顺序可以直接验证。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在单位矩阵中插入列后，原矩阵对角线上的 '1' 仍然位于正确的位置（即它们对应的行索引不变）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经处理的 repr 字符串相等，因为格式可能变化。",
+        "reason": "Issue 的核心是行顺序错误，导致 '1' 的位置错乱。通过提取并比较关键元素（如对角线元素或特定子矩阵）的位置，可以稳定地验证正确性。"
+      },
+      {
+        "assertion_goal": "验证插入操作后，矩阵的维度是正确的（原列数 + 插入列数）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免仅断言维度正确，因为这可能通过但内部数据错误。",
+        "reason": "这是基本正确性检查，但需要结合数据顺序的断言才能完整验证 Issue。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 模块，以及可能用到的 Matrix, eye, ones 等类/函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在特定矩阵类（如 DenseMatrix）的上下文中运行，以触发具体的 _eval_col_insert 实现。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只存在于特定矩阵类（如 DenseMatrix）的 _eval_col_insert 实现中。",
+      "插入位置（pos）是否为触发缺陷的关键因素，还是所有位置都有问题。",
+      "插入矩阵的列数（>1）是否是触发缺陷的必要条件。",
+      "底层具体的错误代码逻辑是什么（例如，是切片错误、循环索引错误还是矩阵块拼接错误）。"
+    ]
+  }
+}

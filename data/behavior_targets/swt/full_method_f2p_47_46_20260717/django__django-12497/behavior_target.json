@@ -1,0 +1,278 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12497",
+  "issue_summary": "Django 在 ManyToManyField 的中间模型有超过两个外键且未设置 through_fields 时，错误提示中使用了 ForeignKey 的关键字参数 symmetrical 和 through。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 @isolate_apps 装饰器来隔离测试应用，避免模型冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要从 django.core.checks.Error 导入 Error 类用于断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase 或 TransactionTestCase，取决于是否需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ambiguous_relationship_model",
+        "test_file": "tests/invalid_models_tests/test_relative_fields.py",
+        "why_relevant": "该测试直接复现了 Issue 的核心场景：一个 ManyToManyField 的中间模型有多个指向同一目标模型的外键，且未设置 through_fields。它检查了 field.check 返回的错误，其中包含了有问题的 hint。",
+        "reusable_parts": [
+          "测试类装饰器 @isolate_apps",
+          "模型定义模式（Person, Group, AmbiguousRelationship）",
+          "调用 field.check(from_model=...)",
+          "使用 Error 对象进行断言比较"
+        ],
+        "possible_gap": "该测试的 hint 是针对递归关系（'self'）的场景，而 Issue 描述可能也适用于非递归关系（指向另一个模型）。测试的 hint 内容与 Issue 描述不完全一致（Issue 提到提示中使用了 ForeignKey）。"
+      },
+      {
+        "test_name": "test_too_many_foreign_keys_in_self_referential_model",
+        "test_file": "tests/invalid_models_tests/test_relative_fields.py",
+        "why_relevant": "该测试也涉及 ManyToManyField 中间模型有多个外键的场景，并且是自引用（'self'）的。它展示了另一种错误提示（fields.E333），其 hint 是正确的。",
+        "reusable_parts": [
+          "自引用 ManyToManyField 的定义",
+          "中间模型有多个外键的构造",
+          "field.check 的调用和断言"
+        ],
+        "possible_gap": "该测试的错误 ID (E333) 和提示与 Issue 描述的不同（Issue 更可能关联 E335）。它的 hint 已经是正确的，因此不能直接复现 Issue 中的错误提示。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个 ManyToManyField，其 through 参数指定的中间模型包含超过两个指向同一目标模型的外键，且未设置 through_fields 参数。",
+      "evidence": [
+        "Issue 描述：'When there's more than 2 ForeignKeys in an intermediary model of a m2m field and no through_fields have been set'",
+        "相关测试 1 (test_ambiguous_relationship_model) 和 测试 2 (test_too_many_foreign_keys_in_self_referential_model) 展示了类似的模型配置。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "模型检查（field.check）返回的错误提示（hint）中，建议使用 ForeignKey 并包含 symmetrical 和 through 参数，但这些是 ManyToManyField 的关键字参数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'But 'symmetrical' and 'through' are m2m keyword arguments, not ForeignKey.'",
+        "相关测试 1 的错误提示中包含了 'ForeignKey(\"self\", symmetrical=False, through=\"AmbiguousRelationship\")'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ManyToManyField.check",
+        "kind": "method",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中观察到的错误提示是由 ManyToManyField 的 check 方法生成的。相关测试也通过调用 field.check 来验证错误。"
+      },
+      {
+        "name": "Error",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试中用于构造预期错误对象的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ManyToManyField._check_relationship_model 或相关错误生成逻辑",
+        "lines": "",
+        "reason": "Issue 描述的错误提示（hint）是在检查 ManyToManyField 的中间模型时生成的。相关测试 1 的错误提示与 Issue 描述一致，表明生成该提示的代码存在逻辑错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，中间模型 AmbiguousRelationship 有两个外键指向 Person，一个外键指向 Group。",
+        "target_pattern": "创建一个中间模型，使其包含超过两个外键指向 ManyToManyField 的同一个目标模型（可能是 'self' 或另一个模型），并且不设置 through_fields。确保模型配置能触发 fields.E335 错误。",
+        "reason": "Issue 描述的场景是中间模型有超过两个外键指向目标模型。相关测试 1 的中间模型只有两个外键指向 Person（第三个指向 Group），可能需要调整使其有三个或更多指向 Person 的外键，以更精确地匹配 'more than 2 ForeignKeys' 的描述。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 的错误提示 hint 是针对递归关系（'self'）的。",
+        "target_pattern": "尝试构造非递归关系的场景（例如，ManyToManyField 指向另一个模型），观察其错误提示是否也错误地引用了 ForeignKey 参数。",
+        "reason": "Issue 没有明确限定为递归关系。错误提示的生成逻辑可能在递归和非递归场景下都存在缺陷。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "模型检查返回的错误提示应正确使用 ManyToManyField 及其相关参数，或提供与 ForeignKey 无关的准确提示。",
+      "evidence": [
+        "Issue 描述暗示提示信息有误，需要修正。",
+        "相关测试 2 的错误提示为 'Use through_fields to specify which two foreign keys Django should use.'，这是一个正确的提示示例。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "field.check(from_model=...) 返回的列表中的 Error 对象的 hint 属性。",
+        "reason": "Issue 的核心是错误提示的内容不正确。观察生成的 hint 字符串是否包含 'ForeignKey'、'symmetrical'、'through' 等不恰当的词汇。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在定义模型并运行检查时，是否抛出任何异常（尽管 Issue 主要关于错误提示）。",
+        "reason": "确保测试能正常执行到模型检查步骤，而不是因为其他验证错误提前失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 field.check 返回的错误提示（hint）不包含将 ManyToManyField 参数误用于 ForeignKey 的建议，或者提示内容与 ManyToManyField 的用法一致。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的提示字符串，因为修复后的正确提示可能有多样性。避免断言错误列表的长度等无关细节。",
+        "reason": "Issue 的关键在于提示信息的语义错误。断言提示中不包含错误的 API 引用（如 'ForeignKey' 与 'symmetrical'/'through' 的错误组合）比断言一个固定的正确字符串更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发错误提示的确切模型配置细节：是必须超过两个外键，还是两个以上？是指向同一个模型，还是包括‘self’场景？",
+    "错误提示（hint）的完整正确内容应该是什么？Issue 没有提供具体的修正版本。",
+    "生成错误提示的精确代码位置和逻辑。",
+    "该缺陷是否只存在于递归关系（'self'）的提示中，还是也存在于非递归关系的提示中。"
+  ],
+  "raw": {
+    "issue_summary": "Django 在 ManyToManyField 的中间模型有超过两个外键且未设置 through_fields 时，错误提示中使用了 ForeignKey 的关键字参数 symmetrical 和 through。",
+    "trigger_condition": {
+      "text": "定义一个 ManyToManyField，其 through 参数指定的中间模型包含超过两个指向同一目标模型的外键，且未设置 through_fields 参数。",
+      "evidence": [
+        "Issue 描述：'When there's more than 2 ForeignKeys in an intermediary model of a m2m field and no through_fields have been set'",
+        "相关测试 1 (test_ambiguous_relationship_model) 和 测试 2 (test_too_many_foreign_keys_in_self_referential_model) 展示了类似的模型配置。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "模型检查（field.check）返回的错误提示（hint）中，建议使用 ForeignKey 并包含 symmetrical 和 through 参数，但这些是 ManyToManyField 的关键字参数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'But 'symmetrical' and 'through' are m2m keyword arguments, not ForeignKey.'",
+        "相关测试 1 的错误提示中包含了 'ForeignKey(\"self\", symmetrical=False, through=\"AmbiguousRelationship\")'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "模型检查返回的错误提示应正确使用 ManyToManyField 及其相关参数，或提供与 ForeignKey 无关的准确提示。",
+      "evidence": [
+        "Issue 描述暗示提示信息有误，需要修正。",
+        "相关测试 2 的错误提示为 'Use through_fields to specify which two foreign keys Django should use.'，这是一个正确的提示示例。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ManyToManyField.check",
+        "kind": "method",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中观察到的错误提示是由 ManyToManyField 的 check 方法生成的。相关测试也通过调用 field.check 来验证错误。"
+      },
+      {
+        "name": "Error",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试中用于构造预期错误对象的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ManyToManyField._check_relationship_model 或相关错误生成逻辑",
+        "lines": "",
+        "reason": "Issue 描述的错误提示（hint）是在检查 ManyToManyField 的中间模型时生成的。相关测试 1 的错误提示与 Issue 描述一致，表明生成该提示的代码存在逻辑错误。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ambiguous_relationship_model",
+        "test_file": "tests/invalid_models_tests/test_relative_fields.py",
+        "why_relevant": "该测试直接复现了 Issue 的核心场景：一个 ManyToManyField 的中间模型有多个指向同一目标模型的外键，且未设置 through_fields。它检查了 field.check 返回的错误，其中包含了有问题的 hint。",
+        "reusable_parts": [
+          "测试类装饰器 @isolate_apps",
+          "模型定义模式（Person, Group, AmbiguousRelationship）",
+          "调用 field.check(from_model=...)",
+          "使用 Error 对象进行断言比较"
+        ],
+        "possible_gap": "该测试的 hint 是针对递归关系（'self'）的场景，而 Issue 描述可能也适用于非递归关系（指向另一个模型）。测试的 hint 内容与 Issue 描述不完全一致（Issue 提到提示中使用了 ForeignKey）。"
+      },
+      {
+        "test_name": "test_too_many_foreign_keys_in_self_referential_model",
+        "test_file": "tests/invalid_models_tests/test_relative_fields.py",
+        "why_relevant": "该测试也涉及 ManyToManyField 中间模型有多个外键的场景，并且是自引用（'self'）的。它展示了另一种错误提示（fields.E333），其 hint 是正确的。",
+        "reusable_parts": [
+          "自引用 ManyToManyField 的定义",
+          "中间模型有多个外键的构造",
+          "field.check 的调用和断言"
+        ],
+        "possible_gap": "该测试的错误 ID (E333) 和提示与 Issue 描述的不同（Issue 更可能关联 E335）。它的 hint 已经是正确的，因此不能直接复现 Issue 中的错误提示。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，中间模型 AmbiguousRelationship 有两个外键指向 Person，一个外键指向 Group。",
+        "target_pattern": "创建一个中间模型，使其包含超过两个外键指向 ManyToManyField 的同一个目标模型（可能是 'self' 或另一个模型），并且不设置 through_fields。确保模型配置能触发 fields.E335 错误。",
+        "reason": "Issue 描述的场景是中间模型有超过两个外键指向目标模型。相关测试 1 的中间模型只有两个外键指向 Person（第三个指向 Group），可能需要调整使其有三个或更多指向 Person 的外键，以更精确地匹配 'more than 2 ForeignKeys' 的描述。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 的错误提示 hint 是针对递归关系（'self'）的。",
+        "target_pattern": "尝试构造非递归关系的场景（例如，ManyToManyField 指向另一个模型），观察其错误提示是否也错误地引用了 ForeignKey 参数。",
+        "reason": "Issue 没有明确限定为递归关系。错误提示的生成逻辑可能在递归和非递归场景下都存在缺陷。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "field.check(from_model=...) 返回的列表中的 Error 对象的 hint 属性。",
+        "reason": "Issue 的核心是错误提示的内容不正确。观察生成的 hint 字符串是否包含 'ForeignKey'、'symmetrical'、'through' 等不恰当的词汇。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在定义模型并运行检查时，是否抛出任何异常（尽管 Issue 主要关于错误提示）。",
+        "reason": "确保测试能正常执行到模型检查步骤，而不是因为其他验证错误提前失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 field.check 返回的错误提示（hint）不包含将 ManyToManyField 参数误用于 ForeignKey 的建议，或者提示内容与 ManyToManyField 的用法一致。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的提示字符串，因为修复后的正确提示可能有多样性。避免断言错误列表的长度等无关细节。",
+        "reason": "Issue 的关键在于提示信息的语义错误。断言提示中不包含错误的 API 引用（如 'ForeignKey' 与 'symmetrical'/'through' 的错误组合）比断言一个固定的正确字符串更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 @isolate_apps 装饰器来隔离测试应用，避免模型冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要从 django.core.checks.Error 导入 Error 类用于断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase 或 TransactionTestCase，取决于是否需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发错误提示的确切模型配置细节：是必须超过两个外键，还是两个以上？是指向同一个模型，还是包括‘self’场景？",
+      "错误提示（hint）的完整正确内容应该是什么？Issue 没有提供具体的修正版本。",
+      "生成错误提示的精确代码位置和逻辑。",
+      "该缺陷是否只存在于递归关系（'self'）的提示中，还是也存在于非递归关系的提示中。"
+    ]
+  }
+}

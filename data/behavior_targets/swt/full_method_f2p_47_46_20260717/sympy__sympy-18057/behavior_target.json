@@ -1,0 +1,360 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-18057",
+  "issue_summary": "Sympy 在 __eq__ 方法中错误地尝试 eval 未知对象的 repr 字符串，导致潜在的安全问题和错误比较。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要在测试文件中导入 sympy 和相关模块（如 `from sympy import Symbol`）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以定义为普通函数，无需特殊 fixture 或 TestCase 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义一个或多个简单的自定义类，在其 `__repr__` 方法中返回特定字符串。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_cmp_bug1",
+        "test_file": "sympy/core/tests/test_equal.py",
+        "why_relevant": "该测试直接测试了 Symbol 对象与一个自定义类实例的相等性比较，断言它们不相等。这与 Issue 中触发 bug 的场景高度相似。",
+        "reusable_parts": [
+          "测试结构：定义一个简单的自定义类，创建 Symbol 对象，进行 `==` 和 `!=` 比较。",
+          "断言风格：使用 `assert not (x == t)` 和 `assert (x != t)`。"
+        ],
+        "possible_gap": "该测试中自定义类 `T` 没有定义 `__repr__` 方法，因此不会触发 Issue 中描述的通过 `eval` 解析 `__repr__` 字符串的路径。需要变异以包含 `__repr__` 方法。"
+      },
+      {
+        "test_name": "test_cmp_bug2",
+        "test_file": "sympy/core/tests/test_equal.py",
+        "why_relevant": "该测试测试了 Symbol 类（而非实例）与自定义类实例的比较，也涉及非 Sympy 对象的比较逻辑。",
+        "reusable_parts": [
+          "测试结构：定义自定义类，直接比较 `Symbol` 类与实例。",
+          "断言风格：`assert not (Symbol == t)` 和 `assert (Symbol != t)`。"
+        ],
+        "possible_gap": "同样，自定义类没有 `__repr__` 方法，且比较的是类而非实例，与 Issue 中 Symbol 实例比较的场景略有不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "将 Sympy Symbol 对象与一个自定义类实例进行相等性比较（==），该自定义类的 __repr__ 方法返回一个字符串，该字符串在 Sympy 的 sympify/parse_expr 上下文中 eval 时会产生 AttributeError 或导致错误的相等性判断。",
+      "evidence": [
+        "Issue 中的 Repro code: `_ = sympy.Symbol('x') == C()`，其中 C 的 `__repr__` 返回 `'x.y'`。",
+        "Issue 中提到的另一个例子：`assert sympy.Symbol('x') != C()` 会失败，如果 C 的 `__repr__` 返回 `'x'`。",
+        "相关测试 test_cmp_bug1 和 test_cmp_bug2 展示了 Symbol 与自定义类实例的比较场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "比较操作触发 AttributeError: 'Symbol' object has no attribute 'y'，异常发生在 sympy/parsing/sympy_parser.py 的 eval_expr 函数中，当 eval 代码 `Symbol ('x' ).y` 时。或者，当 repr 返回 `'x'` 时，Symbol('x') 会错误地与自定义对象判等。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：`AttributeError: 'Symbol' object has no attribute 'y'`。",
+        "Issue 中的 traceback 指向 `sympy/parsing/sympy_parser.py` 的 `eval_expr` 函数。",
+        "Issue 中明确说明：`an unknown object whose repr is `x` will incorrectly compare as equal to a sympy symbol x`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.Symbol",
+        "kind": "class",
+        "source_path": "sympy/core/symbol.py",
+        "reason": "Issue 中触发 bug 的核心对象，用于构造比较的一方。"
+      },
+      {
+        "name": "sympy.core.expr.__eq__",
+        "kind": "method",
+        "source_path": "sympy/core/expr.py",
+        "reason": "Issue traceback 显示比较操作进入 `__eq__` 方法，进而调用 `sympify`。"
+      },
+      {
+        "name": "sympify",
+        "kind": "function",
+        "source_path": "sympy/core/sympify.py",
+        "reason": "Issue traceback 显示 `__eq__` 调用了 `sympify` 来处理比较的另一方。"
+      },
+      {
+        "name": "parse_expr",
+        "kind": "function",
+        "source_path": "sympy/parsing/sympy_parser.py",
+        "reason": "`sympify` 调用了 `parse_expr` 来解析字符串，这是触发 eval 的路径。"
+      },
+      {
+        "name": "eval_expr",
+        "kind": "function",
+        "source_path": "sympy/parsing/sympy_parser.py",
+        "reason": "`parse_expr` 最终调用 `eval_expr`，其中执行了有问题的 `eval` 调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/parsing/sympy_parser.py",
+        "object": "eval_expr",
+        "lines": "896-905",
+        "reason": "Issue traceback 指向此处，`eval(code, global_dict, local_dict)` 直接 eval 了来自对象 repr 的字符串，当字符串包含无效属性访问（如 `x.y`）时会抛出 AttributeError。"
+      },
+      {
+        "path": "sympy/parsing/sympy_parser.py",
+        "object": "parse_expr",
+        "lines": "908-1008",
+        "reason": "该函数负责将字符串转换为表达式，并最终调用 `eval_expr`。它处理了来自 `sympify` 的输入，可能未充分验证或安全处理来自非信任源（如任意对象的 `__repr__`）的字符串。"
+      },
+      {
+        "path": "sympy/core/sympify.py",
+        "object": "sympify",
+        "lines": "",
+        "reason": "该函数是 `__eq__` 调用来处理比较对象的入口点。它可能过于激进地将任何具有 `__repr__` 的对象尝试转换为 Sympy 表达式，而未考虑安全性或边界情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_cmp_bug1 中，比较的另一方是简单的自定义类实例 `t`，其 `__repr__` 默认继承自 object。",
+        "target_pattern": "将比较的另一方变异为一个自定义类实例，该实例的 `__repr__` 方法返回一个特定的字符串（如 `'x.y'` 或 `'x'`）。",
+        "reason": "Issue 的核心触发条件是对象的 `__repr__` 返回的字符串在 sympify/parse_expr 的上下文中被 eval。添加 `__repr__` 方法会引导执行流进入有缺陷的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，比较操作 `Symbol('x') == t` 可能因为 t 无法 sympify 而快速返回 False，未深入解析路径。",
+        "target_pattern": "通过提供 `__repr__`，强制比较操作尝试通过 `sympify` -> `parse_expr` -> `eval_expr` 路径来“理解”该对象，从而触发 eval。",
+        "reason": "Sympy 的相等性比较逻辑会尝试 sympify 另一方对象。如果对象有 `__repr__`，会将其字符串表示传入解析流程，最终到达有问题的 eval 调用。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Sympy Symbol 对象与一个非 Sympy 对象（其 __repr__ 返回任意字符串）进行相等性比较时，不应触发 eval 导致的异常，并且应正确返回 False（即不相等），除非该对象可以被正确地 sympify 为相同的 Symbol。",
+      "evidence": [
+        "相关测试 test_cmp_bug1 和 test_cmp_bug2 的断言表明，Symbol 与不相关对象比较应返回 False。",
+        "Issue 中隐含的期望：`assert sympy.Symbol('x') != C()` 应该成立。",
+        "Sympy 的 sympify 逻辑应安全处理来自未知对象的字符串表示。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `sympy.Symbol('x') == custom_obj` 时，捕获是否抛出 `AttributeError` 或其他异常。",
+        "reason": "Issue 的主要表现就是 `AttributeError`。观测异常是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 `sympy.Symbol('x') == custom_obj` 和 `sympy.Symbol('x') != custom_obj` 的布尔返回值。",
+        "reason": "当 `__repr__` 返回 `'x'` 时，Issue 指出会错误地返回 `True`（相等）。观测返回值可以检测这种逻辑错误。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "观察自定义对象的 `repr(custom_obj)` 输出。",
+        "reason": "触发条件依赖于 `__repr__` 的返回值。确认该值符合预期是复现的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当自定义对象的 `__repr__` 返回 `'x.y'` 时，与 `Symbol('x')` 的比较不会抛出 `AttributeError`（修复后）或会抛出特定异常（当前）。根据 Issue，修复后应不抛异常且返回 False。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的异常消息字符串，因为可能变化。",
+        "reason": "Issue 明确描述了 `AttributeError`。使用 `pytest.raises` 可以稳定地捕获异常类型。"
+      },
+      {
+        "assertion_goal": "验证当自定义对象的 `__repr__` 返回 `'x'` 时，`Symbol('x')` 与该对象的相等性比较结果为 `False`（即不相等）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言 `sympify(custom_obj)` 的结果，因为修复可能不涉及成功 sympify。",
+        "reason": "Issue 指出当前会错误地判等。断言比较结果为 `False` 直接对应期望的正确行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "除了 `AttributeError`，`eval` 来自 `__repr__` 的字符串是否还可能引发其他安全或逻辑问题？",
+    "`sympify` 函数内部处理非 Sympy 对象的确切逻辑和边界条件是什么？哪些类型的对象会被尝试转换？",
+    "修复后的理想行为是让比较安全地返回 False，还是应该在某些情况下成功 sympify `__repr__` 字符串？Issue 未明确指定。",
+    "除了 Symbol，其他 Sympy 类型（如 `Expr` 的子类）的 `__eq__` 方法是否也存在同样的问题？"
+  ],
+  "raw": {
+    "issue_summary": "Sympy 在 __eq__ 方法中错误地尝试 eval 未知对象的 repr 字符串，导致潜在的安全问题和错误比较。",
+    "trigger_condition": {
+      "text": "将 Sympy Symbol 对象与一个自定义类实例进行相等性比较（==），该自定义类的 __repr__ 方法返回一个字符串，该字符串在 Sympy 的 sympify/parse_expr 上下文中 eval 时会产生 AttributeError 或导致错误的相等性判断。",
+      "evidence": [
+        "Issue 中的 Repro code: `_ = sympy.Symbol('x') == C()`，其中 C 的 `__repr__` 返回 `'x.y'`。",
+        "Issue 中提到的另一个例子：`assert sympy.Symbol('x') != C()` 会失败，如果 C 的 `__repr__` 返回 `'x'`。",
+        "相关测试 test_cmp_bug1 和 test_cmp_bug2 展示了 Symbol 与自定义类实例的比较场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "比较操作触发 AttributeError: 'Symbol' object has no attribute 'y'，异常发生在 sympy/parsing/sympy_parser.py 的 eval_expr 函数中，当 eval 代码 `Symbol ('x' ).y` 时。或者，当 repr 返回 `'x'` 时，Symbol('x') 会错误地与自定义对象判等。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：`AttributeError: 'Symbol' object has no attribute 'y'`。",
+        "Issue 中的 traceback 指向 `sympy/parsing/sympy_parser.py` 的 `eval_expr` 函数。",
+        "Issue 中明确说明：`an unknown object whose repr is `x` will incorrectly compare as equal to a sympy symbol x`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Sympy Symbol 对象与一个非 Sympy 对象（其 __repr__ 返回任意字符串）进行相等性比较时，不应触发 eval 导致的异常，并且应正确返回 False（即不相等），除非该对象可以被正确地 sympify 为相同的 Symbol。",
+      "evidence": [
+        "相关测试 test_cmp_bug1 和 test_cmp_bug2 的断言表明，Symbol 与不相关对象比较应返回 False。",
+        "Issue 中隐含的期望：`assert sympy.Symbol('x') != C()` 应该成立。",
+        "Sympy 的 sympify 逻辑应安全处理来自未知对象的字符串表示。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.Symbol",
+        "kind": "class",
+        "source_path": "sympy/core/symbol.py",
+        "reason": "Issue 中触发 bug 的核心对象，用于构造比较的一方。"
+      },
+      {
+        "name": "sympy.core.expr.__eq__",
+        "kind": "method",
+        "source_path": "sympy/core/expr.py",
+        "reason": "Issue traceback 显示比较操作进入 `__eq__` 方法，进而调用 `sympify`。"
+      },
+      {
+        "name": "sympify",
+        "kind": "function",
+        "source_path": "sympy/core/sympify.py",
+        "reason": "Issue traceback 显示 `__eq__` 调用了 `sympify` 来处理比较的另一方。"
+      },
+      {
+        "name": "parse_expr",
+        "kind": "function",
+        "source_path": "sympy/parsing/sympy_parser.py",
+        "reason": "`sympify` 调用了 `parse_expr` 来解析字符串，这是触发 eval 的路径。"
+      },
+      {
+        "name": "eval_expr",
+        "kind": "function",
+        "source_path": "sympy/parsing/sympy_parser.py",
+        "reason": "`parse_expr` 最终调用 `eval_expr`，其中执行了有问题的 `eval` 调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/parsing/sympy_parser.py",
+        "object": "eval_expr",
+        "lines": "896-905",
+        "reason": "Issue traceback 指向此处，`eval(code, global_dict, local_dict)` 直接 eval 了来自对象 repr 的字符串，当字符串包含无效属性访问（如 `x.y`）时会抛出 AttributeError。"
+      },
+      {
+        "path": "sympy/parsing/sympy_parser.py",
+        "object": "parse_expr",
+        "lines": "908-1008",
+        "reason": "该函数负责将字符串转换为表达式，并最终调用 `eval_expr`。它处理了来自 `sympify` 的输入，可能未充分验证或安全处理来自非信任源（如任意对象的 `__repr__`）的字符串。"
+      },
+      {
+        "path": "sympy/core/sympify.py",
+        "object": "sympify",
+        "lines": "",
+        "reason": "该函数是 `__eq__` 调用来处理比较对象的入口点。它可能过于激进地将任何具有 `__repr__` 的对象尝试转换为 Sympy 表达式，而未考虑安全性或边界情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_cmp_bug1",
+        "test_file": "sympy/core/tests/test_equal.py",
+        "why_relevant": "该测试直接测试了 Symbol 对象与一个自定义类实例的相等性比较，断言它们不相等。这与 Issue 中触发 bug 的场景高度相似。",
+        "reusable_parts": [
+          "测试结构：定义一个简单的自定义类，创建 Symbol 对象，进行 `==` 和 `!=` 比较。",
+          "断言风格：使用 `assert not (x == t)` 和 `assert (x != t)`。"
+        ],
+        "possible_gap": "该测试中自定义类 `T` 没有定义 `__repr__` 方法，因此不会触发 Issue 中描述的通过 `eval` 解析 `__repr__` 字符串的路径。需要变异以包含 `__repr__` 方法。"
+      },
+      {
+        "test_name": "test_cmp_bug2",
+        "test_file": "sympy/core/tests/test_equal.py",
+        "why_relevant": "该测试测试了 Symbol 类（而非实例）与自定义类实例的比较，也涉及非 Sympy 对象的比较逻辑。",
+        "reusable_parts": [
+          "测试结构：定义自定义类，直接比较 `Symbol` 类与实例。",
+          "断言风格：`assert not (Symbol == t)` 和 `assert (Symbol != t)`。"
+        ],
+        "possible_gap": "同样，自定义类没有 `__repr__` 方法，且比较的是类而非实例，与 Issue 中 Symbol 实例比较的场景略有不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_cmp_bug1 中，比较的另一方是简单的自定义类实例 `t`，其 `__repr__` 默认继承自 object。",
+        "target_pattern": "将比较的另一方变异为一个自定义类实例，该实例的 `__repr__` 方法返回一个特定的字符串（如 `'x.y'` 或 `'x'`）。",
+        "reason": "Issue 的核心触发条件是对象的 `__repr__` 返回的字符串在 sympify/parse_expr 的上下文中被 eval。添加 `__repr__` 方法会引导执行流进入有缺陷的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，比较操作 `Symbol('x') == t` 可能因为 t 无法 sympify 而快速返回 False，未深入解析路径。",
+        "target_pattern": "通过提供 `__repr__`，强制比较操作尝试通过 `sympify` -> `parse_expr` -> `eval_expr` 路径来“理解”该对象，从而触发 eval。",
+        "reason": "Sympy 的相等性比较逻辑会尝试 sympify 另一方对象。如果对象有 `__repr__`，会将其字符串表示传入解析流程，最终到达有问题的 eval 调用。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `sympy.Symbol('x') == custom_obj` 时，捕获是否抛出 `AttributeError` 或其他异常。",
+        "reason": "Issue 的主要表现就是 `AttributeError`。观测异常是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 `sympy.Symbol('x') == custom_obj` 和 `sympy.Symbol('x') != custom_obj` 的布尔返回值。",
+        "reason": "当 `__repr__` 返回 `'x'` 时，Issue 指出会错误地返回 `True`（相等）。观测返回值可以检测这种逻辑错误。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "观察自定义对象的 `repr(custom_obj)` 输出。",
+        "reason": "触发条件依赖于 `__repr__` 的返回值。确认该值符合预期是复现的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当自定义对象的 `__repr__` 返回 `'x.y'` 时，与 `Symbol('x')` 的比较不会抛出 `AttributeError`（修复后）或会抛出特定异常（当前）。根据 Issue，修复后应不抛异常且返回 False。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的异常消息字符串，因为可能变化。",
+        "reason": "Issue 明确描述了 `AttributeError`。使用 `pytest.raises` 可以稳定地捕获异常类型。"
+      },
+      {
+        "assertion_goal": "验证当自定义对象的 `__repr__` 返回 `'x'` 时，`Symbol('x')` 与该对象的相等性比较结果为 `False`（即不相等）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言 `sympify(custom_obj)` 的结果，因为修复可能不涉及成功 sympify。",
+        "reason": "Issue 指出当前会错误地判等。断言比较结果为 `False` 直接对应期望的正确行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要在测试文件中导入 sympy 和相关模块（如 `from sympy import Symbol`）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以定义为普通函数，无需特殊 fixture 或 TestCase 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义一个或多个简单的自定义类，在其 `__repr__` 方法中返回特定字符串。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 `AttributeError`，`eval` 来自 `__repr__` 的字符串是否还可能引发其他安全或逻辑问题？",
+      "`sympify` 函数内部处理非 Sympy 对象的确切逻辑和边界条件是什么？哪些类型的对象会被尝试转换？",
+      "修复后的理想行为是让比较安全地返回 False，还是应该在某些情况下成功 sympify `__repr__` 字符串？Issue 未明确指定。",
+      "除了 Symbol，其他 Sympy 类型（如 `Expr` 的子类）的 `__eq__` 方法是否也存在同样的问题？"
+    ]
+  }
+}

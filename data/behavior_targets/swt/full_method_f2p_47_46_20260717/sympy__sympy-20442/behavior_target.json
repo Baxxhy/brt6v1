@@ -1,0 +1,276 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-20442",
+  "issue_summary": "convert_to 函数在处理不兼容维度的单位转换时，返回了不合理的单位表达式。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy.physics.units 导入 convert_to, joule, second, kg, m 等单位。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在标准 SI 单位系统下运行。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_convert_to_quantities",
+        "test_file": "sympy/physics/units/tests/test_util.py",
+        "why_relevant": "该测试包含了大量 convert_to 的调用示例，包括维度不兼容时返回原始表达式的案例（如 `convert_to(steradian, coulomb)`），这与 Issue 期望的行为部分一致。",
+        "reusable_parts": [
+          "imports (convert_to, 相关单位)",
+          "基本的 API 调用模式",
+          "assert 风格（直接比较返回值）"
+        ],
+        "possible_gap": "现有测试可能没有覆盖到 Issue 中 `joule*second` 到 `joule` 这种特定维度不兼容组合，或者没有断言在维度不兼容时应返回原始表达式或报错。"
+      },
+      {
+        "test_name": "test_convert_to_tuples_of_quantities",
+        "test_file": "sympy/physics/units/tests/test_util.py",
+        "why_relevant": "测试了 convert_to 向多个目标单位转换的情况，涉及单位幂次的计算，与 Issue 中出现的分数幂次现象相关。",
+        "reusable_parts": [
+          "imports",
+          "涉及 joule 等单位的构造",
+          "assert 风格"
+        ],
+        "possible_gap": "测试用例都是维度兼容的转换，没有测试维度不兼容的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 convert_to(expr, target_units)，其中 expr 的维度与 target_units 的维度不兼容。具体示例：convert_to(joule*second, joule)。",
+      "evidence": [
+        "Issue 中提供了示例：`convert_to(joule*second,joule)` 返回了 `joule**(7/9)`。",
+        "Issue 描述指出：'It appears that convert_to can only readily handle conversions where the full unit expression is valid.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回了一个维度上不合理的单位表达式（例如 `joule**(7/9)`），而不是返回原始表达式、转换为基本单位的表达式或报错。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了错误输出：`joule**(7/9)`。",
+        "Issue 作者期望：'I would expect the unchanged original expression back, an expression in terms of base units, or an error.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "convert_to",
+        "kind": "function",
+        "source_path": "sympy/physics/units/util.py",
+        "reason": "Issue 直接报告了此函数的行为问题，是缺陷复现的核心调用点。"
+      },
+      {
+        "name": "Quantity",
+        "kind": "class",
+        "source_path": "sympy/physics/units/definitions/unit_definitions.py",
+        "reason": "Issue 中涉及的单位（joule, second, kg, m）都是 Quantity 类的实例，是函数操作的对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/physics/units/util.py",
+        "object": "convert_to",
+        "lines": "37-109",
+        "reason": "这是问题函数的主体实现。Issue 中的错误行为很可能源于此函数在处理维度不兼容情况时的逻辑缺陷，例如依赖矩阵计算或后续的单位组合逻辑。"
+      },
+      {
+        "path": "sympy/physics/units/util.py",
+        "object": "_get_conversion_matrix_for_expr",
+        "lines": "",
+        "reason": "convert_to 函数内部调用了此函数（根据源码片段1），它负责计算转换矩阵。如果它对于不兼容维度返回了非 None 但无效的矩阵，可能导致后续生成错误表达式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，convert_to 的 target_units 参数通常与 expr 的维度兼容（如 speed_of_light 转换为 [meter, second]）。",
+        "target_pattern": "将 target_units 设置为与 expr 维度不兼容的单位（如将 joule*second 转换为 joule）。",
+        "reason": "Issue 表明，当目标单位维度不兼容时，函数会进入错误路径，产生不合理的输出。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，expr 通常是单个单位（如 joule）或简单组合（如 speed_of_light）。",
+        "target_pattern": "将 expr 设置为复合单位表达式（如 joule*second）。",
+        "reason": "Issue 的核心触发条件是 expr 为复合单位（joule*second），其维度与目标单位（joule）不同。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当目标单位与表达式维度不兼容时，convert_to 应返回原始表达式、转换为基本单位的表达式或引发错误/警告。",
+      "evidence": [
+        "Issue 中作者明确表达了期望：'I would expect the unchanged original expression back, an expression in terms of base units, or an error.'",
+        "相关测试 test_convert_to_quantities 中，对于维度不兼容的转换（如 `convert_to(steradian, coulomb)`），函数返回了原始表达式 `steradian`，这暗示了预期的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "convert_to 函数的返回值，特别是其单位部分的表达式结构（如是否出现分数幂次）。",
+        "reason": "Issue 的核心错误是返回值不合理（joule**(7/9)），直接观察返回值是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "返回值的 repr 或 str 表示。",
+        "reason": "Issue 中通过打印展示了错误输出，观测字符串表示可以方便地与预期行为（如返回原始表达式）进行比较。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当目标单位与表达式维度不兼容时，convert_to 的返回值应等于原始表达式（或转换为基本单位的等效表达式），或者其维度应与原始表达式一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回值的完整字符串表示与某个特定值完全相等，因为基本单位转换的表示可能不唯一。",
+        "reason": "Issue 期望返回原始表达式或基本单位表达式。直接比较返回值与原始表达式（或检查其维度）是稳定且与 Issue 语义对齐的断言方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "convert_to 函数内部 `_get_conversion_matrix_for_expr` 的具体行为和返回值在维度不兼容时的确切逻辑。",
+    "除了返回原始表达式，函数是否应该（或已经）有抛出异常或警告的机制。",
+    "对于维度不兼容的情况，转换为基本单位表达式是否总是可行，其具体形式是什么。"
+  ],
+  "raw": {
+    "issue_summary": "convert_to 函数在处理不兼容维度的单位转换时，返回了不合理的单位表达式。",
+    "trigger_condition": {
+      "text": "调用 convert_to(expr, target_units)，其中 expr 的维度与 target_units 的维度不兼容。具体示例：convert_to(joule*second, joule)。",
+      "evidence": [
+        "Issue 中提供了示例：`convert_to(joule*second,joule)` 返回了 `joule**(7/9)`。",
+        "Issue 描述指出：'It appears that convert_to can only readily handle conversions where the full unit expression is valid.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回了一个维度上不合理的单位表达式（例如 `joule**(7/9)`），而不是返回原始表达式、转换为基本单位的表达式或报错。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了错误输出：`joule**(7/9)`。",
+        "Issue 作者期望：'I would expect the unchanged original expression back, an expression in terms of base units, or an error.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当目标单位与表达式维度不兼容时，convert_to 应返回原始表达式、转换为基本单位的表达式或引发错误/警告。",
+      "evidence": [
+        "Issue 中作者明确表达了期望：'I would expect the unchanged original expression back, an expression in terms of base units, or an error.'",
+        "相关测试 test_convert_to_quantities 中，对于维度不兼容的转换（如 `convert_to(steradian, coulomb)`），函数返回了原始表达式 `steradian`，这暗示了预期的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "convert_to",
+        "kind": "function",
+        "source_path": "sympy/physics/units/util.py",
+        "reason": "Issue 直接报告了此函数的行为问题，是缺陷复现的核心调用点。"
+      },
+      {
+        "name": "Quantity",
+        "kind": "class",
+        "source_path": "sympy/physics/units/definitions/unit_definitions.py",
+        "reason": "Issue 中涉及的单位（joule, second, kg, m）都是 Quantity 类的实例，是函数操作的对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/physics/units/util.py",
+        "object": "convert_to",
+        "lines": "37-109",
+        "reason": "这是问题函数的主体实现。Issue 中的错误行为很可能源于此函数在处理维度不兼容情况时的逻辑缺陷，例如依赖矩阵计算或后续的单位组合逻辑。"
+      },
+      {
+        "path": "sympy/physics/units/util.py",
+        "object": "_get_conversion_matrix_for_expr",
+        "lines": "",
+        "reason": "convert_to 函数内部调用了此函数（根据源码片段1），它负责计算转换矩阵。如果它对于不兼容维度返回了非 None 但无效的矩阵，可能导致后续生成错误表达式。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_convert_to_quantities",
+        "test_file": "sympy/physics/units/tests/test_util.py",
+        "why_relevant": "该测试包含了大量 convert_to 的调用示例，包括维度不兼容时返回原始表达式的案例（如 `convert_to(steradian, coulomb)`），这与 Issue 期望的行为部分一致。",
+        "reusable_parts": [
+          "imports (convert_to, 相关单位)",
+          "基本的 API 调用模式",
+          "assert 风格（直接比较返回值）"
+        ],
+        "possible_gap": "现有测试可能没有覆盖到 Issue 中 `joule*second` 到 `joule` 这种特定维度不兼容组合，或者没有断言在维度不兼容时应返回原始表达式或报错。"
+      },
+      {
+        "test_name": "test_convert_to_tuples_of_quantities",
+        "test_file": "sympy/physics/units/tests/test_util.py",
+        "why_relevant": "测试了 convert_to 向多个目标单位转换的情况，涉及单位幂次的计算，与 Issue 中出现的分数幂次现象相关。",
+        "reusable_parts": [
+          "imports",
+          "涉及 joule 等单位的构造",
+          "assert 风格"
+        ],
+        "possible_gap": "测试用例都是维度兼容的转换，没有测试维度不兼容的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，convert_to 的 target_units 参数通常与 expr 的维度兼容（如 speed_of_light 转换为 [meter, second]）。",
+        "target_pattern": "将 target_units 设置为与 expr 维度不兼容的单位（如将 joule*second 转换为 joule）。",
+        "reason": "Issue 表明，当目标单位维度不兼容时，函数会进入错误路径，产生不合理的输出。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，expr 通常是单个单位（如 joule）或简单组合（如 speed_of_light）。",
+        "target_pattern": "将 expr 设置为复合单位表达式（如 joule*second）。",
+        "reason": "Issue 的核心触发条件是 expr 为复合单位（joule*second），其维度与目标单位（joule）不同。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "convert_to 函数的返回值，特别是其单位部分的表达式结构（如是否出现分数幂次）。",
+        "reason": "Issue 的核心错误是返回值不合理（joule**(7/9)），直接观察返回值是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "返回值的 repr 或 str 表示。",
+        "reason": "Issue 中通过打印展示了错误输出，观测字符串表示可以方便地与预期行为（如返回原始表达式）进行比较。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当目标单位与表达式维度不兼容时，convert_to 的返回值应等于原始表达式（或转换为基本单位的等效表达式），或者其维度应与原始表达式一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回值的完整字符串表示与某个特定值完全相等，因为基本单位转换的表示可能不唯一。",
+        "reason": "Issue 期望返回原始表达式或基本单位表达式。直接比较返回值与原始表达式（或检查其维度）是稳定且与 Issue 语义对齐的断言方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy.physics.units 导入 convert_to, joule, second, kg, m 等单位。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在标准 SI 单位系统下运行。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "convert_to 函数内部 `_get_conversion_matrix_for_expr` 的具体行为和返回值在维度不兼容时的确切逻辑。",
+      "除了返回原始表达式，函数是否应该（或已经）有抛出异常或警告的机制。",
+      "对于维度不兼容的情况，转换为基本单位表达式是否总是可行，其具体形式是什么。"
+    ]
+  }
+}

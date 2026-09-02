@@ -1,0 +1,300 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-21171",
+  "issue_summary": "调用 Beam.shear_force() 时，由于 SingularityFunction 的 LaTeX 打印方法 _print_SingularityFunction 不支持 'exp' 关键字参数，导致 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 和 Beam 类，可能还需要 SingularityFunction。测试可以是一个简单的函数，无需复杂 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 Jupyter 的显示上下文，或者直接调用 latex() 函数来触发打印。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Beam",
+        "test_file": "sympy/physics/continuum_mechanics/tests/test_beam.py",
+        "why_relevant": "该测试广泛测试了 Beam 类的功能，包括 apply_load、apply_support、solve_for_reaction_loads 和 shear_force，并成功断言了 shear_force() 的返回值。",
+        "reusable_parts": [
+          "导入语句（from sympy.physics.continuum_mechanics.beam import Beam, SingularityFunction）",
+          "Beam 对象的构造（b = Beam(length, E, I)）",
+          "apply_load、apply_support、solve_for_reaction_loads 的调用模式",
+          "对 shear_force() 返回值的断言风格（与预期表达式比较）"
+        ],
+        "possible_gap": "现有测试可能没有触发导致 SingularityFunction 表达式以特定方式（例如作为幂的底数）被 LaTeX 打印机处理的情况。Issue 中的载荷配置（在 L/2 处施加点载荷，并在 0 处固定支撑）可能产生了特定的表达式结构，使得 SingularityFunction 在 LaTeX 打印时被视为 Pow 的 base。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 Beam 对象，应用载荷和固定支撑，求解反作用力，然后调用 shear_force() 方法。",
+      "evidence": [
+        "Issue 中的代码片段：创建 Beam 对象，调用 apply_load(-F, L/2, -1)、apply_support(0, \"fixed\")、solve_for_reaction_loads(R0, M0)，最后调用 b2.shear_force()。",
+        "相关测试 1 中展示了类似的 Beam 使用流程，包括 apply_load、apply_support、solve_for_reaction_loads 和 shear_force 调用。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "TypeError: _print_SingularityFunction() got an unexpected keyword argument 'exp'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的完整错误堆栈跟踪显示，在 latex 打印过程中，_print_SingularityFunction 被调用时传入了 'exp' 关键字参数，导致 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Beam.shear_force",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中直接触发错误的调用。"
+      },
+      {
+        "name": "Beam.apply_load",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中用于设置载荷的方法，影响 shear_force() 的返回值。"
+      },
+      {
+        "name": "Beam.apply_support",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中用于设置支撑的方法，会引入反应载荷。"
+      },
+      {
+        "name": "Beam.solve_for_reaction_loads",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中用于求解反作用力的方法，影响载荷表达式。"
+      },
+      {
+        "name": "SingularityFunction",
+        "kind": "class",
+        "source_path": "",
+        "reason": "shear_force() 返回表达式的核心组成部分，其打印方法涉及错误。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/latex.py",
+        "object": "_print_SingularityFunction",
+        "lines": "",
+        "reason": "错误堆栈指向 _print_SingularityFunction 不接受 'exp' 参数。但检索出的相关源码片段 6 来自 mathml.py，而非 latex.py，这表明问题可能在于 LaTeX 打印器缺少对应的 _print_SingularityFunction 方法或方法签名不匹配。"
+      },
+      {
+        "path": "sympy/printing/latex.py",
+        "object": "_print_Pow",
+        "lines": "",
+        "reason": "错误堆栈显示，在 _print_Pow 方法中（第 651 行附近），当 expr.base.is_Function 为 True 时，代码尝试调用 self._print(expr.base, exp=self._print(expr.exp))。这可能将 'exp' 参数传递给了一个不接受它的 _print_SingularityFunction 方法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中的载荷配置通常是多个载荷的组合，包括点载荷、分布载荷等，支撑条件也多样。",
+        "target_pattern": "使用 Issue 中特定的配置：在梁中点（L/2）施加一个负的点载荷（order=-1），在起点（0）施加一个固定支撑。",
+        "reason": "这种特定的载荷和支撑组合可能通过 solve_for_reaction_loads 产生一个表达式，其中 SingularityFunction 作为 Pow 的底数出现，从而触发 LaTeX 打印路径中的缺陷。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中调用 shear_force() 后直接进行表达式比较。",
+        "target_pattern": "在调用 shear_force() 后，尝试对其进行 LaTeX 格式化（例如 str()、repr() 或隐式调用，如在 Jupyter 中显示）。",
+        "reason": "错误是在尝试 LaTeX 格式化时触发的，而不仅仅是计算 shear_force() 表达式。需要模拟触发打印的上下文。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "调用 Beam.shear_force() 应成功返回一个包含 SingularityFunction 的表达式，并且该表达式应能正常进行 LaTeX 格式化（或其他打印操作）而不引发 TypeError。",
+      "evidence": [
+        "相关测试 1 中，test_Beam 函数多次成功调用 shear_force() 并断言其返回值，没有出现 TypeError。这表明在正常测试场景下，shear_force() 的返回值是可打印的。",
+        "源码片段 5 中 shear_force() 的文档字符串和示例表明它应返回一个 SingularityFunction 表达式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 latex(shear_force_result) 或 str(shear_force_result) 时是否抛出 TypeError。",
+        "reason": "直接观察是否重现 Issue 中报告的异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "shear_force() 返回的表达式结构，特别是其中是否包含 SingularityFunction 作为 Pow 的底数。",
+        "reason": "帮助理解触发缺陷的表达式特征。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查 shear_force() 返回值中 SingularityFunction 实例的上下文（例如，是否为 Mul 或 Pow 的一部分）。",
+        "reason": "确定表达式在何时何地被传递给打印器。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 shear_force() 并尝试进行 LaTeX 格式化不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 LaTeX 输出字符串，因为修复可能改变格式但不改变功能。",
+        "reason": "Issue 的核心是异常，因此断言不引发特定异常是直接且稳定的验证方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "LaTeX 打印机中 _print_SingularityFunction 方法的准确定义和签名是什么？",
+    "Issue 中特定的载荷配置产生的表达式究竟有何特殊之处，导致 SingularityFunction 被以 'exp' 参数调用？",
+    "除了 LaTeX 打印，其他打印方式（如 str、mathml）是否也会触发类似错误？"
+  ],
+  "raw": {
+    "issue_summary": "调用 Beam.shear_force() 时，由于 SingularityFunction 的 LaTeX 打印方法 _print_SingularityFunction 不支持 'exp' 关键字参数，导致 TypeError。",
+    "trigger_condition": {
+      "text": "创建一个 Beam 对象，应用载荷和固定支撑，求解反作用力，然后调用 shear_force() 方法。",
+      "evidence": [
+        "Issue 中的代码片段：创建 Beam 对象，调用 apply_load(-F, L/2, -1)、apply_support(0, \"fixed\")、solve_for_reaction_loads(R0, M0)，最后调用 b2.shear_force()。",
+        "相关测试 1 中展示了类似的 Beam 使用流程，包括 apply_load、apply_support、solve_for_reaction_loads 和 shear_force 调用。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "TypeError: _print_SingularityFunction() got an unexpected keyword argument 'exp'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的完整错误堆栈跟踪显示，在 latex 打印过程中，_print_SingularityFunction 被调用时传入了 'exp' 关键字参数，导致 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "调用 Beam.shear_force() 应成功返回一个包含 SingularityFunction 的表达式，并且该表达式应能正常进行 LaTeX 格式化（或其他打印操作）而不引发 TypeError。",
+      "evidence": [
+        "相关测试 1 中，test_Beam 函数多次成功调用 shear_force() 并断言其返回值，没有出现 TypeError。这表明在正常测试场景下，shear_force() 的返回值是可打印的。",
+        "源码片段 5 中 shear_force() 的文档字符串和示例表明它应返回一个 SingularityFunction 表达式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Beam.shear_force",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中直接触发错误的调用。"
+      },
+      {
+        "name": "Beam.apply_load",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中用于设置载荷的方法，影响 shear_force() 的返回值。"
+      },
+      {
+        "name": "Beam.apply_support",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中用于设置支撑的方法，会引入反应载荷。"
+      },
+      {
+        "name": "Beam.solve_for_reaction_loads",
+        "kind": "method",
+        "source_path": "sympy/physics/continuum_mechanics/beam.py",
+        "reason": "Issue 中用于求解反作用力的方法，影响载荷表达式。"
+      },
+      {
+        "name": "SingularityFunction",
+        "kind": "class",
+        "source_path": "",
+        "reason": "shear_force() 返回表达式的核心组成部分，其打印方法涉及错误。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/latex.py",
+        "object": "_print_SingularityFunction",
+        "lines": "",
+        "reason": "错误堆栈指向 _print_SingularityFunction 不接受 'exp' 参数。但检索出的相关源码片段 6 来自 mathml.py，而非 latex.py，这表明问题可能在于 LaTeX 打印器缺少对应的 _print_SingularityFunction 方法或方法签名不匹配。"
+      },
+      {
+        "path": "sympy/printing/latex.py",
+        "object": "_print_Pow",
+        "lines": "",
+        "reason": "错误堆栈显示，在 _print_Pow 方法中（第 651 行附近），当 expr.base.is_Function 为 True 时，代码尝试调用 self._print(expr.base, exp=self._print(expr.exp))。这可能将 'exp' 参数传递给了一个不接受它的 _print_SingularityFunction 方法。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Beam",
+        "test_file": "sympy/physics/continuum_mechanics/tests/test_beam.py",
+        "why_relevant": "该测试广泛测试了 Beam 类的功能，包括 apply_load、apply_support、solve_for_reaction_loads 和 shear_force，并成功断言了 shear_force() 的返回值。",
+        "reusable_parts": [
+          "导入语句（from sympy.physics.continuum_mechanics.beam import Beam, SingularityFunction）",
+          "Beam 对象的构造（b = Beam(length, E, I)）",
+          "apply_load、apply_support、solve_for_reaction_loads 的调用模式",
+          "对 shear_force() 返回值的断言风格（与预期表达式比较）"
+        ],
+        "possible_gap": "现有测试可能没有触发导致 SingularityFunction 表达式以特定方式（例如作为幂的底数）被 LaTeX 打印机处理的情况。Issue 中的载荷配置（在 L/2 处施加点载荷，并在 0 处固定支撑）可能产生了特定的表达式结构，使得 SingularityFunction 在 LaTeX 打印时被视为 Pow 的 base。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中的载荷配置通常是多个载荷的组合，包括点载荷、分布载荷等，支撑条件也多样。",
+        "target_pattern": "使用 Issue 中特定的配置：在梁中点（L/2）施加一个负的点载荷（order=-1），在起点（0）施加一个固定支撑。",
+        "reason": "这种特定的载荷和支撑组合可能通过 solve_for_reaction_loads 产生一个表达式，其中 SingularityFunction 作为 Pow 的底数出现，从而触发 LaTeX 打印路径中的缺陷。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中调用 shear_force() 后直接进行表达式比较。",
+        "target_pattern": "在调用 shear_force() 后，尝试对其进行 LaTeX 格式化（例如 str()、repr() 或隐式调用，如在 Jupyter 中显示）。",
+        "reason": "错误是在尝试 LaTeX 格式化时触发的，而不仅仅是计算 shear_force() 表达式。需要模拟触发打印的上下文。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 latex(shear_force_result) 或 str(shear_force_result) 时是否抛出 TypeError。",
+        "reason": "直接观察是否重现 Issue 中报告的异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "shear_force() 返回的表达式结构，特别是其中是否包含 SingularityFunction 作为 Pow 的底数。",
+        "reason": "帮助理解触发缺陷的表达式特征。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查 shear_force() 返回值中 SingularityFunction 实例的上下文（例如，是否为 Mul 或 Pow 的一部分）。",
+        "reason": "确定表达式在何时何地被传递给打印器。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 shear_force() 并尝试进行 LaTeX 格式化不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 LaTeX 输出字符串，因为修复可能改变格式但不改变功能。",
+        "reason": "Issue 的核心是异常，因此断言不引发特定异常是直接且稳定的验证方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 和 Beam 类，可能还需要 SingularityFunction。测试可以是一个简单的函数，无需复杂 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 Jupyter 的显示上下文，或者直接调用 latex() 函数来触发打印。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "LaTeX 打印机中 _print_SingularityFunction 方法的准确定义和签名是什么？",
+      "Issue 中特定的载荷配置产生的表达式究竟有何特殊之处，导致 SingularityFunction 被以 'exp' 参数调用？",
+      "除了 LaTeX 打印，其他打印方式（如 str、mathml）是否也会触发类似错误？"
+    ]
+  }
+}

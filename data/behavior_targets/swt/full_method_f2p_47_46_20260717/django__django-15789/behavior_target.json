@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15789",
+  "issue_summary": "json_script 函数不支持自定义 JSON 编码器，导致无法编码自定义类型。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 django.utils.html 导入 json_script。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase（如现有测试所示），因为不涉及数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要定义自定义的 JSON 编码器类，继承自 json.JSONEncoder 或 DjangoJSONEncoder，并重写 default 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestUtilsHtml.test_json_script",
+        "test_file": "tests/utils_tests/test_html.py",
+        "why_relevant": "这是对 json_script 函数现有的核心功能测试，包含了各种输入（字符串、字典、惰性字符串）和输出验证，可以作为测试变异的起点。",
+        "reusable_parts": [
+          "测试类 TestUtilsHtml(SimpleTestCase)",
+          "导入 json_script",
+          "使用 self.subTest 和 self.assertEqual 的断言风格",
+          "构造包含特殊字符的测试数据对"
+        ],
+        "possible_gap": "当前测试只验证了使用默认 DjangoJSONEncoder 时的行为，没有测试传入自定义编码器参数的情况。"
+      },
+      {
+        "test_name": "JsonResponseTests.test_json_response_custom_encoder",
+        "test_file": "tests/httpwrappers/tests.py",
+        "why_relevant": "该测试展示了如何为 JsonResponse 构造和传入一个自定义的 DjangoJSONEncoder 子类，并验证其输出。这为如何测试 json_script 的自定义编码器参数提供了模式参考。",
+        "reusable_parts": [
+          "定义自定义编码器类（继承自 DjangoJSONEncoder）的模式",
+          "验证序列化输出内容的断言模式（json.loads 比较）"
+        ],
+        "possible_gap": "测试的是 JsonResponse 而非 json_script，API 调用和上下文不同。"
+      },
+      {
+        "test_name": "JsonSerializerTestCase.test_custom_encoder",
+        "test_file": "tests/serializers/test_json.py",
+        "why_relevant": "该测试展示了在序列化上下文中使用自定义 JSON 编码器（cls 参数）来处理特定模型字段（如 Decimal），验证了自定义编码器可以改变序列化结果。",
+        "reusable_parts": [
+          "定义自定义编码器类（继承自 json.JSONEncoder）",
+          "在 API 调用中传入 cls=CustomJSONEncoder 参数的模式",
+          "断言输出包含特定字符串的模式"
+        ],
+        "possible_gap": "测试的是序列化器而非 json_script 函数，且涉及数据库模型，上下文更复杂。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 django.utils.html.json_script 函数，并传入一个需要自定义 JSON 编码器（而非默认 DjangoJSONEncoder）才能正确序列化的值。",
+      "evidence": [
+        "Issue 描述：用户希望自定义 JSON 编码以输出到模板层，但 json_script 的编码器是硬编码的 DjangoJSONEncoder。",
+        "源码片段 1 显示 json_script 函数内部使用 json.dumps(value, cls=DjangoJSONEncoder)，没有提供参数来覆盖 cls。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当传入需要自定义编码器（如处理特定 Python 对象）的值时，json_script 可能无法正确序列化，导致输出不正确或引发 TypeError。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述表明用户有自定义编码的需求，但当前函数不支持。",
+        "相关测试 3 和 5 展示了 Django 其他部分（如 JsonResponse、JsonSerializer）支持自定义编码器，暗示 json_script 缺少此功能可能导致问题。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.html.json_script",
+        "kind": "function",
+        "source_path": "django/utils/html.py",
+        "reason": "这是 Issue 报告的直接目标函数，需要增强以支持自定义编码器参数。"
+      },
+      {
+        "name": "json.dumps",
+        "kind": "function",
+        "source_path": "",
+        "reason": "json_script 内部调用 json.dumps 进行序列化，其 cls 参数是支持自定义编码器的关键。"
+      },
+      {
+        "name": "django.core.serializers.json.DjangoJSONEncoder",
+        "kind": "class",
+        "source_path": "django/core/serializers/json.py",
+        "reason": "当前 json_script 硬编码使用的默认编码器，是可能被替换的对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/html.py",
+        "object": "json_script",
+        "lines": "62-77",
+        "reason": "该函数定义处直接使用了 cls=DjangoJSONEncoder，没有提供参数来覆盖它，这是功能缺失的直接位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "json_script(arg, 'test_id') 调用只传入值和 element_id 参数。",
+        "target_pattern": "json_script(arg, 'test_id', encoder=CustomJSONEncoder) 调用增加一个 encoder 参数。",
+        "reason": "Issue 的核心诉求是增加一个参数来传递自定义编码器。变异调用方式可以触发对新参数路径的测试。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试输入是普通字符串、字典或惰性字符串，这些都能被默认 DjangoJSONEncoder 处理。",
+        "target_pattern": "测试输入是一个需要自定义编码器 default 方法处理的 Python 对象（例如一个自定义类实例、一个特殊的 datetime 子类等）。",
+        "reason": "使用默认编码器无法正确处理的对象，可以凸显出自定义编码器的必要性，并可能暴露序列化错误。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "json_script 函数应允许通过参数传入自定义的 JSON 编码器类，以便用户能够控制 JSON 序列化过程。",
+      "evidence": [
+        "Issue 描述明确请求：'It would be nice to be able to pass a custom encoder class.'",
+        "相关测试 3、4、5 展示了 Django 其他组件（JsonSerializer、test Client、JsonResponse）支持自定义编码器参数，提供了功能一致性的依据。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "json_script 函数的返回值（HTML 字符串），特别是 <script> 标签内的 JSON 内容。",
+        "reason": "自定义编码器是否生效，会直接影响序列化后的 JSON 字符串内容。比较实际输出与期望输出是关键。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 json_script 时是否抛出 TypeError（来自 json.dumps 的 default 方法）。",
+        "reason": "如果传入的对象无法被默认编码器序列化，且没有提供自定义编码器，可能会引发异常。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "json.dumps 调用内部，传入的 cls 参数值。",
+        "reason": "观察实际传递给 json.dumps 的编码器类，可以确认自定义编码器参数是否被正确传递和使用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当提供自定义编码器时，json_script 的输出包含了该编码器产生的特定序列化结果。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对完整的、包含转义字符的 HTML 字符串进行硬编码的相等断言，因为自定义编码器的输出可能多变。",
+        "reason": "自定义编码器的输出内容是其核心特征，断言输出包含该特征片段（如特定的字符串表示）比完全匹配整个 HTML 更稳定。"
+      },
+      {
+        "assertion_goal": "验证 json_script 函数支持 encoder 参数，且调用不会因对象无法序列化而失败。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言不抛出特定异常消息的完整字符串，因为异常消息可能变化。",
+        "reason": "对于功能存在性的验证，可以断言输出中不包含表示序列化失败的占位符或错误信息片段。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "自定义编码器参数的具体名称是 'encoder' 还是 'cls'（参考 json.dumps 和 Django 其他 API）。",
+    "当不提供自定义编码器参数时，函数是否应保持完全向后兼容（即仍使用 DjangoJSONEncoder）。",
+    "自定义编码器是否必须继承自 DjangoJSONEncoder，还是可以是任何 json.JSONEncoder 子类。",
+    "除了编码器参数，函数签名或行为是否还有其他预期变化（如文档提及）。"
+  ],
+  "raw": {
+    "issue_summary": "json_script 函数不支持自定义 JSON 编码器，导致无法编码自定义类型。",
+    "trigger_condition": {
+      "text": "调用 django.utils.html.json_script 函数，并传入一个需要自定义 JSON 编码器（而非默认 DjangoJSONEncoder）才能正确序列化的值。",
+      "evidence": [
+        "Issue 描述：用户希望自定义 JSON 编码以输出到模板层，但 json_script 的编码器是硬编码的 DjangoJSONEncoder。",
+        "源码片段 1 显示 json_script 函数内部使用 json.dumps(value, cls=DjangoJSONEncoder)，没有提供参数来覆盖 cls。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当传入需要自定义编码器（如处理特定 Python 对象）的值时，json_script 可能无法正确序列化，导致输出不正确或引发 TypeError。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述表明用户有自定义编码的需求，但当前函数不支持。",
+        "相关测试 3 和 5 展示了 Django 其他部分（如 JsonResponse、JsonSerializer）支持自定义编码器，暗示 json_script 缺少此功能可能导致问题。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "json_script 函数应允许通过参数传入自定义的 JSON 编码器类，以便用户能够控制 JSON 序列化过程。",
+      "evidence": [
+        "Issue 描述明确请求：'It would be nice to be able to pass a custom encoder class.'",
+        "相关测试 3、4、5 展示了 Django 其他组件（JsonSerializer、test Client、JsonResponse）支持自定义编码器参数，提供了功能一致性的依据。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.html.json_script",
+        "kind": "function",
+        "source_path": "django/utils/html.py",
+        "reason": "这是 Issue 报告的直接目标函数，需要增强以支持自定义编码器参数。"
+      },
+      {
+        "name": "json.dumps",
+        "kind": "function",
+        "source_path": "",
+        "reason": "json_script 内部调用 json.dumps 进行序列化，其 cls 参数是支持自定义编码器的关键。"
+      },
+      {
+        "name": "django.core.serializers.json.DjangoJSONEncoder",
+        "kind": "class",
+        "source_path": "django/core/serializers/json.py",
+        "reason": "当前 json_script 硬编码使用的默认编码器，是可能被替换的对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/html.py",
+        "object": "json_script",
+        "lines": "62-77",
+        "reason": "该函数定义处直接使用了 cls=DjangoJSONEncoder，没有提供参数来覆盖它，这是功能缺失的直接位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestUtilsHtml.test_json_script",
+        "test_file": "tests/utils_tests/test_html.py",
+        "why_relevant": "这是对 json_script 函数现有的核心功能测试，包含了各种输入（字符串、字典、惰性字符串）和输出验证，可以作为测试变异的起点。",
+        "reusable_parts": [
+          "测试类 TestUtilsHtml(SimpleTestCase)",
+          "导入 json_script",
+          "使用 self.subTest 和 self.assertEqual 的断言风格",
+          "构造包含特殊字符的测试数据对"
+        ],
+        "possible_gap": "当前测试只验证了使用默认 DjangoJSONEncoder 时的行为，没有测试传入自定义编码器参数的情况。"
+      },
+      {
+        "test_name": "JsonResponseTests.test_json_response_custom_encoder",
+        "test_file": "tests/httpwrappers/tests.py",
+        "why_relevant": "该测试展示了如何为 JsonResponse 构造和传入一个自定义的 DjangoJSONEncoder 子类，并验证其输出。这为如何测试 json_script 的自定义编码器参数提供了模式参考。",
+        "reusable_parts": [
+          "定义自定义编码器类（继承自 DjangoJSONEncoder）的模式",
+          "验证序列化输出内容的断言模式（json.loads 比较）"
+        ],
+        "possible_gap": "测试的是 JsonResponse 而非 json_script，API 调用和上下文不同。"
+      },
+      {
+        "test_name": "JsonSerializerTestCase.test_custom_encoder",
+        "test_file": "tests/serializers/test_json.py",
+        "why_relevant": "该测试展示了在序列化上下文中使用自定义 JSON 编码器（cls 参数）来处理特定模型字段（如 Decimal），验证了自定义编码器可以改变序列化结果。",
+        "reusable_parts": [
+          "定义自定义编码器类（继承自 json.JSONEncoder）",
+          "在 API 调用中传入 cls=CustomJSONEncoder 参数的模式",
+          "断言输出包含特定字符串的模式"
+        ],
+        "possible_gap": "测试的是序列化器而非 json_script 函数，且涉及数据库模型，上下文更复杂。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "json_script(arg, 'test_id') 调用只传入值和 element_id 参数。",
+        "target_pattern": "json_script(arg, 'test_id', encoder=CustomJSONEncoder) 调用增加一个 encoder 参数。",
+        "reason": "Issue 的核心诉求是增加一个参数来传递自定义编码器。变异调用方式可以触发对新参数路径的测试。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试输入是普通字符串、字典或惰性字符串，这些都能被默认 DjangoJSONEncoder 处理。",
+        "target_pattern": "测试输入是一个需要自定义编码器 default 方法处理的 Python 对象（例如一个自定义类实例、一个特殊的 datetime 子类等）。",
+        "reason": "使用默认编码器无法正确处理的对象，可以凸显出自定义编码器的必要性，并可能暴露序列化错误。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "json_script 函数的返回值（HTML 字符串），特别是 <script> 标签内的 JSON 内容。",
+        "reason": "自定义编码器是否生效，会直接影响序列化后的 JSON 字符串内容。比较实际输出与期望输出是关键。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 json_script 时是否抛出 TypeError（来自 json.dumps 的 default 方法）。",
+        "reason": "如果传入的对象无法被默认编码器序列化，且没有提供自定义编码器，可能会引发异常。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "json.dumps 调用内部，传入的 cls 参数值。",
+        "reason": "观察实际传递给 json.dumps 的编码器类，可以确认自定义编码器参数是否被正确传递和使用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当提供自定义编码器时，json_script 的输出包含了该编码器产生的特定序列化结果。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对完整的、包含转义字符的 HTML 字符串进行硬编码的相等断言，因为自定义编码器的输出可能多变。",
+        "reason": "自定义编码器的输出内容是其核心特征，断言输出包含该特征片段（如特定的字符串表示）比完全匹配整个 HTML 更稳定。"
+      },
+      {
+        "assertion_goal": "验证 json_script 函数支持 encoder 参数，且调用不会因对象无法序列化而失败。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言不抛出特定异常消息的完整字符串，因为异常消息可能变化。",
+        "reason": "对于功能存在性的验证，可以断言输出中不包含表示序列化失败的占位符或错误信息片段。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 django.utils.html 导入 json_script。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase（如现有测试所示），因为不涉及数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要定义自定义的 JSON 编码器类，继承自 json.JSONEncoder 或 DjangoJSONEncoder，并重写 default 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "自定义编码器参数的具体名称是 'encoder' 还是 'cls'（参考 json.dumps 和 Django 其他 API）。",
+      "当不提供自定义编码器参数时，函数是否应保持完全向后兼容（即仍使用 DjangoJSONEncoder）。",
+      "自定义编码器是否必须继承自 DjangoJSONEncoder，还是可以是任何 json.JSONEncoder 子类。",
+      "除了编码器参数，函数签名或行为是否还有其他预期变化（如文档提及）。"
+    ]
+  }
+}

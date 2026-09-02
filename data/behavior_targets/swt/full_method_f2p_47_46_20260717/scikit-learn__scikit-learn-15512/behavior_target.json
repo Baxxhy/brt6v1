@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-15512",
+  "issue_summary": "AffinityPropagation 在未收敛时没有按照文档说明返回空聚类中心和 -1 标签。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 AffinityPropagation, ConvergenceWarning, 以及 numpy 和 pandas。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 assert_warns 或 pytest.warns 来捕获预期的警告。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应构造一个在给定 max_iter 下无法收敛的数据集。",
+        "source": "issue|retrieved_test|inference",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_affinity_propagation_fit_non_convergence",
+        "test_file": "sklearn/cluster/tests/test_affinity_propagation.py",
+        "why_relevant": "此测试专门验证算法未收敛时的行为，与 Issue 描述的场景高度一致。",
+        "reusable_parts": [
+          "导入 AffinityPropagation",
+          "使用 assert_warns 检查 ConvergenceWarning",
+          "断言 cluster_centers_ 为空数组和 labels_ 为 -1 的模式"
+        ],
+        "possible_gap": "该测试使用特定的 preference=-10 和 max_iter=1 来触发非收敛，而 Issue 中的示例使用不同的数据和配置（affinity='euclidean', copy=False, max_iter=2），可能揭示了该测试未覆盖的触发路径。"
+      },
+      {
+        "test_name": "test_affinity_propagation_predict_non_convergence",
+        "test_file": "sklearn/cluster/tests/test_affinity_propagation.py",
+        "why_relevant": "此测试也涉及非收敛场景，并检查 predict 方法的行为。",
+        "reusable_parts": [
+          "构造非收敛模型的方式",
+          "使用 assert_warns"
+        ],
+        "possible_gap": "主要关注 predict 行为，而 Issue 的核心是 fit 后属性的直接状态。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 AffinityPropagation 进行聚类，设置 max_iter 为一个较小的值（例如 2），使得算法在达到最大迭代次数前无法收敛。",
+      "evidence": [
+        "Issue 中示例代码设置 max_iter=2",
+        "相关测试 1 和 2 通过设置 max_iter=1 来强制不收敛"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当算法未收敛时，cluster_centers_indices_ 不是空数组，labels_ 也不是全 -1 的数组，而是返回了看似正常的聚类结果（例如 [2] 和 [0,0,0]）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中用户期望得到空列表和 [-1,-1,-1]，但实际得到 [2] 和 [0,0,0]"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AffinityPropagation",
+        "kind": "class",
+        "source_path": "sklearn/cluster/_affinity_propagation.py",
+        "reason": "Issue 直接关于此类在未收敛时的行为。"
+      },
+      {
+        "name": "AffinityPropagation.fit",
+        "kind": "method",
+        "source_path": "sklearn/cluster/_affinity_propagation.py",
+        "reason": "Issue 中 bug 在调用 fit 方法后显现。"
+      },
+      {
+        "name": "affinity_propagation",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码片段 2 显示 fit 方法内部调用了此函数，它可能负责返回聚类结果。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/cluster/_affinity_propagation.py",
+        "object": "affinity_propagation",
+        "lines": "",
+        "reason": "fit 方法将 cluster_centers_indices_ 和 labels_ 的赋值委托给此函数，它可能未正确处理非收敛情况。"
+      },
+      {
+        "path": "sklearn/cluster/_affinity_propagation.py",
+        "object": "AffinityPropagation.fit",
+        "lines": "352-394",
+        "reason": "此方法接收 affinity_propagation 函数的返回值并赋值给实例属性，可能缺少对非收敛返回值的检查或处理逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中设置 preference=-10, max_iter=1",
+        "target_pattern": "使用 Issue 中的配置：affinity='euclidean', copy=False, max_iter=2，并使用 pandas DataFrame 作为输入数据。",
+        "reason": "Issue 中的特定配置和数据可能触发了测试未覆盖的代码路径，导致非收敛时未正确设置属性。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用简单的 NumPy 数组作为输入数据。",
+        "target_pattern": "使用 Issue 中的 pandas DataFrame 作为输入数据。",
+        "reason": "输入数据类型的不同可能导致内部处理逻辑的差异，从而影响非收敛时的行为。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当算法未收敛时，cluster_centers_indices_ 应为空数组，labels_ 应为全 -1 的数组，并且应发出 ConvergenceWarning。",
+      "evidence": [
+        "源码片段 1 的类文档字符串说明：'When fit does not converge, cluster_centers_ becomes an empty array and all training samples will be labelled as -1.'",
+        "相关测试 1 和 2 的断言验证了此行为"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "af.cluster_centers_indices_",
+        "reason": "Issue 的核心是此属性在非收敛时应为空数组。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "af.labels_",
+        "reason": "Issue 的核心是此属性在非收敛时应为全 -1 数组。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 或 assert_warns 捕获 ConvergenceWarning",
+        "reason": "相关测试表明非收敛时应发出 ConvergenceWarning，Issue 也提到 verbose 模式会输出信息。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "af.n_iter_ 与 af.max_iter 的比较",
+        "reason": "Issue 中提到用户通过检查 n_iter_ == max_iter 来推断是否收敛，这可能是一个相关的内部状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在算法未收敛时，cluster_centers_indices_ 的长度为 0（即空数组）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的数组 repr 字符串，因为具体实现可能返回不同形状的空数组。",
+        "reason": "直接验证数组为空，与文档和期望行为对齐。"
+      },
+      {
+        "assertion_goal": "验证在算法未收敛时，labels_ 数组的所有元素都等于 -1。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言 labels_ 包含 -1，需要确保所有元素都是 -1。",
+        "reason": "文档明确指出所有训练样本应标记为 -1。"
+      },
+      {
+        "assertion_goal": "验证在算法未收敛时，fit 方法会发出 ConvergenceWarning。",
+        "preferred_assertion_style": "warns",
+        "avoid": "忽略警告或仅检查 verbose 输出。",
+        "reason": "相关测试和 Issue 上下文都表明非收敛应伴随警告。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中使用的特定 pandas DataFrame 数据是否是触发 bug 的必要条件，还是 NumPy 数组在相同配置下也会出现同样问题。",
+    "bug 的确切根源是在 affinity_propagation 函数内部，还是在 AffinityPropagation.fit 方法中对返回值的处理上。",
+    "除了 max_iter 设置过小，是否还有其他配置组合（如特定的 damping、preference 值）会更容易触发此非收敛但属性设置错误的行为。",
+    "copy=False 参数在此 bug 中扮演什么角色。"
+  ],
+  "raw": {
+    "issue_summary": "AffinityPropagation 在未收敛时没有按照文档说明返回空聚类中心和 -1 标签。",
+    "trigger_condition": {
+      "text": "使用 AffinityPropagation 进行聚类，设置 max_iter 为一个较小的值（例如 2），使得算法在达到最大迭代次数前无法收敛。",
+      "evidence": [
+        "Issue 中示例代码设置 max_iter=2",
+        "相关测试 1 和 2 通过设置 max_iter=1 来强制不收敛"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当算法未收敛时，cluster_centers_indices_ 不是空数组，labels_ 也不是全 -1 的数组，而是返回了看似正常的聚类结果（例如 [2] 和 [0,0,0]）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中用户期望得到空列表和 [-1,-1,-1]，但实际得到 [2] 和 [0,0,0]"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当算法未收敛时，cluster_centers_indices_ 应为空数组，labels_ 应为全 -1 的数组，并且应发出 ConvergenceWarning。",
+      "evidence": [
+        "源码片段 1 的类文档字符串说明：'When fit does not converge, cluster_centers_ becomes an empty array and all training samples will be labelled as -1.'",
+        "相关测试 1 和 2 的断言验证了此行为"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AffinityPropagation",
+        "kind": "class",
+        "source_path": "sklearn/cluster/_affinity_propagation.py",
+        "reason": "Issue 直接关于此类在未收敛时的行为。"
+      },
+      {
+        "name": "AffinityPropagation.fit",
+        "kind": "method",
+        "source_path": "sklearn/cluster/_affinity_propagation.py",
+        "reason": "Issue 中 bug 在调用 fit 方法后显现。"
+      },
+      {
+        "name": "affinity_propagation",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码片段 2 显示 fit 方法内部调用了此函数，它可能负责返回聚类结果。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/cluster/_affinity_propagation.py",
+        "object": "affinity_propagation",
+        "lines": "",
+        "reason": "fit 方法将 cluster_centers_indices_ 和 labels_ 的赋值委托给此函数，它可能未正确处理非收敛情况。"
+      },
+      {
+        "path": "sklearn/cluster/_affinity_propagation.py",
+        "object": "AffinityPropagation.fit",
+        "lines": "352-394",
+        "reason": "此方法接收 affinity_propagation 函数的返回值并赋值给实例属性，可能缺少对非收敛返回值的检查或处理逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_affinity_propagation_fit_non_convergence",
+        "test_file": "sklearn/cluster/tests/test_affinity_propagation.py",
+        "why_relevant": "此测试专门验证算法未收敛时的行为，与 Issue 描述的场景高度一致。",
+        "reusable_parts": [
+          "导入 AffinityPropagation",
+          "使用 assert_warns 检查 ConvergenceWarning",
+          "断言 cluster_centers_ 为空数组和 labels_ 为 -1 的模式"
+        ],
+        "possible_gap": "该测试使用特定的 preference=-10 和 max_iter=1 来触发非收敛，而 Issue 中的示例使用不同的数据和配置（affinity='euclidean', copy=False, max_iter=2），可能揭示了该测试未覆盖的触发路径。"
+      },
+      {
+        "test_name": "test_affinity_propagation_predict_non_convergence",
+        "test_file": "sklearn/cluster/tests/test_affinity_propagation.py",
+        "why_relevant": "此测试也涉及非收敛场景，并检查 predict 方法的行为。",
+        "reusable_parts": [
+          "构造非收敛模型的方式",
+          "使用 assert_warns"
+        ],
+        "possible_gap": "主要关注 predict 行为，而 Issue 的核心是 fit 后属性的直接状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中设置 preference=-10, max_iter=1",
+        "target_pattern": "使用 Issue 中的配置：affinity='euclidean', copy=False, max_iter=2，并使用 pandas DataFrame 作为输入数据。",
+        "reason": "Issue 中的特定配置和数据可能触发了测试未覆盖的代码路径，导致非收敛时未正确设置属性。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用简单的 NumPy 数组作为输入数据。",
+        "target_pattern": "使用 Issue 中的 pandas DataFrame 作为输入数据。",
+        "reason": "输入数据类型的不同可能导致内部处理逻辑的差异，从而影响非收敛时的行为。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "af.cluster_centers_indices_",
+        "reason": "Issue 的核心是此属性在非收敛时应为空数组。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "af.labels_",
+        "reason": "Issue 的核心是此属性在非收敛时应为全 -1 数组。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 或 assert_warns 捕获 ConvergenceWarning",
+        "reason": "相关测试表明非收敛时应发出 ConvergenceWarning，Issue 也提到 verbose 模式会输出信息。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "af.n_iter_ 与 af.max_iter 的比较",
+        "reason": "Issue 中提到用户通过检查 n_iter_ == max_iter 来推断是否收敛，这可能是一个相关的内部状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在算法未收敛时，cluster_centers_indices_ 的长度为 0（即空数组）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的数组 repr 字符串，因为具体实现可能返回不同形状的空数组。",
+        "reason": "直接验证数组为空，与文档和期望行为对齐。"
+      },
+      {
+        "assertion_goal": "验证在算法未收敛时，labels_ 数组的所有元素都等于 -1。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言 labels_ 包含 -1，需要确保所有元素都是 -1。",
+        "reason": "文档明确指出所有训练样本应标记为 -1。"
+      },
+      {
+        "assertion_goal": "验证在算法未收敛时，fit 方法会发出 ConvergenceWarning。",
+        "preferred_assertion_style": "warns",
+        "avoid": "忽略警告或仅检查 verbose 输出。",
+        "reason": "相关测试和 Issue 上下文都表明非收敛应伴随警告。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 AffinityPropagation, ConvergenceWarning, 以及 numpy 和 pandas。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 assert_warns 或 pytest.warns 来捕获预期的警告。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应构造一个在给定 max_iter 下无法收敛的数据集。",
+        "source": "issue|retrieved_test|inference",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中使用的特定 pandas DataFrame 数据是否是触发 bug 的必要条件，还是 NumPy 数组在相同配置下也会出现同样问题。",
+      "bug 的确切根源是在 affinity_propagation 函数内部，还是在 AffinityPropagation.fit 方法中对返回值的处理上。",
+      "除了 max_iter 设置过小，是否还有其他配置组合（如特定的 damping、preference 值）会更容易触发此非收敛但属性设置错误的行为。",
+      "copy=False 参数在此 bug 中扮演什么角色。"
+    ]
+  }
+}

@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11095",
+  "issue_summary": "ModelAdmin 缺少一个 get_inlines() 钩子，无法根据请求或模型实例动态设置内联类。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase，并配置正确的 ROOT_URLCONF。可能需要创建用户、模型实例和请求工厂。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.contrib.admin 以及相关的模型和内联类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能涉及添加视图（obj=None）和更改视图（obj=instance）两种场景。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_custom_min_num",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "它测试了一个内联类的 get_min_num 钩子，该钩子根据请求和对象动态返回值。这与 get_inlines 钩子的预期行为模式（基于 request 和 obj 动态决定）非常相似。",
+        "reusable_parts": [
+          "使用 ModelAdmin 和自定义内联类的模式",
+          "创建请求和用户对象",
+          "调用 modeladmin.changeform_view 并检查响应内容",
+          "针对添加视图和更改视图分别测试"
+        ],
+        "possible_gap": "它测试的是内联类（Inline）上的钩子，而 Issue 请求的是 ModelAdmin 上的钩子。测试逻辑需要从检查内联参数（如 min_num）调整为检查内联类列表本身。"
+      },
+      {
+        "test_name": "test_get_extra",
+        "test_file": "tests/generic_inline_admin/tests.py",
+        "why_relevant": "它测试了内联类的 get_extra 钩子，展示了如何通过覆盖内联方法并基于 request 和 obj 返回动态值。这演示了 Django Admin 中钩子方法的标准模式。",
+        "reusable_parts": [
+          "定义自定义内联类并覆盖钩子方法",
+          "创建模型实例和超级用户请求",
+          "通过 modeladmin.changeform_view 获取上下文并提取 formset",
+          "使用 assertEqual 验证动态返回值"
+        ],
+        "possible_gap": "同样，它测试的是内联类级别的钩子，而非 ModelAdmin 级别的钩子。测试的断言目标是 formset.extra，而非内联类的列表。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当开发者需要根据请求（如用户权限）或模型实例（如对象状态）动态决定 ModelAdmin 的内联类时，无法通过覆盖一个简单的方法来实现，而必须复制 get_inline_instances 方法中的循环逻辑。",
+      "evidence": [
+        "Issue 描述：'add ModelAdmin.get_inlines() hook to allow set inlines based on the request or model instance.'",
+        "Issue 描述：'Currently, We can override the method get_inline_instances to do such a thing, but a for loop should be copied to my code.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "没有错误异常或直接的功能失效，而是缺少一个便捷的扩展点，导致开发者必须复制样板代码来实现动态内联逻辑。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述表明当前只能通过覆盖 get_inline_instances 并复制其循环来实现需求，这被视为一种不便或设计缺陷。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.contrib.admin.options.ModelAdmin.get_inlines",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 的核心是请求添加此方法作为钩子。"
+      },
+      {
+        "name": "django.contrib.admin.options.ModelAdmin.get_inline_instances",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "当前实现动态内联需要覆盖此方法，它是相关逻辑的入口点。"
+      },
+      {
+        "name": "django.contrib.admin.options.ModelAdmin.inlines",
+        "kind": "attribute",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "这是存储内联类列表的默认属性，get_inlines 预期会覆盖或补充它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin.get_inline_instances",
+        "lines": "583-596",
+        "reason": "该方法目前直接使用 self.inlines 静态列表。为了支持动态钩子，其逻辑可能需要修改以调用一个类似 get_inlines 的方法来获取内联类列表。"
+      },
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin",
+        "lines": "538-1957",
+        "reason": "需要在该类中添加新的 get_inlines 方法定义。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，ModelAdmin.inlines 被设置为一个静态的内联类列表。",
+        "target_pattern": "创建一个自定义 ModelAdmin 子类，覆盖 get_inlines 方法，使其根据 request 属性（如用户）或 obj 参数（如对象是否存在）返回不同的内联类列表。",
+        "reason": "Issue 要求能够基于请求或模型实例动态设置内联。通过变异 ModelAdmin 的行为，使其不再依赖静态的 inlines 列表，而是调用动态的 get_inlines，可以触发对新钩子功能的需求或测试其缺失。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相似测试中，调用 modeladmin.changeform_view 会间接触发内联实例的创建，其内联列表是固定的。",
+        "target_pattern": "在调用 changeform_view 时，传入不同的请求（例如，不同权限的用户）或不同的对象（添加视图 obj=None 与更改视图 obj=instance），并观察内联实例列表是否相应变化。",
+        "reason": "get_inlines 钩子的目的是根据这些输入（request, obj）产生不同的输出。变异调用条件可以验证该钩子是否被正确调用并影响结果。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ModelAdmin 应提供一个 get_inlines(request, obj=None) 方法，允许开发者返回一个基于请求或模型实例动态计算的内联类列表。",
+      "evidence": [
+        "Issue 描述明确请求：'So I wished add a hook get_inlines(request, obj=None)'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "modeladmin.get_inline_instances(request, obj) 返回的 inline_instances 列表的长度和类型。",
+        "reason": "如果 get_inlines 钩子被实现并调用，它应该影响最终生成的内联实例。观察此列表可以判断动态逻辑是否生效。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 ModelAdmin 子类中，覆盖的 get_inlines 方法是否被调用，以及其 request 和 obj 参数的值。",
+        "reason": "直接观测钩子方法的调用是验证其存在性和功能的最直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "modeladmin.get_inlines(request, obj) 的返回值（如果方法存在）。",
+        "reason": "这是新钩子的核心输出，需要观察其是否返回了预期的内联类列表。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当提供不同的请求或对象时，ModelAdmin 产生的内联实例列表应不同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、硬编码的内联类列表。避免断言与动态逻辑无关的固定数量。",
+        "reason": "这直接对应 Issue 的期望：内联列表应基于输入动态变化。使用 equals 比较两个不同场景下的列表是稳定且直接的。"
+      },
+      {
+        "assertion_goal": "ModelAdmin 子类中覆盖的 get_inlines 方法应被调用，并接收正确的 request 和 obj 参数。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的、可能变化的请求对象属性细节。",
+        "reason": "这验证了钩子机制本身是否正常工作。可以通过 mock 或状态标记来观测方法调用。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "get_inlines 方法的确切签名和返回值类型（是否必须是类列表，还是可以是实例列表）在 Issue 中没有完全明确。",
+    "get_inlines 钩子与现有的 get_inline_instances 方法将如何交互？是 get_inline_instances 调用 get_inlines，还是完全替换？",
+    "权限检查（如 has_view_or_change_permission）是在 get_inlines 之后进行，还是集成在其中？这可能会影响最终内联实例的列表。",
+    "当前代码库中是否已经存在一个未在检索片段中显示的部分实现或相关讨论。"
+  ],
+  "raw": {
+    "issue_summary": "ModelAdmin 缺少一个 get_inlines() 钩子，无法根据请求或模型实例动态设置内联类。",
+    "trigger_condition": {
+      "text": "当开发者需要根据请求（如用户权限）或模型实例（如对象状态）动态决定 ModelAdmin 的内联类时，无法通过覆盖一个简单的方法来实现，而必须复制 get_inline_instances 方法中的循环逻辑。",
+      "evidence": [
+        "Issue 描述：'add ModelAdmin.get_inlines() hook to allow set inlines based on the request or model instance.'",
+        "Issue 描述：'Currently, We can override the method get_inline_instances to do such a thing, but a for loop should be copied to my code.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "没有错误异常或直接的功能失效，而是缺少一个便捷的扩展点，导致开发者必须复制样板代码来实现动态内联逻辑。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述表明当前只能通过覆盖 get_inline_instances 并复制其循环来实现需求，这被视为一种不便或设计缺陷。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ModelAdmin 应提供一个 get_inlines(request, obj=None) 方法，允许开发者返回一个基于请求或模型实例动态计算的内联类列表。",
+      "evidence": [
+        "Issue 描述明确请求：'So I wished add a hook get_inlines(request, obj=None)'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.contrib.admin.options.ModelAdmin.get_inlines",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 的核心是请求添加此方法作为钩子。"
+      },
+      {
+        "name": "django.contrib.admin.options.ModelAdmin.get_inline_instances",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "当前实现动态内联需要覆盖此方法，它是相关逻辑的入口点。"
+      },
+      {
+        "name": "django.contrib.admin.options.ModelAdmin.inlines",
+        "kind": "attribute",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "这是存储内联类列表的默认属性，get_inlines 预期会覆盖或补充它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin.get_inline_instances",
+        "lines": "583-596",
+        "reason": "该方法目前直接使用 self.inlines 静态列表。为了支持动态钩子，其逻辑可能需要修改以调用一个类似 get_inlines 的方法来获取内联类列表。"
+      },
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin",
+        "lines": "538-1957",
+        "reason": "需要在该类中添加新的 get_inlines 方法定义。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_custom_min_num",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "它测试了一个内联类的 get_min_num 钩子，该钩子根据请求和对象动态返回值。这与 get_inlines 钩子的预期行为模式（基于 request 和 obj 动态决定）非常相似。",
+        "reusable_parts": [
+          "使用 ModelAdmin 和自定义内联类的模式",
+          "创建请求和用户对象",
+          "调用 modeladmin.changeform_view 并检查响应内容",
+          "针对添加视图和更改视图分别测试"
+        ],
+        "possible_gap": "它测试的是内联类（Inline）上的钩子，而 Issue 请求的是 ModelAdmin 上的钩子。测试逻辑需要从检查内联参数（如 min_num）调整为检查内联类列表本身。"
+      },
+      {
+        "test_name": "test_get_extra",
+        "test_file": "tests/generic_inline_admin/tests.py",
+        "why_relevant": "它测试了内联类的 get_extra 钩子，展示了如何通过覆盖内联方法并基于 request 和 obj 返回动态值。这演示了 Django Admin 中钩子方法的标准模式。",
+        "reusable_parts": [
+          "定义自定义内联类并覆盖钩子方法",
+          "创建模型实例和超级用户请求",
+          "通过 modeladmin.changeform_view 获取上下文并提取 formset",
+          "使用 assertEqual 验证动态返回值"
+        ],
+        "possible_gap": "同样，它测试的是内联类级别的钩子，而非 ModelAdmin 级别的钩子。测试的断言目标是 formset.extra，而非内联类的列表。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，ModelAdmin.inlines 被设置为一个静态的内联类列表。",
+        "target_pattern": "创建一个自定义 ModelAdmin 子类，覆盖 get_inlines 方法，使其根据 request 属性（如用户）或 obj 参数（如对象是否存在）返回不同的内联类列表。",
+        "reason": "Issue 要求能够基于请求或模型实例动态设置内联。通过变异 ModelAdmin 的行为，使其不再依赖静态的 inlines 列表，而是调用动态的 get_inlines，可以触发对新钩子功能的需求或测试其缺失。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相似测试中，调用 modeladmin.changeform_view 会间接触发内联实例的创建，其内联列表是固定的。",
+        "target_pattern": "在调用 changeform_view 时，传入不同的请求（例如，不同权限的用户）或不同的对象（添加视图 obj=None 与更改视图 obj=instance），并观察内联实例列表是否相应变化。",
+        "reason": "get_inlines 钩子的目的是根据这些输入（request, obj）产生不同的输出。变异调用条件可以验证该钩子是否被正确调用并影响结果。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "modeladmin.get_inline_instances(request, obj) 返回的 inline_instances 列表的长度和类型。",
+        "reason": "如果 get_inlines 钩子被实现并调用，它应该影响最终生成的内联实例。观察此列表可以判断动态逻辑是否生效。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 ModelAdmin 子类中，覆盖的 get_inlines 方法是否被调用，以及其 request 和 obj 参数的值。",
+        "reason": "直接观测钩子方法的调用是验证其存在性和功能的最直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "modeladmin.get_inlines(request, obj) 的返回值（如果方法存在）。",
+        "reason": "这是新钩子的核心输出，需要观察其是否返回了预期的内联类列表。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当提供不同的请求或对象时，ModelAdmin 产生的内联实例列表应不同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、硬编码的内联类列表。避免断言与动态逻辑无关的固定数量。",
+        "reason": "这直接对应 Issue 的期望：内联列表应基于输入动态变化。使用 equals 比较两个不同场景下的列表是稳定且直接的。"
+      },
+      {
+        "assertion_goal": "ModelAdmin 子类中覆盖的 get_inlines 方法应被调用，并接收正确的 request 和 obj 参数。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的、可能变化的请求对象属性细节。",
+        "reason": "这验证了钩子机制本身是否正常工作。可以通过 mock 或状态标记来观测方法调用。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase，并配置正确的 ROOT_URLCONF。可能需要创建用户、模型实例和请求工厂。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.contrib.admin 以及相关的模型和内联类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能涉及添加视图（obj=None）和更改视图（obj=instance）两种场景。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "get_inlines 方法的确切签名和返回值类型（是否必须是类列表，还是可以是实例列表）在 Issue 中没有完全明确。",
+      "get_inlines 钩子与现有的 get_inline_instances 方法将如何交互？是 get_inline_instances 调用 get_inlines，还是完全替换？",
+      "权限检查（如 has_view_or_change_permission）是在 get_inlines 之后进行，还是集成在其中？这可能会影响最终内联实例的列表。",
+      "当前代码库中是否已经存在一个未在检索片段中显示的部分实现或相关讨论。"
+    ]
+  }
+}

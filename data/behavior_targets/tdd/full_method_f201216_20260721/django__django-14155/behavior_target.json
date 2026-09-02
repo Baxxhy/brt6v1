@@ -1,0 +1,320 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14155",
+  "issue_summary": "ResolverMatch.__repr__() 对 functools.partial() 视图函数的表示不友好，没有展示底层函数和预置参数。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 override_settings 设置 ROOT_URLCONF，并定义包含 partial 视图的 URL 配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 functools.partial 和一个基础视图函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase 或 TestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ResolverMatchTests.test_repr",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它直接测试 ResolverMatch.__repr__() 的输出，是测试 __repr__ 行为的起点。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 resolve() 获取 ResolverMatch",
+          "assertEqual 比较 repr() 输出"
+        ],
+        "possible_gap": "当前测试使用普通函数视图，没有使用 functools.partial 作为视图。"
+      },
+      {
+        "test_name": "ResolverMatchTests.test_urlpattern_resolve",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它测试 resolve() 返回的 ResolverMatch 的各个属性，包括 func，可用于验证 partial 处理后的属性。",
+        "reusable_parts": [
+          "测试数据循环",
+          "resolve() 调用",
+          "对 ResolverMatch 属性的多种断言"
+        ],
+        "possible_gap": "测试数据中的 func 是普通函数，不是 partial。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "将一个 functools.partial 对象作为视图函数传递给 ResolverMatch。",
+      "evidence": [
+        "Issue 描述：'When a partial function is passed as the view'",
+        "源码 __init__ 接收 func 参数，__repr__ 使用 self._func_path"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ResolverMatch.__repr__() 输出显示 func 参数为 'functools.partial'，没有揭示底层函数或预置参数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the __repr__ shows the func argument as functools.partial which isn't very helpful, especially as it doesn't reveal the underlying function or arguments provided.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.urls.resolvers.ResolverMatch",
+        "kind": "class",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 直接关于此类的 __repr__ 方法。"
+      },
+      {
+        "name": "django.urls.resolvers.ResolverMatch.__init__",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 建议在 __init__ 中处理 partial 对象。"
+      },
+      {
+        "name": "django.urls.resolvers.ResolverMatch.__repr__",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 直接关于此方法的输出。"
+      },
+      {
+        "name": "django.urls.resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中用于获取 ResolverMatch 实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/urls/resolvers.py",
+        "object": "ResolverMatch.__init__",
+        "lines": "33-56",
+        "reason": "Issue 建议在此处解包 partial 对象。__init__ 中计算 _func_path 的逻辑可能未处理 partial。"
+      },
+      {
+        "path": "django/urls/resolvers.py",
+        "object": "ResolverMatch.__repr__",
+        "lines": "61-65",
+        "reason": "此方法直接输出有问题的 _func_path。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用普通函数（如 empty_view）作为视图。",
+        "target_pattern": "使用 functools.partial 包装的函数作为视图。",
+        "reason": "Issue 明确指出当视图是 partial 对象时触发问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "ResolverMatch.__init__ 接收的 func 参数是普通函数或类。",
+        "target_pattern": "func 参数是 functools.partial 对象。",
+        "reason": "这是触发 __init__ 中 _func_path 计算和 __repr__ 输出问题的直接原因。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ResolverMatch.__repr__() 应该能展示 partial 对象包装的底层函数以及预置的参数。",
+      "evidence": [
+        "Issue 描述：'we need to handle those specially so that they are accessible in __repr__.'",
+        "Issue 建议：'we can simply unwrap functools.partial objects in ResolverMatch.__init__()'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "repr",
+        "expression_hint": "repr(resolver_match_instance) 或 resolver_match_instance._func_path",
+        "reason": "Issue 的核心是 __repr__ 输出不友好，观察 repr 字符串或内部 _func_path 属性可以判断是否正确处理了 partial。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(resolver_match_instance.func)",
+        "reason": "可以确认传入的 func 是否是 partial 对象，以及处理后是否被解包。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当视图是 partial 时，__repr__ 输出的 func 部分应包含底层函数名，而非仅 'functools.partial'。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、固定的 repr 字符串相等，因为底层函数名和参数可能变化。",
+        "reason": "Issue 要求揭示底层函数和参数，断言包含这些关键片段比完整字符串更稳定。"
+      },
+      {
+        "assertion_goal": "ResolverMatch 实例的 func 属性（或 _func_path）应能正确反映 partial 包装的底层可调用对象。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 func 严格等于某个特定 partial 对象实例。",
+        "reason": "修复可能涉及解包 partial，断言 func 的类型或路径更关注语义。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后 __repr__ 输出 partial 参数的确切格式（例如，如何表示预置的 args/kwargs）。",
+    "在 __init__ 中解包 partial 后，是否会影响 ResolverMatch 的其他属性或行为（如 args, kwargs 的合并）。",
+    "除了 __repr__，其他使用 _func_path 或 func 的地方是否也需要调整。"
+  ],
+  "raw": {
+    "issue_summary": "ResolverMatch.__repr__() 对 functools.partial() 视图函数的表示不友好，没有展示底层函数和预置参数。",
+    "trigger_condition": {
+      "text": "将一个 functools.partial 对象作为视图函数传递给 ResolverMatch。",
+      "evidence": [
+        "Issue 描述：'When a partial function is passed as the view'",
+        "源码 __init__ 接收 func 参数，__repr__ 使用 self._func_path"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ResolverMatch.__repr__() 输出显示 func 参数为 'functools.partial'，没有揭示底层函数或预置参数。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'the __repr__ shows the func argument as functools.partial which isn't very helpful, especially as it doesn't reveal the underlying function or arguments provided.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ResolverMatch.__repr__() 应该能展示 partial 对象包装的底层函数以及预置的参数。",
+      "evidence": [
+        "Issue 描述：'we need to handle those specially so that they are accessible in __repr__.'",
+        "Issue 建议：'we can simply unwrap functools.partial objects in ResolverMatch.__init__()'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.urls.resolvers.ResolverMatch",
+        "kind": "class",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 直接关于此类的 __repr__ 方法。"
+      },
+      {
+        "name": "django.urls.resolvers.ResolverMatch.__init__",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 建议在 __init__ 中处理 partial 对象。"
+      },
+      {
+        "name": "django.urls.resolvers.ResolverMatch.__repr__",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 直接关于此方法的输出。"
+      },
+      {
+        "name": "django.urls.resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中用于获取 ResolverMatch 实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/urls/resolvers.py",
+        "object": "ResolverMatch.__init__",
+        "lines": "33-56",
+        "reason": "Issue 建议在此处解包 partial 对象。__init__ 中计算 _func_path 的逻辑可能未处理 partial。"
+      },
+      {
+        "path": "django/urls/resolvers.py",
+        "object": "ResolverMatch.__repr__",
+        "lines": "61-65",
+        "reason": "此方法直接输出有问题的 _func_path。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ResolverMatchTests.test_repr",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它直接测试 ResolverMatch.__repr__() 的输出，是测试 __repr__ 行为的起点。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 resolve() 获取 ResolverMatch",
+          "assertEqual 比较 repr() 输出"
+        ],
+        "possible_gap": "当前测试使用普通函数视图，没有使用 functools.partial 作为视图。"
+      },
+      {
+        "test_name": "ResolverMatchTests.test_urlpattern_resolve",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它测试 resolve() 返回的 ResolverMatch 的各个属性，包括 func，可用于验证 partial 处理后的属性。",
+        "reusable_parts": [
+          "测试数据循环",
+          "resolve() 调用",
+          "对 ResolverMatch 属性的多种断言"
+        ],
+        "possible_gap": "测试数据中的 func 是普通函数，不是 partial。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用普通函数（如 empty_view）作为视图。",
+        "target_pattern": "使用 functools.partial 包装的函数作为视图。",
+        "reason": "Issue 明确指出当视图是 partial 对象时触发问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "ResolverMatch.__init__ 接收的 func 参数是普通函数或类。",
+        "target_pattern": "func 参数是 functools.partial 对象。",
+        "reason": "这是触发 __init__ 中 _func_path 计算和 __repr__ 输出问题的直接原因。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "repr",
+        "expression_hint": "repr(resolver_match_instance) 或 resolver_match_instance._func_path",
+        "reason": "Issue 的核心是 __repr__ 输出不友好，观察 repr 字符串或内部 _func_path 属性可以判断是否正确处理了 partial。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(resolver_match_instance.func)",
+        "reason": "可以确认传入的 func 是否是 partial 对象，以及处理后是否被解包。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当视图是 partial 时，__repr__ 输出的 func 部分应包含底层函数名，而非仅 'functools.partial'。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、固定的 repr 字符串相等，因为底层函数名和参数可能变化。",
+        "reason": "Issue 要求揭示底层函数和参数，断言包含这些关键片段比完整字符串更稳定。"
+      },
+      {
+        "assertion_goal": "ResolverMatch 实例的 func 属性（或 _func_path）应能正确反映 partial 包装的底层可调用对象。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 func 严格等于某个特定 partial 对象实例。",
+        "reason": "修复可能涉及解包 partial，断言 func 的类型或路径更关注语义。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 override_settings 设置 ROOT_URLCONF，并定义包含 partial 视图的 URL 配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 functools.partial 和一个基础视图函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase 或 TestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后 __repr__ 输出 partial 参数的确切格式（例如，如何表示预置的 args/kwargs）。",
+      "在 __init__ 中解包 partial 后，是否会影响 ResolverMatch 的其他属性或行为（如 args, kwargs 的合并）。",
+      "除了 __repr__，其他使用 _func_path 或 func 的地方是否也需要调整。"
+    ]
+  }
+}

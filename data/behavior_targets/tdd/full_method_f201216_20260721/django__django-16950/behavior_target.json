@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16950",
+  "issue_summary": "Django Admin 在使用内联（Inlines）时，未正确使用 UUIDField 的默认值，导致保存时 id 字段被设置为 null 而引发异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要设置 Django 测试环境，包括配置数据库、ROOT_URLCONF 指向包含 Admin 的 URLconf，并创建相应的 ModelAdmin 和内联注册。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义与 Issue 描述一致的模型：一个使用 UUIDField(default=uuid.uuid4) 的抽象基类，以及具有 ForeignKey 的内联子模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和 Client 来模拟 Admin 登录和 POST 请求。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inlineformset_factory_nulls_default_pks",
+        "test_file": "tests/model_formsets/test_uuid.py",
+        "why_relevant": "该测试直接针对内联表单集（inlineformset_factory）与具有默认主键（UUID）的父模型的交互进行测试，场景与 Issue 高度相似。",
+        "reusable_parts": [
+          "imports (inlineformset_factory, TestCase)",
+          "使用 UUIDPKParent 和 UUIDPKChild 模型的概念",
+          "assertIsNone 用于检查字段初始值"
+        ],
+        "possible_gap": "该测试在普通表单集上下文中，未涉及 Django Admin 的特定请求/响应流程和 Admin 内联的保存逻辑。"
+      },
+      {
+        "test_name": "test_create_inlines_on_inherited_model",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "该测试在 Django Admin 上下文中测试创建带有内联的对象，涉及客户端 POST 请求和响应检查，与 Issue 的操作环境匹配。",
+        "reusable_parts": [
+          "@override_settings",
+          "TestDataMixin, TestCase 基类",
+          "使用 self.client.post 模拟 Admin 保存操作",
+          "检查 response.status_code 和对象计数"
+        ],
+        "possible_gap": "该测试使用的模型是继承的，但主键是自增的，不涉及 UUIDField 及其默认值问题。"
+      },
+      {
+        "test_name": "test_inline_nonauto_noneditable_pk",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "该测试检查 Admin 内联中非自增、不可编辑主键字段的渲染（隐藏输入），涉及非标准主键的处理。",
+        "reusable_parts": [
+          "Admin 内联测试的框架",
+          "使用 assertContains 检查 HTML 输出中的隐藏字段"
+        ],
+        "possible_gap": "该测试主要关注页面渲染，而非保存逻辑，且使用的是随机主键而非 UUIDField 默认值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django Admin 中，为具有 UUIDField 默认值（如 default=uuid.uuid4）的父模型（Thing）创建新对象，并同时添加一个或多个内联子对象（SubThing），然后保存。",
+      "evidence": [
+        "Issue 描述：'When logging into the admin, if you delete all of the entries for \"subthings\", add a name, and save the model, it will work. As soon as you try to add a subthing alongside the main Thing, it fails...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "保存时抛出异常，指示 Thing 模型的 'id' 字段被设置为 null。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'It shows that the value of \"id\" in the Thing model is being set to null.' 并附有异常链接。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "admin.ModelAdmin",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 涉及 Django Admin 配置和保存行为。"
+      },
+      {
+        "name": "inlineformset_factory",
+        "kind": "function",
+        "source_path": "django/forms/models.py",
+        "reason": "相关测试 1 直接使用此 API 测试内联表单集与默认主键的交互，与 Issue 场景高度相关。"
+      },
+      {
+        "name": "models.UUIDField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 的核心是 UUIDField 的默认值未在特定上下文中被使用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin.save_formset 或相关方法",
+        "lines": "",
+        "reason": "Issue 发生在 Django Admin 保存包含内联的表单时，处理新对象及其内联子对象的逻辑可能未正确处理非自增、有默认值的主键字段。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "BaseInlineFormSet.save_new",
+        "lines": "",
+        "reason": "相关测试 1 测试 inlineformset_factory 对默认主键的处理，表明内联表单集在创建新对象时可能错误地处理了父对象的默认主键值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 使用具有自增主键或非 UUID 默认主键的模型。",
+        "target_pattern": "使用具有 UUIDField(default=uuid.uuid4) 作为主键/唯一标识字段的抽象基类模型，并为其创建内联子模型。",
+        "reason": "Issue 明确指出当父模型使用 UUIDField 默认值且同时添加内联子对象时触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 直接调用 inlineformset_factory 并检查表单字段初始值。",
+        "target_pattern": "在 Django Admin 的视图/请求上下文中触发保存流程，模拟用户通过 Admin 界面添加父对象和内联子对象并提交。",
+        "reason": "Issue 的 bug 仅在通过 Django Admin 界面操作时触发，可能涉及 Admin 特定的中间处理层。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 Django Admin 中，当使用内联为具有 UUIDField 默认值的父模型创建新对象并添加子对象时，父对象的 UUID 字段应正确生成默认值并成功保存，不应为 null。",
+      "evidence": [
+        "Issue 描述中隐含的期望：UUIDField 定义了 default=uuid.uuid4，应自动生成值。",
+        "相关测试 1 涉及 inlineformset_factory 和默认主键的处理逻辑。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 Admin 保存视图（如 response = self.client.post(...)）后，检查 response 是否包含异常或状态码不是 302。",
+        "reason": "Issue 报告保存时抛出异常，观测响应状态或内容可捕获错误。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在保存操作前后，检查新创建的父 Thing 对象的 .id 字段值。",
+        "reason": "Issue 核心是 id 字段被错误设置为 null，直接观测其值可判断 bug 是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在数据库插入操作前后，观测生成的 SQL 语句，特别是 INSERT 语句中是否包含父对象 id 字段的值或是否为 NULL。",
+        "reason": "可帮助定位是 Django ORM 未生成默认值，还是数据库约束导致的错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 Admin 成功创建包含内联子对象的父对象后，父对象的 UUID 字段（id）是一个有效的 UUID 对象，不为 None。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 UUID 字符串值，因为它是随机生成的。避免断言完整的 HTML 响应内容。",
+        "reason": "修复后，父对象的 id 应正确生成 UUID，断言其类型和存在性是稳定且与 Issue 对齐的。"
+      },
+      {
+        "assertion_goal": "验证保存操作成功完成（例如，响应为重定向 302，或未抛出异常）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言响应状态码为 200，因为成功保存后 Admin 通常返回 302 重定向。",
+        "reason": "Issue 中失败会抛出异常或导致非成功响应，成功保存是基本预期。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "异常的确切类型和完整堆栈跟踪未在 Issue 文本中提供，仅提供了链接。",
+    "iCoRe 检索出的相关源代码片段（contenttypes 和 array field）似乎与当前 Issue 无关，不确定它们是否真的涉及缺陷位置。",
+    "不确定 bug 是发生在 Admin 的表单验证、内联表单集保存、还是模型实例保存的哪个具体阶段。",
+    "UUIDField 的 default 调用时机在 Admin 内联上下文中的确切逻辑。"
+  ],
+  "raw": {
+    "issue_summary": "Django Admin 在使用内联（Inlines）时，未正确使用 UUIDField 的默认值，导致保存时 id 字段被设置为 null 而引发异常。",
+    "trigger_condition": {
+      "text": "在 Django Admin 中，为具有 UUIDField 默认值（如 default=uuid.uuid4）的父模型（Thing）创建新对象，并同时添加一个或多个内联子对象（SubThing），然后保存。",
+      "evidence": [
+        "Issue 描述：'When logging into the admin, if you delete all of the entries for \"subthings\", add a name, and save the model, it will work. As soon as you try to add a subthing alongside the main Thing, it fails...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "保存时抛出异常，指示 Thing 模型的 'id' 字段被设置为 null。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'It shows that the value of \"id\" in the Thing model is being set to null.' 并附有异常链接。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 Django Admin 中，当使用内联为具有 UUIDField 默认值的父模型创建新对象并添加子对象时，父对象的 UUID 字段应正确生成默认值并成功保存，不应为 null。",
+      "evidence": [
+        "Issue 描述中隐含的期望：UUIDField 定义了 default=uuid.uuid4，应自动生成值。",
+        "相关测试 1 涉及 inlineformset_factory 和默认主键的处理逻辑。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "admin.ModelAdmin",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 涉及 Django Admin 配置和保存行为。"
+      },
+      {
+        "name": "inlineformset_factory",
+        "kind": "function",
+        "source_path": "django/forms/models.py",
+        "reason": "相关测试 1 直接使用此 API 测试内联表单集与默认主键的交互，与 Issue 场景高度相关。"
+      },
+      {
+        "name": "models.UUIDField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 的核心是 UUIDField 的默认值未在特定上下文中被使用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin.save_formset 或相关方法",
+        "lines": "",
+        "reason": "Issue 发生在 Django Admin 保存包含内联的表单时，处理新对象及其内联子对象的逻辑可能未正确处理非自增、有默认值的主键字段。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "BaseInlineFormSet.save_new",
+        "lines": "",
+        "reason": "相关测试 1 测试 inlineformset_factory 对默认主键的处理，表明内联表单集在创建新对象时可能错误地处理了父对象的默认主键值。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inlineformset_factory_nulls_default_pks",
+        "test_file": "tests/model_formsets/test_uuid.py",
+        "why_relevant": "该测试直接针对内联表单集（inlineformset_factory）与具有默认主键（UUID）的父模型的交互进行测试，场景与 Issue 高度相似。",
+        "reusable_parts": [
+          "imports (inlineformset_factory, TestCase)",
+          "使用 UUIDPKParent 和 UUIDPKChild 模型的概念",
+          "assertIsNone 用于检查字段初始值"
+        ],
+        "possible_gap": "该测试在普通表单集上下文中，未涉及 Django Admin 的特定请求/响应流程和 Admin 内联的保存逻辑。"
+      },
+      {
+        "test_name": "test_create_inlines_on_inherited_model",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "该测试在 Django Admin 上下文中测试创建带有内联的对象，涉及客户端 POST 请求和响应检查，与 Issue 的操作环境匹配。",
+        "reusable_parts": [
+          "@override_settings",
+          "TestDataMixin, TestCase 基类",
+          "使用 self.client.post 模拟 Admin 保存操作",
+          "检查 response.status_code 和对象计数"
+        ],
+        "possible_gap": "该测试使用的模型是继承的，但主键是自增的，不涉及 UUIDField 及其默认值问题。"
+      },
+      {
+        "test_name": "test_inline_nonauto_noneditable_pk",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "该测试检查 Admin 内联中非自增、不可编辑主键字段的渲染（隐藏输入），涉及非标准主键的处理。",
+        "reusable_parts": [
+          "Admin 内联测试的框架",
+          "使用 assertContains 检查 HTML 输出中的隐藏字段"
+        ],
+        "possible_gap": "该测试主要关注页面渲染，而非保存逻辑，且使用的是随机主键而非 UUIDField 默认值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 使用具有自增主键或非 UUID 默认主键的模型。",
+        "target_pattern": "使用具有 UUIDField(default=uuid.uuid4) 作为主键/唯一标识字段的抽象基类模型，并为其创建内联子模型。",
+        "reason": "Issue 明确指出当父模型使用 UUIDField 默认值且同时添加内联子对象时触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 直接调用 inlineformset_factory 并检查表单字段初始值。",
+        "target_pattern": "在 Django Admin 的视图/请求上下文中触发保存流程，模拟用户通过 Admin 界面添加父对象和内联子对象并提交。",
+        "reason": "Issue 的 bug 仅在通过 Django Admin 界面操作时触发，可能涉及 Admin 特定的中间处理层。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 Admin 保存视图（如 response = self.client.post(...)）后，检查 response 是否包含异常或状态码不是 302。",
+        "reason": "Issue 报告保存时抛出异常，观测响应状态或内容可捕获错误。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在保存操作前后，检查新创建的父 Thing 对象的 .id 字段值。",
+        "reason": "Issue 核心是 id 字段被错误设置为 null，直接观测其值可判断 bug 是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在数据库插入操作前后，观测生成的 SQL 语句，特别是 INSERT 语句中是否包含父对象 id 字段的值或是否为 NULL。",
+        "reason": "可帮助定位是 Django ORM 未生成默认值，还是数据库约束导致的错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 Admin 成功创建包含内联子对象的父对象后，父对象的 UUID 字段（id）是一个有效的 UUID 对象，不为 None。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 UUID 字符串值，因为它是随机生成的。避免断言完整的 HTML 响应内容。",
+        "reason": "修复后，父对象的 id 应正确生成 UUID，断言其类型和存在性是稳定且与 Issue 对齐的。"
+      },
+      {
+        "assertion_goal": "验证保存操作成功完成（例如，响应为重定向 302，或未抛出异常）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅断言响应状态码为 200，因为成功保存后 Admin 通常返回 302 重定向。",
+        "reason": "Issue 中失败会抛出异常或导致非成功响应，成功保存是基本预期。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要设置 Django 测试环境，包括配置数据库、ROOT_URLCONF 指向包含 Admin 的 URLconf，并创建相应的 ModelAdmin 和内联注册。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义与 Issue 描述一致的模型：一个使用 UUIDField(default=uuid.uuid4) 的抽象基类，以及具有 ForeignKey 的内联子模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和 Client 来模拟 Admin 登录和 POST 请求。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "异常的确切类型和完整堆栈跟踪未在 Issue 文本中提供，仅提供了链接。",
+      "iCoRe 检索出的相关源代码片段（contenttypes 和 array field）似乎与当前 Issue 无关，不确定它们是否真的涉及缺陷位置。",
+      "不确定 bug 是发生在 Admin 的表单验证、内联表单集保存、还是模型实例保存的哪个具体阶段。",
+      "UUIDField 的 default 调用时机在 Admin 内联上下文中的确切逻辑。"
+    ]
+  }
+}

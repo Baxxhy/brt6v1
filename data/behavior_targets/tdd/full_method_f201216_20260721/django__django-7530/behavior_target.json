@@ -1,0 +1,298 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-7530",
+  "issue_summary": "makemigrations 在一致性检查时错误地以所有项目的模型调用每个应用的 allow_migrate()，而不是以该应用自身的模型调用。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要配置多个应用（app）和模型（model），并设置一个自定义的 DATABASE_ROUTER，该路由器对 (app_label, model) 组合敏感。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 MigrationTestBase 或类似的测试基类，以及 temporary_migration_module 来管理迁移模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 mock.patch 来拦截和检查 allow_migrate 的调用参数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_makemigrations_consistency_checks_respect_routers",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试直接验证 makemigrations 的一致性检查如何与 DATABASE_ROUTERS 交互，并 mock 了 allow_migrate 方法。",
+        "reusable_parts": [
+          "使用 override_settings 设置 DATABASE_ROUTERS",
+          "使用 mock.patch 模拟 allow_migrate 方法",
+          "调用 call_command('makemigrations', ...)",
+          "检查 allow_migrate 的调用参数"
+        ],
+        "possible_gap": "该测试主要关注 allow_migrate 是否被调用以阻止检查，但没有直接验证 allow_migrate 是否被传入了错误的 (app_label, model) 组合（即跨应用的模型）。"
+      },
+      {
+        "test_name": "test_migrate_selection",
+        "test_file": "tests/multiple_database/tests.py",
+        "why_relevant": "该测试涉及数据库路由器和 allow_migrate_model 的行为，展示了路由器如何根据模型和数据库做出决策。",
+        "reusable_parts": [
+          "RouterTestCase 和 override_settings 的使用",
+          "对 router.allow_migrate_model 的断言"
+        ],
+        "possible_gap": "该测试关注的是 migrate 命令的选择逻辑，而非 makemigrations 的一致性检查逻辑。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "运行 makemigrations 命令进行迁移历史一致性检查时，配置了自定义数据库路由器（DATABASE_ROUTERS），且路由器根据 (app_label, model) 对做出决策。",
+      "evidence": [
+        "Issue 描述指出 makemigrations 错误地调用 allow_migrate() 时使用了所有项目的模型，而非每个应用自身的模型。",
+        "相关测试 2 展示了 makemigrations 命令如何与 DATABASE_ROUTERS 设置交互进行一致性检查。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "自定义数据库路由器收到了无效的 (app_label, model) 组合，导致路由器逻辑被破坏（例如，对于分片场景，并非所有分片都有相同的模型）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述提到 'It broke the router I use because it was passing invalid combinations for shards since not all shards have the same models.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "function",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 直接关于 makemigrations 命令的行为。"
+      },
+      {
+        "name": "allow_migrate",
+        "kind": "method",
+        "source_path": "django/db/utils.py",
+        "reason": "Issue 的核心是 allow_migrate() 方法被错误调用。"
+      },
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "测试中用于调用 makemigrations 命令。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/makemigrations.py",
+        "object": "makemigrations",
+        "lines": "",
+        "reason": "Issue 明确指出 makemigrations 命令错误地调用了 allow_migrate()。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中配置的路由器可能只根据 app_label 和 model 对特定数据库做出允许/禁止迁移的决策。",
+        "target_pattern": "配置一个对 (app_label, model) 组合敏感的路由器，当接收到不属于该 app_label 的 model 时会失败或行为异常。",
+        "reason": "Issue 描述的路由器在收到无效组合时会“被破坏”，因此需要模拟这种敏感的路由器逻辑。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 2 中，allow_migrate 被 mock 并检查其是否被调用。",
+        "target_pattern": "在 mock 中检查 allow_migrate 被调用时传入的 model_name 参数是否属于对应的 app_label。",
+        "reason": "为了复现缺陷，需要验证 allow_migrate 是否收到了跨应用的模型名。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "makemigrations 命令在进行一致性检查时，对于每个应用，应仅以该应用自身的模型调用 allow_migrate() 方法。",
+      "evidence": [
+        "Issue 描述暗示了正确行为应为 'for each app with the app's models'。",
+        "相关测试 2 中 allow_migrate 的调用模式暗示了其预期接收特定应用的模型。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "mock 的 allow_migrate 方法接收到的参数，特别是 app_label 和 model_name（或 hints 中的 model）的值。",
+        "reason": "通过观察传入的参数，可以判断是否出现了跨应用的模型组合。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 allow_migrate 调用前后，检查路由器内部状态或日志，看是否因无效组合而进入错误分支。",
+        "reason": "Issue 提到路由器“被破坏”，可能表现为异常、返回错误值或状态不一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于给定的 app_label，allow_migrate 方法接收到的 model_name 属于该 app_label。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或复杂的 repr。避免断言 allow_migrate 被调用的确切次数，除非与核心问题直接相关。",
+        "reason": "Issue 的核心是参数传递错误，因此直接断言参数的正确性是最稳定的方式。"
+      },
+      {
+        "assertion_goal": "验证路由器在处理跨应用模型组合时没有抛出异常或返回意外的值（如果路由器逻辑因此出错）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言特定的异常消息文本，除非 Issue 明确给出。",
+        "reason": "Issue 描述路由器“被破坏”，这可能表现为异常，但具体形式不确定。更稳定的断言是确保没有发生不该有的错误。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切代码位置在 makemigrations.py 中的哪一部分。",
+    "错误调用 allow_migrate 的具体代码逻辑是怎样的（例如，是循环嵌套错误还是参数收集错误）。",
+    "路由器“被破坏”的具体表现是什么（是抛出异常、返回错误值，还是其他副作用）。",
+    "修复后的正确调用模式在代码中应该如何精确实现。"
+  ],
+  "raw": {
+    "issue_summary": "makemigrations 在一致性检查时错误地以所有项目的模型调用每个应用的 allow_migrate()，而不是以该应用自身的模型调用。",
+    "trigger_condition": {
+      "text": "运行 makemigrations 命令进行迁移历史一致性检查时，配置了自定义数据库路由器（DATABASE_ROUTERS），且路由器根据 (app_label, model) 对做出决策。",
+      "evidence": [
+        "Issue 描述指出 makemigrations 错误地调用 allow_migrate() 时使用了所有项目的模型，而非每个应用自身的模型。",
+        "相关测试 2 展示了 makemigrations 命令如何与 DATABASE_ROUTERS 设置交互进行一致性检查。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "自定义数据库路由器收到了无效的 (app_label, model) 组合，导致路由器逻辑被破坏（例如，对于分片场景，并非所有分片都有相同的模型）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述提到 'It broke the router I use because it was passing invalid combinations for shards since not all shards have the same models.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "makemigrations 命令在进行一致性检查时，对于每个应用，应仅以该应用自身的模型调用 allow_migrate() 方法。",
+      "evidence": [
+        "Issue 描述暗示了正确行为应为 'for each app with the app's models'。",
+        "相关测试 2 中 allow_migrate 的调用模式暗示了其预期接收特定应用的模型。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "function",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 直接关于 makemigrations 命令的行为。"
+      },
+      {
+        "name": "allow_migrate",
+        "kind": "method",
+        "source_path": "django/db/utils.py",
+        "reason": "Issue 的核心是 allow_migrate() 方法被错误调用。"
+      },
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "测试中用于调用 makemigrations 命令。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/makemigrations.py",
+        "object": "makemigrations",
+        "lines": "",
+        "reason": "Issue 明确指出 makemigrations 命令错误地调用了 allow_migrate()。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_makemigrations_consistency_checks_respect_routers",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试直接验证 makemigrations 的一致性检查如何与 DATABASE_ROUTERS 交互，并 mock 了 allow_migrate 方法。",
+        "reusable_parts": [
+          "使用 override_settings 设置 DATABASE_ROUTERS",
+          "使用 mock.patch 模拟 allow_migrate 方法",
+          "调用 call_command('makemigrations', ...)",
+          "检查 allow_migrate 的调用参数"
+        ],
+        "possible_gap": "该测试主要关注 allow_migrate 是否被调用以阻止检查，但没有直接验证 allow_migrate 是否被传入了错误的 (app_label, model) 组合（即跨应用的模型）。"
+      },
+      {
+        "test_name": "test_migrate_selection",
+        "test_file": "tests/multiple_database/tests.py",
+        "why_relevant": "该测试涉及数据库路由器和 allow_migrate_model 的行为，展示了路由器如何根据模型和数据库做出决策。",
+        "reusable_parts": [
+          "RouterTestCase 和 override_settings 的使用",
+          "对 router.allow_migrate_model 的断言"
+        ],
+        "possible_gap": "该测试关注的是 migrate 命令的选择逻辑，而非 makemigrations 的一致性检查逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中配置的路由器可能只根据 app_label 和 model 对特定数据库做出允许/禁止迁移的决策。",
+        "target_pattern": "配置一个对 (app_label, model) 组合敏感的路由器，当接收到不属于该 app_label 的 model 时会失败或行为异常。",
+        "reason": "Issue 描述的路由器在收到无效组合时会“被破坏”，因此需要模拟这种敏感的路由器逻辑。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 2 中，allow_migrate 被 mock 并检查其是否被调用。",
+        "target_pattern": "在 mock 中检查 allow_migrate 被调用时传入的 model_name 参数是否属于对应的 app_label。",
+        "reason": "为了复现缺陷，需要验证 allow_migrate 是否收到了跨应用的模型名。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "mock 的 allow_migrate 方法接收到的参数，特别是 app_label 和 model_name（或 hints 中的 model）的值。",
+        "reason": "通过观察传入的参数，可以判断是否出现了跨应用的模型组合。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 allow_migrate 调用前后，检查路由器内部状态或日志，看是否因无效组合而进入错误分支。",
+        "reason": "Issue 提到路由器“被破坏”，可能表现为异常、返回错误值或状态不一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于给定的 app_label，allow_migrate 方法接收到的 model_name 属于该 app_label。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或复杂的 repr。避免断言 allow_migrate 被调用的确切次数，除非与核心问题直接相关。",
+        "reason": "Issue 的核心是参数传递错误，因此直接断言参数的正确性是最稳定的方式。"
+      },
+      {
+        "assertion_goal": "验证路由器在处理跨应用模型组合时没有抛出异常或返回意外的值（如果路由器逻辑因此出错）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言特定的异常消息文本，除非 Issue 明确给出。",
+        "reason": "Issue 描述路由器“被破坏”，这可能表现为异常，但具体形式不确定。更稳定的断言是确保没有发生不该有的错误。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要配置多个应用（app）和模型（model），并设置一个自定义的 DATABASE_ROUTER，该路由器对 (app_label, model) 组合敏感。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 MigrationTestBase 或类似的测试基类，以及 temporary_migration_module 来管理迁移模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 mock.patch 来拦截和检查 allow_migrate 的调用参数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切代码位置在 makemigrations.py 中的哪一部分。",
+      "错误调用 allow_migrate 的具体代码逻辑是怎样的（例如，是循环嵌套错误还是参数收集错误）。",
+      "路由器“被破坏”的具体表现是什么（是抛出异常、返回错误值，还是其他副作用）。",
+      "修复后的正确调用模式在代码中应该如何精确实现。"
+    ]
+  }
+}

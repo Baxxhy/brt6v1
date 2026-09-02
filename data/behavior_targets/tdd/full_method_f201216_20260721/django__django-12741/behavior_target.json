@@ -1,0 +1,268 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12741",
+  "issue_summary": "DatabaseOperations.execute_sql_flush() 方法的签名可以简化，移除冗余的 using 参数。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 TransactionTestCase 并设置数据库表（例如 Author 和 Book 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入必要的模块，如 transaction、connection、no_style 以及相关模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_execute_sql_flush_statements",
+        "test_file": "tests/backends/base/test_operations.py",
+        "why_relevant": "它直接调用了 execute_sql_flush 方法，并展示了其当前的使用模式（传递两个参数）。",
+        "reusable_parts": [
+          "TransactionTestCase 的使用",
+          "使用 connection.ops 获取操作实例",
+          "调用 sql_flush 生成 SQL 列表",
+          "调用 execute_sql_flush",
+          "使用 assertIs 和 assertEqual 进行断言"
+        ],
+        "possible_gap": "该测试当前使用正确的双参数调用，不会触发签名不匹配的错误。需要变异调用方式以测试单参数签名。"
+      },
+      {
+        "test_name": "test_sequence_name_length_limits_flush",
+        "test_file": "tests/backends/tests.py",
+        "why_relevant": "它也调用了 execute_sql_flush 方法，展示了在另一个上下文中的使用。",
+        "reusable_parts": [
+          "TransactionTestCase 的使用",
+          "模型和表名的设置",
+          "调用 sql_flush 生成 SQL 列表",
+          "调用 execute_sql_flush"
+        ],
+        "possible_gap": "同样使用双参数调用，不会触发签名问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 execute_sql_flush 方法时，传入 using 参数。",
+      "evidence": [
+        "Issue 描述中给出了当前签名：def execute_sql_flush(self, using, sql_list):",
+        "相关测试 1 和 2 中展示了调用方式：connection.ops.execute_sql_flush(connection.alias, sql_list)"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前方法签名包含一个冗余的 using 参数，调用者需要显式传递 self.connection.alias。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述指出 using 参数可以被移除，并由调用实例推断：self.connection.alias。",
+        "Issue 提到一些内部调用已经这样做了：connection.ops.execute_sql_flush(connection.alias, sql_flush)"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DatabaseOperations.execute_sql_flush",
+        "kind": "method",
+        "source_path": "django/db/backends/base/operations.py",
+        "reason": "这是 Issue 直接讨论的需要修改签名的方法。"
+      },
+      {
+        "name": "DatabaseOperations.sql_flush",
+        "kind": "method",
+        "source_path": "django/db/backends/base/operations.py",
+        "reason": "相关测试中，sql_flush 被调用以生成 sql_list，然后传递给 execute_sql_flush。"
+      },
+      {
+        "name": "connection.ops",
+        "kind": "property",
+        "source_path": "django/db/__init__.py",
+        "reason": "这是获取 DatabaseOperations 实例的常见方式，用于调用 execute_sql_flush。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/operations.py",
+        "object": "BaseDatabaseOperations.execute_sql_flush",
+        "lines": "403-408",
+        "reason": "这是 Issue 中明确指出的需要修改签名的方法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "connection.ops.execute_sql_flush(connection.alias, sql_list)",
+        "target_pattern": "connection.ops.execute_sql_flush(sql_list)",
+        "reason": "Issue 建议移除 using 参数，因此变异为只传递 sql_list 可能触发方法签名不匹配的错误（如果方法尚未修改）。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "execute_sql_flush 方法应接受一个参数 sql_list，并内部使用 self.connection.alias 来推断 using。",
+      "evidence": [
+        "Issue 描述中给出了预期的简化签名：def execute_sql_flush(self, sql_list):",
+        "Issue 指出 using 参数可以被移除并推断。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 connection.ops.execute_sql_flush(sql_list) 时是否引发 TypeError（例如参数数量错误）。",
+        "reason": "如果方法签名尚未修改，使用单参数调用会引发异常，表明 Issue 描述的问题存在。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 connection.ops.execute_sql_flush(sql_list) 后，数据库表的状态（例如记录是否被清空）。",
+        "reason": "如果方法签名已修改且功能正常，调用应成功并清空表数据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用单参数调用 execute_sql_flush 应成功执行，不引发 TypeError，并清空目标表。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的异常消息，因为这些可能因数据库后端而异。",
+        "reason": "Issue 的核心是方法签名变更。如果方法未修改，单参数调用应引发 TypeError；如果已修改，则应正常执行。使用 raises 断言可以捕捉签名不匹配的错误。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "execute_sql_flush 方法是否已经在某些数据库后端中实现了单参数版本？",
+    "如果方法签名已修改，内部是否正确地使用了 self.connection.alias？",
+    "除了 TypeError，是否还有其他潜在的错误（例如数据库连接错误）？"
+  ],
+  "raw": {
+    "issue_summary": "DatabaseOperations.execute_sql_flush() 方法的签名可以简化，移除冗余的 using 参数。",
+    "trigger_condition": {
+      "text": "调用 execute_sql_flush 方法时，传入 using 参数。",
+      "evidence": [
+        "Issue 描述中给出了当前签名：def execute_sql_flush(self, using, sql_list):",
+        "相关测试 1 和 2 中展示了调用方式：connection.ops.execute_sql_flush(connection.alias, sql_list)"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前方法签名包含一个冗余的 using 参数，调用者需要显式传递 self.connection.alias。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述指出 using 参数可以被移除，并由调用实例推断：self.connection.alias。",
+        "Issue 提到一些内部调用已经这样做了：connection.ops.execute_sql_flush(connection.alias, sql_flush)"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "execute_sql_flush 方法应接受一个参数 sql_list，并内部使用 self.connection.alias 来推断 using。",
+      "evidence": [
+        "Issue 描述中给出了预期的简化签名：def execute_sql_flush(self, sql_list):",
+        "Issue 指出 using 参数可以被移除并推断。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DatabaseOperations.execute_sql_flush",
+        "kind": "method",
+        "source_path": "django/db/backends/base/operations.py",
+        "reason": "这是 Issue 直接讨论的需要修改签名的方法。"
+      },
+      {
+        "name": "DatabaseOperations.sql_flush",
+        "kind": "method",
+        "source_path": "django/db/backends/base/operations.py",
+        "reason": "相关测试中，sql_flush 被调用以生成 sql_list，然后传递给 execute_sql_flush。"
+      },
+      {
+        "name": "connection.ops",
+        "kind": "property",
+        "source_path": "django/db/__init__.py",
+        "reason": "这是获取 DatabaseOperations 实例的常见方式，用于调用 execute_sql_flush。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/operations.py",
+        "object": "BaseDatabaseOperations.execute_sql_flush",
+        "lines": "403-408",
+        "reason": "这是 Issue 中明确指出的需要修改签名的方法。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_execute_sql_flush_statements",
+        "test_file": "tests/backends/base/test_operations.py",
+        "why_relevant": "它直接调用了 execute_sql_flush 方法，并展示了其当前的使用模式（传递两个参数）。",
+        "reusable_parts": [
+          "TransactionTestCase 的使用",
+          "使用 connection.ops 获取操作实例",
+          "调用 sql_flush 生成 SQL 列表",
+          "调用 execute_sql_flush",
+          "使用 assertIs 和 assertEqual 进行断言"
+        ],
+        "possible_gap": "该测试当前使用正确的双参数调用，不会触发签名不匹配的错误。需要变异调用方式以测试单参数签名。"
+      },
+      {
+        "test_name": "test_sequence_name_length_limits_flush",
+        "test_file": "tests/backends/tests.py",
+        "why_relevant": "它也调用了 execute_sql_flush 方法，展示了在另一个上下文中的使用。",
+        "reusable_parts": [
+          "TransactionTestCase 的使用",
+          "模型和表名的设置",
+          "调用 sql_flush 生成 SQL 列表",
+          "调用 execute_sql_flush"
+        ],
+        "possible_gap": "同样使用双参数调用，不会触发签名问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "connection.ops.execute_sql_flush(connection.alias, sql_list)",
+        "target_pattern": "connection.ops.execute_sql_flush(sql_list)",
+        "reason": "Issue 建议移除 using 参数，因此变异为只传递 sql_list 可能触发方法签名不匹配的错误（如果方法尚未修改）。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 connection.ops.execute_sql_flush(sql_list) 时是否引发 TypeError（例如参数数量错误）。",
+        "reason": "如果方法签名尚未修改，使用单参数调用会引发异常，表明 Issue 描述的问题存在。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 connection.ops.execute_sql_flush(sql_list) 后，数据库表的状态（例如记录是否被清空）。",
+        "reason": "如果方法签名已修改且功能正常，调用应成功并清空表数据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用单参数调用 execute_sql_flush 应成功执行，不引发 TypeError，并清空目标表。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的异常消息，因为这些可能因数据库后端而异。",
+        "reason": "Issue 的核心是方法签名变更。如果方法未修改，单参数调用应引发 TypeError；如果已修改，则应正常执行。使用 raises 断言可以捕捉签名不匹配的错误。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TransactionTestCase 并设置数据库表（例如 Author 和 Book 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入必要的模块，如 transaction、connection、no_style 以及相关模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "execute_sql_flush 方法是否已经在某些数据库后端中实现了单参数版本？",
+      "如果方法签名已修改，内部是否正确地使用了 self.connection.alias？",
+      "除了 TypeError，是否还有其他潜在的错误（例如数据库连接错误）？"
+    ]
+  }
+}

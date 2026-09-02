@@ -1,0 +1,342 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-18698",
+  "issue_summary": "sqf_list 函数在处理某些多项式时返回的因子重数（multiplicity）不正确。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 相关模块，如 Poly, sqf_list, symbols。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义符号变量，如 x = symbols('x')。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造测试多项式时，使用 sympy 的乘法运算符和幂运算符。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_sqf",
+        "test_file": "sympy/polys/tests/test_polytools.py",
+        "why_relevant": "该测试直接测试了 sqf 和 sqf_list 函数，包含了多种输入和断言，是生成缺陷复现测试最直接的起点。",
+        "reusable_parts": [
+          "导入语句（如 from sympy import Poly, sqf, sqf_list）",
+          "多项式的构造方式（如 f = x**5 - x**3 - x**2 + 1）",
+          "sqf_list 的调用方式（如 sqf_list(f) 或 Poly(f).sqf_list()）",
+          "断言风格（如 assert sqf_list(f) == (1, [(g, 1), (h, 2)])）"
+        ],
+        "possible_gap": "现有测试用例可能未覆盖到 Issue 中触发缺陷的特定多项式结构（即包含多个不同因子但具有相同重数的情况）。"
+      },
+      {
+        "test_name": "test_PolyElement_sqf_list",
+        "test_file": "sympy/polys/tests/test_rings.py",
+        "why_relevant": "测试了底层环（ring）元素的 sqf_list 方法，这可能与 Poly.sqf_list 调用的底层实现相关。",
+        "reusable_parts": [
+          "环的构造（如 _, x = ring(\"x\", ZZ)）",
+          "底层 sqf_list 的调用和断言模式"
+        ],
+        "possible_gap": "该测试使用底层环 API，与 Issue 中使用的 Poly 或 top-level sqf_list API 不同，需要适配调用方式。"
+      },
+      {
+        "test_name": "test_dup_sqf",
+        "test_file": "sympy/polys/tests/test_sqfreetools.py",
+        "why_relevant": "测试了底层一元多项式的无平方因子分解（dup_sqf_list），缺陷可能出现在此底层算法中。",
+        "reusable_parts": [
+          "底层 sqf_list 的输入输出格式示例",
+          "对不同域（ZZ, QQ, FF）的测试"
+        ],
+        "possible_gap": "这是对非常底层函数的测试，与用户直接调用的 API 距离较远，且测试用例可能也未包含触发缺陷的特定多项式。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 sqf_list 函数处理包含多个不同重数因子的多项式，例如 (x**2 + 1) * (x - 1)**2 * (x - 2)**3 * (x - 3)**3。",
+      "evidence": [
+        "Issue 中提供了两个触发示例：一个错误的输出和一个正确的输出。",
+        "相关测试代码 test_sqf 和 test_PolyElement_sqf_list 展示了 sqf_list 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "sqf_list 返回的因子列表中，某些因子的重数与预期不符。在 Issue 的错误示例中，两个重数为 3 的因子被错误地合并或表示。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确指出输出结果不一致，并给出了具体的错误输出示例：`(1, [(x**2 + 1, 1), (x - 1, 2), (x - 3, 3), (x - 2, 3)])`，而预期应为 `(x*_2 - 5_x + 6, 3)` 而不是两个重数为 3 的因子。",
+        "相关测试代码 test_sqf 中包含了多个 sqf_list 的断言，表明其返回值应遵循特定格式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sqf_list",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 直接报告了 sqf_list 函数输出不一致的问题，且相关源码片段 2 展示了其定义。"
+      },
+      {
+        "name": "Poly.sqf_list",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "相关测试代码中大量使用 Poly 对象的 sqf_list 方法，这是调用 sqf_list 功能的主要方式之一。"
+      },
+      {
+        "name": "sqf",
+        "kind": "function",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "相关源码片段 1 定义了 sqf 函数，Issue 标题提到了 sqf 和 sqf_list，且测试代码中也有对 sqf 的测试。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/polys/polytools.py",
+        "object": "Poly.sqf_list",
+        "lines": "3210-3237",
+        "reason": "这是 Issue 中直接提到的函数，其实现调用了底层表示（f.rep）的 sqf_list 方法，问题可能出现在该方法的调用或结果处理中。"
+      },
+      {
+        "path": "sympy/polys/some_underlying_module (如 sqfreetools)",
+        "object": "底层 sqf_list 实现（如 dup_sqf_list, dmp_sqf_list）",
+        "lines": "",
+        "reason": "相关测试代码 test_dup_sqf 和 test_dmp_sqf 测试了底层环（ring）的 sqf_list 操作，缺陷可能源于这些底层实现中处理因子重数的逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的多项式，如 x**5 - x**3 - x**2 + 1，其因子重数组合可能较简单（如 (1, 2)）。",
+        "target_pattern": "使用 Issue 中触发缺陷的多项式：(x**2 + 1) * (x - 1)**2 * (x - 2)**3 * (x - 3)**3，包含多个不同因子且部分因子重数相同（两个重数为 3 的因子）。",
+        "reason": "Issue 表明缺陷在特定输入下触发，即当多项式包含多个不同因子但具有相同重数时，sqf_list 可能错误地处理这些因子的表示或重数。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试可能主要测试整数或有理数域上的多项式。",
+        "target_pattern": "确保测试多项式在整数域（ZZ）或有理数域（QQ）上，因为 Issue 示例未指定特殊域。",
+        "reason": "相关测试代码覆盖了不同域，但 Issue 示例是标准多项式，应在默认或整数域上测试。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "sqf_list 应正确计算并返回多项式的无平方因子分解列表，每个因子的重数应准确反映其在原始多项式中的指数。对于具有相同重数的不同因子，不应错误地合并或丢失。",
+      "evidence": [
+        "Issue 中给出了一个正确的示例：`sqf_list( x**5 - 2*x**4 - 2*x**3 + 4*x**2 + x - 2 )` 返回 `(1, [(x - 2, 1), (x**2 - 1, 2)])`，其中重数为 2 的因子只有一个。",
+        "相关测试代码 test_sqf 中的断言 `assert sqf_list(f) == (1, [(g, 1), (h, 2)])` 展示了预期的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "sqf_list(polynomial) 的返回值，特别是返回的元组中第二个元素（因子列表）的结构和每个因子的重数。",
+        "reason": "Issue 的核心是返回值错误，直接观察返回值并与预期比较是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "Poly(polynomial).sqf_list() 的返回值。",
+        "reason": "Poly 对象的 sqf_list 方法是另一种调用方式，需要确认缺陷是否在不同 API 路径下都出现。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "返回的因子列表中每个因子的字符串表示（repr）或类型。",
+        "reason": "帮助确认返回的因子对象是否正确（是 Poly 对象还是表达式），以及它们的顺序。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 sqf_list 返回的因子列表中，每个因子的重数（multiplicity）与输入多项式分解后该因子的指数一致。对于具有相同重数的不同因子，不应丢失或错误合并。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、顺序敏感的列表完全相等，因为因子顺序可能未指定。应关注因子集合和重数的正确性。",
+        "reason": "Issue 表明重数计算错误，且因子顺序可能不是问题核心。断言应聚焦于因子和重数的对应关系。"
+      },
+      {
+        "assertion_goal": "验证返回的因子列表中的因子数量与输入多项式中不同无平方因子的数量一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言因子的字符串表示完全匹配，应使用符号相等（如 factor.equals(expected_factor)）。",
+        "reason": "这可以检查是否错误地合并了不同的因子。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切底层位置：是在 Poly.sqf_list 方法中，还是在它调用的 rep.sqf_list 底层实现中（如 dup_sqf_list 或 dmp_sqf_list）？",
+    "缺陷是否只在特定域（如 ZZ）上触发？Issue 示例未指定域。",
+    "因子在返回列表中的顺序是否有规范？Issue 中错误输出的顺序可能与预期不同，但问题核心是重数错误。",
+    "除了 Issue 中给出的具体多项式，是否还有其他输入模式会触发此缺陷？"
+  ],
+  "raw": {
+    "issue_summary": "sqf_list 函数在处理某些多项式时返回的因子重数（multiplicity）不正确。",
+    "trigger_condition": {
+      "text": "调用 sqf_list 函数处理包含多个不同重数因子的多项式，例如 (x**2 + 1) * (x - 1)**2 * (x - 2)**3 * (x - 3)**3。",
+      "evidence": [
+        "Issue 中提供了两个触发示例：一个错误的输出和一个正确的输出。",
+        "相关测试代码 test_sqf 和 test_PolyElement_sqf_list 展示了 sqf_list 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "sqf_list 返回的因子列表中，某些因子的重数与预期不符。在 Issue 的错误示例中，两个重数为 3 的因子被错误地合并或表示。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确指出输出结果不一致，并给出了具体的错误输出示例：`(1, [(x**2 + 1, 1), (x - 1, 2), (x - 3, 3), (x - 2, 3)])`，而预期应为 `(x*_2 - 5_x + 6, 3)` 而不是两个重数为 3 的因子。",
+        "相关测试代码 test_sqf 中包含了多个 sqf_list 的断言，表明其返回值应遵循特定格式。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "sqf_list 应正确计算并返回多项式的无平方因子分解列表，每个因子的重数应准确反映其在原始多项式中的指数。对于具有相同重数的不同因子，不应错误地合并或丢失。",
+      "evidence": [
+        "Issue 中给出了一个正确的示例：`sqf_list( x**5 - 2*x**4 - 2*x**3 + 4*x**2 + x - 2 )` 返回 `(1, [(x - 2, 1), (x**2 - 1, 2)])`，其中重数为 2 的因子只有一个。",
+        "相关测试代码 test_sqf 中的断言 `assert sqf_list(f) == (1, [(g, 1), (h, 2)])` 展示了预期的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sqf_list",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 直接报告了 sqf_list 函数输出不一致的问题，且相关源码片段 2 展示了其定义。"
+      },
+      {
+        "name": "Poly.sqf_list",
+        "kind": "method",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "相关测试代码中大量使用 Poly 对象的 sqf_list 方法，这是调用 sqf_list 功能的主要方式之一。"
+      },
+      {
+        "name": "sqf",
+        "kind": "function",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "相关源码片段 1 定义了 sqf 函数，Issue 标题提到了 sqf 和 sqf_list，且测试代码中也有对 sqf 的测试。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/polys/polytools.py",
+        "object": "Poly.sqf_list",
+        "lines": "3210-3237",
+        "reason": "这是 Issue 中直接提到的函数，其实现调用了底层表示（f.rep）的 sqf_list 方法，问题可能出现在该方法的调用或结果处理中。"
+      },
+      {
+        "path": "sympy/polys/some_underlying_module (如 sqfreetools)",
+        "object": "底层 sqf_list 实现（如 dup_sqf_list, dmp_sqf_list）",
+        "lines": "",
+        "reason": "相关测试代码 test_dup_sqf 和 test_dmp_sqf 测试了底层环（ring）的 sqf_list 操作，缺陷可能源于这些底层实现中处理因子重数的逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_sqf",
+        "test_file": "sympy/polys/tests/test_polytools.py",
+        "why_relevant": "该测试直接测试了 sqf 和 sqf_list 函数，包含了多种输入和断言，是生成缺陷复现测试最直接的起点。",
+        "reusable_parts": [
+          "导入语句（如 from sympy import Poly, sqf, sqf_list）",
+          "多项式的构造方式（如 f = x**5 - x**3 - x**2 + 1）",
+          "sqf_list 的调用方式（如 sqf_list(f) 或 Poly(f).sqf_list()）",
+          "断言风格（如 assert sqf_list(f) == (1, [(g, 1), (h, 2)])）"
+        ],
+        "possible_gap": "现有测试用例可能未覆盖到 Issue 中触发缺陷的特定多项式结构（即包含多个不同因子但具有相同重数的情况）。"
+      },
+      {
+        "test_name": "test_PolyElement_sqf_list",
+        "test_file": "sympy/polys/tests/test_rings.py",
+        "why_relevant": "测试了底层环（ring）元素的 sqf_list 方法，这可能与 Poly.sqf_list 调用的底层实现相关。",
+        "reusable_parts": [
+          "环的构造（如 _, x = ring(\"x\", ZZ)）",
+          "底层 sqf_list 的调用和断言模式"
+        ],
+        "possible_gap": "该测试使用底层环 API，与 Issue 中使用的 Poly 或 top-level sqf_list API 不同，需要适配调用方式。"
+      },
+      {
+        "test_name": "test_dup_sqf",
+        "test_file": "sympy/polys/tests/test_sqfreetools.py",
+        "why_relevant": "测试了底层一元多项式的无平方因子分解（dup_sqf_list），缺陷可能出现在此底层算法中。",
+        "reusable_parts": [
+          "底层 sqf_list 的输入输出格式示例",
+          "对不同域（ZZ, QQ, FF）的测试"
+        ],
+        "possible_gap": "这是对非常底层函数的测试，与用户直接调用的 API 距离较远，且测试用例可能也未包含触发缺陷的特定多项式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的多项式，如 x**5 - x**3 - x**2 + 1，其因子重数组合可能较简单（如 (1, 2)）。",
+        "target_pattern": "使用 Issue 中触发缺陷的多项式：(x**2 + 1) * (x - 1)**2 * (x - 2)**3 * (x - 3)**3，包含多个不同因子且部分因子重数相同（两个重数为 3 的因子）。",
+        "reason": "Issue 表明缺陷在特定输入下触发，即当多项式包含多个不同因子但具有相同重数时，sqf_list 可能错误地处理这些因子的表示或重数。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试可能主要测试整数或有理数域上的多项式。",
+        "target_pattern": "确保测试多项式在整数域（ZZ）或有理数域（QQ）上，因为 Issue 示例未指定特殊域。",
+        "reason": "相关测试代码覆盖了不同域，但 Issue 示例是标准多项式，应在默认或整数域上测试。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "sqf_list(polynomial) 的返回值，特别是返回的元组中第二个元素（因子列表）的结构和每个因子的重数。",
+        "reason": "Issue 的核心是返回值错误，直接观察返回值并与预期比较是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "Poly(polynomial).sqf_list() 的返回值。",
+        "reason": "Poly 对象的 sqf_list 方法是另一种调用方式，需要确认缺陷是否在不同 API 路径下都出现。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "返回的因子列表中每个因子的字符串表示（repr）或类型。",
+        "reason": "帮助确认返回的因子对象是否正确（是 Poly 对象还是表达式），以及它们的顺序。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 sqf_list 返回的因子列表中，每个因子的重数（multiplicity）与输入多项式分解后该因子的指数一致。对于具有相同重数的不同因子，不应丢失或错误合并。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、顺序敏感的列表完全相等，因为因子顺序可能未指定。应关注因子集合和重数的正确性。",
+        "reason": "Issue 表明重数计算错误，且因子顺序可能不是问题核心。断言应聚焦于因子和重数的对应关系。"
+      },
+      {
+        "assertion_goal": "验证返回的因子列表中的因子数量与输入多项式中不同无平方因子的数量一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言因子的字符串表示完全匹配，应使用符号相等（如 factor.equals(expected_factor)）。",
+        "reason": "这可以检查是否错误地合并了不同的因子。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 相关模块，如 Poly, sqf_list, symbols。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义符号变量，如 x = symbols('x')。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造测试多项式时，使用 sympy 的乘法运算符和幂运算符。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切底层位置：是在 Poly.sqf_list 方法中，还是在它调用的 rep.sqf_list 底层实现中（如 dup_sqf_list 或 dmp_sqf_list）？",
+      "缺陷是否只在特定域（如 ZZ）上触发？Issue 示例未指定域。",
+      "因子在返回列表中的顺序是否有规范？Issue 中错误输出的顺序可能与预期不同，但问题核心是重数错误。",
+      "除了 Issue 中给出的具体多项式，是否还有其他输入模式会触发此缺陷？"
+    ]
+  }
+}

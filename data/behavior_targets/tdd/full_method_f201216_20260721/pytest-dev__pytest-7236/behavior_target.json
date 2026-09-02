@@ -1,0 +1,338 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-7236",
+  "issue_summary": "使用 --pdb 参数运行 pytest 时，被 unittest.skip 装饰器跳过的测试的 tearDown 方法会被错误执行。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 testdir fixture 来创建和运行测试文件。可能需要 monkeypatch 来注入状态记录（如记录 tearDown 调用）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承 unittest.TestCase，并包含被 @unittest.skip 装饰的测试方法和一个定义了 tearDown 方法的类。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "运行测试时需要添加 --pdb 命令行参数。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pdb_unittest_skip",
+        "test_file": "testing/test_debugging.py",
+        "why_relevant": "直接测试了 unittest.skipIf 与 --pdb 参数一起使用的情况，验证了测试被跳过且没有错误。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试文件",
+          "使用 testdir.spawn_pytest 运行带 --pdb 的命令",
+          "验证输出包含跳过信息"
+        ],
+        "possible_gap": "该测试使用 skipIf(True)，而 Issue 使用 @unittest.skip 装饰器。它没有检查 tearDown 是否被错误调用，只验证了跳过信息。"
+      },
+      {
+        "test_name": "test_pdb_teardown_called",
+        "test_file": "testing/test_unittest.py",
+        "why_relevant": "专门测试了 --pdb 参数下 tearDown 方法的调用，使用了 unittest.TestCase 并收集 tearDown 调用记录。",
+        "reusable_parts": [
+          "使用 unittest.TestCase 类",
+          "在 tearDown 中追加调用记录",
+          "使用 testdir.runpytest_inprocess 运行 --pdb",
+          "验证 tearDown 被调用的顺序和内容"
+        ],
+        "possible_gap": "该测试验证的是正常（未跳过）测试的 tearDown 被调用，而 Issue 是跳过测试的 tearDown 不应被调用。需要变异为包含跳过的测试。"
+      },
+      {
+        "test_name": "test_pdb_on_skip",
+        "test_file": "testing/test_debugging.py",
+        "why_relevant": "测试了 pytest.skip 与 --pdb 的交互，验证了跳过时不会进入调试器（pdblist 为空）。",
+        "reusable_parts": [
+          "使用 runpdb_and_get_report 辅助函数",
+          "检查报告状态为 skipped",
+          "检查 pdblist 长度"
+        ],
+        "possible_gap": "测试的是 pytest.skip，而不是 unittest.skip。且没有涉及 unittest.TestCase 的 setUp/tearDown 生命周期。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 pytest 运行一个包含被 @unittest.skip 装饰的测试方法的 unittest.TestCase 子类，并添加 --pdb 命令行参数。",
+      "evidence": [
+        "Issue 中用户提供的测试代码和命令 `pytest --pdb test_repro.py`。",
+        "Issue 描述表明在 pytest 5.4.1 中正常，5.4.2 中出现问题。",
+        "相关测试 1 (test_pdb_unittest_skip) 也涉及 --pdb 和 unittest.skipIf。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "被跳过的测试的 tearDown 方法被执行，导致其中未定义的变量引发 NameError 异常，测试结果从 'skipped' 变为 'error'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误输出显示 `NameError: name 'xxx' is not defined` 来自 `tearDown` 方法。",
+        "Issue 中测试摘要显示 `1 skipped, 1 error`，表明出现了错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "unittest.skip",
+        "kind": "decorator",
+        "source_path": "",
+        "reason": "Issue 中用于跳过测试的装饰器，是触发条件的关键部分。"
+      },
+      {
+        "name": "unittest.TestCase.tearDown",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中错误执行的方法，是缺陷的直接表现。"
+      },
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "",
+        "reason": "运行测试的入口点，需要 --pdb 参数来触发缺陷。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/unittest.py",
+        "object": "处理 unittest.TestCase 测试运行和 --pdb 交互的逻辑",
+        "lines": "",
+        "reason": "Issue 涉及 unittest 与 pytest 的集成，特别是 --pdb 参数如何影响测试生命周期（setUp/tearDown）的执行。缺陷可能在于 --pdb 模式下对跳过测试的处理逻辑。"
+      },
+      {
+        "path": "src/_pytest/debugging.py",
+        "object": "处理 --pdb 参数和调试器交互的逻辑",
+        "lines": "",
+        "reason": "--pdb 是触发条件，相关测试 4 (test_pdb_teardown_called) 表明 --pdb 会延迟 tearDown 调用，可能与跳过逻辑产生冲突。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 4 中，测试正常运行（或通过 skipIf 条件跳过），然后验证 --pdb 下的行为。",
+        "target_pattern": "测试类中包含一个被 @unittest.skip 装饰的测试方法，并且该类定义了 tearDown 方法。使用 --pdb 运行。",
+        "reason": "Issue 表明，只有当测试被 @unittest.skip 装饰且使用 --pdb 运行时，tearDown 才会被错误执行。需要将正常测试或条件跳过变为无条件装饰器跳过。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 4 中，tearDown 被调用并记录状态，这是期望的正常行为。",
+        "target_pattern": "tearDown 方法中包含会引发异常的操作（如访问未定义变量），以检测其是否被不应执行地执行了。",
+        "reason": "为了清晰捕捉缺陷，需要让错误执行的 tearDown 产生明显的失败信号（如异常），而不是静默通过。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使使用 --pdb 参数，被 @unittest.skip 装饰的测试也应被完全跳过，其 setUp 和 tearDown 方法都不应执行。",
+      "evidence": [
+        "Issue 中用户期望：\"I would have expected the test to be skipped, even with `--pdb`.\"",
+        "相关测试 3 (test_pdb_on_skip) 验证了使用 pytest.skip 时，--pdb 不会触发调试器，暗示跳过应完全生效。",
+        "相关测试 1 (test_pdb_unittest_skip) 验证了 unittest.skipIf 与 --pdb 一起使用时，测试被跳过且没有错误。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "测试运行结果中的异常信息，特别是是否来自 tearDown 方法。",
+        "reason": "Issue 的核心错误是 tearDown 被执行并抛出 NameError。观测是否有异常及异常来源可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "tearDown 方法是否被调用（例如通过一个全局列表记录调用）。",
+        "reason": "直接验证被跳过的测试的 tearDown 方法是否被执行，这是缺陷行为的核心。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "测试运行后的结果摘要（passed, skipped, failed, error 的数量）。",
+        "reason": "Issue 中正确行为应为 1 skipped，错误行为为 1 skipped, 1 error。观测结果分类可以判断整体行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 --pdb 运行被 @unittest.skip 装饰的测试时，其 tearDown 方法没有被调用，且测试结果为 skipped 而非 error。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的控制台输出字符串，因为输出格式可能变化。",
+        "reason": "断言 tearDown 调用记录为空，并且结果统计中 skipped=1, errors=0，这直接对应 Issue 的期望行为，且不依赖于易变的输出格式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只影响 @unittest.skip，还是也影响 unittest.skipIf？",
+    "缺陷是否与特定的 Python 或 pytest 版本严格相关（Issue 提到 5.4.1 正常，5.4.2 异常）？",
+    "setUp 方法是否也会被错误执行？Issue 只明确提到了 tearDown。",
+    "缺陷的确切代码位置和根本原因是什么？"
+  ],
+  "raw": {
+    "issue_summary": "使用 --pdb 参数运行 pytest 时，被 unittest.skip 装饰器跳过的测试的 tearDown 方法会被错误执行。",
+    "trigger_condition": {
+      "text": "使用 pytest 运行一个包含被 @unittest.skip 装饰的测试方法的 unittest.TestCase 子类，并添加 --pdb 命令行参数。",
+      "evidence": [
+        "Issue 中用户提供的测试代码和命令 `pytest --pdb test_repro.py`。",
+        "Issue 描述表明在 pytest 5.4.1 中正常，5.4.2 中出现问题。",
+        "相关测试 1 (test_pdb_unittest_skip) 也涉及 --pdb 和 unittest.skipIf。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "被跳过的测试的 tearDown 方法被执行，导致其中未定义的变量引发 NameError 异常，测试结果从 'skipped' 变为 'error'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误输出显示 `NameError: name 'xxx' is not defined` 来自 `tearDown` 方法。",
+        "Issue 中测试摘要显示 `1 skipped, 1 error`，表明出现了错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使使用 --pdb 参数，被 @unittest.skip 装饰的测试也应被完全跳过，其 setUp 和 tearDown 方法都不应执行。",
+      "evidence": [
+        "Issue 中用户期望：\"I would have expected the test to be skipped, even with `--pdb`.\"",
+        "相关测试 3 (test_pdb_on_skip) 验证了使用 pytest.skip 时，--pdb 不会触发调试器，暗示跳过应完全生效。",
+        "相关测试 1 (test_pdb_unittest_skip) 验证了 unittest.skipIf 与 --pdb 一起使用时，测试被跳过且没有错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "unittest.skip",
+        "kind": "decorator",
+        "source_path": "",
+        "reason": "Issue 中用于跳过测试的装饰器，是触发条件的关键部分。"
+      },
+      {
+        "name": "unittest.TestCase.tearDown",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中错误执行的方法，是缺陷的直接表现。"
+      },
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "",
+        "reason": "运行测试的入口点，需要 --pdb 参数来触发缺陷。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/unittest.py",
+        "object": "处理 unittest.TestCase 测试运行和 --pdb 交互的逻辑",
+        "lines": "",
+        "reason": "Issue 涉及 unittest 与 pytest 的集成，特别是 --pdb 参数如何影响测试生命周期（setUp/tearDown）的执行。缺陷可能在于 --pdb 模式下对跳过测试的处理逻辑。"
+      },
+      {
+        "path": "src/_pytest/debugging.py",
+        "object": "处理 --pdb 参数和调试器交互的逻辑",
+        "lines": "",
+        "reason": "--pdb 是触发条件，相关测试 4 (test_pdb_teardown_called) 表明 --pdb 会延迟 tearDown 调用，可能与跳过逻辑产生冲突。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pdb_unittest_skip",
+        "test_file": "testing/test_debugging.py",
+        "why_relevant": "直接测试了 unittest.skipIf 与 --pdb 参数一起使用的情况，验证了测试被跳过且没有错误。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试文件",
+          "使用 testdir.spawn_pytest 运行带 --pdb 的命令",
+          "验证输出包含跳过信息"
+        ],
+        "possible_gap": "该测试使用 skipIf(True)，而 Issue 使用 @unittest.skip 装饰器。它没有检查 tearDown 是否被错误调用，只验证了跳过信息。"
+      },
+      {
+        "test_name": "test_pdb_teardown_called",
+        "test_file": "testing/test_unittest.py",
+        "why_relevant": "专门测试了 --pdb 参数下 tearDown 方法的调用，使用了 unittest.TestCase 并收集 tearDown 调用记录。",
+        "reusable_parts": [
+          "使用 unittest.TestCase 类",
+          "在 tearDown 中追加调用记录",
+          "使用 testdir.runpytest_inprocess 运行 --pdb",
+          "验证 tearDown 被调用的顺序和内容"
+        ],
+        "possible_gap": "该测试验证的是正常（未跳过）测试的 tearDown 被调用，而 Issue 是跳过测试的 tearDown 不应被调用。需要变异为包含跳过的测试。"
+      },
+      {
+        "test_name": "test_pdb_on_skip",
+        "test_file": "testing/test_debugging.py",
+        "why_relevant": "测试了 pytest.skip 与 --pdb 的交互，验证了跳过时不会进入调试器（pdblist 为空）。",
+        "reusable_parts": [
+          "使用 runpdb_and_get_report 辅助函数",
+          "检查报告状态为 skipped",
+          "检查 pdblist 长度"
+        ],
+        "possible_gap": "测试的是 pytest.skip，而不是 unittest.skip。且没有涉及 unittest.TestCase 的 setUp/tearDown 生命周期。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 4 中，测试正常运行（或通过 skipIf 条件跳过），然后验证 --pdb 下的行为。",
+        "target_pattern": "测试类中包含一个被 @unittest.skip 装饰的测试方法，并且该类定义了 tearDown 方法。使用 --pdb 运行。",
+        "reason": "Issue 表明，只有当测试被 @unittest.skip 装饰且使用 --pdb 运行时，tearDown 才会被错误执行。需要将正常测试或条件跳过变为无条件装饰器跳过。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 4 中，tearDown 被调用并记录状态，这是期望的正常行为。",
+        "target_pattern": "tearDown 方法中包含会引发异常的操作（如访问未定义变量），以检测其是否被不应执行地执行了。",
+        "reason": "为了清晰捕捉缺陷，需要让错误执行的 tearDown 产生明显的失败信号（如异常），而不是静默通过。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "测试运行结果中的异常信息，特别是是否来自 tearDown 方法。",
+        "reason": "Issue 的核心错误是 tearDown 被执行并抛出 NameError。观测是否有异常及异常来源可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "tearDown 方法是否被调用（例如通过一个全局列表记录调用）。",
+        "reason": "直接验证被跳过的测试的 tearDown 方法是否被执行，这是缺陷行为的核心。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "测试运行后的结果摘要（passed, skipped, failed, error 的数量）。",
+        "reason": "Issue 中正确行为应为 1 skipped，错误行为为 1 skipped, 1 error。观测结果分类可以判断整体行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 --pdb 运行被 @unittest.skip 装饰的测试时，其 tearDown 方法没有被调用，且测试结果为 skipped 而非 error。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的控制台输出字符串，因为输出格式可能变化。",
+        "reason": "断言 tearDown 调用记录为空，并且结果统计中 skipped=1, errors=0，这直接对应 Issue 的期望行为，且不依赖于易变的输出格式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 testdir fixture 来创建和运行测试文件。可能需要 monkeypatch 来注入状态记录（如记录 tearDown 调用）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承 unittest.TestCase，并包含被 @unittest.skip 装饰的测试方法和一个定义了 tearDown 方法的类。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "运行测试时需要添加 --pdb 命令行参数。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只影响 @unittest.skip，还是也影响 unittest.skipIf？",
+      "缺陷是否与特定的 Python 或 pytest 版本严格相关（Issue 提到 5.4.1 正常，5.4.2 异常）？",
+      "setUp 方法是否也会被错误执行？Issue 只明确提到了 tearDown。",
+      "缺陷的确切代码位置和根本原因是什么？"
+    ]
+  }
+}

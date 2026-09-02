@@ -1,0 +1,262 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13821",
+  "issue_summary": "Django 需要放弃对 SQLite 3.9.0 以下版本的支持。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 unittest.skipUnless 确保只在 SQLite 后端运行测试，并使用 mock.patch 模拟 sqlite_version_info 和 sqlite_version。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建测试数据库或表来触发涉及表达式索引的操作。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_check_sqlite_version",
+        "test_file": "tests/backends/sqlite/tests.py",
+        "why_relevant": "它直接测试了 SQLite 版本检查逻辑，是验证版本支持策略的起点。",
+        "reusable_parts": [
+          "imports",
+          "class structure",
+          "mock.patch usage",
+          "assertRaisesMessage"
+        ],
+        "possible_gap": "它测试的是旧版本（3.8.2）被拒绝的场景，但 Issue 要求将支持下限提高到 3.9.0，需要调整模拟的版本号和错误信息。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 SQLite 版本低于 3.9.0 的环境中使用 Django。",
+      "evidence": [
+        "Issue 提到 SQLite 3.9.0+ 支持表达式索引和 SQLITE_ENABLE_JSON1 编译选项，并建议放弃对旧版本的支持。",
+        "相关测试 1 模拟了 SQLite 3.8.2 版本并检查版本要求。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前 Django 可能允许在 SQLite 3.9.0 以下版本中运行，但某些功能（如表达式索引）可能无法正常工作或导致兼容性问题。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述了 SQLite 3.9.0+ 才支持的功能，并建议放弃对旧版本的支持，暗示当前版本检查可能不够严格。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "check_sqlite_version",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 调用了此函数来检查 SQLite 版本，它可能是控制版本支持的关键入口点。"
+      },
+      {
+        "name": "connection.ops",
+        "kind": "object",
+        "source_path": "",
+        "reason": "相关测试 3 和 4 使用了 connection.ops 来执行 SQL 操作，这些操作可能依赖于特定 SQLite 版本的功能。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "check_sqlite_version",
+        "lines": "",
+        "reason": "该函数负责检查 SQLite 版本，Issue 暗示当前版本检查逻辑可能允许了过低的版本。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "mock",
+        "current_pattern": "模拟 sqlite_version_info 为 (3, 8, 2)，触发 ImproperlyConfigured 异常。",
+        "target_pattern": "模拟 sqlite_version_info 为 (3, 8, 9) 或 (3, 8, 11) 等低于 3.9.0 但高于当前测试的版本，观察是否仍会触发异常或行为是否符合预期。",
+        "reason": "Issue 要求支持版本 >= 3.9.0，因此需要测试边界情况，即版本在 3.8.3 到 3.8.x 之间时，Django 的行为是否符合新的支持策略。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在默认配置下运行。",
+        "target_pattern": "可能需要配置或模拟环境，使 Django 认为它运行在 SQLite 3.9.0 以下版本上，并尝试使用表达式索引等新功能。",
+        "reason": "Issue 提到 SQLite 3.9.0+ 支持特定功能，测试需要触发在旧版本上使用这些功能的场景。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Django 应明确拒绝或无法在 SQLite 3.9.0 以下版本中运行，或至少对相关功能给出明确的错误提示。",
+      "evidence": [
+        "Issue 建议放弃对 SQLite < 3.9.0 的支持，类似于对 GEOS 库的支持策略。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "check_sqlite_version() 的调用结果，或尝试使用表达式索引等新功能时抛出的异常。",
+        "reason": "如果版本检查逻辑已更新，在 SQLite < 3.9.0 时应抛出 ImproperlyConfigured 或类似异常。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "启动 Django 或执行数据库操作时产生的警告信息。",
+        "reason": "在过渡期，Django 可能对使用旧版本 SQLite 发出警告。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "connection.vendor 和 connection.sqlite_version_info 的值。",
+        "reason": "确认测试环境模拟的 SQLite 版本是否正确，以及 Django 是否识别出该版本。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 SQLite 版本低于 3.9.0 时，Django 应拒绝运行或对特定功能给出明确错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能随版本更新而变化。",
+        "reason": "Issue 的核心是版本支持策略的改变，断言异常的发生比断言具体消息更稳定。"
+      },
+      {
+        "assertion_goal": "当 SQLite 版本为 3.9.0 或更高时，Django 应能正常启动或使用相关功能。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言具体的功能输出，因为功能实现可能变化。",
+        "reason": "需要验证新版本支持的下限，确保 3.9.0+ 版本不被错误地拒绝。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 没有明确说明当前 Django 在 SQLite 3.8.3 到 3.8.x 版本上的具体行为是正常工作、静默失败还是抛出异常。",
+    "Issue 没有提供具体的修复代码或错误消息，因此无法确定 check_sqlite_version 函数的具体修改内容。",
+    "不确定除了版本检查函数外，还有哪些代码路径直接依赖于 SQLite 3.9.0+ 的功能，需要插桩观测。"
+  ],
+  "raw": {
+    "issue_summary": "Django 需要放弃对 SQLite 3.9.0 以下版本的支持。",
+    "trigger_condition": {
+      "text": "在 SQLite 版本低于 3.9.0 的环境中使用 Django。",
+      "evidence": [
+        "Issue 提到 SQLite 3.9.0+ 支持表达式索引和 SQLITE_ENABLE_JSON1 编译选项，并建议放弃对旧版本的支持。",
+        "相关测试 1 模拟了 SQLite 3.8.2 版本并检查版本要求。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前 Django 可能允许在 SQLite 3.9.0 以下版本中运行，但某些功能（如表达式索引）可能无法正常工作或导致兼容性问题。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述了 SQLite 3.9.0+ 才支持的功能，并建议放弃对旧版本的支持，暗示当前版本检查可能不够严格。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "Django 应明确拒绝或无法在 SQLite 3.9.0 以下版本中运行，或至少对相关功能给出明确的错误提示。",
+      "evidence": [
+        "Issue 建议放弃对 SQLite < 3.9.0 的支持，类似于对 GEOS 库的支持策略。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "check_sqlite_version",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 调用了此函数来检查 SQLite 版本，它可能是控制版本支持的关键入口点。"
+      },
+      {
+        "name": "connection.ops",
+        "kind": "object",
+        "source_path": "",
+        "reason": "相关测试 3 和 4 使用了 connection.ops 来执行 SQL 操作，这些操作可能依赖于特定 SQLite 版本的功能。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "check_sqlite_version",
+        "lines": "",
+        "reason": "该函数负责检查 SQLite 版本，Issue 暗示当前版本检查逻辑可能允许了过低的版本。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_check_sqlite_version",
+        "test_file": "tests/backends/sqlite/tests.py",
+        "why_relevant": "它直接测试了 SQLite 版本检查逻辑，是验证版本支持策略的起点。",
+        "reusable_parts": [
+          "imports",
+          "class structure",
+          "mock.patch usage",
+          "assertRaisesMessage"
+        ],
+        "possible_gap": "它测试的是旧版本（3.8.2）被拒绝的场景，但 Issue 要求将支持下限提高到 3.9.0，需要调整模拟的版本号和错误信息。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "mock",
+        "current_pattern": "模拟 sqlite_version_info 为 (3, 8, 2)，触发 ImproperlyConfigured 异常。",
+        "target_pattern": "模拟 sqlite_version_info 为 (3, 8, 9) 或 (3, 8, 11) 等低于 3.9.0 但高于当前测试的版本，观察是否仍会触发异常或行为是否符合预期。",
+        "reason": "Issue 要求支持版本 >= 3.9.0，因此需要测试边界情况，即版本在 3.8.3 到 3.8.x 之间时，Django 的行为是否符合新的支持策略。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在默认配置下运行。",
+        "target_pattern": "可能需要配置或模拟环境，使 Django 认为它运行在 SQLite 3.9.0 以下版本上，并尝试使用表达式索引等新功能。",
+        "reason": "Issue 提到 SQLite 3.9.0+ 支持特定功能，测试需要触发在旧版本上使用这些功能的场景。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "check_sqlite_version() 的调用结果，或尝试使用表达式索引等新功能时抛出的异常。",
+        "reason": "如果版本检查逻辑已更新，在 SQLite < 3.9.0 时应抛出 ImproperlyConfigured 或类似异常。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "启动 Django 或执行数据库操作时产生的警告信息。",
+        "reason": "在过渡期，Django 可能对使用旧版本 SQLite 发出警告。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "connection.vendor 和 connection.sqlite_version_info 的值。",
+        "reason": "确认测试环境模拟的 SQLite 版本是否正确，以及 Django 是否识别出该版本。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 SQLite 版本低于 3.9.0 时，Django 应拒绝运行或对特定功能给出明确错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能随版本更新而变化。",
+        "reason": "Issue 的核心是版本支持策略的改变，断言异常的发生比断言具体消息更稳定。"
+      },
+      {
+        "assertion_goal": "当 SQLite 版本为 3.9.0 或更高时，Django 应能正常启动或使用相关功能。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言具体的功能输出，因为功能实现可能变化。",
+        "reason": "需要验证新版本支持的下限，确保 3.9.0+ 版本不被错误地拒绝。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 unittest.skipUnless 确保只在 SQLite 后端运行测试，并使用 mock.patch 模拟 sqlite_version_info 和 sqlite_version。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建测试数据库或表来触发涉及表达式索引的操作。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "uncertainties": [
+      "Issue 没有明确说明当前 Django 在 SQLite 3.8.3 到 3.8.x 版本上的具体行为是正常工作、静默失败还是抛出异常。",
+      "Issue 没有提供具体的修复代码或错误消息，因此无法确定 check_sqlite_version 函数的具体修改内容。",
+      "不确定除了版本检查函数外，还有哪些代码路径直接依赖于 SQLite 3.9.0+ 的功能，需要插桩观测。"
+    ]
+  }
+}

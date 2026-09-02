@@ -1,0 +1,320 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16631",
+  "issue_summary": "SECRET_KEY_FALLBACKS 配置在会话认证哈希计算中未被使用，导致密钥轮换后用户被强制登出。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 override_settings 或 settings 上下文管理器来动态设置 SECRET_KEY 和 SECRET_KEY_FALLBACKS。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个用户模型实例（或使用测试夹具）来调用 get_session_auth_hash。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试类可能需要继承自 django.test.TestCase 或 SimpleTestCase，以支持数据库操作或设置覆盖。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "CheckSecretKeyFallbacksTest.test_insecure_secret_key_fallbacks",
+        "test_file": "tests/check_framework/test_security.py",
+        "why_relevant": "该测试直接操作了 SECRET_KEY_FALLBACKS 配置，并检查了相关的警告。",
+        "reusable_parts": [
+          "@override_settings 装饰器的使用",
+          "对 settings.SECRET_KEY_FALLBACKS 的配置和访问模式",
+          "SimpleTestCase 的使用"
+        ],
+        "possible_gap": "该测试仅检查配置安全性警告，不涉及会话认证或 salted_hmac 的实际调用。"
+      },
+      {
+        "test_name": "CheckSecretKeyFallbacksTest.test_okay_secret_key_fallbacks",
+        "test_file": "tests/check_framework/test_security.py",
+        "why_relevant": "该测试设置了 SECRET_KEY_FALLBACKS 并验证其属性，展示了如何配置该列表。",
+        "reusable_parts": [
+          "使用 override_settings 设置 SECRET_KEY_FALLBACKS",
+          "对配置项长度和唯一性的断言风格"
+        ],
+        "possible_gap": "测试不涉及任何用户模型或会话哈希计算。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "配置了 SECRET_KEY_FALLBACKS 列表（包含旧的 SECRET_KEY），并执行了涉及用户会话认证的操作（如登录状态验证）。",
+      "evidence": [
+        "Issue 描述：用户旋转了密钥，将旧密钥放入 SECRET_KEY_FALLBACKS，但用户被登出。",
+        "源码片段 1 显示 SECRET_KEY_FALLBACKS 是一个全局配置列表。",
+        "源码片段 5 显示 get_session_auth_hash 方法调用 salted_hmac 时未传递 secret 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "用户会话在密钥轮换后失效，用户被强制登出，无法维持登录状态。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'I'm pretty sure everyone on our site is logged out now.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "salted_hmac",
+        "kind": "function",
+        "source_path": "django/utils/crypto.py",
+        "reason": "Issue 明确指出该函数默认使用 SECRET_KEY，且 get_session_auth_hash 调用它时未传递 secret 参数，导致无法使用 SECRET_KEY_FALLBACKS。"
+      },
+      {
+        "name": "AbstractBaseUser.get_session_auth_hash",
+        "kind": "method",
+        "source_path": "django/contrib/auth/base_user.py",
+        "reason": "Issue 明确指出该方法调用 salted_hmac 时未提供 secret 参数，是导致 SECRET_KEY_FALLBACKS 未被使用的直接原因。"
+      },
+      {
+        "name": "settings.SECRET_KEY_FALLBACKS",
+        "kind": "module",
+        "source_path": "django/conf/global_settings.py",
+        "reason": "这是 Issue 的核心配置项，其值应在密钥轮换场景下被用于会话认证。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/base_user.py",
+        "object": "AbstractBaseUser.get_session_auth_hash",
+        "lines": "134-143",
+        "reason": "该方法调用 salted_hmac 时未传递 secret 参数，导致其默认使用 settings.SECRET_KEY，而忽略了 SECRET_KEY_FALLBACKS。"
+      },
+      {
+        "path": "django/utils/crypto.py",
+        "object": "salted_hmac",
+        "lines": "18-44",
+        "reason": "该函数的 secret 参数默认值为 None，并会回退到 settings.SECRET_KEY。Issue 暗示其逻辑可能未考虑 SECRET_KEY_FALLBACKS。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 SECRET_KEY_FALLBACKS 被设置为一个列表，但仅用于检查配置本身（如安全性、长度）。",
+        "target_pattern": "设置 SECRET_KEY 为一个新值，并将旧值放入 SECRET_KEY_FALLBACKS 列表的开头，然后执行一个需要会话认证的操作。",
+        "reason": "Issue 描述的触发条件是密钥轮换：新 SECRET_KEY 和包含旧密钥的 SECRET_KEY_FALLBACKS。当前测试未模拟此操作流。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "检索到的测试没有调用 get_session_auth_hash 或 salted_hmac。",
+        "target_pattern": "在测试中创建一个用户对象，调用其 get_session_auth_hash() 方法，或直接调用 salted_hmac 并观察其使用的 secret。",
+        "reason": "缺陷的核心在于 get_session_auth_hash -> salted_hmac 调用链未使用 SECRET_KEY_FALLBACKS。需要变异测试以包含此调用。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 SECRET_KEY_FALLBACKS 配置了旧的密钥时，系统应能使用该列表中的密钥来验证或生成会话认证哈希，以支持平滑的密钥轮换，用户不应被强制登出。",
+      "evidence": [
+        "Issue 引用的文档说明：SECRET_KEY_FALLBACKS 应用于轮换密钥，以支持会话、密码重置令牌等。",
+        "Issue 暗示了当前行为与文档描述不符。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 user.get_session_auth_hash() 在不同密钥配置下（仅 SECRET_KEY  vs SECRET_KEY + SECRET_KEY_FALLBACKS）的返回值。",
+        "reason": "如果 SECRET_KEY_FALLBACKS 被正确使用，使用旧密钥计算的哈希值在新密钥配置下应仍能被验证（或生成相同的哈希）。观察哈希值是否随配置改变而改变。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "在调用 salted_hmac 或 get_session_auth_hash 前后，检查 settings.SECRET_KEY 和 settings.SECRET_KEY_FALLBACKS 的值。",
+        "reason": "确认测试环境是否正确设置了 Issue 描述的配置状态。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "模拟登录后，在密钥轮换配置下，检查用户会话是否保持有效（如 request.user.is_authenticated）。",
+        "reason": "Issue 的最终症状是用户被登出，观测会话状态能直接反映问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 SECRET_KEY_FALLBACKS 包含旧密钥时，使用旧密钥生成的会话认证哈希应仍被视为有效（或能被正确计算/验证）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、固定的哈希字符串，因为哈希值依赖于密钥和密码。",
+        "reason": "应关注哈希值在密钥配置变化下的行为关系，例如，使用旧密钥配置生成的哈希，在启用 SECRET_KEY_FALLBACKS 的新配置下应能匹配或通过验证。"
+      },
+      {
+        "assertion_goal": "salted_hmac 函数在 secret=None 时，其内部逻辑应能考虑到 SECRET_KEY_FALLBACKS 而不仅仅是 SECRET_KEY。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "直接断言函数内部变量值。",
+        "reason": "可以通过在不同配置下调用 salted_hmac 并比较结果，来推断其内部使用的 secret 来源。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "salted_hmac 函数内部是否已有（或应该有）使用 SECRET_KEY_FALLBACKS 的逻辑？还是需要在调用方（如 get_session_auth_hash）显式传递？",
+    "SECRET_KEY_FALLBACKS 的确切使用语义：是用于验证（解密/验证签名）还是也用于生成（加密/签名）？Issue 主要关注验证侧。",
+    "除了会话认证哈希，SECRET_KEY_FALLBACKS 是否还应影响其他组件（如密码重置令牌）？Issue 提到了文档说明，但未提供其他组件的错误证据。",
+    "修复后的具体行为：是让 get_session_auth_hash 返回一个基于 SECRET_KEY_FALLBACKS 列表中某个密钥的哈希，还是让验证逻辑能接受多个密钥生成的哈希？"
+  ],
+  "raw": {
+    "issue_summary": "SECRET_KEY_FALLBACKS 配置在会话认证哈希计算中未被使用，导致密钥轮换后用户被强制登出。",
+    "trigger_condition": {
+      "text": "配置了 SECRET_KEY_FALLBACKS 列表（包含旧的 SECRET_KEY），并执行了涉及用户会话认证的操作（如登录状态验证）。",
+      "evidence": [
+        "Issue 描述：用户旋转了密钥，将旧密钥放入 SECRET_KEY_FALLBACKS，但用户被登出。",
+        "源码片段 1 显示 SECRET_KEY_FALLBACKS 是一个全局配置列表。",
+        "源码片段 5 显示 get_session_auth_hash 方法调用 salted_hmac 时未传递 secret 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "用户会话在密钥轮换后失效，用户被强制登出，无法维持登录状态。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'I'm pretty sure everyone on our site is logged out now.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 SECRET_KEY_FALLBACKS 配置了旧的密钥时，系统应能使用该列表中的密钥来验证或生成会话认证哈希，以支持平滑的密钥轮换，用户不应被强制登出。",
+      "evidence": [
+        "Issue 引用的文档说明：SECRET_KEY_FALLBACKS 应用于轮换密钥，以支持会话、密码重置令牌等。",
+        "Issue 暗示了当前行为与文档描述不符。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "salted_hmac",
+        "kind": "function",
+        "source_path": "django/utils/crypto.py",
+        "reason": "Issue 明确指出该函数默认使用 SECRET_KEY，且 get_session_auth_hash 调用它时未传递 secret 参数，导致无法使用 SECRET_KEY_FALLBACKS。"
+      },
+      {
+        "name": "AbstractBaseUser.get_session_auth_hash",
+        "kind": "method",
+        "source_path": "django/contrib/auth/base_user.py",
+        "reason": "Issue 明确指出该方法调用 salted_hmac 时未提供 secret 参数，是导致 SECRET_KEY_FALLBACKS 未被使用的直接原因。"
+      },
+      {
+        "name": "settings.SECRET_KEY_FALLBACKS",
+        "kind": "module",
+        "source_path": "django/conf/global_settings.py",
+        "reason": "这是 Issue 的核心配置项，其值应在密钥轮换场景下被用于会话认证。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/base_user.py",
+        "object": "AbstractBaseUser.get_session_auth_hash",
+        "lines": "134-143",
+        "reason": "该方法调用 salted_hmac 时未传递 secret 参数，导致其默认使用 settings.SECRET_KEY，而忽略了 SECRET_KEY_FALLBACKS。"
+      },
+      {
+        "path": "django/utils/crypto.py",
+        "object": "salted_hmac",
+        "lines": "18-44",
+        "reason": "该函数的 secret 参数默认值为 None，并会回退到 settings.SECRET_KEY。Issue 暗示其逻辑可能未考虑 SECRET_KEY_FALLBACKS。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "CheckSecretKeyFallbacksTest.test_insecure_secret_key_fallbacks",
+        "test_file": "tests/check_framework/test_security.py",
+        "why_relevant": "该测试直接操作了 SECRET_KEY_FALLBACKS 配置，并检查了相关的警告。",
+        "reusable_parts": [
+          "@override_settings 装饰器的使用",
+          "对 settings.SECRET_KEY_FALLBACKS 的配置和访问模式",
+          "SimpleTestCase 的使用"
+        ],
+        "possible_gap": "该测试仅检查配置安全性警告，不涉及会话认证或 salted_hmac 的实际调用。"
+      },
+      {
+        "test_name": "CheckSecretKeyFallbacksTest.test_okay_secret_key_fallbacks",
+        "test_file": "tests/check_framework/test_security.py",
+        "why_relevant": "该测试设置了 SECRET_KEY_FALLBACKS 并验证其属性，展示了如何配置该列表。",
+        "reusable_parts": [
+          "使用 override_settings 设置 SECRET_KEY_FALLBACKS",
+          "对配置项长度和唯一性的断言风格"
+        ],
+        "possible_gap": "测试不涉及任何用户模型或会话哈希计算。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 SECRET_KEY_FALLBACKS 被设置为一个列表，但仅用于检查配置本身（如安全性、长度）。",
+        "target_pattern": "设置 SECRET_KEY 为一个新值，并将旧值放入 SECRET_KEY_FALLBACKS 列表的开头，然后执行一个需要会话认证的操作。",
+        "reason": "Issue 描述的触发条件是密钥轮换：新 SECRET_KEY 和包含旧密钥的 SECRET_KEY_FALLBACKS。当前测试未模拟此操作流。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "检索到的测试没有调用 get_session_auth_hash 或 salted_hmac。",
+        "target_pattern": "在测试中创建一个用户对象，调用其 get_session_auth_hash() 方法，或直接调用 salted_hmac 并观察其使用的 secret。",
+        "reason": "缺陷的核心在于 get_session_auth_hash -> salted_hmac 调用链未使用 SECRET_KEY_FALLBACKS。需要变异测试以包含此调用。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 user.get_session_auth_hash() 在不同密钥配置下（仅 SECRET_KEY  vs SECRET_KEY + SECRET_KEY_FALLBACKS）的返回值。",
+        "reason": "如果 SECRET_KEY_FALLBACKS 被正确使用，使用旧密钥计算的哈希值在新密钥配置下应仍能被验证（或生成相同的哈希）。观察哈希值是否随配置改变而改变。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "在调用 salted_hmac 或 get_session_auth_hash 前后，检查 settings.SECRET_KEY 和 settings.SECRET_KEY_FALLBACKS 的值。",
+        "reason": "确认测试环境是否正确设置了 Issue 描述的配置状态。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "模拟登录后，在密钥轮换配置下，检查用户会话是否保持有效（如 request.user.is_authenticated）。",
+        "reason": "Issue 的最终症状是用户被登出，观测会话状态能直接反映问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 SECRET_KEY_FALLBACKS 包含旧密钥时，使用旧密钥生成的会话认证哈希应仍被视为有效（或能被正确计算/验证）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、固定的哈希字符串，因为哈希值依赖于密钥和密码。",
+        "reason": "应关注哈希值在密钥配置变化下的行为关系，例如，使用旧密钥配置生成的哈希，在启用 SECRET_KEY_FALLBACKS 的新配置下应能匹配或通过验证。"
+      },
+      {
+        "assertion_goal": "salted_hmac 函数在 secret=None 时，其内部逻辑应能考虑到 SECRET_KEY_FALLBACKS 而不仅仅是 SECRET_KEY。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "直接断言函数内部变量值。",
+        "reason": "可以通过在不同配置下调用 salted_hmac 并比较结果，来推断其内部使用的 secret 来源。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 override_settings 或 settings 上下文管理器来动态设置 SECRET_KEY 和 SECRET_KEY_FALLBACKS。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个用户模型实例（或使用测试夹具）来调用 get_session_auth_hash。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试类可能需要继承自 django.test.TestCase 或 SimpleTestCase，以支持数据库操作或设置覆盖。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "salted_hmac 函数内部是否已有（或应该有）使用 SECRET_KEY_FALLBACKS 的逻辑？还是需要在调用方（如 get_session_auth_hash）显式传递？",
+      "SECRET_KEY_FALLBACKS 的确切使用语义：是用于验证（解密/验证签名）还是也用于生成（加密/签名）？Issue 主要关注验证侧。",
+      "除了会话认证哈希，SECRET_KEY_FALLBACKS 是否还应影响其他组件（如密码重置令牌）？Issue 提到了文档说明，但未提供其他组件的错误证据。",
+      "修复后的具体行为：是让 get_session_auth_hash 返回一个基于 SECRET_KEY_FALLBACKS 列表中某个密钥的哈希，还是让验证逻辑能接受多个密钥生成的哈希？"
+    ]
+  }
+}

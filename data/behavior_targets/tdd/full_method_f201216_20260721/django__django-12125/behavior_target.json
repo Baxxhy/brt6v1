@@ -1,0 +1,354 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12125",
+  "issue_summary": "makemigrations 在生成迁移文件时，对内部类字段的引用路径错误，忽略了外层类名。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 isolate_apps 或类似的机制来隔离测试应用，避免模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 temporary_migration_module 来管理迁移文件的生成路径。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类可能需要继承自 MigrationTestBase 或 SimpleTestCase，以获取相关的测试工具方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义包含内部类的模型结构，这可能在测试方法内部作为局部类定义。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "WriterTests.test_deconstruct_class_arguments",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "该测试直接验证 MigrationWriter.serialize 方法对类参数（包括自定义字段的类参数）的序列化是否正确。这与 Issue 中内部类作为字段参数的序列化问题高度相关。",
+        "reusable_parts": [
+          "MigrationWriter.serialize 的调用方式",
+          "对序列化结果字符串的断言模式（contains_fragment/equals）",
+          "涉及自定义类（DeconstructibleInstances）的构造"
+        ],
+        "possible_gap": "该测试使用的是顶级自定义类，而非内部类。它没有测试嵌套类（Outer.Inner）的序列化路径。"
+      },
+      {
+        "test_name": "AutodetectorTests.test_deconstruct_type",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试涉及 ModelState 的创建和迁移变更检测，测试了未实例化的类（models.IntegerField）作为字段默认值时的序列化。这涉及到迁移生成过程中对类对象的处理。",
+        "reusable_parts": [
+          "ModelState 的构造方式",
+          "使用 get_changes 进行迁移检测",
+          "assertNumberMigrations 和 assertOperationTypes 的断言模式"
+        ],
+        "possible_gap": "该测试关注的是类作为默认值，而 Issue 关注的是类本身作为字段类型（如 Outer.Inner）。且测试中的类是顶级模块类，不是内部类。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_migrations_modules_path_not_exist",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试是 makemigrations 命令的集成测试，创建了一个简单模型并运行命令，验证迁移文件的生成。这提供了运行 makemigrations 的测试框架和流程。",
+        "reusable_parts": [
+          "使用 temporary_migration_module 上下文管理器",
+          "call_command('makemigrations', ...) 的调用方式",
+          "对生成的迁移文件路径的检查（os.path.exists）",
+          "对命令输出的断言（assertIn）"
+        ],
+        "possible_gap": "该测试使用普通的 BooleanField，没有涉及自定义字段或内部类。它主要测试迁移模块路径，不测试字段序列化的具体内容。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个继承自 django.db.models.Field 的内部类，并在一个 django.db.models.Model 类中使用该内部类作为字段。然后运行 manage.py makemigrations。",
+      "evidence": [
+        "Issue 描述中提供了两个具体的可复现示例：1) Outer.Inner 字段，2) Thing.State 枚举字段。",
+        "Issue 明确指出 'When you define a subclass from django.db.models.Field as an inner class of some other class, and use this field inside a django.db.models.Model class, then when you run manage.py makemigrations...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的迁移文件中的字段引用路径不正确，内部类被当作顶级模块类引用，缺少了外层类的限定。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中展示了生成的迁移代码片段：'test1.models.Inner(max_length=20)' 和 'test1.models.State'，而正确的应为 'test1.models.Outer.Inner' 和 'test1.models.Thing.State'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心触发操作是运行 manage.py makemigrations 命令。"
+      },
+      {
+        "name": "CreateModel",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "Issue 中展示的错误输出片段来自 migrations.CreateModel 操作，该类负责生成模型创建代码。"
+      },
+      {
+        "name": "MigrationWriter.serialize",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 WriterTests.test_deconstruct_class_arguments 涉及 MigrationWriter.serialize，这与迁移文件的序列化过程直接相关，而 Issue 正是关于序列化路径错误。"
+      },
+      {
+        "name": "ModelState.from_model",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 ModelStateTests.test_abstract_model_children_inherit_indexes 使用了 ModelState.from_model，这可能与从模型定义生成迁移状态的过程有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "CreateModel",
+        "lines": "41-239",
+        "reason": "Issue 中展示的错误输出直接来自 migrations.CreateModel 操作。该类负责生成模型创建代码，可能包含字段序列化的逻辑。"
+      },
+      {
+        "path": "",
+        "object": "迁移序列化逻辑（可能涉及 MigrationWriter 或相关序列化器）",
+        "lines": "",
+        "reason": "Issue 本质是对象（内部类）在序列化为迁移文件字符串时，其路径表示错误。相关测试 WriterTests.test_deconstruct_class_arguments 也测试了 MigrationWriter.serialize 对类的处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用普通的、顶级的 Django 模型字段（如 BooleanField, CharField）或顶级自定义类。",
+        "target_pattern": "使用定义在另一个类内部的字段类（内部类），例如 Outer.Inner 或 ModelClass.EnumField。",
+        "reason": "Issue 明确指出 bug 在字段是内部类时触发。将测试中的字段替换为内部类字段是走向缺陷路径的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接序列化一个字段实例或构建一个包含普通字段的 ModelState。",
+        "target_pattern": "构建一个模型，其字段类型是一个内部类的实例（如 field = Outer.Inner(...)），然后触发对该模型的迁移序列化过程。",
+        "reason": "需要模拟 Issue 描述的完整场景：定义内部类字段 -> 在模型中使用 -> 触发迁移生成序列化。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "makemigrations 生成的迁移文件应正确序列化内部类字段，其引用路径应包含完整的外层类限定（例如 Outer.Inner 或 Thing.State）。",
+      "evidence": [
+        "Issue 描述中指出了错误路径和预期正确路径的对比：'Note the test1.models.Inner, which should have been test1.models.Outer.Inner.' 和 'This refers to test1.models.State, instead of to test1.models.Thing.State.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "生成的迁移文件内容字符串，特别是 CreateModel 操作中字段的序列化表示（如 `models.CharField(...)` 部分）。",
+        "reason": "Issue 的错误现象直接体现在生成的迁移文件代码中，观察序列化后的字段引用字符串是判断问题是否存在的直接依据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "内部类字段对象在序列化前的 `__module__` 和 `__qualname__` 属性，以及序列化后字符串中对应的路径部分。",
+        "reason": "比较序列化输入（字段对象）的完整限定名与输出字符串中的路径，可以定位路径信息在何处丢失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的迁移代码中，对内部类字段的引用包含了正确的外层类限定名（例如包含 'Outer.Inner' 或 'Thing.State'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "对完整迁移文件字符串进行精确相等断言，因为时间戳、顺序等可能变化。避免断言不相关的部分。",
+        "reason": "Issue 的核心是路径片段缺失，使用 contains_fragment 检查关键路径组件（外层类名）是否存在更稳定。"
+      },
+      {
+        "assertion_goal": "验证生成的迁移代码中，对内部类字段的引用不错误地将其视为顶级模块类（例如不应该是单纯的 'Inner' 或 'State'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "仅断言字符串不等于某个错误示例，因为可能有多种错误形式。",
+        "reason": "可以补充正向断言，确保错误模式（缺少外层类限定）没有出现。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 CreateModel 操作中，还是在更底层的序列化器（如 MigrationWriter）中，亦或是在 deconstruct 方法中？",
+    "除了示例中的 CharField 子类和 EnumField，其他类型的自定义内部类字段是否也会触发此问题？",
+    "内部类嵌套多层（如 Outer.Middle.Inner）时，bug 的表现形式是什么？",
+    "修复后的正确序列化字符串具体格式是什么？是 'models.Outer.Inner(...)' 还是 'test1.models.Outer.Inner(...)'？Issue 只给出了模块路径部分。"
+  ],
+  "raw": {
+    "issue_summary": "makemigrations 在生成迁移文件时，对内部类字段的引用路径错误，忽略了外层类名。",
+    "trigger_condition": {
+      "text": "定义一个继承自 django.db.models.Field 的内部类，并在一个 django.db.models.Model 类中使用该内部类作为字段。然后运行 manage.py makemigrations。",
+      "evidence": [
+        "Issue 描述中提供了两个具体的可复现示例：1) Outer.Inner 字段，2) Thing.State 枚举字段。",
+        "Issue 明确指出 'When you define a subclass from django.db.models.Field as an inner class of some other class, and use this field inside a django.db.models.Model class, then when you run manage.py makemigrations...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的迁移文件中的字段引用路径不正确，内部类被当作顶级模块类引用，缺少了外层类的限定。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中展示了生成的迁移代码片段：'test1.models.Inner(max_length=20)' 和 'test1.models.State'，而正确的应为 'test1.models.Outer.Inner' 和 'test1.models.Thing.State'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "makemigrations 生成的迁移文件应正确序列化内部类字段，其引用路径应包含完整的外层类限定（例如 Outer.Inner 或 Thing.State）。",
+      "evidence": [
+        "Issue 描述中指出了错误路径和预期正确路径的对比：'Note the test1.models.Inner, which should have been test1.models.Outer.Inner.' 和 'This refers to test1.models.State, instead of to test1.models.Thing.State.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心触发操作是运行 manage.py makemigrations 命令。"
+      },
+      {
+        "name": "CreateModel",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "Issue 中展示的错误输出片段来自 migrations.CreateModel 操作，该类负责生成模型创建代码。"
+      },
+      {
+        "name": "MigrationWriter.serialize",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 WriterTests.test_deconstruct_class_arguments 涉及 MigrationWriter.serialize，这与迁移文件的序列化过程直接相关，而 Issue 正是关于序列化路径错误。"
+      },
+      {
+        "name": "ModelState.from_model",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 ModelStateTests.test_abstract_model_children_inherit_indexes 使用了 ModelState.from_model，这可能与从模型定义生成迁移状态的过程有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "CreateModel",
+        "lines": "41-239",
+        "reason": "Issue 中展示的错误输出直接来自 migrations.CreateModel 操作。该类负责生成模型创建代码，可能包含字段序列化的逻辑。"
+      },
+      {
+        "path": "",
+        "object": "迁移序列化逻辑（可能涉及 MigrationWriter 或相关序列化器）",
+        "lines": "",
+        "reason": "Issue 本质是对象（内部类）在序列化为迁移文件字符串时，其路径表示错误。相关测试 WriterTests.test_deconstruct_class_arguments 也测试了 MigrationWriter.serialize 对类的处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "WriterTests.test_deconstruct_class_arguments",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "该测试直接验证 MigrationWriter.serialize 方法对类参数（包括自定义字段的类参数）的序列化是否正确。这与 Issue 中内部类作为字段参数的序列化问题高度相关。",
+        "reusable_parts": [
+          "MigrationWriter.serialize 的调用方式",
+          "对序列化结果字符串的断言模式（contains_fragment/equals）",
+          "涉及自定义类（DeconstructibleInstances）的构造"
+        ],
+        "possible_gap": "该测试使用的是顶级自定义类，而非内部类。它没有测试嵌套类（Outer.Inner）的序列化路径。"
+      },
+      {
+        "test_name": "AutodetectorTests.test_deconstruct_type",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试涉及 ModelState 的创建和迁移变更检测，测试了未实例化的类（models.IntegerField）作为字段默认值时的序列化。这涉及到迁移生成过程中对类对象的处理。",
+        "reusable_parts": [
+          "ModelState 的构造方式",
+          "使用 get_changes 进行迁移检测",
+          "assertNumberMigrations 和 assertOperationTypes 的断言模式"
+        ],
+        "possible_gap": "该测试关注的是类作为默认值，而 Issue 关注的是类本身作为字段类型（如 Outer.Inner）。且测试中的类是顶级模块类，不是内部类。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_migrations_modules_path_not_exist",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试是 makemigrations 命令的集成测试，创建了一个简单模型并运行命令，验证迁移文件的生成。这提供了运行 makemigrations 的测试框架和流程。",
+        "reusable_parts": [
+          "使用 temporary_migration_module 上下文管理器",
+          "call_command('makemigrations', ...) 的调用方式",
+          "对生成的迁移文件路径的检查（os.path.exists）",
+          "对命令输出的断言（assertIn）"
+        ],
+        "possible_gap": "该测试使用普通的 BooleanField，没有涉及自定义字段或内部类。它主要测试迁移模块路径，不测试字段序列化的具体内容。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用普通的、顶级的 Django 模型字段（如 BooleanField, CharField）或顶级自定义类。",
+        "target_pattern": "使用定义在另一个类内部的字段类（内部类），例如 Outer.Inner 或 ModelClass.EnumField。",
+        "reason": "Issue 明确指出 bug 在字段是内部类时触发。将测试中的字段替换为内部类字段是走向缺陷路径的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接序列化一个字段实例或构建一个包含普通字段的 ModelState。",
+        "target_pattern": "构建一个模型，其字段类型是一个内部类的实例（如 field = Outer.Inner(...)），然后触发对该模型的迁移序列化过程。",
+        "reason": "需要模拟 Issue 描述的完整场景：定义内部类字段 -> 在模型中使用 -> 触发迁移生成序列化。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "生成的迁移文件内容字符串，特别是 CreateModel 操作中字段的序列化表示（如 `models.CharField(...)` 部分）。",
+        "reason": "Issue 的错误现象直接体现在生成的迁移文件代码中，观察序列化后的字段引用字符串是判断问题是否存在的直接依据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "内部类字段对象在序列化前的 `__module__` 和 `__qualname__` 属性，以及序列化后字符串中对应的路径部分。",
+        "reason": "比较序列化输入（字段对象）的完整限定名与输出字符串中的路径，可以定位路径信息在何处丢失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的迁移代码中，对内部类字段的引用包含了正确的外层类限定名（例如包含 'Outer.Inner' 或 'Thing.State'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "对完整迁移文件字符串进行精确相等断言，因为时间戳、顺序等可能变化。避免断言不相关的部分。",
+        "reason": "Issue 的核心是路径片段缺失，使用 contains_fragment 检查关键路径组件（外层类名）是否存在更稳定。"
+      },
+      {
+        "assertion_goal": "验证生成的迁移代码中，对内部类字段的引用不错误地将其视为顶级模块类（例如不应该是单纯的 'Inner' 或 'State'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "仅断言字符串不等于某个错误示例，因为可能有多种错误形式。",
+        "reason": "可以补充正向断言，确保错误模式（缺少外层类限定）没有出现。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 isolate_apps 或类似的机制来隔离测试应用，避免模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 temporary_migration_module 来管理迁移文件的生成路径。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类可能需要继承自 MigrationTestBase 或 SimpleTestCase，以获取相关的测试工具方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义包含内部类的模型结构，这可能在测试方法内部作为局部类定义。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 CreateModel 操作中，还是在更底层的序列化器（如 MigrationWriter）中，亦或是在 deconstruct 方法中？",
+      "除了示例中的 CharField 子类和 EnumField，其他类型的自定义内部类字段是否也会触发此问题？",
+      "内部类嵌套多层（如 Outer.Middle.Inner）时，bug 的表现形式是什么？",
+      "修复后的正确序列化字符串具体格式是什么？是 'models.Outer.Inner(...)' 还是 'test1.models.Outer.Inner(...)'？Issue 只给出了模块路径部分。"
+    ]
+  }
+}

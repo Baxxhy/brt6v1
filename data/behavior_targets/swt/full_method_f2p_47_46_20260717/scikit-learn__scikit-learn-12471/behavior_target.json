@@ -1,0 +1,346 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-12471",
+  "issue_summary": "OneHotEncoder 在 handle_unknown='ignore' 且类别为字符串时，处理未知字符串时因内存不安全导致 ValueError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 sklearn.preprocessing.OneHotEncoder。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试函数可能是一个独立的 pytest 函数，无需特殊的 TestCase 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 .reshape((-1,1)) 将一维数组转换为列向量。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_one_hot_encoder_handle_unknown",
+        "test_file": "sklearn/preprocessing/tests/test_encoders.py",
+        "why_relevant": "该测试专门测试了 handle_unknown='ignore' 的行为，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "OneHotEncoder 的导入",
+          "handle_unknown='ignore' 的配置",
+          "fit 和 transform 的调用模式",
+          "使用 assert_array_equal 验证输出矩阵"
+        ],
+        "possible_gap": "该测试使用整数数组，而 Issue 中的 bug 特定于字符串数组，且涉及字符串长度差异导致的内存问题。"
+      },
+      {
+        "test_name": "test_one_hot_encoder_inverse",
+        "test_file": "sklearn/preprocessing/tests/test_encoders.py",
+        "why_relevant": "测试了 handle_unknown='ignore' 与字符串类别结合的情况，并涉及 transform 和 inverse_transform。",
+        "reusable_parts": [
+          "使用字符串和混合类型数据",
+          "设置 handle_unknown='ignore'",
+          "categories 参数的手动指定"
+        ],
+        "possible_gap": "测试焦点在于 inverse_transform 的正确性，而非 transform 过程中因字符串长度引发的内存错误。"
+      },
+      {
+        "test_name": "test_one_hot_encoder_specified_categories",
+        "test_file": "sklearn/preprocessing/tests/test_encoders.py",
+        "why_relevant": "测试了手动指定 categories 并处理未知类别的情况，包含对象类型（字符串）。",
+        "reusable_parts": [
+          "使用 dtype=object 的 numpy 数组",
+          "设置 categories 参数",
+          "handle_unknown='ignore' 的配置"
+        ],
+        "possible_gap": "测试数据中的字符串长度相似，没有模拟 Issue 中长字符串类别与短字符串输入之间的不匹配。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 OneHotEncoder，设置 handle_unknown='ignore'，在 fit 时使用包含较长字符串的 numpy 数组，在 transform 时传入包含较短未知字符串的 numpy 数组。",
+      "evidence": [
+        "Issue 描述：'when you set OneHotEncoder to ignore unknown entries. and your labels are strings.'",
+        "Issue 代码：ohe = OneHotEncoder(dtype=bool,handle_unknown='ignore')",
+        "Issue 代码：train 包含 '11111111'，test 包含 '55555'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: y contains previously unseen labels: ['111111']",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 Actual Results 部分：'> ValueError: y contains previously unseen labels: ['111111']'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "OneHotEncoder",
+        "kind": "class",
+        "source_path": "sklearn/preprocessing/_encoders.py",
+        "reason": "Issue 直接报告了该类的问题。"
+      },
+      {
+        "name": "OneHotEncoder.fit",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_encoders.py",
+        "reason": "需要先调用 fit 来训练编码器。"
+      },
+      {
+        "name": "OneHotEncoder.transform",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_encoders.py",
+        "reason": "Issue 在调用 transform 时触发了错误。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/preprocessing/_encoders.py",
+        "object": "OneHotEncoder._transform_new",
+        "lines": "",
+        "reason": "Issue 描述的错误发生在 transform 阶段，且与处理未知字符串的内存操作有关。源码片段 3 显示 transform 方法在非 legacy 模式下会调用 _transform_new。"
+      },
+      {
+        "path": "sklearn/preprocessing/_encoders.py",
+        "object": "OneHotEncoder._legacy_transform",
+        "lines": "",
+        "reason": "Issue 描述的错误也可能发生在 legacy 模式下，但 Issue 未明确说明版本，且相关源码显示存在 legacy 模式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的输入数据通常是整数数组或长度相近的字符串数组。",
+        "target_pattern": "使用 numpy 数组，其中 fit 数据包含一个较长的字符串类别（如 '11111111'），transform 数据包含一个较短的未知字符串（如 '55555'）。",
+        "reason": "Issue 明确指出 bug 发生在长类别字符串需要放入短字符串输入数组条目时，导致截断和 ValueError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常使用默认的 dtype（如 np.float64）或未指定。",
+        "target_pattern": "显式设置 dtype=bool，如 Issue 示例所示。",
+        "reason": "Issue 的复现代码中设置了 dtype=bool，这可能影响内部数组的数据类型处理。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "transform 方法应成功处理未知字符串，返回一个稀疏矩阵，其中未知类别对应的列全为零。",
+      "evidence": [
+        "Issue 的 Expected Results 部分：'Here we should get an sparse matrix 2x4 false everywhere except at (1,1) the '22' that is known'",
+        "相关测试 1 中 handle_unknown='ignore' 的行为描述：'ignores unknown features (giving all 0's)'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 ohe.transform(test) 时捕获的异常及其消息。",
+        "reason": "Issue 的核心现象是抛出 ValueError，观测异常类型和消息是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ohe.transform(test) 成功返回时的稀疏矩阵形状和值。",
+        "reason": "在修复后或正常路径下，应能成功返回矩阵，并验证未知类别对应列是否全为零。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "fit 后 ohe.categories_ 中元素的数据类型和具体值。",
+        "reason": "确认类别是字符串类型，并且第一个类别（按字母排序）是长字符串，这是触发条件的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 handle_unknown='ignore' 且输入包含未知字符串时，transform 应成功执行，不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体措辞可能变化。",
+        "reason": "Issue 的核心是错误地抛出了异常。修复后，该调用不应再引发异常。因此，在生成复现测试时，初始目标可能是验证异常被引发（raises），但最终修复后的测试应验证无异常。提示使用 'raises' 风格来捕获当前缺陷行为。"
+      },
+      {
+        "assertion_goal": "transform 输出的稀疏矩阵中，未知特征对应的列应全为零。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个稀疏矩阵的完整字符串表示。",
+        "reason": "这是 handle_unknown='ignore' 的预期语义，相关测试 1 中也使用了此断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "bug 是否只发生在 dtype=bool 时，还是其他 dtype 也会触发。",
+    "bug 是在 _transform_new 方法中还是 _legacy_transform 方法中，或者两者都有。",
+    "内部具体是哪个内存操作（如赋值、拷贝）导致了字符串截断。",
+    "是否只有 numpy 数组会触发，列表或其他数组类型是否安全。"
+  ],
+  "raw": {
+    "issue_summary": "OneHotEncoder 在 handle_unknown='ignore' 且类别为字符串时，处理未知字符串时因内存不安全导致 ValueError。",
+    "trigger_condition": {
+      "text": "使用 OneHotEncoder，设置 handle_unknown='ignore'，在 fit 时使用包含较长字符串的 numpy 数组，在 transform 时传入包含较短未知字符串的 numpy 数组。",
+      "evidence": [
+        "Issue 描述：'when you set OneHotEncoder to ignore unknown entries. and your labels are strings.'",
+        "Issue 代码：ohe = OneHotEncoder(dtype=bool,handle_unknown='ignore')",
+        "Issue 代码：train 包含 '11111111'，test 包含 '55555'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: y contains previously unseen labels: ['111111']",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 Actual Results 部分：'> ValueError: y contains previously unseen labels: ['111111']'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "transform 方法应成功处理未知字符串，返回一个稀疏矩阵，其中未知类别对应的列全为零。",
+      "evidence": [
+        "Issue 的 Expected Results 部分：'Here we should get an sparse matrix 2x4 false everywhere except at (1,1) the '22' that is known'",
+        "相关测试 1 中 handle_unknown='ignore' 的行为描述：'ignores unknown features (giving all 0's)'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "OneHotEncoder",
+        "kind": "class",
+        "source_path": "sklearn/preprocessing/_encoders.py",
+        "reason": "Issue 直接报告了该类的问题。"
+      },
+      {
+        "name": "OneHotEncoder.fit",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_encoders.py",
+        "reason": "需要先调用 fit 来训练编码器。"
+      },
+      {
+        "name": "OneHotEncoder.transform",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_encoders.py",
+        "reason": "Issue 在调用 transform 时触发了错误。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/preprocessing/_encoders.py",
+        "object": "OneHotEncoder._transform_new",
+        "lines": "",
+        "reason": "Issue 描述的错误发生在 transform 阶段，且与处理未知字符串的内存操作有关。源码片段 3 显示 transform 方法在非 legacy 模式下会调用 _transform_new。"
+      },
+      {
+        "path": "sklearn/preprocessing/_encoders.py",
+        "object": "OneHotEncoder._legacy_transform",
+        "lines": "",
+        "reason": "Issue 描述的错误也可能发生在 legacy 模式下，但 Issue 未明确说明版本，且相关源码显示存在 legacy 模式。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_one_hot_encoder_handle_unknown",
+        "test_file": "sklearn/preprocessing/tests/test_encoders.py",
+        "why_relevant": "该测试专门测试了 handle_unknown='ignore' 的行为，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "OneHotEncoder 的导入",
+          "handle_unknown='ignore' 的配置",
+          "fit 和 transform 的调用模式",
+          "使用 assert_array_equal 验证输出矩阵"
+        ],
+        "possible_gap": "该测试使用整数数组，而 Issue 中的 bug 特定于字符串数组，且涉及字符串长度差异导致的内存问题。"
+      },
+      {
+        "test_name": "test_one_hot_encoder_inverse",
+        "test_file": "sklearn/preprocessing/tests/test_encoders.py",
+        "why_relevant": "测试了 handle_unknown='ignore' 与字符串类别结合的情况，并涉及 transform 和 inverse_transform。",
+        "reusable_parts": [
+          "使用字符串和混合类型数据",
+          "设置 handle_unknown='ignore'",
+          "categories 参数的手动指定"
+        ],
+        "possible_gap": "测试焦点在于 inverse_transform 的正确性，而非 transform 过程中因字符串长度引发的内存错误。"
+      },
+      {
+        "test_name": "test_one_hot_encoder_specified_categories",
+        "test_file": "sklearn/preprocessing/tests/test_encoders.py",
+        "why_relevant": "测试了手动指定 categories 并处理未知类别的情况，包含对象类型（字符串）。",
+        "reusable_parts": [
+          "使用 dtype=object 的 numpy 数组",
+          "设置 categories 参数",
+          "handle_unknown='ignore' 的配置"
+        ],
+        "possible_gap": "测试数据中的字符串长度相似，没有模拟 Issue 中长字符串类别与短字符串输入之间的不匹配。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的输入数据通常是整数数组或长度相近的字符串数组。",
+        "target_pattern": "使用 numpy 数组，其中 fit 数据包含一个较长的字符串类别（如 '11111111'），transform 数据包含一个较短的未知字符串（如 '55555'）。",
+        "reason": "Issue 明确指出 bug 发生在长类别字符串需要放入短字符串输入数组条目时，导致截断和 ValueError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常使用默认的 dtype（如 np.float64）或未指定。",
+        "target_pattern": "显式设置 dtype=bool，如 Issue 示例所示。",
+        "reason": "Issue 的复现代码中设置了 dtype=bool，这可能影响内部数组的数据类型处理。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 ohe.transform(test) 时捕获的异常及其消息。",
+        "reason": "Issue 的核心现象是抛出 ValueError，观测异常类型和消息是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ohe.transform(test) 成功返回时的稀疏矩阵形状和值。",
+        "reason": "在修复后或正常路径下，应能成功返回矩阵，并验证未知类别对应列是否全为零。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "fit 后 ohe.categories_ 中元素的数据类型和具体值。",
+        "reason": "确认类别是字符串类型，并且第一个类别（按字母排序）是长字符串，这是触发条件的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 handle_unknown='ignore' 且输入包含未知字符串时，transform 应成功执行，不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体措辞可能变化。",
+        "reason": "Issue 的核心是错误地抛出了异常。修复后，该调用不应再引发异常。因此，在生成复现测试时，初始目标可能是验证异常被引发（raises），但最终修复后的测试应验证无异常。提示使用 'raises' 风格来捕获当前缺陷行为。"
+      },
+      {
+        "assertion_goal": "transform 输出的稀疏矩阵中，未知特征对应的列应全为零。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个稀疏矩阵的完整字符串表示。",
+        "reason": "这是 handle_unknown='ignore' 的预期语义，相关测试 1 中也使用了此断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 sklearn.preprocessing.OneHotEncoder。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试函数可能是一个独立的 pytest 函数，无需特殊的 TestCase 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 .reshape((-1,1)) 将一维数组转换为列向量。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "bug 是否只发生在 dtype=bool 时，还是其他 dtype 也会触发。",
+      "bug 是在 _transform_new 方法中还是 _legacy_transform 方法中，或者两者都有。",
+      "内部具体是哪个内存操作（如赋值、拷贝）导致了字符串截断。",
+      "是否只有 numpy 数组会触发，列表或其他数组类型是否安全。"
+    ]
+  }
+}

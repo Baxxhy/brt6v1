@@ -1,0 +1,360 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15278",
+  "issue_summary": "在 SQLite 数据库上为模型添加一个可为空的 OneToOneField 字段时，执行迁移会因 UNIQUE 约束导致 OperationalError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用基于 SQLite 的测试数据库。可能需要使用 django.test.TestCase 或 django.test.TransactionTestCase 来管理数据库。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个包含初始模型的迁移状态，然后应用添加 OneToOneField 的新迁移。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以参考 tests/migrations/ 目录下的测试，它们设置了复杂的迁移测试场景。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_add_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "它测试了 AddField 操作的自动检测，是迁移测试的起点。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "assertOperationTypes 和 assertOperationAttributes 的断言模式"
+        ],
+        "possible_gap": "它不涉及具体的数据库后端（SQLite）操作，也不测试 OneToOneField 或 UNIQUE 约束在 SQLite 上的添加。"
+      },
+      {
+        "test_name": "test_nullable_o2o_delete",
+        "test_file": "tests/one_to_one/tests.py",
+        "why_relevant": "它测试了可为空的 OneToOneField 的行为，包括保存和删除。",
+        "reusable_parts": [
+          "OneToOneTests 类",
+          "UndergroundBar 和 Place 模型的使用",
+          "可为空关系的保存和查询模式"
+        ],
+        "possible_gap": "它测试的是应用层行为，而不是迁移创建表结构的过程。"
+      },
+      {
+        "test_name": "test_one_to_one",
+        "test_file": "tests/field_deconstruction/tests.py",
+        "why_relevant": "它测试了 OneToOneField 的构造和反构造，包括各种参数（如 on_delete=models.SET_NULL）。",
+        "reusable_parts": [
+          "OneToOneField 的实例化模式",
+          "对 on_delete 等参数的设置"
+        ],
+        "possible_gap": "它是一个单元测试，不涉及数据库迁移或 SQL 执行。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 SQLite 数据库上，对一个已存在的模型执行 AddField 迁移操作，添加一个 blank=True, null=True 的 OneToOneField 字段。",
+      "evidence": [
+        "Issue 中描述了在 Django 4.0 和 main 分支之间构建 django-oauth-toolkit 时，migrations.AddField 操作失败。",
+        "Issue 中提供了迁移代码片段，显示 field=models.OneToOneField(blank=True, null=True, ...)。",
+        "相关源码片段 2 显示了 AddField 类。",
+        "相关源码片段 3 显示 OneToOneField 继承自 ForeignKey 并带有“unique”约束。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行迁移时，SQLite 后端抛出 django.db.utils.OperationalError: Cannot add a UNIQUE column。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中显示了错误堆栈和错误信息：OperationalError: Cannot add a UNIQUE column。",
+        "相关源码片段 1 显示了 execute 方法，是错误抛出的位置。",
+        "相关源码片段 4 显示了 OperationalError 类。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AddField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 中触发错误的迁移操作。"
+      },
+      {
+        "name": "models.OneToOneField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中正在添加的字段类型，其 unique 约束是问题的核心。"
+      },
+      {
+        "name": "django.db.backends.sqlite3.base.SQLiteCursorWrapper.execute",
+        "kind": "method",
+        "source_path": "django/db/backends/sqlite3/base.py",
+        "reason": "错误发生的位置，执行 SQL 语句时。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/sqlite3/schema.py",
+        "object": "用于生成 ALTER TABLE ADD COLUMN 语句的相关方法",
+        "lines": "",
+        "reason": "Issue 提到 SQLite 相关更改（#33355），且错误是 SQLite 特有的，因此生成 SQL 语句的逻辑可能是问题所在。"
+      },
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AddField.database_forwards",
+        "lines": "",
+        "reason": "该方法是执行迁移操作、调用 schema_editor 的地方，可能影响生成的 SQL。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试通常在默认或通用数据库后端（如内存 SQLite）上运行。",
+        "target_pattern": "明确使用 SQLite 数据库后端，并针对一个已存在数据的表进行迁移。",
+        "reason": "Issue 错误是 SQLite 特有的，且与向已有表添加 UNIQUE 列相关。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接创建模型实例并操作。",
+        "target_pattern": "测试需要调用迁移框架（migrate 或 schema_editor.execute）来执行 AddField 操作。",
+        "reason": "错误发生在迁移执行过程中，而不是常规的 ORM 保存操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "OneToOneField 在测试中可能用于新模型或非空场景。",
+        "target_pattern": "OneToOneField 的构造参数需包含 blank=True, null=True，并添加到已有模型中。",
+        "reason": "Issue 中的迁移片段明确设置了这些参数，且错误与添加可为空但唯一的列有关。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移应成功执行，在 SQLite 数据库表中添加一个可为空且具有 UNIQUE 约束的新列。",
+      "evidence": [
+        "Issue 标题和描述暗示这是一个新出现的错误，表明在 Django 4.0 之前或修复后，此操作应正常工作。",
+        "相关测试 1 和 2 展示了可为空的 OneToOneField 可以正常保存和删除，暗示数据库层面应支持此操作。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 schema_editor.execute 或 migrate 命令时捕获 django.db.utils.OperationalError。",
+        "reason": "Issue 的核心错误就是这个异常。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "观察由 schema_editor 为 AddField 操作生成的 SQL 语句（特别是 ALTER TABLE ... ADD COLUMN ... 部分）。",
+        "reason": "错误信息指向 SQL 执行失败，观察生成的 SQL 可以确认是否包含 UNIQUE 约束以及其语法。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "迁移执行前后，检查数据库表结构（如通过 introspection）是否成功添加了列及其约束。",
+        "reason": "验证迁移的最终效果是否符合预期。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功完成，不抛出 OperationalError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或错误信息文本，因为具体信息可能随版本变化。",
+        "reason": "Issue 表明当前行为会抛出异常，修复后应不再抛出。因此，在修复后的测试中，应使用 assertNotRaises 或类似方式。但根据规则9，此处提示修复前测试的断言风格（应捕获异常）。对于修复后的正向断言，应是迁移成功且列被添加。"
+      },
+      {
+        "assertion_goal": "迁移后，新添加的 OneToOneField 列在数据库中存在且可为空并具有 UNIQUE 约束。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言模型实例的特定属性值，除非与迁移直接相关。",
+        "reason": "这直接验证了迁移的最终状态是否符合 OneToOneField 的语义（可为空且唯一）。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致错误的精确 SQLite 版本或 Django 提交范围（仅知与 #33355 有关）。",
+    "修复后的正确 SQL 语句应该是什么样子。",
+    "是否所有可为空的 OneToOneField 添加都会失败，还是仅在特定条件下（如表中有数据）。",
+    "除了 SQLite，其他数据库后端是否受影响。"
+  ],
+  "raw": {
+    "issue_summary": "在 SQLite 数据库上为模型添加一个可为空的 OneToOneField 字段时，执行迁移会因 UNIQUE 约束导致 OperationalError。",
+    "trigger_condition": {
+      "text": "在 SQLite 数据库上，对一个已存在的模型执行 AddField 迁移操作，添加一个 blank=True, null=True 的 OneToOneField 字段。",
+      "evidence": [
+        "Issue 中描述了在 Django 4.0 和 main 分支之间构建 django-oauth-toolkit 时，migrations.AddField 操作失败。",
+        "Issue 中提供了迁移代码片段，显示 field=models.OneToOneField(blank=True, null=True, ...)。",
+        "相关源码片段 2 显示了 AddField 类。",
+        "相关源码片段 3 显示 OneToOneField 继承自 ForeignKey 并带有“unique”约束。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行迁移时，SQLite 后端抛出 django.db.utils.OperationalError: Cannot add a UNIQUE column。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中显示了错误堆栈和错误信息：OperationalError: Cannot add a UNIQUE column。",
+        "相关源码片段 1 显示了 execute 方法，是错误抛出的位置。",
+        "相关源码片段 4 显示了 OperationalError 类。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移应成功执行，在 SQLite 数据库表中添加一个可为空且具有 UNIQUE 约束的新列。",
+      "evidence": [
+        "Issue 标题和描述暗示这是一个新出现的错误，表明在 Django 4.0 之前或修复后，此操作应正常工作。",
+        "相关测试 1 和 2 展示了可为空的 OneToOneField 可以正常保存和删除，暗示数据库层面应支持此操作。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AddField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 中触发错误的迁移操作。"
+      },
+      {
+        "name": "models.OneToOneField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中正在添加的字段类型，其 unique 约束是问题的核心。"
+      },
+      {
+        "name": "django.db.backends.sqlite3.base.SQLiteCursorWrapper.execute",
+        "kind": "method",
+        "source_path": "django/db/backends/sqlite3/base.py",
+        "reason": "错误发生的位置，执行 SQL 语句时。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/sqlite3/schema.py",
+        "object": "用于生成 ALTER TABLE ADD COLUMN 语句的相关方法",
+        "lines": "",
+        "reason": "Issue 提到 SQLite 相关更改（#33355），且错误是 SQLite 特有的，因此生成 SQL 语句的逻辑可能是问题所在。"
+      },
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AddField.database_forwards",
+        "lines": "",
+        "reason": "该方法是执行迁移操作、调用 schema_editor 的地方，可能影响生成的 SQL。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_add_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "它测试了 AddField 操作的自动检测，是迁移测试的起点。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "assertOperationTypes 和 assertOperationAttributes 的断言模式"
+        ],
+        "possible_gap": "它不涉及具体的数据库后端（SQLite）操作，也不测试 OneToOneField 或 UNIQUE 约束在 SQLite 上的添加。"
+      },
+      {
+        "test_name": "test_nullable_o2o_delete",
+        "test_file": "tests/one_to_one/tests.py",
+        "why_relevant": "它测试了可为空的 OneToOneField 的行为，包括保存和删除。",
+        "reusable_parts": [
+          "OneToOneTests 类",
+          "UndergroundBar 和 Place 模型的使用",
+          "可为空关系的保存和查询模式"
+        ],
+        "possible_gap": "它测试的是应用层行为，而不是迁移创建表结构的过程。"
+      },
+      {
+        "test_name": "test_one_to_one",
+        "test_file": "tests/field_deconstruction/tests.py",
+        "why_relevant": "它测试了 OneToOneField 的构造和反构造，包括各种参数（如 on_delete=models.SET_NULL）。",
+        "reusable_parts": [
+          "OneToOneField 的实例化模式",
+          "对 on_delete 等参数的设置"
+        ],
+        "possible_gap": "它是一个单元测试，不涉及数据库迁移或 SQL 执行。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试通常在默认或通用数据库后端（如内存 SQLite）上运行。",
+        "target_pattern": "明确使用 SQLite 数据库后端，并针对一个已存在数据的表进行迁移。",
+        "reason": "Issue 错误是 SQLite 特有的，且与向已有表添加 UNIQUE 列相关。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接创建模型实例并操作。",
+        "target_pattern": "测试需要调用迁移框架（migrate 或 schema_editor.execute）来执行 AddField 操作。",
+        "reason": "错误发生在迁移执行过程中，而不是常规的 ORM 保存操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "OneToOneField 在测试中可能用于新模型或非空场景。",
+        "target_pattern": "OneToOneField 的构造参数需包含 blank=True, null=True，并添加到已有模型中。",
+        "reason": "Issue 中的迁移片段明确设置了这些参数，且错误与添加可为空但唯一的列有关。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 schema_editor.execute 或 migrate 命令时捕获 django.db.utils.OperationalError。",
+        "reason": "Issue 的核心错误就是这个异常。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "观察由 schema_editor 为 AddField 操作生成的 SQL 语句（特别是 ALTER TABLE ... ADD COLUMN ... 部分）。",
+        "reason": "错误信息指向 SQL 执行失败，观察生成的 SQL 可以确认是否包含 UNIQUE 约束以及其语法。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "迁移执行前后，检查数据库表结构（如通过 introspection）是否成功添加了列及其约束。",
+        "reason": "验证迁移的最终效果是否符合预期。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功完成，不抛出 OperationalError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或错误信息文本，因为具体信息可能随版本变化。",
+        "reason": "Issue 表明当前行为会抛出异常，修复后应不再抛出。因此，在修复后的测试中，应使用 assertNotRaises 或类似方式。但根据规则9，此处提示修复前测试的断言风格（应捕获异常）。对于修复后的正向断言，应是迁移成功且列被添加。"
+      },
+      {
+        "assertion_goal": "迁移后，新添加的 OneToOneField 列在数据库中存在且可为空并具有 UNIQUE 约束。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言模型实例的特定属性值，除非与迁移直接相关。",
+        "reason": "这直接验证了迁移的最终状态是否符合 OneToOneField 的语义（可为空且唯一）。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用基于 SQLite 的测试数据库。可能需要使用 django.test.TestCase 或 django.test.TransactionTestCase 来管理数据库。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个包含初始模型的迁移状态，然后应用添加 OneToOneField 的新迁移。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以参考 tests/migrations/ 目录下的测试，它们设置了复杂的迁移测试场景。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致错误的精确 SQLite 版本或 Django 提交范围（仅知与 #33355 有关）。",
+      "修复后的正确 SQL 语句应该是什么样子。",
+      "是否所有可为空的 OneToOneField 添加都会失败，还是仅在特定条件下（如表中有数据）。",
+      "除了 SQLite，其他数据库后端是否受影响。"
+    ]
+  }
+}

@@ -1,0 +1,298 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13757",
+  "issue_summary": "在 SQLite 和 Oracle 数据库上，对 JSON 字段使用 __isnull=True 的 KeyTransform 查询错误地匹配了键值为 JSON null 的对象。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `NullableJSONModel` 模型，并准备一组具有不同 `value` JSON 结构的测试对象（`self.objs`），其中至少一个对象的 `value` 包含 `{'j': None}`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类需要继承自 `TestCase` 并使用 `@skipUnlessDBFeature('supports_json_field')` 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 Django 使用 SQLite 或 Oracle 数据库后端来运行测试，以触发缺陷。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_isnull_key",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试直接测试 `value__<key>__isnull=True/False` 查询，与 Issue 主题完全一致。Issue 描述也建议修改此测试来确认缺陷。",
+        "reusable_parts": [
+          "测试类 `TestQuerying` 和装饰器 `@skipUnlessDBFeature('supports_json_field')`",
+          "`NullableJSONModel` 模型和 `self.objs` fixture 的构造与使用",
+          "使用 `assertSequenceEqual` 比较查询结果序列的断言风格"
+        ],
+        "possible_gap": "原始测试使用 `value__a__isnull=True` 进行断言，但 Issue 指出使用 `value__a` 可能无法捕获缺陷，因为其值不是 JSON null。需要将查询键改为 `j` 并调整预期结果序列。"
+      },
+      {
+        "test_name": "test_none_key",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试涉及查询键值为 `None` (`value__j=None`) 的情况，这与 `__isnull=True` 查询错误匹配 JSON null 的现象直接相关。",
+        "reusable_parts": [
+          "对 `NullableJSONModel` 和 `value__j` 键的使用",
+          "`assertSequenceEqual` 断言风格"
+        ],
+        "possible_gap": "该测试关注的是 `=` 操作符与 `None` 的比较，而非 `__isnull` 查找。需要将查询条件改为 `__isnull=True` 并调整预期逻辑。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 SQLite 或 Oracle 数据库上，对 JSON 字段使用 __isnull=True 的 KeyTransform 进行查询（例如 `NullableJSONModel.objects.filter(value__j__isnull=True)`）。",
+      "evidence": [
+        "Issue 描述指出问题发生在 SQLite 和 Oracle 上，并给出了修改测试 `test_isnull_key` 中查询条件的示例。",
+        "相关测试 1 展示了 `value__a__isnull=True` 和 `value__j__isnull=False` 的查询模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "查询结果错误地包含了那些具有指定键且键值为 JSON null 的对象，而正确的行为应该只匹配那些根本不具有该键的对象。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述明确指出：'on SQLite and Oracle, the query also matches objects that have the key with the value null, which is incorrect.'",
+        "相关测试 1 和 2 展示了 `isnull=True` 查询的预期结果序列，暗示了正确与错误结果的差异。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "KeyTransformIsNull",
+        "kind": "class",
+        "source_path": "django/db/models/fields/json.py",
+        "reason": "Issue 直接提到 KeyTransformIsNull lookup，并且源码片段 1 显示它是 lookups.IsNull 的子类，负责处理 `__isnull` 查询。"
+      },
+      {
+        "name": "NullableJSONModel.objects.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 和所有相关测试都通过调用 `NullableJSONModel.objects.filter` 并传入 `value__<key>__isnull=True/False` 参数来触发查询。"
+      },
+      {
+        "name": "HasKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/json.py",
+        "reason": "Issue 提到 'KeyTransformIsNull lookup borrows the logic from HasKey for isnull=False'，说明 HasKey 类与当前缺陷的逻辑实现相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/json.py",
+        "object": "KeyTransformIsNull.as_sqlite",
+        "lines": "366-376",
+        "reason": "源码片段 1 显示 KeyTransformIsNull 类定义了 `as_sqlite` 方法。Issue 明确指出问题发生在 SQLite 和 Oracle 上，因此这些数据库特定的 SQL 生成方法（`as_sqlite` 和 `as_oracle`）是首要怀疑对象。"
+      },
+      {
+        "path": "django/db/models/fields/json.py",
+        "object": "KeyTransformIsNull.as_oracle",
+        "lines": "366-376",
+        "reason": "同上，Issue 明确指出问题发生在 Oracle 上，因此 `as_oracle` 方法也是怀疑对象。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 `test_isnull_key` 中对 `value__a__isnull=True` 进行查询。",
+        "target_pattern": "将查询键从 `a` 改为 `j`，因为 `self.objs[4]` 的 `value` 字段包含 `{'j': None}`（根据相关测试 3 推断）。",
+        "reason": "Issue 明确指出原始测试使用 `value__a` 可能无法捕获缺陷，因为其值不是 JSON null。而键 `j` 在某些对象中具有 JSON null 值，是触发错误匹配的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试通常在支持 JSON 字段的数据库上运行。",
+        "target_pattern": "确保测试在 SQLite 或 Oracle 数据库后端上运行。",
+        "reason": "Issue 明确指出缺陷只发生在 SQLite 和 Oracle 上，在其他数据库上是正确的。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 SQLite 和 Oracle 数据库上，对 JSON 字段使用 __isnull=True 的 KeyTransform 查询应只匹配那些不具有指定键的对象，不应匹配键值为 JSON null 的对象。",
+      "evidence": [
+        "Issue 描述指出：'If isnull=True, the query should only match objects that do not have the key.'",
+        "Issue 提到 MariaDB, MySQL, PostgreSQL 上的查询是正确的，这暗示了期望的行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`NullableJSONModel.objects.filter(value__j__isnull=True).values_list('id', flat=True)` 或查询结果序列本身。",
+        "reason": "Issue 的核心是查询返回了错误的对象集合。观察实际返回的 ID 列表或对象序列，并与预期序列（不包含 `self.objs[4]`）进行比较，可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "`str(NullableJSONModel.objects.filter(value__j__isnull=True).query)` 或通过数据库连接记录的 SQL 语句。",
+        "reason": "缺陷可能源于为 SQLite/Oracle 生成的错误 SQL 条件。观察生成的 SQL 可以帮助理解为什么 `__isnull=True` 会匹配 JSON null 值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 SQLite/Oracle 上，`value__j__isnull=True` 查询返回的对象集合不包含 `value` 字段中具有键 `j`（即使其值为 JSON null）的对象。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、硬编码的 SQL 字符串。避免断言与缺陷无关的对象数量或顺序细节。",
+        "reason": "Issue 的核心是错误地包含了不该包含的对象（`self.objs[4]`）。使用 `assertNotIn` 或确保结果序列不包含特定对象 ID 的断言，可以稳定地捕捉到这个错误包含关系，而不依赖于完整的对象列表顺序。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`self.objs` 中每个对象 `value` 字段的确切 JSON 内容，特别是哪个对象包含 `{'j': None}`。虽然从相关测试 3 推断 `self.objs[4]` 包含它，但需要确认。",
+    "在 SQLite 和 Oracle 上，`KeyTransformIsNull.as_sqlite` 和 `as_oracle` 方法内部生成错误 SQL 的具体逻辑。",
+    "除了 `j` 键，是否还有其他键值组合会触发此缺陷。",
+    "修复后，`__isnull=False` 的行为在 SQLite 和 Oracle 上是否也需要调整或保持不变。"
+  ],
+  "raw": {
+    "issue_summary": "在 SQLite 和 Oracle 数据库上，对 JSON 字段使用 __isnull=True 的 KeyTransform 查询错误地匹配了键值为 JSON null 的对象。",
+    "trigger_condition": {
+      "text": "在 SQLite 或 Oracle 数据库上，对 JSON 字段使用 __isnull=True 的 KeyTransform 进行查询（例如 `NullableJSONModel.objects.filter(value__j__isnull=True)`）。",
+      "evidence": [
+        "Issue 描述指出问题发生在 SQLite 和 Oracle 上，并给出了修改测试 `test_isnull_key` 中查询条件的示例。",
+        "相关测试 1 展示了 `value__a__isnull=True` 和 `value__j__isnull=False` 的查询模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "查询结果错误地包含了那些具有指定键且键值为 JSON null 的对象，而正确的行为应该只匹配那些根本不具有该键的对象。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述明确指出：'on SQLite and Oracle, the query also matches objects that have the key with the value null, which is incorrect.'",
+        "相关测试 1 和 2 展示了 `isnull=True` 查询的预期结果序列，暗示了正确与错误结果的差异。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 SQLite 和 Oracle 数据库上，对 JSON 字段使用 __isnull=True 的 KeyTransform 查询应只匹配那些不具有指定键的对象，不应匹配键值为 JSON null 的对象。",
+      "evidence": [
+        "Issue 描述指出：'If isnull=True, the query should only match objects that do not have the key.'",
+        "Issue 提到 MariaDB, MySQL, PostgreSQL 上的查询是正确的，这暗示了期望的行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "KeyTransformIsNull",
+        "kind": "class",
+        "source_path": "django/db/models/fields/json.py",
+        "reason": "Issue 直接提到 KeyTransformIsNull lookup，并且源码片段 1 显示它是 lookups.IsNull 的子类，负责处理 `__isnull` 查询。"
+      },
+      {
+        "name": "NullableJSONModel.objects.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 和所有相关测试都通过调用 `NullableJSONModel.objects.filter` 并传入 `value__<key>__isnull=True/False` 参数来触发查询。"
+      },
+      {
+        "name": "HasKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/json.py",
+        "reason": "Issue 提到 'KeyTransformIsNull lookup borrows the logic from HasKey for isnull=False'，说明 HasKey 类与当前缺陷的逻辑实现相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/json.py",
+        "object": "KeyTransformIsNull.as_sqlite",
+        "lines": "366-376",
+        "reason": "源码片段 1 显示 KeyTransformIsNull 类定义了 `as_sqlite` 方法。Issue 明确指出问题发生在 SQLite 和 Oracle 上，因此这些数据库特定的 SQL 生成方法（`as_sqlite` 和 `as_oracle`）是首要怀疑对象。"
+      },
+      {
+        "path": "django/db/models/fields/json.py",
+        "object": "KeyTransformIsNull.as_oracle",
+        "lines": "366-376",
+        "reason": "同上，Issue 明确指出问题发生在 Oracle 上，因此 `as_oracle` 方法也是怀疑对象。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_isnull_key",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试直接测试 `value__<key>__isnull=True/False` 查询，与 Issue 主题完全一致。Issue 描述也建议修改此测试来确认缺陷。",
+        "reusable_parts": [
+          "测试类 `TestQuerying` 和装饰器 `@skipUnlessDBFeature('supports_json_field')`",
+          "`NullableJSONModel` 模型和 `self.objs` fixture 的构造与使用",
+          "使用 `assertSequenceEqual` 比较查询结果序列的断言风格"
+        ],
+        "possible_gap": "原始测试使用 `value__a__isnull=True` 进行断言，但 Issue 指出使用 `value__a` 可能无法捕获缺陷，因为其值不是 JSON null。需要将查询键改为 `j` 并调整预期结果序列。"
+      },
+      {
+        "test_name": "test_none_key",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试涉及查询键值为 `None` (`value__j=None`) 的情况，这与 `__isnull=True` 查询错误匹配 JSON null 的现象直接相关。",
+        "reusable_parts": [
+          "对 `NullableJSONModel` 和 `value__j` 键的使用",
+          "`assertSequenceEqual` 断言风格"
+        ],
+        "possible_gap": "该测试关注的是 `=` 操作符与 `None` 的比较，而非 `__isnull` 查找。需要将查询条件改为 `__isnull=True` 并调整预期逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 `test_isnull_key` 中对 `value__a__isnull=True` 进行查询。",
+        "target_pattern": "将查询键从 `a` 改为 `j`，因为 `self.objs[4]` 的 `value` 字段包含 `{'j': None}`（根据相关测试 3 推断）。",
+        "reason": "Issue 明确指出原始测试使用 `value__a` 可能无法捕获缺陷，因为其值不是 JSON null。而键 `j` 在某些对象中具有 JSON null 值，是触发错误匹配的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试通常在支持 JSON 字段的数据库上运行。",
+        "target_pattern": "确保测试在 SQLite 或 Oracle 数据库后端上运行。",
+        "reason": "Issue 明确指出缺陷只发生在 SQLite 和 Oracle 上，在其他数据库上是正确的。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`NullableJSONModel.objects.filter(value__j__isnull=True).values_list('id', flat=True)` 或查询结果序列本身。",
+        "reason": "Issue 的核心是查询返回了错误的对象集合。观察实际返回的 ID 列表或对象序列，并与预期序列（不包含 `self.objs[4]`）进行比较，可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "`str(NullableJSONModel.objects.filter(value__j__isnull=True).query)` 或通过数据库连接记录的 SQL 语句。",
+        "reason": "缺陷可能源于为 SQLite/Oracle 生成的错误 SQL 条件。观察生成的 SQL 可以帮助理解为什么 `__isnull=True` 会匹配 JSON null 值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 SQLite/Oracle 上，`value__j__isnull=True` 查询返回的对象集合不包含 `value` 字段中具有键 `j`（即使其值为 JSON null）的对象。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、硬编码的 SQL 字符串。避免断言与缺陷无关的对象数量或顺序细节。",
+        "reason": "Issue 的核心是错误地包含了不该包含的对象（`self.objs[4]`）。使用 `assertNotIn` 或确保结果序列不包含特定对象 ID 的断言，可以稳定地捕捉到这个错误包含关系，而不依赖于完整的对象列表顺序。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `NullableJSONModel` 模型，并准备一组具有不同 `value` JSON 结构的测试对象（`self.objs`），其中至少一个对象的 `value` 包含 `{'j': None}`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类需要继承自 `TestCase` 并使用 `@skipUnlessDBFeature('supports_json_field')` 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 Django 使用 SQLite 或 Oracle 数据库后端来运行测试，以触发缺陷。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`self.objs` 中每个对象 `value` 字段的确切 JSON 内容，特别是哪个对象包含 `{'j': None}`。虽然从相关测试 3 推断 `self.objs[4]` 包含它，但需要确认。",
+      "在 SQLite 和 Oracle 上，`KeyTransformIsNull.as_sqlite` 和 `as_oracle` 方法内部生成错误 SQL 的具体逻辑。",
+      "除了 `j` 键，是否还有其他键值组合会触发此缺陷。",
+      "修复后，`__isnull=False` 的行为在 SQLite 和 Oracle 上是否也需要调整或保持不变。"
+    ]
+  }
+}

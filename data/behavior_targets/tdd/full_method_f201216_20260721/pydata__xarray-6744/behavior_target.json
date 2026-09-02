@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-6744",
+  "issue_summary": "DataArrayRolling 的 __iter__ 方法在手动迭代时忽略了 center=True 参数，导致返回的窗口序列与预期中心对齐的窗口序列不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 1 维 DataArray 作为测试数据，类似于 Issue 中的 `xr.DataArray(np.arange(1,10), dims=\"x\")`。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 pytest 参数化来测试不同的 window 大小和 center 值（至少 True）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自现有测试框架（如直接使用 TestDataArrayRolling 类或类似结构）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataArrayRolling.test_rolling_iter",
+        "test_file": "xarray/tests/test_rolling.py",
+        "why_relevant": "该测试直接测试了 DataArrayRolling 的 __iter__ 方法，并验证了迭代结果与聚合结果的一致性。",
+        "reusable_parts": [
+          "测试类结构 (TestDataArrayRolling)",
+          "创建 DataArrayRolling 对象的方式 (`da.rolling(time=7)`)",
+          "迭代对象的模式 (`for i, (label, window_da) in enumerate(rolling_obj):`)",
+          "使用 assert_identical 和 assert_array_equal 的断言风格"
+        ],
+        "possible_gap": "该测试没有测试 center=True 的情况，它默认使用了 center=False（或未指定）。因此它无法复现当 center=True 时迭代行为与聚合行为不一致的问题。"
+      },
+      {
+        "test_name": "TestDataArrayRolling.test_rolling_pandas_compat",
+        "test_file": "xarray/tests/test_rolling.py",
+        "why_relevant": "该测试参数化了 center 参数，并比较了 xarray 与 pandas 的滚动行为，验证了 center 参数在聚合方法（.mean()）中的效果。",
+        "reusable_parts": [
+          "参数化 center 参数 (`@pytest.mark.parametrize(\"center\", (True, False))`)",
+          "创建带 center 参数的滚动对象 (`da.rolling(index=window, center=center, min_periods=min_periods)`)",
+          "与 pandas 结果对比的验证模式"
+        ],
+        "possible_gap": "该测试只验证了聚合方法（.mean() 和 .reduce()）的结果，没有测试手动迭代（__iter__）的行为。"
+      },
+      {
+        "test_name": "TestDataArrayRolling.test_rolling_reduce",
+        "test_file": "xarray/tests/test_rolling.py",
+        "why_relevant": "该测试也参数化了 center 参数，并验证了 .reduce() 方法与直接调用聚合方法（如 .mean()）结果的一致性。",
+        "reusable_parts": [
+          "参数化 center, min_periods, window 等多个参数",
+          "创建带 center 参数的滚动对象",
+          "使用 assert_allclose 进行数值比较"
+        ],
+        "possible_gap": "该测试同样没有涉及手动迭代（__iter__）的行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 DataArrayRolling 对象时指定 center=True，然后手动迭代该对象（例如使用 for 循环或列表推导式）。",
+      "evidence": [
+        "Issue 中用户代码：`my_data_rolling = my_data.rolling(x=3, center=True)` 和 `[window.mean().values.item() for label, window in my_data_rolling]`",
+        "源码片段 1 中 DataArrayRolling.__init__ 方法签名包含 center 参数",
+        "源码片段 4 中 DataArrayRolling.__iter__ 方法实现"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "手动迭代 DataArrayRolling 对象返回的窗口序列与直接调用其聚合方法（如 .mean()）返回的结果序列不同。具体表现为手动迭代得到的窗口序列相对于聚合方法的结果序列发生了偏移（例如，聚合方法结果序列首尾为 NaN，而手动迭代结果序列开头有更多 NaN）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中用户展示的结果：`result1` 为 `[nan, 2., 3., 4., 5., 6., 7., 8., nan]`，而 `result2` 为 `[nan, nan, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]`",
+        "用户提问：'Is this an issue with the window iterator?'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DataArrayRolling.__iter__",
+        "kind": "method",
+        "source_path": "xarray/core/rolling.py",
+        "reason": "Issue 的核心是手动迭代 DataArrayRolling 对象时 center 参数被忽略，而 __iter__ 方法是迭代的入口。"
+      },
+      {
+        "name": "DataArrayRolling.__init__",
+        "kind": "method",
+        "source_path": "xarray/core/rolling.py",
+        "reason": "该方法接收 center 参数，是设置滚动窗口中心对齐的起点。"
+      },
+      {
+        "name": "DataArray.rolling",
+        "kind": "method",
+        "source_path": "",
+        "reason": "这是用户创建 DataArrayRolling 对象的 API 调用。"
+      },
+      {
+        "name": "DataArrayRolling.mean",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中用于对比的聚合方法，其行为在 center=True 时是正确的。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/rolling.py",
+        "object": "DataArrayRolling.__iter__",
+        "lines": "270-282",
+        "reason": "源码片段 4 显示了 __iter__ 方法的实现，其中计算 starts 和 stops 的逻辑（`stops = np.arange(1, len(self.window_labels) + 1); starts = stops - int(self.window[0])`）似乎没有考虑 self.center 参数，这可能导致窗口始终是前向对齐而非中心对齐。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试 test_rolling_iter 中创建滚动对象时未指定 center 参数（默认为 False）。",
+        "target_pattern": "创建滚动对象时显式指定 center=True。",
+        "reason": "Issue 表明只有当 center=True 时，手动迭代的行为才会出现偏差。将 center 参数从默认值（False）或显式 False 改为 True，是触发缺陷路径的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试 test_rolling_iter 中，迭代滚动对象后，将每个窗口的聚合结果与预先计算的滚动聚合结果在对应位置进行比较。",
+        "target_pattern": "在 center=True 的条件下，迭代滚动对象，并将迭代得到的窗口序列（或对其聚合后的序列）与直接调用滚动对象聚合方法（如 .mean()）得到的完整结果序列进行比较。",
+        "reason": "Issue 的核心矛盾在于两种方式（手动迭代 vs 直接聚合）得到的结果序列在 center=True 时不一致。测试需要捕捉这种不一致。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当创建 DataArrayRolling 对象时指定 center=True，手动迭代该对象应返回中心对齐的窗口序列，其顺序与直接调用该对象的聚合方法（如 .mean()）返回的结果序列中每个位置对应的窗口一致。",
+      "evidence": [
+        "Issue 中用户期望：'I would like to be able to manually iterate over a DataArrayRolling object, and still be given center-justified windows.'",
+        "相关测试 2、3、4、5 均表明 center 参数应影响滚动窗口的行为"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "迭代过程中每个窗口的索引位置（label）或窗口切片（window），以及直接调用 .mean() 返回的完整 DataArray 的值序列。",
+        "reason": "通过比较手动迭代产生的窗口序列（或聚合后序列）与 .mean() 返回序列的对应关系，可以判断 center 参数是否在迭代中被正确应用。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "DataArrayRolling 对象的 center 属性值，以及在 __iter__ 方法中用于计算 starts 和 stops 的内部状态。",
+        "reason": "确认 center 参数是否被正确存储，以及在迭代逻辑中是否被读取和使用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 center=True 时，手动迭代 DataArrayRolling 对象并对每个窗口应用聚合函数（如 mean）得到的序列，应与直接调用该滚动对象的相同聚合方法（如 .mean()）得到的序列完全一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或依赖于内部实现细节的精确切片范围。",
+        "reason": "Issue 的期望是两种操作方式结果等价。使用数值相等或数组全等断言可以稳定地验证这一语义目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "DataArrayRolling.__iter__ 方法中 self.center 属性的具体类型和结构（是 bool 还是 Mapping），以及如何根据它调整 starts/stops 的计算逻辑。",
+    "当 center=True 且窗口大小为偶数时，预期的具体对齐规则（例如，窗口是左偏还是右偏）在文档或代码中是否有明确定义。",
+    "除了 __iter__ 方法，是否还有其他依赖于窗口索引的代码路径（如 construct 方法）也受到同样问题的影响。"
+  ],
+  "raw": {
+    "issue_summary": "DataArrayRolling 的 __iter__ 方法在手动迭代时忽略了 center=True 参数，导致返回的窗口序列与预期中心对齐的窗口序列不一致。",
+    "trigger_condition": {
+      "text": "创建一个 DataArrayRolling 对象时指定 center=True，然后手动迭代该对象（例如使用 for 循环或列表推导式）。",
+      "evidence": [
+        "Issue 中用户代码：`my_data_rolling = my_data.rolling(x=3, center=True)` 和 `[window.mean().values.item() for label, window in my_data_rolling]`",
+        "源码片段 1 中 DataArrayRolling.__init__ 方法签名包含 center 参数",
+        "源码片段 4 中 DataArrayRolling.__iter__ 方法实现"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "手动迭代 DataArrayRolling 对象返回的窗口序列与直接调用其聚合方法（如 .mean()）返回的结果序列不同。具体表现为手动迭代得到的窗口序列相对于聚合方法的结果序列发生了偏移（例如，聚合方法结果序列首尾为 NaN，而手动迭代结果序列开头有更多 NaN）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中用户展示的结果：`result1` 为 `[nan, 2., 3., 4., 5., 6., 7., 8., nan]`，而 `result2` 为 `[nan, nan, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]`",
+        "用户提问：'Is this an issue with the window iterator?'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当创建 DataArrayRolling 对象时指定 center=True，手动迭代该对象应返回中心对齐的窗口序列，其顺序与直接调用该对象的聚合方法（如 .mean()）返回的结果序列中每个位置对应的窗口一致。",
+      "evidence": [
+        "Issue 中用户期望：'I would like to be able to manually iterate over a DataArrayRolling object, and still be given center-justified windows.'",
+        "相关测试 2、3、4、5 均表明 center 参数应影响滚动窗口的行为"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DataArrayRolling.__iter__",
+        "kind": "method",
+        "source_path": "xarray/core/rolling.py",
+        "reason": "Issue 的核心是手动迭代 DataArrayRolling 对象时 center 参数被忽略，而 __iter__ 方法是迭代的入口。"
+      },
+      {
+        "name": "DataArrayRolling.__init__",
+        "kind": "method",
+        "source_path": "xarray/core/rolling.py",
+        "reason": "该方法接收 center 参数，是设置滚动窗口中心对齐的起点。"
+      },
+      {
+        "name": "DataArray.rolling",
+        "kind": "method",
+        "source_path": "",
+        "reason": "这是用户创建 DataArrayRolling 对象的 API 调用。"
+      },
+      {
+        "name": "DataArrayRolling.mean",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中用于对比的聚合方法，其行为在 center=True 时是正确的。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/rolling.py",
+        "object": "DataArrayRolling.__iter__",
+        "lines": "270-282",
+        "reason": "源码片段 4 显示了 __iter__ 方法的实现，其中计算 starts 和 stops 的逻辑（`stops = np.arange(1, len(self.window_labels) + 1); starts = stops - int(self.window[0])`）似乎没有考虑 self.center 参数，这可能导致窗口始终是前向对齐而非中心对齐。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataArrayRolling.test_rolling_iter",
+        "test_file": "xarray/tests/test_rolling.py",
+        "why_relevant": "该测试直接测试了 DataArrayRolling 的 __iter__ 方法，并验证了迭代结果与聚合结果的一致性。",
+        "reusable_parts": [
+          "测试类结构 (TestDataArrayRolling)",
+          "创建 DataArrayRolling 对象的方式 (`da.rolling(time=7)`)",
+          "迭代对象的模式 (`for i, (label, window_da) in enumerate(rolling_obj):`)",
+          "使用 assert_identical 和 assert_array_equal 的断言风格"
+        ],
+        "possible_gap": "该测试没有测试 center=True 的情况，它默认使用了 center=False（或未指定）。因此它无法复现当 center=True 时迭代行为与聚合行为不一致的问题。"
+      },
+      {
+        "test_name": "TestDataArrayRolling.test_rolling_pandas_compat",
+        "test_file": "xarray/tests/test_rolling.py",
+        "why_relevant": "该测试参数化了 center 参数，并比较了 xarray 与 pandas 的滚动行为，验证了 center 参数在聚合方法（.mean()）中的效果。",
+        "reusable_parts": [
+          "参数化 center 参数 (`@pytest.mark.parametrize(\"center\", (True, False))`)",
+          "创建带 center 参数的滚动对象 (`da.rolling(index=window, center=center, min_periods=min_periods)`)",
+          "与 pandas 结果对比的验证模式"
+        ],
+        "possible_gap": "该测试只验证了聚合方法（.mean() 和 .reduce()）的结果，没有测试手动迭代（__iter__）的行为。"
+      },
+      {
+        "test_name": "TestDataArrayRolling.test_rolling_reduce",
+        "test_file": "xarray/tests/test_rolling.py",
+        "why_relevant": "该测试也参数化了 center 参数，并验证了 .reduce() 方法与直接调用聚合方法（如 .mean()）结果的一致性。",
+        "reusable_parts": [
+          "参数化 center, min_periods, window 等多个参数",
+          "创建带 center 参数的滚动对象",
+          "使用 assert_allclose 进行数值比较"
+        ],
+        "possible_gap": "该测试同样没有涉及手动迭代（__iter__）的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试 test_rolling_iter 中创建滚动对象时未指定 center 参数（默认为 False）。",
+        "target_pattern": "创建滚动对象时显式指定 center=True。",
+        "reason": "Issue 表明只有当 center=True 时，手动迭代的行为才会出现偏差。将 center 参数从默认值（False）或显式 False 改为 True，是触发缺陷路径的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试 test_rolling_iter 中，迭代滚动对象后，将每个窗口的聚合结果与预先计算的滚动聚合结果在对应位置进行比较。",
+        "target_pattern": "在 center=True 的条件下，迭代滚动对象，并将迭代得到的窗口序列（或对其聚合后的序列）与直接调用滚动对象聚合方法（如 .mean()）得到的完整结果序列进行比较。",
+        "reason": "Issue 的核心矛盾在于两种方式（手动迭代 vs 直接聚合）得到的结果序列在 center=True 时不一致。测试需要捕捉这种不一致。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "迭代过程中每个窗口的索引位置（label）或窗口切片（window），以及直接调用 .mean() 返回的完整 DataArray 的值序列。",
+        "reason": "通过比较手动迭代产生的窗口序列（或聚合后序列）与 .mean() 返回序列的对应关系，可以判断 center 参数是否在迭代中被正确应用。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "DataArrayRolling 对象的 center 属性值，以及在 __iter__ 方法中用于计算 starts 和 stops 的内部状态。",
+        "reason": "确认 center 参数是否被正确存储，以及在迭代逻辑中是否被读取和使用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 center=True 时，手动迭代 DataArrayRolling 对象并对每个窗口应用聚合函数（如 mean）得到的序列，应与直接调用该滚动对象的相同聚合方法（如 .mean()）得到的序列完全一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或依赖于内部实现细节的精确切片范围。",
+        "reason": "Issue 的期望是两种操作方式结果等价。使用数值相等或数组全等断言可以稳定地验证这一语义目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 1 维 DataArray 作为测试数据，类似于 Issue 中的 `xr.DataArray(np.arange(1,10), dims=\"x\")`。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 pytest 参数化来测试不同的 window 大小和 center 值（至少 True）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自现有测试框架（如直接使用 TestDataArrayRolling 类或类似结构）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "DataArrayRolling.__iter__ 方法中 self.center 属性的具体类型和结构（是 bool 还是 Mapping），以及如何根据它调整 starts/stops 的计算逻辑。",
+      "当 center=True 且窗口大小为偶数时，预期的具体对齐规则（例如，窗口是左偏还是右偏）在文档或代码中是否有明确定义。",
+      "除了 __iter__ 方法，是否还有其他依赖于窗口索引的代码路径（如 construct 方法）也受到同样问题的影响。"
+    ]
+  }
+}

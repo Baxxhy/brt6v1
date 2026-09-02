@@ -1,0 +1,296 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-12481",
+  "issue_summary": "Permutation 构造函数在传入非互斥循环时错误地抛出 ValueError，而不是按从左到右顺序应用这些循环并构造正确的置换。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.combinatorics.permutations.Permutation。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个继承自 unittest.TestCase 的类中，或者使用纯函数风格。相关测试文件显示使用了纯函数和 `raises` 辅助函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_args",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "它测试了 Permutation 构造函数的各种输入形式，包括循环列表，并包含对 ValueError 的断言。",
+        "reusable_parts": [
+          "from sympy.combinatorics import Permutation",
+          "使用 Permutation([[x, y], [a, b]]) 的构造方式",
+          "raises(ValueError, ...) 的断言模式"
+        ],
+        "possible_gap": "现有测试只覆盖了互斥循环或明显无效输入（如重复元素），没有测试非互斥但有效的循环组合。"
+      },
+      {
+        "test_name": "test_Cycle",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "它测试了 Cycle 类以及与 Permutation 的交互，涉及循环的组合（如 Cycle(1,2)(2,3)）。",
+        "reusable_parts": [
+          "Cycle 和 Permutation 的交互测试",
+          "循环组合的语法"
+        ],
+        "possible_gap": "测试侧重于 Cycle 对象的行为，而非直接通过 Permutation([[cycle1], [cycle2]]) 形式传入非互斥循环列表。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用非互斥的循环列表（例如 [[0,1],[0,1]]）调用 Permutation 构造函数。",
+      "evidence": [
+        "Issue 中明确提到 `Permutation([[0,1],[0,1]])` 会引发 ValueError。",
+        "相关测试 1 中 `Permutation([[1, 2], [4, 5]])` 是互斥循环的正常用例，暗示非互斥循环可能触发问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError 异常，阻止了置换的构造。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确说 'raises a ValueError instead of constructing the identity permutation'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Permutation.__new__",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "这是 Permutation 类的构造函数，负责处理传入的循环参数，是缺陷触发的直接入口。"
+      },
+      {
+        "name": "Permutation._af_new",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "可能用于从数组形式创建置换，与内部表示转换相关。"
+      },
+      {
+        "name": "Cycle.__init__",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "Cycle 类处理循环，Permutation 可能依赖它，且其 __init__ 中有对重复元素的检查（has_dups），可能与当前问题相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Permutation.__new__",
+        "lines": "",
+        "reason": "构造函数负责解析输入参数（包括循环列表），可能包含对循环互斥性的错误检查或处理逻辑。"
+      },
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Cycle.__init__",
+        "lines": "425-453",
+        "reason": "该函数检查循环内元素的唯一性（has_dups），但非互斥循环涉及跨循环的重复，可能在此处或调用它的上层逻辑中被错误拒绝。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用互斥的循环列表，如 `Permutation([[0, 3, 1, 2], [4, 5]])`。",
+        "target_pattern": "使用非互斥的循环列表，如 `Permutation([[0,1],[0,1]])` 或 `Permutation([[1,2],[2,3]])`。",
+        "reason": "Issue 明确指出非互斥循环会触发 ValueError，而互斥循环不会。改变输入为此模式应能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "将循环作为单独参数传入，如 `Permutation([(0, 3, 1, 2), (4, 5)])`（注意外层是列表）。",
+        "target_pattern": "将非互斥循环作为嵌套列表传入，如 `Permutation([[0,1],[0,1]])`。",
+        "reason": "Issue 中的调用示例是嵌套列表形式，这可能直接由构造函数解析，而非通过 Cycle 对象组合。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Permutation 构造函数应接受非互斥循环，并按从左到右的顺序应用它们，计算出正确的置换结果（例如对于 [[0,1],[0,1]] 应得到单位置换）。",
+      "evidence": [
+        "Issue 中明确说明 'they should be applied in left-to-right order and the resulting permutation should be returned'。",
+        "源码片段 1 的文档提到 'The composite of two permutations p*q means first apply p, then q'，暗示了顺序应用的概念。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `Permutation(non_disjoint_cycles)` 时是否抛出 ValueError 及其消息。",
+        "reason": "Issue 的核心错误现象是抛出异常，观测此点可直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功构造时返回的 Permutation 对象的 `array_form` 或 `cyclic_form`。",
+        "reason": "修复后，构造函数应返回一个置换，其形式应与按顺序应用非互斥循环的预期结果一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于非互斥循环输入，Permutation 构造函数不应抛出 ValueError，而应成功构造一个置换对象。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能变化。",
+        "reason": "Issue 的核心是异常被错误抛出。修复后，调用应正常返回。因此，初始测试可能使用 `pytest.raises` 来验证当前行为（bug），但最终修复后断言应改为验证无异常且结果正确。"
+      },
+      {
+        "assertion_goal": "构造出的置换在应用上等价于按从左到右顺序组合给定循环的结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "直接比较内部 `_array_form` 的精确值，除非能从 Issue 明确推导（如对于 [[0,1],[0,1]] 应为单位置换）。",
+        "reason": "修复后的正确行为是计算出正确的置换。对于简单案例（如 [[0,1],[0,1]]），预期结果是单位置换，可以具体断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "ValueError 是在 Permutation.__new__ 中抛出的，还是在内部调用的 Cycle 相关逻辑中抛出的？",
+    "对于更复杂的非互斥循环（例如 [[1,2],[2,3]]），预期的 array_form 或 cyclic_form 具体是什么？Issue 只给出了 [[0,1],[0,1]] 应得到单位置换的例子。",
+    "修复后的行为是否会影响 Cycle 类本身的逻辑？"
+  ],
+  "raw": {
+    "issue_summary": "Permutation 构造函数在传入非互斥循环时错误地抛出 ValueError，而不是按从左到右顺序应用这些循环并构造正确的置换。",
+    "trigger_condition": {
+      "text": "使用非互斥的循环列表（例如 [[0,1],[0,1]]）调用 Permutation 构造函数。",
+      "evidence": [
+        "Issue 中明确提到 `Permutation([[0,1],[0,1]])` 会引发 ValueError。",
+        "相关测试 1 中 `Permutation([[1, 2], [4, 5]])` 是互斥循环的正常用例，暗示非互斥循环可能触发问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError 异常，阻止了置换的构造。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确说 'raises a ValueError instead of constructing the identity permutation'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Permutation 构造函数应接受非互斥循环，并按从左到右的顺序应用它们，计算出正确的置换结果（例如对于 [[0,1],[0,1]] 应得到单位置换）。",
+      "evidence": [
+        "Issue 中明确说明 'they should be applied in left-to-right order and the resulting permutation should be returned'。",
+        "源码片段 1 的文档提到 'The composite of two permutations p*q means first apply p, then q'，暗示了顺序应用的概念。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Permutation.__new__",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "这是 Permutation 类的构造函数，负责处理传入的循环参数，是缺陷触发的直接入口。"
+      },
+      {
+        "name": "Permutation._af_new",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "可能用于从数组形式创建置换，与内部表示转换相关。"
+      },
+      {
+        "name": "Cycle.__init__",
+        "kind": "method",
+        "source_path": "sympy/combinatorics/permutations.py",
+        "reason": "Cycle 类处理循环，Permutation 可能依赖它，且其 __init__ 中有对重复元素的检查（has_dups），可能与当前问题相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Permutation.__new__",
+        "lines": "",
+        "reason": "构造函数负责解析输入参数（包括循环列表），可能包含对循环互斥性的错误检查或处理逻辑。"
+      },
+      {
+        "path": "sympy/combinatorics/permutations.py",
+        "object": "Cycle.__init__",
+        "lines": "425-453",
+        "reason": "该函数检查循环内元素的唯一性（has_dups），但非互斥循环涉及跨循环的重复，可能在此处或调用它的上层逻辑中被错误拒绝。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_args",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "它测试了 Permutation 构造函数的各种输入形式，包括循环列表，并包含对 ValueError 的断言。",
+        "reusable_parts": [
+          "from sympy.combinatorics import Permutation",
+          "使用 Permutation([[x, y], [a, b]]) 的构造方式",
+          "raises(ValueError, ...) 的断言模式"
+        ],
+        "possible_gap": "现有测试只覆盖了互斥循环或明显无效输入（如重复元素），没有测试非互斥但有效的循环组合。"
+      },
+      {
+        "test_name": "test_Cycle",
+        "test_file": "sympy/combinatorics/tests/test_permutations.py",
+        "why_relevant": "它测试了 Cycle 类以及与 Permutation 的交互，涉及循环的组合（如 Cycle(1,2)(2,3)）。",
+        "reusable_parts": [
+          "Cycle 和 Permutation 的交互测试",
+          "循环组合的语法"
+        ],
+        "possible_gap": "测试侧重于 Cycle 对象的行为，而非直接通过 Permutation([[cycle1], [cycle2]]) 形式传入非互斥循环列表。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用互斥的循环列表，如 `Permutation([[0, 3, 1, 2], [4, 5]])`。",
+        "target_pattern": "使用非互斥的循环列表，如 `Permutation([[0,1],[0,1]])` 或 `Permutation([[1,2],[2,3]])`。",
+        "reason": "Issue 明确指出非互斥循环会触发 ValueError，而互斥循环不会。改变输入为此模式应能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "将循环作为单独参数传入，如 `Permutation([(0, 3, 1, 2), (4, 5)])`（注意外层是列表）。",
+        "target_pattern": "将非互斥循环作为嵌套列表传入，如 `Permutation([[0,1],[0,1]])`。",
+        "reason": "Issue 中的调用示例是嵌套列表形式，这可能直接由构造函数解析，而非通过 Cycle 对象组合。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `Permutation(non_disjoint_cycles)` 时是否抛出 ValueError 及其消息。",
+        "reason": "Issue 的核心错误现象是抛出异常，观测此点可直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功构造时返回的 Permutation 对象的 `array_form` 或 `cyclic_form`。",
+        "reason": "修复后，构造函数应返回一个置换，其形式应与按顺序应用非互斥循环的预期结果一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于非互斥循环输入，Permutation 构造函数不应抛出 ValueError，而应成功构造一个置换对象。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能变化。",
+        "reason": "Issue 的核心是异常被错误抛出。修复后，调用应正常返回。因此，初始测试可能使用 `pytest.raises` 来验证当前行为（bug），但最终修复后断言应改为验证无异常且结果正确。"
+      },
+      {
+        "assertion_goal": "构造出的置换在应用上等价于按从左到右顺序组合给定循环的结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "直接比较内部 `_array_form` 的精确值，除非能从 Issue 明确推导（如对于 [[0,1],[0,1]] 应为单位置换）。",
+        "reason": "修复后的正确行为是计算出正确的置换。对于简单案例（如 [[0,1],[0,1]]），预期结果是单位置换，可以具体断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.combinatorics.permutations.Permutation。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个继承自 unittest.TestCase 的类中，或者使用纯函数风格。相关测试文件显示使用了纯函数和 `raises` 辅助函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "ValueError 是在 Permutation.__new__ 中抛出的，还是在内部调用的 Cycle 相关逻辑中抛出的？",
+      "对于更复杂的非互斥循环（例如 [[1,2],[2,3]]），预期的 array_form 或 cyclic_form 具体是什么？Issue 只给出了 [[0,1],[0,1]] 应得到单位置换的例子。",
+      "修复后的行为是否会影响 Cycle 类本身的逻辑？"
+    ]
+  }
+}

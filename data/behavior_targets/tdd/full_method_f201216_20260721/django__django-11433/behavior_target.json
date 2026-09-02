@@ -1,0 +1,302 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11433",
+  "issue_summary": "当表单数据中缺少某个字段且该字段在模型中有默认值时，无法通过修改 cleaned_data 来覆盖该默认值。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个定义了带默认值字段的 Django 模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个继承自 forms.ModelForm 的表单类，可能需要在其中覆盖 clean 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以支持数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_changing_cleaned_data_in_clean",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "它演示了在 Form 的 clean 方法中修改或替换 cleaned_data 字典，并验证修改生效。",
+        "reusable_parts": [
+          "Form 子类定义、clean 方法覆盖、使用 cleaned_data、assert 验证 cleaned_data 内容"
+        ],
+        "possible_gap": "该测试针对普通 Form，而非 ModelForm，且不涉及模型字段默认值。"
+      },
+      {
+        "test_name": "test_changing_cleaned_data_nothing_returned",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "它演示了直接修改 self.cleaned_data（而不返回新字典）并验证修改生效。",
+        "reusable_parts": [
+          "Form 子类定义、在 clean 中直接修改 self.cleaned_data、assert 验证"
+        ],
+        "possible_gap": "该测试针对普通 Form，而非 ModelForm，且不涉及模型字段默认值。"
+      },
+      {
+        "test_name": "test_default_not_populated_on_selectmultiple",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了当表单字段（SelectMultiple）在提交数据中缺失时，模型默认值不被使用的情况。",
+        "reusable_parts": [
+          "ModelForm 子类定义、使用空数据字典、验证模型实例字段值、访问模型字段默认值"
+        ],
+        "possible_gap": "该测试验证的是默认值“不被使用”（字段值为空字符串），而 Issue 是需要“覆盖”默认值。测试未尝试通过 cleaned_data 设置值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "提交一个表单，其中某个字段不在数据负载中（例如未包含在表单中），但该字段在模型上定义了默认值；然后尝试在表单的 clean 方法或类似地方通过修改 self.cleaned_data 来设置该字段的值。",
+      "evidence": [
+        "Issue 描述：'some_field' isn't in the data payload (e.g. it wasn't included in the form, perhaps because its value is derived from another field), and 'some_field' has a default value on the model, it cannot be overwritten with 'self.cleaned_data'."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "通过修改 self.cleaned_data 设置的字段值被忽略，模型实例保存时使用了模型字段的默认值，而不是 cleaned_data 中设置的值。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'it cannot be overwritten with 'self.cleaned_data'."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "forms.ModelForm.cleaned_data",
+        "kind": "property",
+        "source_path": "",
+        "reason": "Issue 的核心是关于修改 cleaned_data 以覆盖默认值的能力。"
+      },
+      {
+        "name": "forms.ModelForm.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "保存表单时，cleaned_data 中的值应被用于创建/更新模型实例。"
+      },
+      {
+        "name": "forms.Form.clean",
+        "kind": "method",
+        "source_path": "",
+        "reason": "开发者通常在 clean 方法中修改 cleaned_data。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelForm._post_clean",
+        "lines": "",
+        "reason": "该方法是 ModelForm 清理过程的最后阶段，负责将 cleaned_data 应用到模型实例，可能在此处未正确处理从 cleaned_data 中缺失但模型有默认值的字段。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelForm._construct_instance",
+        "lines": "",
+        "reason": "此方法负责从表单数据构造模型实例，可能优先使用了模型默认值而非 cleaned_data 中显式设置的值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试（如 test_default_not_populated_on_selectmultiple）使用空数据字典 {} 提交表单。",
+        "target_pattern": "使用空数据字典 {} 提交表单，但在表单的 clean 方法中向 self.cleaned_data 添加一个键（对应模型中有默认值的字段）并赋值。",
+        "reason": "Issue 描述的场景是字段不在原始数据负载中，但开发者希望通过修改 cleaned_data 来设置它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型字段有默认值，但表单提交后，模型实例字段被设置为空值（如 '' 或 False）。",
+        "target_pattern": "模型字段有默认值，表单提交后，在 clean 方法中通过 self.cleaned_data 设置了该字段的值，期望模型实例字段被设置为该值，而不是默认值。",
+        "reason": "Issue 的核心矛盾在于 cleaned_data 中的显式设置未能覆盖模型默认值。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当开发者通过修改 self.cleaned_data 来设置一个字段的值时，该值应该能够覆盖模型字段的默认值，并最终用于模型实例的保存。",
+      "evidence": [
+        "Issue 描述：'This does not really follow the paradigm of modifying data in 'cleaned_data'.' 暗示了修改 cleaned_data 应该能影响最终数据的预期。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "表单实例的 cleaned_data 字典在 clean 方法执行后和保存前的状态。",
+        "reason": "确认开发者设置的值是否确实存在于 cleaned_data 中。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "通过 save(commit=False) 获得的模型实例的对应字段值。",
+        "reason": "比较模型实例字段值是来自 cleaned_data 还是模型默认值，以判断覆盖是否成功。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 save(commit=False) 获得的模型实例的特定字段值等于在 cleaned_data 中设置的值，而不是模型字段的默认值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的模型实例 repr 或与问题无关的其他字段。",
+        "reason": "直接验证 Issue 关心的核心行为：cleaned_data 中的值应覆盖模型默认值。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 _post_clean、_construct_instance 还是其他地方。",
+    "当字段不在原始提交数据中但在 cleaned_data 中被添加时，表单的验证过程（如字段的 required 属性）是否会受到影响。",
+    "对于不同类型的表单字段（如 CharField、BooleanField）和不同的小部件，行为是否一致。"
+  ],
+  "raw": {
+    "issue_summary": "当表单数据中缺少某个字段且该字段在模型中有默认值时，无法通过修改 cleaned_data 来覆盖该默认值。",
+    "trigger_condition": {
+      "text": "提交一个表单，其中某个字段不在数据负载中（例如未包含在表单中），但该字段在模型上定义了默认值；然后尝试在表单的 clean 方法或类似地方通过修改 self.cleaned_data 来设置该字段的值。",
+      "evidence": [
+        "Issue 描述：'some_field' isn't in the data payload (e.g. it wasn't included in the form, perhaps because its value is derived from another field), and 'some_field' has a default value on the model, it cannot be overwritten with 'self.cleaned_data'."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "通过修改 self.cleaned_data 设置的字段值被忽略，模型实例保存时使用了模型字段的默认值，而不是 cleaned_data 中设置的值。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'it cannot be overwritten with 'self.cleaned_data'."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当开发者通过修改 self.cleaned_data 来设置一个字段的值时，该值应该能够覆盖模型字段的默认值，并最终用于模型实例的保存。",
+      "evidence": [
+        "Issue 描述：'This does not really follow the paradigm of modifying data in 'cleaned_data'.' 暗示了修改 cleaned_data 应该能影响最终数据的预期。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "forms.ModelForm.cleaned_data",
+        "kind": "property",
+        "source_path": "",
+        "reason": "Issue 的核心是关于修改 cleaned_data 以覆盖默认值的能力。"
+      },
+      {
+        "name": "forms.ModelForm.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "保存表单时，cleaned_data 中的值应被用于创建/更新模型实例。"
+      },
+      {
+        "name": "forms.Form.clean",
+        "kind": "method",
+        "source_path": "",
+        "reason": "开发者通常在 clean 方法中修改 cleaned_data。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelForm._post_clean",
+        "lines": "",
+        "reason": "该方法是 ModelForm 清理过程的最后阶段，负责将 cleaned_data 应用到模型实例，可能在此处未正确处理从 cleaned_data 中缺失但模型有默认值的字段。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelForm._construct_instance",
+        "lines": "",
+        "reason": "此方法负责从表单数据构造模型实例，可能优先使用了模型默认值而非 cleaned_data 中显式设置的值。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_changing_cleaned_data_in_clean",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "它演示了在 Form 的 clean 方法中修改或替换 cleaned_data 字典，并验证修改生效。",
+        "reusable_parts": [
+          "Form 子类定义、clean 方法覆盖、使用 cleaned_data、assert 验证 cleaned_data 内容"
+        ],
+        "possible_gap": "该测试针对普通 Form，而非 ModelForm，且不涉及模型字段默认值。"
+      },
+      {
+        "test_name": "test_changing_cleaned_data_nothing_returned",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "它演示了直接修改 self.cleaned_data（而不返回新字典）并验证修改生效。",
+        "reusable_parts": [
+          "Form 子类定义、在 clean 中直接修改 self.cleaned_data、assert 验证"
+        ],
+        "possible_gap": "该测试针对普通 Form，而非 ModelForm，且不涉及模型字段默认值。"
+      },
+      {
+        "test_name": "test_default_not_populated_on_selectmultiple",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了当表单字段（SelectMultiple）在提交数据中缺失时，模型默认值不被使用的情况。",
+        "reusable_parts": [
+          "ModelForm 子类定义、使用空数据字典、验证模型实例字段值、访问模型字段默认值"
+        ],
+        "possible_gap": "该测试验证的是默认值“不被使用”（字段值为空字符串），而 Issue 是需要“覆盖”默认值。测试未尝试通过 cleaned_data 设置值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试（如 test_default_not_populated_on_selectmultiple）使用空数据字典 {} 提交表单。",
+        "target_pattern": "使用空数据字典 {} 提交表单，但在表单的 clean 方法中向 self.cleaned_data 添加一个键（对应模型中有默认值的字段）并赋值。",
+        "reason": "Issue 描述的场景是字段不在原始数据负载中，但开发者希望通过修改 cleaned_data 来设置它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型字段有默认值，但表单提交后，模型实例字段被设置为空值（如 '' 或 False）。",
+        "target_pattern": "模型字段有默认值，表单提交后，在 clean 方法中通过 self.cleaned_data 设置了该字段的值，期望模型实例字段被设置为该值，而不是默认值。",
+        "reason": "Issue 的核心矛盾在于 cleaned_data 中的显式设置未能覆盖模型默认值。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "表单实例的 cleaned_data 字典在 clean 方法执行后和保存前的状态。",
+        "reason": "确认开发者设置的值是否确实存在于 cleaned_data 中。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "通过 save(commit=False) 获得的模型实例的对应字段值。",
+        "reason": "比较模型实例字段值是来自 cleaned_data 还是模型默认值，以判断覆盖是否成功。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 save(commit=False) 获得的模型实例的特定字段值等于在 cleaned_data 中设置的值，而不是模型字段的默认值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的模型实例 repr 或与问题无关的其他字段。",
+        "reason": "直接验证 Issue 关心的核心行为：cleaned_data 中的值应覆盖模型默认值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个定义了带默认值字段的 Django 模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个继承自 forms.ModelForm 的表单类，可能需要在其中覆盖 clean 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以支持数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 _post_clean、_construct_instance 还是其他地方。",
+      "当字段不在原始提交数据中但在 cleaned_data 中被添加时，表单的验证过程（如字段的 required 属性）是否会受到影响。",
+      "对于不同类型的表单字段（如 CharField、BooleanField）和不同的小部件，行为是否一致。"
+    ]
+  }
+}

@@ -1,0 +1,302 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15916",
+  "issue_summary": "modelform_factory 在未提供 formfield_callback 参数时，未继承传入 form 类的 Meta.formfield_callback，导致自定义回调失效。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型（如 Person）作为 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或 TestCase，取决于是否需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义一个修改字段属性（如 required）的 formfield_callback 函数。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_custom_callback",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了 modelform_factory 在提供 formfield_callback 参数时的行为，展示了回调被调用的预期模式。",
+        "reusable_parts": [
+          "imports (forms, models)",
+          "callback 函数定义模式",
+          "modelform_factory 调用方式",
+          "使用 Person 模型作为 fixture",
+          "assert 风格（检查 callback_args）"
+        ],
+        "possible_gap": "该测试显式传递了 formfield_callback 参数，而 Issue 场景是未传递该参数，期望从 form 类继承。"
+      },
+      {
+        "test_name": "test_inherit_after_custom_callback",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它涉及了从通过 modelform_factory 生成的表单继承，并检查字段属性的一致性，与 Issue 中表单生成和属性继承相关。",
+        "reusable_parts": [
+          "callback 函数定义",
+          "BaseForm 定义（含 Meta）",
+          "modelform_factory 调用",
+          "字段属性比较断言"
+        ],
+        "possible_gap": "该测试也显式传递了 formfield_callback 参数，未测试不传递参数时从 BaseForm.Meta 继承回调的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 modelform_factory 时，传入一个定义了 Meta.formfield_callback 的 ModelForm 子类作为 form 参数，但不提供 formfield_callback 参数。",
+      "evidence": [
+        "Issue 描述：'When no callback is provided the class uses no callback instead of the formfield_callback of the base form provided.'",
+        "Issue 示例代码：FactoryForm = forms.modelform_factory(MyModel, form=MyForm) 未传递 formfield_callback 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 FactoryForm 未使用 MyForm.Meta.formfield_callback 指定的回调函数，导致字段的 required 属性等未按预期修改（例如字段未变为 required）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'in FactoryForm the fields are not required.'",
+        "Issue 示例：预期字段 required 为 True，但实际未生效。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.models.modelform_factory",
+        "kind": "function",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 直接报告此函数的行为问题，是缺陷复现的核心调用点。"
+      },
+      {
+        "name": "django.forms.ModelForm",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "作为 modelform_factory 的 form 参数传入，其 Meta.formfield_callback 是预期应被继承的属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "modelform_factory",
+        "lines": "563-648",
+        "reason": "函数逻辑在 formfield_callback 参数为 None 时，直接将其设置为 None，未检查传入 form 类的 Meta.formfield_callback 属性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "modelform_factory(Person, form=BaseForm, formfield_callback=callback) （显式提供回调参数）",
+        "target_pattern": "modelform_factory(Person, form=BaseForm) （不提供 formfield_callback 参数）",
+        "reason": "Issue 触发条件正是调用 modelform_factory 时不提供 formfield_callback 参数，但传入的 BaseForm 定义了 Meta.formfield_callback。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "BaseForm 的 Meta 类可能未定义 formfield_callback 属性。",
+        "target_pattern": "BaseForm 的 Meta 类定义 formfield_callback 属性为一个自定义函数。",
+        "reason": "Issue 中 bug 的触发需要 BaseForm.Meta.formfield_callback 存在，但 modelform_factory 未继承它。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 modelform_factory 的 formfield_callback 参数为 None 时，应继承并使用传入 form 类的 Meta.formfield_callback（如果存在）。",
+      "evidence": [
+        "Issue 描述：'The expected behavior would be that the FactoryForm uses the formfield_callback specified in the Meta attribute of MyForm'",
+        "源码片段 1 中，当 formfield_callback 参数为 None 时，未检查或继承 form.Meta.formfield_callback。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "FactoryForm.base_fields[field_name].required 或类似字段属性",
+        "reason": "Issue 中回调函数将字段设为 required，观察字段的 required 属性可判断回调是否生效。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "FactoryForm.Meta.formfield_callback 或 FactoryForm.formfield_callback",
+        "reason": "观察生成的表单类是否设置了正确的 formfield_callback 属性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "callback 函数被调用的次数或参数（如果回调被调用）",
+        "reason": "Issue 提到之前错误的测试断言了错误的调用次数，观察回调是否被调用及次数可验证行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 FactoryForm 的字段应具有由 BaseForm.Meta.formfield_callback 修改后的属性（例如 required=True）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的回调调用参数列表（除非 Issue 明确），避免脆弱的完整顺序断言。",
+        "reason": "Issue 的核心是字段属性未按预期修改，直接断言字段属性（如 required）更稳定且与问题语义对齐。"
+      },
+      {
+        "assertion_goal": "FactoryForm.Meta.formfield_callback 应等于 BaseForm.Meta.formfield_callback（当未提供参数时）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言回调函数对象的完整 repr 或内存地址相等。",
+        "reason": "这直接验证了继承行为是否发生，是修复后的核心正确状态。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的历史 Ticket #18573 和已移除的测试的确切细节和影响。",
+    "当 formfield_callback 参数为 None 且传入的 form 类没有 Meta.formfield_callback 时，当前行为是否已经是正确的（即使用 None）。",
+    "除了 required 属性，回调函数可能修改的其他字段属性是否同样受影响。"
+  ],
+  "raw": {
+    "issue_summary": "modelform_factory 在未提供 formfield_callback 参数时，未继承传入 form 类的 Meta.formfield_callback，导致自定义回调失效。",
+    "trigger_condition": {
+      "text": "调用 modelform_factory 时，传入一个定义了 Meta.formfield_callback 的 ModelForm 子类作为 form 参数，但不提供 formfield_callback 参数。",
+      "evidence": [
+        "Issue 描述：'When no callback is provided the class uses no callback instead of the formfield_callback of the base form provided.'",
+        "Issue 示例代码：FactoryForm = forms.modelform_factory(MyModel, form=MyForm) 未传递 formfield_callback 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 FactoryForm 未使用 MyForm.Meta.formfield_callback 指定的回调函数，导致字段的 required 属性等未按预期修改（例如字段未变为 required）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'in FactoryForm the fields are not required.'",
+        "Issue 示例：预期字段 required 为 True，但实际未生效。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 modelform_factory 的 formfield_callback 参数为 None 时，应继承并使用传入 form 类的 Meta.formfield_callback（如果存在）。",
+      "evidence": [
+        "Issue 描述：'The expected behavior would be that the FactoryForm uses the formfield_callback specified in the Meta attribute of MyForm'",
+        "源码片段 1 中，当 formfield_callback 参数为 None 时，未检查或继承 form.Meta.formfield_callback。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.models.modelform_factory",
+        "kind": "function",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 直接报告此函数的行为问题，是缺陷复现的核心调用点。"
+      },
+      {
+        "name": "django.forms.ModelForm",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "作为 modelform_factory 的 form 参数传入，其 Meta.formfield_callback 是预期应被继承的属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "modelform_factory",
+        "lines": "563-648",
+        "reason": "函数逻辑在 formfield_callback 参数为 None 时，直接将其设置为 None，未检查传入 form 类的 Meta.formfield_callback 属性。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_custom_callback",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了 modelform_factory 在提供 formfield_callback 参数时的行为，展示了回调被调用的预期模式。",
+        "reusable_parts": [
+          "imports (forms, models)",
+          "callback 函数定义模式",
+          "modelform_factory 调用方式",
+          "使用 Person 模型作为 fixture",
+          "assert 风格（检查 callback_args）"
+        ],
+        "possible_gap": "该测试显式传递了 formfield_callback 参数，而 Issue 场景是未传递该参数，期望从 form 类继承。"
+      },
+      {
+        "test_name": "test_inherit_after_custom_callback",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它涉及了从通过 modelform_factory 生成的表单继承，并检查字段属性的一致性，与 Issue 中表单生成和属性继承相关。",
+        "reusable_parts": [
+          "callback 函数定义",
+          "BaseForm 定义（含 Meta）",
+          "modelform_factory 调用",
+          "字段属性比较断言"
+        ],
+        "possible_gap": "该测试也显式传递了 formfield_callback 参数，未测试不传递参数时从 BaseForm.Meta 继承回调的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "modelform_factory(Person, form=BaseForm, formfield_callback=callback) （显式提供回调参数）",
+        "target_pattern": "modelform_factory(Person, form=BaseForm) （不提供 formfield_callback 参数）",
+        "reason": "Issue 触发条件正是调用 modelform_factory 时不提供 formfield_callback 参数，但传入的 BaseForm 定义了 Meta.formfield_callback。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "BaseForm 的 Meta 类可能未定义 formfield_callback 属性。",
+        "target_pattern": "BaseForm 的 Meta 类定义 formfield_callback 属性为一个自定义函数。",
+        "reason": "Issue 中 bug 的触发需要 BaseForm.Meta.formfield_callback 存在，但 modelform_factory 未继承它。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "FactoryForm.base_fields[field_name].required 或类似字段属性",
+        "reason": "Issue 中回调函数将字段设为 required，观察字段的 required 属性可判断回调是否生效。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "FactoryForm.Meta.formfield_callback 或 FactoryForm.formfield_callback",
+        "reason": "观察生成的表单类是否设置了正确的 formfield_callback 属性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "callback 函数被调用的次数或参数（如果回调被调用）",
+        "reason": "Issue 提到之前错误的测试断言了错误的调用次数，观察回调是否被调用及次数可验证行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 FactoryForm 的字段应具有由 BaseForm.Meta.formfield_callback 修改后的属性（例如 required=True）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的回调调用参数列表（除非 Issue 明确），避免脆弱的完整顺序断言。",
+        "reason": "Issue 的核心是字段属性未按预期修改，直接断言字段属性（如 required）更稳定且与问题语义对齐。"
+      },
+      {
+        "assertion_goal": "FactoryForm.Meta.formfield_callback 应等于 BaseForm.Meta.formfield_callback（当未提供参数时）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言回调函数对象的完整 repr 或内存地址相等。",
+        "reason": "这直接验证了继承行为是否发生，是修复后的核心正确状态。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型（如 Person）作为 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或 TestCase，取决于是否需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义一个修改字段属性（如 required）的 formfield_callback 函数。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的历史 Ticket #18573 和已移除的测试的确切细节和影响。",
+      "当 formfield_callback 参数为 None 且传入的 form 类没有 Meta.formfield_callback 时，当前行为是否已经是正确的（即使用 None）。",
+      "除了 required 属性，回调函数可能修改的其他字段属性是否同样受影响。"
+    ]
+  }
+}

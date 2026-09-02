@@ -1,0 +1,280 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-13773",
+  "issue_summary": "Matrix 类的 __matmul__ 方法错误地允许标量与矩阵进行矩阵乘法运算，而根据规范它应该只允许矩阵与矩阵相乘。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 Matrix 类，并构造一个 Matrix 实例作为操作数之一。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要处理 Python 版本对 `@` 运算符支持的问题（使用 `eval` 或检查语法可用性）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_multiplication",
+        "test_file": "sympy/matrices/tests/test_commonmatrix.py",
+        "why_relevant": "它测试了 Matrix 的乘法，并包含了对 `@` 运算符（matmul）的测试块，展示了当前标量@矩阵被接受的行为。",
+        "reusable_parts": [
+          "ArithmeticOnlyMatrix 的构造",
+          "使用 `eval` 测试 `@` 运算符的模式",
+          "对矩阵乘法结果的断言风格"
+        ],
+        "possible_gap": "该测试验证了当前（有缺陷的）行为是正常的，即 `5 @ b` 成功。它没有测试或期望标量@矩阵会引发错误。"
+      },
+      {
+        "test_name": "test_multiplication",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "与上一个测试类似，但使用具体的 Matrix 类，更贴近 Issue 中的示例。",
+        "reusable_parts": [
+          "Matrix 对象的构造",
+          "使用 `eval` 测试 `@` 运算符的模式",
+          "对矩阵乘法结果的断言风格"
+        ],
+        "possible_gap": "同样，它验证了当前有缺陷的行为（`5 @ b` 成功），而不是期望的错误行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 @ 运算符（__matmul__）将一个标量（如整数 2）与一个 Matrix 对象（如 B）进行运算。",
+      "evidence": [
+        "Issue 中的示例：`2@B` 返回了一个矩阵结果。",
+        "源码片段 2 显示 `__matmul__` 直接返回 `self.__mul__(other)`。",
+        "相关测试 1 和 2 中都有 `eval('c = 5 @ b')` 的测试块，且没有引发错误。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "标量与矩阵的 @ 运算没有引发错误，而是错误地执行了标量乘法，返回了一个矩阵。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 示例显示 `2@B` 返回了 `Matrix([[4, 6], [2, 4]])`，这是标量乘法的结果。",
+        "Issue 指出 NumPy 在类似情况下会引发 ValueError。",
+        "相关测试 1 和 2 中 `eval('c = 5 @ b')` 后的断言表明当前行为是接受标量乘法的。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Matrix.__matmul__",
+        "kind": "method",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "这是 Issue 直接讨论的有缺陷的方法。"
+      },
+      {
+        "name": "Matrix.__mul__",
+        "kind": "method",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "当前 `__matmul__` 委托给了 `__mul__`，需要理解其逻辑以进行变异。"
+      },
+      {
+        "name": "Matrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/dense.py",
+        "reason": "缺陷涉及 Matrix 类的实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "MatrixArithmetic.__matmul__",
+        "lines": "1975-1976",
+        "reason": "该方法直接返回 `self.__mul__(other)`，没有对操作数类型进行矩阵乘法所需的检查。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 `eval('c = 5 @ b')` 使用整数 `5` 作为左操作数。",
+        "target_pattern": "使用一个非矩阵的标量（如整数 `2`）作为 `@` 运算符的一个操作数，与一个 Matrix 对象进行运算。",
+        "reason": "Issue 表明标量@矩阵应该失败，但当前测试模式接受它。变异输入以触发期望的错误路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试同时测试了 `*`（标量乘法）和 `@`（矩阵乘法），但当前 `@` 的行为与 `*` 在标量情况下一致。",
+        "target_pattern": "确保测试明确区分 `@` 和 `*` 的行为，对 `@` 使用标量操作数时应期待错误。",
+        "reason": "Issue 的核心是 `@` 应该只用于矩阵乘法，不能作为标量乘法的替代。需要变异测试的预期行为。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 @ 运算符的一个操作数不是矩阵时（例如是标量），应该引发一个错误（如 ValueError），并提示使用 '*' 进行标量乘法。",
+      "evidence": [
+        "Issue 描述：\"it should actually only work if the multiplication is actually a matrix multiplication.\"",
+        "Issue 中 NumPy 的行为示例：`2@a` 引发 `ValueError: Scalar operands are not allowed, use '*' instead`。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 `标量 @ 矩阵` 表达式时是否引发异常（如 ValueError）及其消息。",
+        "reason": "修复后的正确行为是引发异常。观测是否引发异常以及异常类型/消息是判断缺陷是否存在的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "执行 `标量 @ 矩阵` 表达式后的返回值及其类型。",
+        "reason": "当前有缺陷的行为会返回一个矩阵（标量乘法的结果）。观测返回值可以确认当前行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用标量作为 `@` 运算符的一个操作数时，会引发一个适当的错误（如 ValueError）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言返回的矩阵值完全等于某个特定矩阵，因为这是当前有缺陷的行为。",
+        "reason": "Issue 的期望行为是引发错误，因此使用 `raises` 断言来验证这一点是直接且稳定的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后具体会引发哪种异常（ValueError 还是 TypeError）以及异常的确切消息是什么。",
+    "__matmul__ 方法是否应该完全拒绝标量，还是应该对非矩阵的‘类矩阵’对象有特殊处理。",
+    "除了标量，其他非矩阵类型（如列表、字典）作为操作数时，__matmul__ 的预期行为是什么。"
+  ],
+  "raw": {
+    "issue_summary": "Matrix 类的 __matmul__ 方法错误地允许标量与矩阵进行矩阵乘法运算，而根据规范它应该只允许矩阵与矩阵相乘。",
+    "trigger_condition": {
+      "text": "使用 @ 运算符（__matmul__）将一个标量（如整数 2）与一个 Matrix 对象（如 B）进行运算。",
+      "evidence": [
+        "Issue 中的示例：`2@B` 返回了一个矩阵结果。",
+        "源码片段 2 显示 `__matmul__` 直接返回 `self.__mul__(other)`。",
+        "相关测试 1 和 2 中都有 `eval('c = 5 @ b')` 的测试块，且没有引发错误。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "标量与矩阵的 @ 运算没有引发错误，而是错误地执行了标量乘法，返回了一个矩阵。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 示例显示 `2@B` 返回了 `Matrix([[4, 6], [2, 4]])`，这是标量乘法的结果。",
+        "Issue 指出 NumPy 在类似情况下会引发 ValueError。",
+        "相关测试 1 和 2 中 `eval('c = 5 @ b')` 后的断言表明当前行为是接受标量乘法的。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 @ 运算符的一个操作数不是矩阵时（例如是标量），应该引发一个错误（如 ValueError），并提示使用 '*' 进行标量乘法。",
+      "evidence": [
+        "Issue 描述：\"it should actually only work if the multiplication is actually a matrix multiplication.\"",
+        "Issue 中 NumPy 的行为示例：`2@a` 引发 `ValueError: Scalar operands are not allowed, use '*' instead`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Matrix.__matmul__",
+        "kind": "method",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "这是 Issue 直接讨论的有缺陷的方法。"
+      },
+      {
+        "name": "Matrix.__mul__",
+        "kind": "method",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "当前 `__matmul__` 委托给了 `__mul__`，需要理解其逻辑以进行变异。"
+      },
+      {
+        "name": "Matrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/dense.py",
+        "reason": "缺陷涉及 Matrix 类的实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "MatrixArithmetic.__matmul__",
+        "lines": "1975-1976",
+        "reason": "该方法直接返回 `self.__mul__(other)`，没有对操作数类型进行矩阵乘法所需的检查。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_multiplication",
+        "test_file": "sympy/matrices/tests/test_commonmatrix.py",
+        "why_relevant": "它测试了 Matrix 的乘法，并包含了对 `@` 运算符（matmul）的测试块，展示了当前标量@矩阵被接受的行为。",
+        "reusable_parts": [
+          "ArithmeticOnlyMatrix 的构造",
+          "使用 `eval` 测试 `@` 运算符的模式",
+          "对矩阵乘法结果的断言风格"
+        ],
+        "possible_gap": "该测试验证了当前（有缺陷的）行为是正常的，即 `5 @ b` 成功。它没有测试或期望标量@矩阵会引发错误。"
+      },
+      {
+        "test_name": "test_multiplication",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "与上一个测试类似，但使用具体的 Matrix 类，更贴近 Issue 中的示例。",
+        "reusable_parts": [
+          "Matrix 对象的构造",
+          "使用 `eval` 测试 `@` 运算符的模式",
+          "对矩阵乘法结果的断言风格"
+        ],
+        "possible_gap": "同样，它验证了当前有缺陷的行为（`5 @ b` 成功），而不是期望的错误行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 `eval('c = 5 @ b')` 使用整数 `5` 作为左操作数。",
+        "target_pattern": "使用一个非矩阵的标量（如整数 `2`）作为 `@` 运算符的一个操作数，与一个 Matrix 对象进行运算。",
+        "reason": "Issue 表明标量@矩阵应该失败，但当前测试模式接受它。变异输入以触发期望的错误路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试同时测试了 `*`（标量乘法）和 `@`（矩阵乘法），但当前 `@` 的行为与 `*` 在标量情况下一致。",
+        "target_pattern": "确保测试明确区分 `@` 和 `*` 的行为，对 `@` 使用标量操作数时应期待错误。",
+        "reason": "Issue 的核心是 `@` 应该只用于矩阵乘法，不能作为标量乘法的替代。需要变异测试的预期行为。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 `标量 @ 矩阵` 表达式时是否引发异常（如 ValueError）及其消息。",
+        "reason": "修复后的正确行为是引发异常。观测是否引发异常以及异常类型/消息是判断缺陷是否存在的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "执行 `标量 @ 矩阵` 表达式后的返回值及其类型。",
+        "reason": "当前有缺陷的行为会返回一个矩阵（标量乘法的结果）。观测返回值可以确认当前行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用标量作为 `@` 运算符的一个操作数时，会引发一个适当的错误（如 ValueError）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言返回的矩阵值完全等于某个特定矩阵，因为这是当前有缺陷的行为。",
+        "reason": "Issue 的期望行为是引发错误，因此使用 `raises` 断言来验证这一点是直接且稳定的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 Matrix 类，并构造一个 Matrix 实例作为操作数之一。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要处理 Python 版本对 `@` 运算符支持的问题（使用 `eval` 或检查语法可用性）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后具体会引发哪种异常（ValueError 还是 TypeError）以及异常的确切消息是什么。",
+      "__matmul__ 方法是否应该完全拒绝标量，还是应该对非矩阵的‘类矩阵’对象有特殊处理。",
+      "除了标量，其他非矩阵类型（如列表、字典）作为操作数时，__matmul__ 的预期行为是什么。"
+    ]
+  }
+}

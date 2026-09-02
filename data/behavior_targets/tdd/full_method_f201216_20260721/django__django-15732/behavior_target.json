@@ -1,0 +1,420 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15732",
+  "issue_summary": "无法删除与主键约束重叠的单字段 unique_together 约束，因为迁移代码在查找列上的唯一约束时遇到多个约束而失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用支持检查约束存在的数据库后端（如 PostgreSQL）。Issue 明确提到了 PostgreSQL。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要继承自 OperationTestBase 或类似的测试基类，以使用 set_up_test_model 等辅助方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要使用 @skipUnlessDBFeature 来确保数据库支持相关特性，但 Issue 中的场景在 PostgreSQL 上应该普遍存在。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要创建模型，其主键为 id，并设置 unique_together = (('id',),)。这可能需要在 set_up_test_model 或自定义模型定义中完成。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_remove_covering_unique_constraint",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了使用 RemoveConstraint 操作删除一个 UniqueConstraint。展示了完整的流程：创建约束、执行 RemoveConstraint、验证约束被移除、验证数据库行为改变。",
+        "reusable_parts": [
+          "OperationTestBase 基类",
+          "self.set_up_test_model 方法",
+          "RemoveConstraint 的构造和调用模式",
+          "operation.state_forwards 和 operation.database_forwards 的调用",
+          "使用 CaptureQueriesContext 捕获 SQL",
+          "使用 assertRaises(IntegrityError) 验证约束生效"
+        ],
+        "possible_gap": "它删除的是一个覆盖索引约束，而不是一个单字段的 unique_together 约束。它没有模拟字段上已存在另一个唯一约束（如主键）的场景。"
+      },
+      {
+        "test_name": "test_remove_deferred_unique_constraint",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了删除一个可延迟的 UniqueConstraint。展示了处理不同数据库特性（supports_deferrable_unique_constraints）的测试模式。",
+        "reusable_parts": [
+          "处理数据库特性差异的模式",
+          "在事务中测试约束行为",
+          "使用 SET CONSTRAINTS 语句"
+        ],
+        "possible_gap": "同样，它没有模拟字段上存在多个唯一约束的场景。"
+      },
+      {
+        "test_name": "test_alter_unique_together",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它直接测试了 AlterUniqueTogether 操作，这是管理 unique_together 的主要操作。展示了如何添加 unique_together 约束并验证其数据库行为（引发 IntegrityError）。",
+        "reusable_parts": [
+          "AlterUniqueTogether 的构造和调用",
+          "直接执行 SQL 插入数据来测试约束",
+          "使用 assertRaises(IntegrityError) 验证唯一性",
+          "测试操作的 reversal (database_backwards)"
+        ],
+        "possible_gap": "它测试的是添加和修改多字段的 unique_together，而不是删除一个单字段的 unique_together。它也没有模拟与现有主键约束冲突的场景。"
+      },
+      {
+        "test_name": "test_remove_func_unique_constraint",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了删除一个基于表达式的 UniqueConstraint。展示了删除约束后验证约束失效（可以插入重复数据）以及 reversal 后约束重新生效的模式。",
+        "reusable_parts": [
+          "创建基于表达式的约束",
+          "使用 assertIndexNameExists/NotExists",
+          "删除约束后验证可以插入'重复'数据（对于表达式索引）"
+        ],
+        "possible_gap": "它没有涉及 unique_together 元选项，也没有模拟字段上存在多个约束的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个模型字段（例如主键 id）同时存在 PRIMARY KEY 约束和一个单字段的 unique_together 约束（例如 unique_together = (('id',),)），然后尝试通过迁移删除这个 unique_together 约束。",
+      "evidence": [
+        "Issue 描述：'I have an erroneous unique_together constraint on a model's primary key (unique_together = (('id',),)) that cannot be dropped by a migration.'",
+        "Issue 描述：'the migration tries to find all unique constraints on the column and expects there to be only one, but I've got two — the primary key and the unique_together constraint'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "迁移操作失败，无法删除 unique_together 约束。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'cannot be dropped by a migration'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.RemoveConstraint",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及通过迁移删除约束，相关测试 1、2、5 都使用了 RemoveConstraint 操作。"
+      },
+      {
+        "name": "migrations.AlterUniqueTogether",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及 unique_together 约束，相关测试 4 展示了修改 unique_together 的操作。"
+      },
+      {
+        "name": "models.UniqueConstraint",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及唯一约束，相关测试 1、2、5 使用了 UniqueConstraint 来创建约束。"
+      },
+      {
+        "name": "connection.schema_editor",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中，数据库操作（如 database_forwards）都通过 schema_editor 执行。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "迁移操作中查找和删除列上唯一约束的逻辑",
+        "lines": "",
+        "reason": "Issue 明确指出：'the migration tries to find all unique constraints on the column and expects there to be only one, but I've got two'。这表明在删除约束时，用于识别要删除的约束的代码逻辑有缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型字段上通常只有一个显式定义的 UniqueConstraint（或 unique_together），或者没有其他唯一约束。",
+        "target_pattern": "模型的一个字段（例如主键 id）上同时存在两种唯一约束：1) 隐式或显式的主键约束（PRIMARY KEY），2) 一个通过 unique_together 元选项定义的、仅包含该字段的单字段唯一约束。",
+        "reason": "Issue 明确指出，当同一列上存在多个唯一约束时，迁移删除逻辑会失败。因此，测试的初始状态需要构造这种重叠约束的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，RemoveConstraint 操作接收一个明确的约束名称（由 UniqueConstraint 的 name 参数指定）。",
+        "target_pattern": "需要删除的约束是通过模型的 unique_together 元选项定义的，而不是通过 models.UniqueConstraint 类显式创建的。迁移操作可能需要通过 AlterUniqueTogether 来删除它，或者内部需要将 unique_together 转换为对应的数据库约束标识。",
+        "reason": "Issue 中的约束是 'erroneous unique_together constraint'，这表明约束定义方式不同，可能影响迁移代码查找和识别约束的逻辑。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接对显式创建的 UniqueConstraint 执行 RemoveConstraint。",
+        "target_pattern": "可能需要先使用 AlterUniqueTogether 将 unique_together 设置为空，或者迁移系统内部需要处理从 unique_together 到数据库约束的映射和删除。",
+        "reason": "Issue 没有明确说明使用的是 RemoveConstraint 还是 AlterUniqueTogether，但问题出现在“迁移”过程中。需要测试删除 unique_together 约束的路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移操作应该能够成功删除单字段的 unique_together 约束，即使该字段上已经存在另一个唯一约束（如主键）。",
+      "evidence": [
+        "Issue 描述暗示这是一个错误，期望迁移能正常工作。",
+        "相关测试 1、2、5 展示了成功删除各种 UniqueConstraint 的操作。",
+        "相关测试 3 展示了在存在 unique_together 的情况下成功删除 index_together 的操作。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 operation.database_forwards 执行期间，由 CaptureQueriesContext 捕获的 SQL 语句。",
+        "reason": "可以观察迁移是否成功生成了删除约束的 SQL（如 ALTER TABLE ... DROP CONSTRAINT ...），或者是否因错误而根本没有生成 SQL，或生成了错误的 SQL。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 operation.database_forwards 时是否抛出任何异常（如 ValueError, OperationalError）。",
+        "reason": "Issue 表明迁移失败，很可能在 database_forwards 阶段抛出了异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "执行 operation.state_forwards 前后，new_state.models[...].options 中 'unique_together' 和 'constraints' 的变化。",
+        "reason": "验证状态迁移是否正确移除了 unique_together 的定义。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "迁移后，通过 apps.get_model(...)._meta.unique_together 和 .constraints 查看模型元数据。",
+        "reason": "验证 Django 内部模型表示是否认为约束已被移除。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功执行，不抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息字符串，因为可能因数据库后端而异。",
+        "reason": "Issue 的核心是迁移失败。一个成功的修复应该允许迁移操作无异常完成。"
+      },
+      {
+        "assertion_goal": "迁移后，模型的 unique_together 元选项应为空（或不再包含有问题的约束）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的模型 repr 或复杂的嵌套结构。",
+        "reason": "验证状态迁移的正确性。"
+      },
+      {
+        "assertion_goal": "迁移后，可以向之前受约束的字段插入'重复'值（在当前上下文中，由于主键仍然存在，'重复'可能指尝试插入违反 unique_together 但主键不同的行？需要厘清）。更稳定的断言是：迁移后，与 unique_together 约束对应的那个特定数据库约束名称应该不存在。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "直接断言可以插入完全相同的行（因为主键冲突），需要设计更精确的测试数据。",
+        "reason": "Issue 是关于删除一个多余的约束。验证该约束在数据库层面确实被移除是关键。可以检查约束名称是否从数据库元数据中消失。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发错误的确切迁移操作是哪个？是 RemoveConstraint 作用于一个由 unique_together 自动生成的约束，还是 AlterUniqueTogether 设置为空？",
+    "错误发生的具体代码位置和抛出的异常类型是什么？",
+    "在存在主键的情况下，单字段 unique_together 约束在数据库层面是如何体现的？它是否真的创建了一个独立的 UNIQUE CONSTRAINT，还是被忽略了？Issue 中的索引列表表明它确实创建了一个独立的约束。",
+    "修复后的正确行为下，删除操作后数据库层面应该剩下什么？主键约束应该依然存在。测试中如何精确断言那个多余的约束被删除了，而主键约束保留？"
+  ],
+  "raw": {
+    "issue_summary": "无法删除与主键约束重叠的单字段 unique_together 约束，因为迁移代码在查找列上的唯一约束时遇到多个约束而失败。",
+    "trigger_condition": {
+      "text": "对一个模型字段（例如主键 id）同时存在 PRIMARY KEY 约束和一个单字段的 unique_together 约束（例如 unique_together = (('id',),)），然后尝试通过迁移删除这个 unique_together 约束。",
+      "evidence": [
+        "Issue 描述：'I have an erroneous unique_together constraint on a model's primary key (unique_together = (('id',),)) that cannot be dropped by a migration.'",
+        "Issue 描述：'the migration tries to find all unique constraints on the column and expects there to be only one, but I've got two — the primary key and the unique_together constraint'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "迁移操作失败，无法删除 unique_together 约束。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'cannot be dropped by a migration'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移操作应该能够成功删除单字段的 unique_together 约束，即使该字段上已经存在另一个唯一约束（如主键）。",
+      "evidence": [
+        "Issue 描述暗示这是一个错误，期望迁移能正常工作。",
+        "相关测试 1、2、5 展示了成功删除各种 UniqueConstraint 的操作。",
+        "相关测试 3 展示了在存在 unique_together 的情况下成功删除 index_together 的操作。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.RemoveConstraint",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及通过迁移删除约束，相关测试 1、2、5 都使用了 RemoveConstraint 操作。"
+      },
+      {
+        "name": "migrations.AlterUniqueTogether",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及 unique_together 约束，相关测试 4 展示了修改 unique_together 的操作。"
+      },
+      {
+        "name": "models.UniqueConstraint",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及唯一约束，相关测试 1、2、5 使用了 UniqueConstraint 来创建约束。"
+      },
+      {
+        "name": "connection.schema_editor",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中，数据库操作（如 database_forwards）都通过 schema_editor 执行。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "迁移操作中查找和删除列上唯一约束的逻辑",
+        "lines": "",
+        "reason": "Issue 明确指出：'the migration tries to find all unique constraints on the column and expects there to be only one, but I've got two'。这表明在删除约束时，用于识别要删除的约束的代码逻辑有缺陷。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_remove_covering_unique_constraint",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了使用 RemoveConstraint 操作删除一个 UniqueConstraint。展示了完整的流程：创建约束、执行 RemoveConstraint、验证约束被移除、验证数据库行为改变。",
+        "reusable_parts": [
+          "OperationTestBase 基类",
+          "self.set_up_test_model 方法",
+          "RemoveConstraint 的构造和调用模式",
+          "operation.state_forwards 和 operation.database_forwards 的调用",
+          "使用 CaptureQueriesContext 捕获 SQL",
+          "使用 assertRaises(IntegrityError) 验证约束生效"
+        ],
+        "possible_gap": "它删除的是一个覆盖索引约束，而不是一个单字段的 unique_together 约束。它没有模拟字段上已存在另一个唯一约束（如主键）的场景。"
+      },
+      {
+        "test_name": "test_remove_deferred_unique_constraint",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了删除一个可延迟的 UniqueConstraint。展示了处理不同数据库特性（supports_deferrable_unique_constraints）的测试模式。",
+        "reusable_parts": [
+          "处理数据库特性差异的模式",
+          "在事务中测试约束行为",
+          "使用 SET CONSTRAINTS 语句"
+        ],
+        "possible_gap": "同样，它没有模拟字段上存在多个唯一约束的场景。"
+      },
+      {
+        "test_name": "test_alter_unique_together",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它直接测试了 AlterUniqueTogether 操作，这是管理 unique_together 的主要操作。展示了如何添加 unique_together 约束并验证其数据库行为（引发 IntegrityError）。",
+        "reusable_parts": [
+          "AlterUniqueTogether 的构造和调用",
+          "直接执行 SQL 插入数据来测试约束",
+          "使用 assertRaises(IntegrityError) 验证唯一性",
+          "测试操作的 reversal (database_backwards)"
+        ],
+        "possible_gap": "它测试的是添加和修改多字段的 unique_together，而不是删除一个单字段的 unique_together。它也没有模拟与现有主键约束冲突的场景。"
+      },
+      {
+        "test_name": "test_remove_func_unique_constraint",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了删除一个基于表达式的 UniqueConstraint。展示了删除约束后验证约束失效（可以插入重复数据）以及 reversal 后约束重新生效的模式。",
+        "reusable_parts": [
+          "创建基于表达式的约束",
+          "使用 assertIndexNameExists/NotExists",
+          "删除约束后验证可以插入'重复'数据（对于表达式索引）"
+        ],
+        "possible_gap": "它没有涉及 unique_together 元选项，也没有模拟字段上存在多个约束的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型字段上通常只有一个显式定义的 UniqueConstraint（或 unique_together），或者没有其他唯一约束。",
+        "target_pattern": "模型的一个字段（例如主键 id）上同时存在两种唯一约束：1) 隐式或显式的主键约束（PRIMARY KEY），2) 一个通过 unique_together 元选项定义的、仅包含该字段的单字段唯一约束。",
+        "reason": "Issue 明确指出，当同一列上存在多个唯一约束时，迁移删除逻辑会失败。因此，测试的初始状态需要构造这种重叠约束的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，RemoveConstraint 操作接收一个明确的约束名称（由 UniqueConstraint 的 name 参数指定）。",
+        "target_pattern": "需要删除的约束是通过模型的 unique_together 元选项定义的，而不是通过 models.UniqueConstraint 类显式创建的。迁移操作可能需要通过 AlterUniqueTogether 来删除它，或者内部需要将 unique_together 转换为对应的数据库约束标识。",
+        "reason": "Issue 中的约束是 'erroneous unique_together constraint'，这表明约束定义方式不同，可能影响迁移代码查找和识别约束的逻辑。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接对显式创建的 UniqueConstraint 执行 RemoveConstraint。",
+        "target_pattern": "可能需要先使用 AlterUniqueTogether 将 unique_together 设置为空，或者迁移系统内部需要处理从 unique_together 到数据库约束的映射和删除。",
+        "reason": "Issue 没有明确说明使用的是 RemoveConstraint 还是 AlterUniqueTogether，但问题出现在“迁移”过程中。需要测试删除 unique_together 约束的路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 operation.database_forwards 执行期间，由 CaptureQueriesContext 捕获的 SQL 语句。",
+        "reason": "可以观察迁移是否成功生成了删除约束的 SQL（如 ALTER TABLE ... DROP CONSTRAINT ...），或者是否因错误而根本没有生成 SQL，或生成了错误的 SQL。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 operation.database_forwards 时是否抛出任何异常（如 ValueError, OperationalError）。",
+        "reason": "Issue 表明迁移失败，很可能在 database_forwards 阶段抛出了异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "执行 operation.state_forwards 前后，new_state.models[...].options 中 'unique_together' 和 'constraints' 的变化。",
+        "reason": "验证状态迁移是否正确移除了 unique_together 的定义。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "迁移后，通过 apps.get_model(...)._meta.unique_together 和 .constraints 查看模型元数据。",
+        "reason": "验证 Django 内部模型表示是否认为约束已被移除。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功执行，不抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息字符串，因为可能因数据库后端而异。",
+        "reason": "Issue 的核心是迁移失败。一个成功的修复应该允许迁移操作无异常完成。"
+      },
+      {
+        "assertion_goal": "迁移后，模型的 unique_together 元选项应为空（或不再包含有问题的约束）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的模型 repr 或复杂的嵌套结构。",
+        "reason": "验证状态迁移的正确性。"
+      },
+      {
+        "assertion_goal": "迁移后，可以向之前受约束的字段插入'重复'值（在当前上下文中，由于主键仍然存在，'重复'可能指尝试插入违反 unique_together 但主键不同的行？需要厘清）。更稳定的断言是：迁移后，与 unique_together 约束对应的那个特定数据库约束名称应该不存在。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "直接断言可以插入完全相同的行（因为主键冲突），需要设计更精确的测试数据。",
+        "reason": "Issue 是关于删除一个多余的约束。验证该约束在数据库层面确实被移除是关键。可以检查约束名称是否从数据库元数据中消失。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用支持检查约束存在的数据库后端（如 PostgreSQL）。Issue 明确提到了 PostgreSQL。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要继承自 OperationTestBase 或类似的测试基类，以使用 set_up_test_model 等辅助方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要使用 @skipUnlessDBFeature 来确保数据库支持相关特性，但 Issue 中的场景在 PostgreSQL 上应该普遍存在。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要创建模型，其主键为 id，并设置 unique_together = (('id',),)。这可能需要在 set_up_test_model 或自定义模型定义中完成。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发错误的确切迁移操作是哪个？是 RemoveConstraint 作用于一个由 unique_together 自动生成的约束，还是 AlterUniqueTogether 设置为空？",
+      "错误发生的具体代码位置和抛出的异常类型是什么？",
+      "在存在主键的情况下，单字段 unique_together 约束在数据库层面是如何体现的？它是否真的创建了一个独立的 UNIQUE CONSTRAINT，还是被忽略了？Issue 中的索引列表表明它确实创建了一个独立的约束。",
+      "修复后的正确行为下，删除操作后数据库层面应该剩下什么？主键约束应该依然存在。测试中如何精确断言那个多余的约束被删除了，而主键约束保留？"
+    ]
+  }
+}

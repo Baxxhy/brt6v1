@@ -1,0 +1,352 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-24637",
+  "issue_summary": "AnnotationBbox 的 gid 属性在保存为 SVG 时未传递给渲染器，导致 SVG 文件中缺少对应的 gid 标签。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 BytesIO 来捕获 SVG 输出内容，以便进行字符串检查。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个简单的图形（fig, ax）并添加 AnnotationBbox。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 OffsetImage 作为 AnnotationBbox 的内容，并加载一个测试图像或使用虚拟数组。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_gid",
+        "test_file": "lib/matplotlib/tests/test_backend_svg.py",
+        "why_relevant": "该测试专门验证各种对象的 gid 是否出现在 SVG 输出中，与 Issue 目标高度一致。",
+        "reusable_parts": [
+          "使用 BytesIO 捕获 SVG 输出的模式",
+          "遍历 fig.findobj 设置 gid 的方法",
+          "断言 gid in buf 的验证风格"
+        ],
+        "possible_gap": "该测试明确排除了 OffsetBox 类型的对象（if isinstance(obj, OffsetBox): return False），因此无法直接检测到 AnnotationBbox（包含 OffsetBox）的 gid 问题。"
+      },
+      {
+        "test_name": "test_annotationbbox_extents",
+        "test_file": "lib/matplotlib/tests/test_offsetbox.py",
+        "why_relevant": "该测试构造了包含 OffsetImage 的 AnnotationBbox 并检查其渲染范围，提供了创建相关对象的模板。",
+        "reusable_parts": [
+          "AnnotationBbox 与 OffsetImage 的构造方式",
+          "fig.canvas.draw 和 get_renderer 的调用",
+          "使用 assert_allclose 进行数值比较"
+        ],
+        "possible_gap": "该测试关注几何范围（extents），不涉及 gid 属性或 SVG 序列化。"
+      },
+      {
+        "test_name": "test_svg_escape",
+        "test_file": "lib/matplotlib/tests/test_backend_svg.py",
+        "why_relevant": "该测试验证 SVG 输出中 gid 属性的正确转义，展示了检查 SVG 内容字符串的模式。",
+        "reusable_parts": [
+          "fig.savefig 到 BytesIO 并解码为字符串的模式",
+          "断言特定字符串（如 gid）存在于 SVG 缓冲区中的方法"
+        ],
+        "possible_gap": "该测试仅针对文本对象的 gid，未涉及 AnnotationBbox 或图像。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个包含 OffsetImage 的 AnnotationBbox 对象，对其调用 set_gid 设置 gid，然后通过 savefig 保存为 SVG 格式。",
+      "evidence": [
+        "Issue 中的示例代码展示了完整的触发步骤：创建 AnnotationBbox，调用 set_gid，然后 savefig 为 SVG。",
+        "Issue 描述：'set_gid but when I save to an svg, the gid label for the images are not included'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SVG 文件中，AnnotationBbox 对应的图像元素缺少预期的 gid 属性标签。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述：'produces an svg file that contains the image with no gid label'。",
+        "Issue 中提供的 example.txt (SVG 文件) 内容显示图像元素没有 gid 属性。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AnnotationBbox",
+        "kind": "class",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Issue 的核心是关于 AnnotationBbox 对象的 gid 属性序列化问题。"
+      },
+      {
+        "name": "set_gid",
+        "kind": "method",
+        "source_path": "lib/matplotlib/artist.py",
+        "reason": "用于设置 Artist 的 gid 属性，是触发问题的关键调用。"
+      },
+      {
+        "name": "get_gid",
+        "kind": "method",
+        "source_path": "lib/matplotlib/artist.py",
+        "reason": "用于获取 gid 属性，可用于验证设置是否成功。"
+      },
+      {
+        "name": "OffsetImage",
+        "kind": "class",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Issue 示例中 AnnotationBbox 包含的 OffsetBox 类型。"
+      },
+      {
+        "name": "savefig",
+        "kind": "method",
+        "source_path": "",
+        "reason": "触发 SVG 序列化和 gid 丢失问题的最终操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/offsetbox.py",
+        "object": "AnnotationBbox.draw",
+        "lines": "",
+        "reason": "draw 方法负责将艺术家渲染到输出，可能遗漏了将 gid 传递给 SVG 渲染器的逻辑。"
+      },
+      {
+        "path": "lib/matplotlib/offsetbox.py",
+        "object": "AnnotationBbox",
+        "lines": "1211-1462",
+        "reason": "AnnotationBbox 类继承自 Artist，但其 gid 处理可能在 SVG 后端序列化时未正确实现。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "test_gid 中排除了 OffsetBox 对象，因此未测试 AnnotationBbox 的 gid。",
+        "target_pattern": "包含 AnnotationBbox（其内部包含 OffsetBox）对象，并为其设置 gid。",
+        "reason": "Issue 表明 AnnotationBbox 的 gid 处理可能被遗漏，将其纳入测试范围可能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "test_gid 遍历所有可见对象并设置 gid，然后保存为 SVG。",
+        "target_pattern": "专门创建 AnnotationBbox 对象，设置 gid，然后保存为 SVG。",
+        "reason": "聚焦于问题报告的具体 API 调用链，以隔离缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "AnnotationBbox 的 gid 属性应正确传递给 SVG 渲染器，并在生成的 SVG 文件的对应元素中包含该 gid 属性。",
+      "evidence": [
+        "Issue 中提到一个类似的 PR #15087 修复了其他缺失 gid 的实例，暗示这是预期的修复方向。",
+        "相关测试 test_gid 验证了其他对象的 gid 会出现在 SVG 输出中，表明这是期望的行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "保存 SVG 后的文件内容字符串（buf）。",
+        "reason": "Issue 的核心症状是 SVG 输出中缺少 gid 属性，直接检查输出内容是最直接的验证方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ab.get_gid() 的返回值。",
+        "reason": "确认 set_gid 操作在内存中是否成功，以区分是设置问题还是序列化问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "AnnotationBbox 对象及其内部 OffsetBox 的 _gid 属性。",
+        "reason": "了解 gid 属性在对象树中的存储位置，有助于定位序列化时遗漏了哪个节点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "SVG 输出内容应包含为 AnnotationBbox 设置的 gid 字符串。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SVG XML 结构或精确的元素位置，因为 SVG 生成细节可能变化。",
+        "reason": "Issue 只关心 gid 属性是否存在，不关心 SVG 的其他细节。使用 contains 检查 gid 字符串片段更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "gid 属性应该设置在 AnnotationBbox 对象本身，还是其内部的 OffsetBox/OffsetImage 上？Issue 示例设置在 AnnotationBbox 上。",
+    "SVG 中 gid 属性丢失是发生在 AnnotationBbox 的容器元素上，还是其内部的图像元素上？需要检查生成的 SVG 结构。",
+    "除了 AnnotationBbox，其他类型的 OffsetBox 容器是否也存在相同的 gid 序列化问题？"
+  ],
+  "raw": {
+    "issue_summary": "AnnotationBbox 的 gid 属性在保存为 SVG 时未传递给渲染器，导致 SVG 文件中缺少对应的 gid 标签。",
+    "trigger_condition": {
+      "text": "创建一个包含 OffsetImage 的 AnnotationBbox 对象，对其调用 set_gid 设置 gid，然后通过 savefig 保存为 SVG 格式。",
+      "evidence": [
+        "Issue 中的示例代码展示了完整的触发步骤：创建 AnnotationBbox，调用 set_gid，然后 savefig 为 SVG。",
+        "Issue 描述：'set_gid but when I save to an svg, the gid label for the images are not included'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SVG 文件中，AnnotationBbox 对应的图像元素缺少预期的 gid 属性标签。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述：'produces an svg file that contains the image with no gid label'。",
+        "Issue 中提供的 example.txt (SVG 文件) 内容显示图像元素没有 gid 属性。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "AnnotationBbox 的 gid 属性应正确传递给 SVG 渲染器，并在生成的 SVG 文件的对应元素中包含该 gid 属性。",
+      "evidence": [
+        "Issue 中提到一个类似的 PR #15087 修复了其他缺失 gid 的实例，暗示这是预期的修复方向。",
+        "相关测试 test_gid 验证了其他对象的 gid 会出现在 SVG 输出中，表明这是期望的行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AnnotationBbox",
+        "kind": "class",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Issue 的核心是关于 AnnotationBbox 对象的 gid 属性序列化问题。"
+      },
+      {
+        "name": "set_gid",
+        "kind": "method",
+        "source_path": "lib/matplotlib/artist.py",
+        "reason": "用于设置 Artist 的 gid 属性，是触发问题的关键调用。"
+      },
+      {
+        "name": "get_gid",
+        "kind": "method",
+        "source_path": "lib/matplotlib/artist.py",
+        "reason": "用于获取 gid 属性，可用于验证设置是否成功。"
+      },
+      {
+        "name": "OffsetImage",
+        "kind": "class",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Issue 示例中 AnnotationBbox 包含的 OffsetBox 类型。"
+      },
+      {
+        "name": "savefig",
+        "kind": "method",
+        "source_path": "",
+        "reason": "触发 SVG 序列化和 gid 丢失问题的最终操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/offsetbox.py",
+        "object": "AnnotationBbox.draw",
+        "lines": "",
+        "reason": "draw 方法负责将艺术家渲染到输出，可能遗漏了将 gid 传递给 SVG 渲染器的逻辑。"
+      },
+      {
+        "path": "lib/matplotlib/offsetbox.py",
+        "object": "AnnotationBbox",
+        "lines": "1211-1462",
+        "reason": "AnnotationBbox 类继承自 Artist，但其 gid 处理可能在 SVG 后端序列化时未正确实现。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_gid",
+        "test_file": "lib/matplotlib/tests/test_backend_svg.py",
+        "why_relevant": "该测试专门验证各种对象的 gid 是否出现在 SVG 输出中，与 Issue 目标高度一致。",
+        "reusable_parts": [
+          "使用 BytesIO 捕获 SVG 输出的模式",
+          "遍历 fig.findobj 设置 gid 的方法",
+          "断言 gid in buf 的验证风格"
+        ],
+        "possible_gap": "该测试明确排除了 OffsetBox 类型的对象（if isinstance(obj, OffsetBox): return False），因此无法直接检测到 AnnotationBbox（包含 OffsetBox）的 gid 问题。"
+      },
+      {
+        "test_name": "test_annotationbbox_extents",
+        "test_file": "lib/matplotlib/tests/test_offsetbox.py",
+        "why_relevant": "该测试构造了包含 OffsetImage 的 AnnotationBbox 并检查其渲染范围，提供了创建相关对象的模板。",
+        "reusable_parts": [
+          "AnnotationBbox 与 OffsetImage 的构造方式",
+          "fig.canvas.draw 和 get_renderer 的调用",
+          "使用 assert_allclose 进行数值比较"
+        ],
+        "possible_gap": "该测试关注几何范围（extents），不涉及 gid 属性或 SVG 序列化。"
+      },
+      {
+        "test_name": "test_svg_escape",
+        "test_file": "lib/matplotlib/tests/test_backend_svg.py",
+        "why_relevant": "该测试验证 SVG 输出中 gid 属性的正确转义，展示了检查 SVG 内容字符串的模式。",
+        "reusable_parts": [
+          "fig.savefig 到 BytesIO 并解码为字符串的模式",
+          "断言特定字符串（如 gid）存在于 SVG 缓冲区中的方法"
+        ],
+        "possible_gap": "该测试仅针对文本对象的 gid，未涉及 AnnotationBbox 或图像。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "test_gid 中排除了 OffsetBox 对象，因此未测试 AnnotationBbox 的 gid。",
+        "target_pattern": "包含 AnnotationBbox（其内部包含 OffsetBox）对象，并为其设置 gid。",
+        "reason": "Issue 表明 AnnotationBbox 的 gid 处理可能被遗漏，将其纳入测试范围可能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "test_gid 遍历所有可见对象并设置 gid，然后保存为 SVG。",
+        "target_pattern": "专门创建 AnnotationBbox 对象，设置 gid，然后保存为 SVG。",
+        "reason": "聚焦于问题报告的具体 API 调用链，以隔离缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "保存 SVG 后的文件内容字符串（buf）。",
+        "reason": "Issue 的核心症状是 SVG 输出中缺少 gid 属性，直接检查输出内容是最直接的验证方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ab.get_gid() 的返回值。",
+        "reason": "确认 set_gid 操作在内存中是否成功，以区分是设置问题还是序列化问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "AnnotationBbox 对象及其内部 OffsetBox 的 _gid 属性。",
+        "reason": "了解 gid 属性在对象树中的存储位置，有助于定位序列化时遗漏了哪个节点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "SVG 输出内容应包含为 AnnotationBbox 设置的 gid 字符串。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SVG XML 结构或精确的元素位置，因为 SVG 生成细节可能变化。",
+        "reason": "Issue 只关心 gid 属性是否存在，不关心 SVG 的其他细节。使用 contains 检查 gid 字符串片段更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 BytesIO 来捕获 SVG 输出内容，以便进行字符串检查。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个简单的图形（fig, ax）并添加 AnnotationBbox。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 OffsetImage 作为 AnnotationBbox 的内容，并加载一个测试图像或使用虚拟数组。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "gid 属性应该设置在 AnnotationBbox 对象本身，还是其内部的 OffsetBox/OffsetImage 上？Issue 示例设置在 AnnotationBbox 上。",
+      "SVG 中 gid 属性丢失是发生在 AnnotationBbox 的容器元素上，还是其内部的图像元素上？需要检查生成的 SVG 结构。",
+      "除了 AnnotationBbox，其他类型的 OffsetBox 容器是否也存在相同的 gid 序列化问题？"
+    ]
+  }
+}

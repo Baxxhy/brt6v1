@@ -1,0 +1,280 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pylint-dev__pylint-7228",
+  "issue_summary": "在 pylintrc 配置文件中使用包含 '\\p{Han}' 的正则表达式会导致 pylint 启动时抛出 re.error 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建临时的 .pylintrc 配置文件，并写入包含 '\\\\p{Han}' 的正则表达式选项。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 tmp_path fixture 来管理临时配置文件。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要模拟或直接调用配置初始化或解析的相关函数，而非运行完整的 pylint 命令行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test__regexp_validator_invalid",
+        "test_file": "tests/config/unittest_config.py",
+        "why_relevant": "该测试验证了无效正则表达式会触发 sre_constants.error 异常，与 Issue 中观察到的 re.error 异常类型相似。",
+        "reusable_parts": [
+          "pytest.raises(sre_constants.error) 的断言风格",
+          "对验证器函数的调用模式"
+        ],
+        "possible_gap": "该测试直接调用验证器函数并传入无效模式字符串，而 Issue 中的触发路径是通过配置文件解析间接触发的。"
+      },
+      {
+        "test_name": "test__regexp_csv_validator_invalid",
+        "test_file": "tests/config/unittest_config.py",
+        "why_relevant": "该测试验证了包含多个正则表达式的 CSV 字符串的验证，涉及正则表达式验证逻辑。",
+        "reusable_parts": [
+          "pytest.raises(sre_constants.error) 的断言风格",
+          "构造包含特殊字符的正则表达式字符串的模式"
+        ],
+        "possible_gap": "测试验证的是 CSV 格式的多个正则表达式，而 Issue 是单个正则表达式选项；且触发路径不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 .pylintrc 配置文件中设置一个包含 Unicode 属性转义序列 '\\p{Han}' 的正则表达式选项值（例如 function-rgx）。",
+      "evidence": [
+        "Issue 中提供的 .pylintrc 配置内容：function-rgx=[\\p{Han}a-z_][\\p{Han}a-z0-9_]{2,30}$",
+        "Issue 描述：'config rxg in pylintrc with \\p{Han} will throw err'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 pylint 命令时，在解析配置文件阶段抛出 re.error: bad escape \\p at position 1 异常，导致程序崩溃退出。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示：'re.error: bad escape \\\\p at position 1'",
+        "堆栈跟踪指向 sre_parse.py 中的 _class_escape 函数"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_parse_configuration_file",
+        "kind": "method",
+        "source_path": "pylint/config/arguments_manager.py",
+        "reason": "Issue 堆栈跟踪显示错误发生在配置解析过程中，该方法负责解析配置文件中的参数。"
+      },
+      {
+        "name": "_regexp_validator",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试代码表明存在用于验证正则表达式的函数，可能与验证配置选项中的正则表达式有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/config/arguments_manager.py",
+        "object": "_ArgumentsManager._parse_configuration_file",
+        "lines": "253-263",
+        "reason": "该方法解析配置文件中的参数，Issue 堆栈跟踪显示错误发生在配置解析流程中。"
+      },
+      {
+        "path": "pylint/config/config_initialization.py",
+        "object": "_config_initialization",
+        "lines": "20-115",
+        "reason": "该函数是配置初始化的顶层入口，调用了 _parse_configuration_file，并处理配置加载的整体流程。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中直接向验证器函数传入无效正则字符串（如 'test_)'）。",
+        "target_pattern": "通过 .pylintrc 配置文件设置包含 '\\\\p{Han}' 的正则表达式选项值。",
+        "reason": "Issue 表明缺陷在通过配置文件解析的路径中被触发，而非直接调用验证器。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用已知会引发 sre_constants.error 的简单无效模式（如不匹配的括号）。",
+        "target_pattern": "使用包含 Unicode 属性转义序列 '\\\\p{Han}' 的正则表达式模式。",
+        "reason": "Issue 表明 '\\\\p{Han}' 是触发特定 re.error 的输入模式。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "pylint 应能正确处理包含 '\\p{Han}' 这类 Unicode 属性转义序列的正则表达式配置，不抛出异常并正常启动。",
+      "evidence": [
+        "Issue 中的 'Expected behavior' 部分：'not throw error'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 _parse_configuration_file 或相关验证逻辑时捕获的异常。",
+        "reason": "Issue 的核心现象是抛出 re.error 异常，观测异常类型和消息是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "从配置文件读取并准备传递给解析器的原始参数字符串。",
+        "reason": "需要确认包含 '\\\\p{Han}' 的配置值是否正确传递到了可能触发编译错误的代码点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当配置包含 '\\\\p{Han}' 时，pylint 的配置解析过程不会抛出 re.error 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串完全相等，因为不同 Python 版本的消息可能略有不同。",
+        "reason": "Issue 的核心是异常被抛出，修复后应不再抛出。使用 pytest.raises 并检查异常类型是稳定且对齐的断言方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在参数解析时对值进行正则编译，还是在某个选项的特定验证器中。",
+    "除了 '\\\\p{Han}'，是否还有其他 Unicode 属性转义序列（如 '\\\\p{L}'）会触发相同问题。",
+    "修复后的预期行为是 silently accept 该模式，还是将其转换为 Python re 模块支持的等价形式。"
+  ],
+  "raw": {
+    "issue_summary": "在 pylintrc 配置文件中使用包含 '\\p{Han}' 的正则表达式会导致 pylint 启动时抛出 re.error 异常。",
+    "trigger_condition": {
+      "text": "在 .pylintrc 配置文件中设置一个包含 Unicode 属性转义序列 '\\p{Han}' 的正则表达式选项值（例如 function-rgx）。",
+      "evidence": [
+        "Issue 中提供的 .pylintrc 配置内容：function-rgx=[\\p{Han}a-z_][\\p{Han}a-z0-9_]{2,30}$",
+        "Issue 描述：'config rxg in pylintrc with \\p{Han} will throw err'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 pylint 命令时，在解析配置文件阶段抛出 re.error: bad escape \\p at position 1 异常，导致程序崩溃退出。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示：'re.error: bad escape \\\\p at position 1'",
+        "堆栈跟踪指向 sre_parse.py 中的 _class_escape 函数"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pylint 应能正确处理包含 '\\p{Han}' 这类 Unicode 属性转义序列的正则表达式配置，不抛出异常并正常启动。",
+      "evidence": [
+        "Issue 中的 'Expected behavior' 部分：'not throw error'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_parse_configuration_file",
+        "kind": "method",
+        "source_path": "pylint/config/arguments_manager.py",
+        "reason": "Issue 堆栈跟踪显示错误发生在配置解析过程中，该方法负责解析配置文件中的参数。"
+      },
+      {
+        "name": "_regexp_validator",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试代码表明存在用于验证正则表达式的函数，可能与验证配置选项中的正则表达式有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/config/arguments_manager.py",
+        "object": "_ArgumentsManager._parse_configuration_file",
+        "lines": "253-263",
+        "reason": "该方法解析配置文件中的参数，Issue 堆栈跟踪显示错误发生在配置解析流程中。"
+      },
+      {
+        "path": "pylint/config/config_initialization.py",
+        "object": "_config_initialization",
+        "lines": "20-115",
+        "reason": "该函数是配置初始化的顶层入口，调用了 _parse_configuration_file，并处理配置加载的整体流程。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test__regexp_validator_invalid",
+        "test_file": "tests/config/unittest_config.py",
+        "why_relevant": "该测试验证了无效正则表达式会触发 sre_constants.error 异常，与 Issue 中观察到的 re.error 异常类型相似。",
+        "reusable_parts": [
+          "pytest.raises(sre_constants.error) 的断言风格",
+          "对验证器函数的调用模式"
+        ],
+        "possible_gap": "该测试直接调用验证器函数并传入无效模式字符串，而 Issue 中的触发路径是通过配置文件解析间接触发的。"
+      },
+      {
+        "test_name": "test__regexp_csv_validator_invalid",
+        "test_file": "tests/config/unittest_config.py",
+        "why_relevant": "该测试验证了包含多个正则表达式的 CSV 字符串的验证，涉及正则表达式验证逻辑。",
+        "reusable_parts": [
+          "pytest.raises(sre_constants.error) 的断言风格",
+          "构造包含特殊字符的正则表达式字符串的模式"
+        ],
+        "possible_gap": "测试验证的是 CSV 格式的多个正则表达式，而 Issue 是单个正则表达式选项；且触发路径不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中直接向验证器函数传入无效正则字符串（如 'test_)'）。",
+        "target_pattern": "通过 .pylintrc 配置文件设置包含 '\\\\p{Han}' 的正则表达式选项值。",
+        "reason": "Issue 表明缺陷在通过配置文件解析的路径中被触发，而非直接调用验证器。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用已知会引发 sre_constants.error 的简单无效模式（如不匹配的括号）。",
+        "target_pattern": "使用包含 Unicode 属性转义序列 '\\\\p{Han}' 的正则表达式模式。",
+        "reason": "Issue 表明 '\\\\p{Han}' 是触发特定 re.error 的输入模式。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 _parse_configuration_file 或相关验证逻辑时捕获的异常。",
+        "reason": "Issue 的核心现象是抛出 re.error 异常，观测异常类型和消息是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "从配置文件读取并准备传递给解析器的原始参数字符串。",
+        "reason": "需要确认包含 '\\\\p{Han}' 的配置值是否正确传递到了可能触发编译错误的代码点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当配置包含 '\\\\p{Han}' 时，pylint 的配置解析过程不会抛出 re.error 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串完全相等，因为不同 Python 版本的消息可能略有不同。",
+        "reason": "Issue 的核心是异常被抛出，修复后应不再抛出。使用 pytest.raises 并检查异常类型是稳定且对齐的断言方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建临时的 .pylintrc 配置文件，并写入包含 '\\\\p{Han}' 的正则表达式选项。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 tmp_path fixture 来管理临时配置文件。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要模拟或直接调用配置初始化或解析的相关函数，而非运行完整的 pylint 命令行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在参数解析时对值进行正则编译，还是在某个选项的特定验证器中。",
+      "除了 '\\\\p{Han}'，是否还有其他 Unicode 属性转义序列（如 '\\\\p{L}'）会触发相同问题。",
+      "修复后的预期行为是 silently accept 该模式，还是将其转换为 Python re 模块支持的等价形式。"
+    ]
+  }
+}

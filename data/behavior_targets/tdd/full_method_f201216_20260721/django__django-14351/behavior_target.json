@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14351",
+  "issue_summary": "使用 Q 对象的 __or__ 操作符时，当查询条件中包含反向关联的 __in 查找时，会错误地选择所有默认列，导致生成的 SQL 子查询返回多列，引发 ProgrammingError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要设置具有反向多对多关系的 Django 模型（例如 Agent 和 PropertyGroup 通过中间表关联）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 类并配置测试数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一些 Agent 和 PropertyGroup 实例，并建立它们之间的关系，以构建非空的查询集。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_q_object_or",
+        "test_file": "tests/generic_relations_regress/tests.py",
+        "why_relevant": "该测试直接涉及 Q 对象与 | 操作符的组合使用，并检查生成的 SQL 是否正确分组。",
+        "reusable_parts": [
+          "使用 Q 对象和 | 操作符构建查询的模式。",
+          "使用 assertIn 验证查询结果。",
+          "TestCase 框架。"
+        ],
+        "possible_gap": "该测试没有使用反向关联的 __in 查找，也没有涉及聚合注解（Count）。它测试的是通用关系，而不是导致多列子查询的特定列选择逻辑。"
+      },
+      {
+        "test_name": "test_filter_or",
+        "test_file": "tests/or_lookups/tests.py",
+        "why_relevant": "该测试展示了使用 | 操作符组合 Q 对象或 QuerySet 的基本模式。",
+        "reusable_parts": [
+          "使用 Q 对象和 | 操作符的语法。",
+          "使用 assertQuerysetEqual 进行断言。",
+          "Article 模型的简单 fixture 设置。"
+        ],
+        "possible_gap": "测试使用的是简单的字段查找（如 headline__startswith），没有涉及反向关联（如 agent__property_groups）或 __in 查找，也没有使用 annotate。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个 QuerySet 使用 filter() 方法，其中包含一个由 Q 对象通过 | 操作符组合的查询条件，且其中一个 Q 对象使用了反向关联的 __in 查找（例如 agent__property_groups__in），另一个 Q 对象使用了聚合注解的字段查找（例如 agent__property_groups__count=0）。",
+      "evidence": [
+        "Issue 中提供了两个对比示例：使用 agent__property_groups__id__in 的查询正常工作，而使用 agent__property_groups__in 的查询失败。",
+        "Issue 中展示了导致错误的查询代码：`Q(agent__property_groups__in=property_groups) | Q(agent__property_groups__count=0)`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 django.db.utils.ProgrammingError，错误信息为 'subquery must return only one column'。生成的 SQL 显示子查询 SELECT 了多个列（例如 U0.\"id\", U0.\"created\", ...），而不是预期的单个列。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中包含了完整的错误堆栈和错误信息。",
+        "Issue 中展示了导致错误的生成 SQL 片段，其中子查询选择了多个列。",
+        "Issue 中通过调试信息展示了 cols 列表包含了多个列，而正常情况只应包含一个列。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 对象在使用 __or__ 操作符时的行为。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发 bug 的查询是通过 filter() 方法构建的。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中的查询使用了 annotate(Count(...))。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "查询中使用了 Count 聚合函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "233",
+        "reason": "Issue 报告者提到在 query.py 的第 233 行附近添加了一个调试修复，通过检查 cols[0].alias 来强制只返回一个列，这表明该区域负责处理查询列的生成逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用简单的字段查找，如 `Q(notes__note__icontains=...)` 或 `Q(headline__startswith=...)`。",
+        "target_pattern": "使用反向关联的 __in 查找，如 `Q(agent__property_groups__in=queryset)`，并与另一个使用聚合计数的条件组合，如 `Q(agent__property_groups__count=0)`。",
+        "reason": "Issue 表明，当 __in 查找用于反向关联并通过 | 与聚合条件组合时，会触发列选择错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "`Model.objects.filter(Q(...) | Q(...))`",
+        "target_pattern": "`Model.objects.annotate(Count('related_field')).filter(Q(related_field__in=subquery) | Q(related_field__count=0))`",
+        "reason": "Issue 中的失败案例包含了 annotate(Count(...)) 步骤，并且 filter 中的条件引用了该注解。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用 Q 对象的 __or__ 操作符组合包含反向关联 __in 查找的条件时，应正确生成只返回单列的子查询，使得查询能够正常执行并返回结果。",
+      "evidence": [
+        "Issue 表明在 Django 2.2.5 版本中该行为是正常的。",
+        "Issue 中展示了使用 agent__property_groups__id__in 的变通方法可以正常工作，暗示了预期的正确行为是子查询只选择单列。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 字符串，特别是子查询部分。",
+        "reason": "错误直接表现为 SQL 子查询选择了多列。观察生成的 SQL 可以确认是否触发了缺陷。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 queryset.query 或尝试评估 queryset（如 list(queryset)）时是否抛出 ProgrammingError。",
+        "reason": "Issue 中观察到的直接错误症状是异常。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "内部查询对象的 cols 或 select_fields 属性（例如通过调试或特定方法访问）。",
+        "reason": "Issue 中的调试输出显示了 cols 列表在错误情况下包含多个列，而正常情况只有一个。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 子查询只选择了一个列（例如主键 id），而不是所有默认列。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 SQL 字符串，因为不同数据库后端或 Django 版本可能产生微小差异。",
+        "reason": "缺陷的核心是子查询选择了多列。断言 SQL 包含 `SELECT U0.\"id\"` 且不包含其他列名（如 `U0.\"created\"`）是稳定且与 Issue 对齐的。"
+      },
+      {
+        "assertion_goal": "验证查询可以正常执行而不抛出 ProgrammingError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息文本，因为数据库驱动可能略有不同。",
+        "reason": "修复后，查询应正常执行。在缺陷复现测试中，可以断言会抛出异常；但在修复验证测试中，应断言不抛出异常。根据任务描述，这里应描述修复后的正向行为，因此极性应为不抛出异常。但当前 JSON 结构要求与 expected_behavior 一致，而 expected_behavior 描述的是修复后的正常执行。然而，assertion_hints 是为生成缺陷复现测试服务的，该测试应触发缺陷。因此，对于缺陷复现测试，断言目标应是异常被触发。这里存在歧义。根据规则9和上下文，本输出用于生成缺陷复现测试，因此 assertion_goal 应描述缺陷触发时的验证目标。一个稳定的断言是检查是否因多列子查询而引发特定类型的异常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致多列选择的精确代码路径和逻辑条件是什么？除了 Issue 中提到的 query.py 第 233 行附近，是否还有其他相关模块？",
+    "是否所有反向关联的 __in 查找与 | 操作符组合都会触发此问题，还是需要特定模型关系（如多对多）？",
+    "除了 ProgrammingError，是否还有其他潜在的错误症状或边缘情况？"
+  ],
+  "raw": {
+    "issue_summary": "使用 Q 对象的 __or__ 操作符时，当查询条件中包含反向关联的 __in 查找时，会错误地选择所有默认列，导致生成的 SQL 子查询返回多列，引发 ProgrammingError。",
+    "trigger_condition": {
+      "text": "对一个 QuerySet 使用 filter() 方法，其中包含一个由 Q 对象通过 | 操作符组合的查询条件，且其中一个 Q 对象使用了反向关联的 __in 查找（例如 agent__property_groups__in），另一个 Q 对象使用了聚合注解的字段查找（例如 agent__property_groups__count=0）。",
+      "evidence": [
+        "Issue 中提供了两个对比示例：使用 agent__property_groups__id__in 的查询正常工作，而使用 agent__property_groups__in 的查询失败。",
+        "Issue 中展示了导致错误的查询代码：`Q(agent__property_groups__in=property_groups) | Q(agent__property_groups__count=0)`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 django.db.utils.ProgrammingError，错误信息为 'subquery must return only one column'。生成的 SQL 显示子查询 SELECT 了多个列（例如 U0.\"id\", U0.\"created\", ...），而不是预期的单个列。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中包含了完整的错误堆栈和错误信息。",
+        "Issue 中展示了导致错误的生成 SQL 片段，其中子查询选择了多个列。",
+        "Issue 中通过调试信息展示了 cols 列表包含了多个列，而正常情况只应包含一个列。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 Q 对象的 __or__ 操作符组合包含反向关联 __in 查找的条件时，应正确生成只返回单列的子查询，使得查询能够正常执行并返回结果。",
+      "evidence": [
+        "Issue 表明在 Django 2.2.5 版本中该行为是正常的。",
+        "Issue 中展示了使用 agent__property_groups__id__in 的变通方法可以正常工作，暗示了预期的正确行为是子查询只选择单列。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 对象在使用 __or__ 操作符时的行为。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发 bug 的查询是通过 filter() 方法构建的。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中的查询使用了 annotate(Count(...))。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "查询中使用了 Count 聚合函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "233",
+        "reason": "Issue 报告者提到在 query.py 的第 233 行附近添加了一个调试修复，通过检查 cols[0].alias 来强制只返回一个列，这表明该区域负责处理查询列的生成逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_q_object_or",
+        "test_file": "tests/generic_relations_regress/tests.py",
+        "why_relevant": "该测试直接涉及 Q 对象与 | 操作符的组合使用，并检查生成的 SQL 是否正确分组。",
+        "reusable_parts": [
+          "使用 Q 对象和 | 操作符构建查询的模式。",
+          "使用 assertIn 验证查询结果。",
+          "TestCase 框架。"
+        ],
+        "possible_gap": "该测试没有使用反向关联的 __in 查找，也没有涉及聚合注解（Count）。它测试的是通用关系，而不是导致多列子查询的特定列选择逻辑。"
+      },
+      {
+        "test_name": "test_filter_or",
+        "test_file": "tests/or_lookups/tests.py",
+        "why_relevant": "该测试展示了使用 | 操作符组合 Q 对象或 QuerySet 的基本模式。",
+        "reusable_parts": [
+          "使用 Q 对象和 | 操作符的语法。",
+          "使用 assertQuerysetEqual 进行断言。",
+          "Article 模型的简单 fixture 设置。"
+        ],
+        "possible_gap": "测试使用的是简单的字段查找（如 headline__startswith），没有涉及反向关联（如 agent__property_groups）或 __in 查找，也没有使用 annotate。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用简单的字段查找，如 `Q(notes__note__icontains=...)` 或 `Q(headline__startswith=...)`。",
+        "target_pattern": "使用反向关联的 __in 查找，如 `Q(agent__property_groups__in=queryset)`，并与另一个使用聚合计数的条件组合，如 `Q(agent__property_groups__count=0)`。",
+        "reason": "Issue 表明，当 __in 查找用于反向关联并通过 | 与聚合条件组合时，会触发列选择错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "`Model.objects.filter(Q(...) | Q(...))`",
+        "target_pattern": "`Model.objects.annotate(Count('related_field')).filter(Q(related_field__in=subquery) | Q(related_field__count=0))`",
+        "reason": "Issue 中的失败案例包含了 annotate(Count(...)) 步骤，并且 filter 中的条件引用了该注解。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 字符串，特别是子查询部分。",
+        "reason": "错误直接表现为 SQL 子查询选择了多列。观察生成的 SQL 可以确认是否触发了缺陷。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 queryset.query 或尝试评估 queryset（如 list(queryset)）时是否抛出 ProgrammingError。",
+        "reason": "Issue 中观察到的直接错误症状是异常。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "内部查询对象的 cols 或 select_fields 属性（例如通过调试或特定方法访问）。",
+        "reason": "Issue 中的调试输出显示了 cols 列表在错误情况下包含多个列，而正常情况只有一个。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 子查询只选择了一个列（例如主键 id），而不是所有默认列。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 SQL 字符串，因为不同数据库后端或 Django 版本可能产生微小差异。",
+        "reason": "缺陷的核心是子查询选择了多列。断言 SQL 包含 `SELECT U0.\"id\"` 且不包含其他列名（如 `U0.\"created\"`）是稳定且与 Issue 对齐的。"
+      },
+      {
+        "assertion_goal": "验证查询可以正常执行而不抛出 ProgrammingError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息文本，因为数据库驱动可能略有不同。",
+        "reason": "修复后，查询应正常执行。在缺陷复现测试中，可以断言会抛出异常；但在修复验证测试中，应断言不抛出异常。根据任务描述，这里应描述修复后的正向行为，因此极性应为不抛出异常。但当前 JSON 结构要求与 expected_behavior 一致，而 expected_behavior 描述的是修复后的正常执行。然而，assertion_hints 是为生成缺陷复现测试服务的，该测试应触发缺陷。因此，对于缺陷复现测试，断言目标应是异常被触发。这里存在歧义。根据规则9和上下文，本输出用于生成缺陷复现测试，因此 assertion_goal 应描述缺陷触发时的验证目标。一个稳定的断言是检查是否因多列子查询而引发特定类型的异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要设置具有反向多对多关系的 Django 模型（例如 Agent 和 PropertyGroup 通过中间表关联）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 类并配置测试数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一些 Agent 和 PropertyGroup 实例，并建立它们之间的关系，以构建非空的查询集。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致多列选择的精确代码路径和逻辑条件是什么？除了 Issue 中提到的 query.py 第 233 行附近，是否还有其他相关模块？",
+      "是否所有反向关联的 __in 查找与 | 操作符组合都会触发此问题，还是需要特定模型关系（如多对多）？",
+      "除了 ProgrammingError，是否还有其他潜在的错误症状或边缘情况？"
+    ]
+  }
+}

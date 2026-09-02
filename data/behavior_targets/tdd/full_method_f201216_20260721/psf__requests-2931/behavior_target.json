@@ -1,0 +1,312 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "psf__requests-2931",
+  "issue_summary": "使用二进制数据作为 payload 的 PUT 请求在 requests 2.9 版本中因调用 to_native_string 而失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 httpbin fixture 来模拟接收 PUT 请求的端点。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要处理二进制数据的构造（如 .encode('utf-8')）。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRequests.test_HTTP_200_OK_PUT",
+        "test_file": "test_requests.py",
+        "why_relevant": "这是针对 PUT 请求的基本测试，提供了请求构造和断言的基本框架。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 httpbin fixture",
+          "requests.put 调用",
+          "状态码断言风格"
+        ],
+        "possible_gap": "该测试使用默认的 data 参数（None），没有使用二进制数据作为 payload。"
+      },
+      {
+        "test_name": "TestRequests.test_unicode_multipart_post",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试涉及使用编码后的二进制数据（`.encode('utf-8')`）作为 data 参数的一部分，与 Issue 中触发条件相似。",
+        "reusable_parts": [
+          "使用二进制数据作为 data 参数的模式",
+          "httpbin fixture",
+          "状态码断言"
+        ],
+        "possible_gap": "该测试是针对 POST 请求和 multipart 表单，而 Issue 是关于 PUT 请求和纯二进制 payload。"
+      },
+      {
+        "test_name": "TestRequests.test_unicode_header_name",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试使用了 requests.put 并设置了 headers 和二进制数据（'\\xff'），涉及 PUT 请求和非常规数据。",
+        "reusable_parts": [
+          "requests.put 调用",
+          "设置 headers",
+          "使用二进制数据（'\\xff'）作为 data"
+        ],
+        "possible_gap": "该测试的 data 是单字节二进制字符串，而 Issue 中是 UTF-8 编码的多字节字符串，且测试重点在 header 名称。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 requests.put 方法，并以二进制字节串（例如，经过 UTF-8 编码的 Unicode 字符串）作为 data 参数。",
+      "evidence": [
+        "Issue 中的示例代码：`requests.put(\"http://httpbin.org/put\", data=u\"ööö\".encode(\"utf-8\"))`",
+        "源码片段 1 显示 put 函数接收 data 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "请求失败，可能抛出异常。Issue 提到在 2.9 版本中不工作，而在 2.8.1 中工作。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：\"This works with 2.8.1, but not with 2.9.\"",
+        "Issue 标题提到 \"fails due to calling to_native_string\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.put",
+        "kind": "function",
+        "source_path": "requests/api.py",
+        "reason": "Issue 中触发 bug 的直接 API 调用。"
+      },
+      {
+        "name": "requests.utils.to_native_string",
+        "kind": "function",
+        "source_path": "requests/utils.py",
+        "reason": "Issue 标题明确指出失败与调用此函数有关。"
+      },
+      {
+        "name": "requests.request",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码片段 1 中 put 函数调用了 request 函数，可能是内部调用链的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/utils.py",
+        "object": "to_native_string",
+        "lines": "686-702",
+        "reason": "Issue 标题直接指出问题与调用此函数有关。该函数处理字符串转换，可能无法正确处理二进制字节串输入。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 data 参数为 None、字典、字符串或文件对象。",
+        "target_pattern": "将 data 参数设置为二进制字节串，例如经过编码的 Unicode 字符串。",
+        "reason": "Issue 表明二进制数据 payload 会触发 to_native_string 调用并导致失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接调用 requests.put 并断言响应状态。",
+        "target_pattern": "确保调用链经过可能处理 data 参数并调用 to_native_string 的内部路径。",
+        "reason": "Issue 指出失败是由于调用了 to_native_string，因此需要触发该内部调用。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用二进制数据作为 payload 的 PUT 请求应能成功发送，不因数据编码问题而失败。",
+      "evidence": [
+        "Issue 表明在 2.8.1 版本中相同代码正常工作。",
+        "相关测试 5 展示了使用二进制数据（`.encode('utf-8')`）进行 POST 请求的测试用例，暗示应支持二进制数据。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "requests.put(...) 调用是否抛出异常，以及异常的类型和消息。",
+        "reason": "Issue 表明请求失败，观察异常是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在内部处理 data 参数时，其类型以及传递给 to_native_string 的参数类型。",
+        "reason": "to_native_string 函数的行为取决于输入类型，观察类型有助于理解转换失败的原因。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "请求的响应状态码或响应体内容。",
+        "reason": "即使没有异常，请求也可能因内部错误而返回非 2xx 状态码。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用二进制数据作为 payload 的 PUT 请求应成功完成（例如，返回 2xx 状态码）且不抛出异常。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的响应体内容或特定的 header 值，除非与二进制 payload 处理直接相关。",
+        "reason": "Issue 的核心是请求因数据编码而失败，成功执行是修复后的基本要求。状态码断言相对稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发 bug 时抛出的具体异常类型和消息是什么？",
+    "to_native_string 函数在哪个具体上下文中被调用（例如，在 header 设置、body 构建或其他地方）？",
+    "除了 UTF-8 编码的字节串，其他二进制数据（如原始字节）是否也会触发此 bug？",
+    "修复后的代码具体应如何正确处理二进制数据？"
+  ],
+  "raw": {
+    "issue_summary": "使用二进制数据作为 payload 的 PUT 请求在 requests 2.9 版本中因调用 to_native_string 而失败。",
+    "trigger_condition": {
+      "text": "使用 requests.put 方法，并以二进制字节串（例如，经过 UTF-8 编码的 Unicode 字符串）作为 data 参数。",
+      "evidence": [
+        "Issue 中的示例代码：`requests.put(\"http://httpbin.org/put\", data=u\"ööö\".encode(\"utf-8\"))`",
+        "源码片段 1 显示 put 函数接收 data 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "请求失败，可能抛出异常。Issue 提到在 2.9 版本中不工作，而在 2.8.1 中工作。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：\"This works with 2.8.1, but not with 2.9.\"",
+        "Issue 标题提到 \"fails due to calling to_native_string\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用二进制数据作为 payload 的 PUT 请求应能成功发送，不因数据编码问题而失败。",
+      "evidence": [
+        "Issue 表明在 2.8.1 版本中相同代码正常工作。",
+        "相关测试 5 展示了使用二进制数据（`.encode('utf-8')`）进行 POST 请求的测试用例，暗示应支持二进制数据。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.put",
+        "kind": "function",
+        "source_path": "requests/api.py",
+        "reason": "Issue 中触发 bug 的直接 API 调用。"
+      },
+      {
+        "name": "requests.utils.to_native_string",
+        "kind": "function",
+        "source_path": "requests/utils.py",
+        "reason": "Issue 标题明确指出失败与调用此函数有关。"
+      },
+      {
+        "name": "requests.request",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码片段 1 中 put 函数调用了 request 函数，可能是内部调用链的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/utils.py",
+        "object": "to_native_string",
+        "lines": "686-702",
+        "reason": "Issue 标题直接指出问题与调用此函数有关。该函数处理字符串转换，可能无法正确处理二进制字节串输入。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRequests.test_HTTP_200_OK_PUT",
+        "test_file": "test_requests.py",
+        "why_relevant": "这是针对 PUT 请求的基本测试，提供了请求构造和断言的基本框架。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 httpbin fixture",
+          "requests.put 调用",
+          "状态码断言风格"
+        ],
+        "possible_gap": "该测试使用默认的 data 参数（None），没有使用二进制数据作为 payload。"
+      },
+      {
+        "test_name": "TestRequests.test_unicode_multipart_post",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试涉及使用编码后的二进制数据（`.encode('utf-8')`）作为 data 参数的一部分，与 Issue 中触发条件相似。",
+        "reusable_parts": [
+          "使用二进制数据作为 data 参数的模式",
+          "httpbin fixture",
+          "状态码断言"
+        ],
+        "possible_gap": "该测试是针对 POST 请求和 multipart 表单，而 Issue 是关于 PUT 请求和纯二进制 payload。"
+      },
+      {
+        "test_name": "TestRequests.test_unicode_header_name",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试使用了 requests.put 并设置了 headers 和二进制数据（'\\xff'），涉及 PUT 请求和非常规数据。",
+        "reusable_parts": [
+          "requests.put 调用",
+          "设置 headers",
+          "使用二进制数据（'\\xff'）作为 data"
+        ],
+        "possible_gap": "该测试的 data 是单字节二进制字符串，而 Issue 中是 UTF-8 编码的多字节字符串，且测试重点在 header 名称。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 data 参数为 None、字典、字符串或文件对象。",
+        "target_pattern": "将 data 参数设置为二进制字节串，例如经过编码的 Unicode 字符串。",
+        "reason": "Issue 表明二进制数据 payload 会触发 to_native_string 调用并导致失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接调用 requests.put 并断言响应状态。",
+        "target_pattern": "确保调用链经过可能处理 data 参数并调用 to_native_string 的内部路径。",
+        "reason": "Issue 指出失败是由于调用了 to_native_string，因此需要触发该内部调用。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "requests.put(...) 调用是否抛出异常，以及异常的类型和消息。",
+        "reason": "Issue 表明请求失败，观察异常是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在内部处理 data 参数时，其类型以及传递给 to_native_string 的参数类型。",
+        "reason": "to_native_string 函数的行为取决于输入类型，观察类型有助于理解转换失败的原因。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "请求的响应状态码或响应体内容。",
+        "reason": "即使没有异常，请求也可能因内部错误而返回非 2xx 状态码。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用二进制数据作为 payload 的 PUT 请求应成功完成（例如，返回 2xx 状态码）且不抛出异常。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的响应体内容或特定的 header 值，除非与二进制 payload 处理直接相关。",
+        "reason": "Issue 的核心是请求因数据编码而失败，成功执行是修复后的基本要求。状态码断言相对稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 httpbin fixture 来模拟接收 PUT 请求的端点。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要处理二进制数据的构造（如 .encode('utf-8')）。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发 bug 时抛出的具体异常类型和消息是什么？",
+      "to_native_string 函数在哪个具体上下文中被调用（例如，在 header 设置、body 构建或其他地方）？",
+      "除了 UTF-8 编码的字节串，其他二进制数据（如原始字节）是否也会触发此 bug？",
+      "修复后的代码具体应如何正确处理二进制数据？"
+    ]
+  }
+}

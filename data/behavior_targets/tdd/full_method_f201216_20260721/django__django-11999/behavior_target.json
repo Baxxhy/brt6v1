@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11999",
+  "issue_summary": "在 Django 2.2+ 中，无法在模型上覆盖 get_FIELD_display() 方法。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建一个简单的 Django 模型，包含一个带有 choices 的字段，并定义覆盖的 get_FIELD_display 方法。测试可能需要在 Django 的测试环境中运行，可能涉及数据库（如果模型是 managed）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "参考相关测试，使用 SimpleTestCase 或 TransactionTestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GetFieldDisplayTests.test_choices_and_field_display",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试直接测试了 get_FIELD_display 方法在各种输入下的行为，包括有效值、无效值和空值。",
+        "reusable_parts": [
+          "测试类的结构（SimpleTestCase）",
+          "模型（如 Whiz）的构造方式",
+          "调用 get_FIELD_display 的 API 模式",
+          "使用 assertEqual 进行断言"
+        ],
+        "possible_gap": "该测试没有尝试覆盖 get_FIELD_display 方法。它测试的是默认行为，而不是用户自定义覆盖的行为。"
+      },
+      {
+        "test_name": "GetFieldDisplayTests.test_get_FIELD_display_translated",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试也调用了 get_FIELD_display 并检查其返回值，关注翻译场景。",
+        "reusable_parts": [
+          "测试类的结构",
+          "模型实例化",
+          "调用 get_FIELD_display 并检查返回类型和值"
+        ],
+        "possible_gap": "同样，没有测试用户覆盖该方法的情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个 Django 模型，该模型包含一个带有 choices 选项的字段，并在该模型上定义一个名为 get_<fieldname>_display 的方法来覆盖默认行为。然后，在模型的 __str__ 方法或其他地方调用该方法。",
+      "evidence": [
+        "Issue 描述中提供了示例：定义了一个 FooBar 模型，其中包含一个带有 choices 的 foo_bar 字段，并定义了 get_foo_bar_display 方法。__str__ 方法调用了 self.get_foo_bar_display()。",
+        "相关测试 1 和 2 展示了 get_FIELD_display 方法的正常调用模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "覆盖的 get_foo_bar_display 方法没有被调用，而是调用了默认的显示逻辑，返回了 choices 中对应的显示值（如 'foo' 或 'bar'），而不是覆盖方法返回的值（如 'something'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中明确指出：'This returns 'foo' or 'bar' in 2.2, but 'something' in 2.1'。",
+        "Issue 期望能够覆盖此函数，但实际行为表明覆盖未生效。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Model.get_FIELD_display",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 的核心是关于覆盖模型上的 get_FIELD_display 方法。"
+      },
+      {
+        "name": "Model.__str__",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 示例中在 __str__ 方法中调用了 get_foo_bar_display，这是触发问题的场景之一。"
+      },
+      {
+        "name": "CharField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 示例中使用了带有 choices 的 CharField。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/base.py",
+        "object": "Model",
+        "lines": "",
+        "reason": "Model 类负责生成 get_FIELD_display 方法。Issue 表明在 2.2 版本中覆盖行为发生了变化，问题可能出在 Model 类或其元类（ModelBase）如何动态创建或解析这些方法上。"
+      },
+      {
+        "path": "django/db/models/base.py",
+        "object": "_get_FIELD_display",
+        "lines": "",
+        "reason": "源码片段 1 中列出了 _get_FIELD_display 方法，这可能是默认实现或内部方法。覆盖失败可能与这个方法或生成它的机制有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型类（如 Whiz）没有定义自定义的 get_FIELD_display 方法，直接使用 Django 默认生成的。",
+        "target_pattern": "创建一个新的模型类，其中包含一个带有 choices 的字段，并显式定义一个同名的 get_<fieldname>_display 方法，返回一个固定的字符串（如 'something'）。",
+        "reason": "Issue 表明，当用户定义此方法时，它应该被调用。将测试变异为包含此覆盖方法是触发缺陷的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用 instance.get_FIELD_display()。",
+        "target_pattern": "在模型的另一个方法（如 __str__）中调用 instance.get_FIELD_display()，就像 Issue 示例一样。",
+        "reason": "Issue 示例在 __str__ 中调用，这可能影响方法解析的上下文。确保测试调用路径与 Issue 一致。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当在模型上定义 get_<fieldname>_display 方法时，该方法应被调用并返回其定义的值，而不是默认的 choices 显示值。",
+      "evidence": [
+        "Issue 描述中明确说明：'What I expect is that I should be able to override this function.'",
+        "Issue 提到在 Django 2.1 中此覆盖是有效的，这暗示了修复后的正确行为应与 2.1 版本一致。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "instance.get_foo_bar_display() 的返回值。",
+        "reason": "Issue 的核心是返回值错误。观察实际返回值是 'foo'/'bar'（默认）还是 'something'（覆盖），可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(instance) 的输出，因为 __str__ 调用了 get_foo_bar_display。",
+        "reason": "如果 __str__ 依赖于被覆盖的方法，那么观察 str(instance) 的输出可以间接验证覆盖是否生效。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证调用自定义的 get_FIELD_display 方法时，返回的是覆盖方法中定义的固定字符串，而不是默认的 choices 显示值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言返回完整的默认 choices 显示值，因为具体的 'foo' 或 'bar' 字符串可能因 choices 定义而变化。应断言等于覆盖方法返回的固定值。",
+        "reason": "Issue 明确指出期望返回 'something'（覆盖值），而不是 'foo' 或 'bar'（默认值）。equals 断言直接且稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切根源是在 Model 类的哪个具体方法或属性描述符中。",
+    "是否所有类型的字段（如 CharField, IntegerField）的 get_FIELD_display 覆盖都会失败，还是仅限于某些情况。",
+    "除了 __str__ 方法，在其他上下文中调用覆盖的方法是否也会失败。"
+  ],
+  "raw": {
+    "issue_summary": "在 Django 2.2+ 中，无法在模型上覆盖 get_FIELD_display() 方法。",
+    "trigger_condition": {
+      "text": "定义一个 Django 模型，该模型包含一个带有 choices 选项的字段，并在该模型上定义一个名为 get_<fieldname>_display 的方法来覆盖默认行为。然后，在模型的 __str__ 方法或其他地方调用该方法。",
+      "evidence": [
+        "Issue 描述中提供了示例：定义了一个 FooBar 模型，其中包含一个带有 choices 的 foo_bar 字段，并定义了 get_foo_bar_display 方法。__str__ 方法调用了 self.get_foo_bar_display()。",
+        "相关测试 1 和 2 展示了 get_FIELD_display 方法的正常调用模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "覆盖的 get_foo_bar_display 方法没有被调用，而是调用了默认的显示逻辑，返回了 choices 中对应的显示值（如 'foo' 或 'bar'），而不是覆盖方法返回的值（如 'something'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中明确指出：'This returns 'foo' or 'bar' in 2.2, but 'something' in 2.1'。",
+        "Issue 期望能够覆盖此函数，但实际行为表明覆盖未生效。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当在模型上定义 get_<fieldname>_display 方法时，该方法应被调用并返回其定义的值，而不是默认的 choices 显示值。",
+      "evidence": [
+        "Issue 描述中明确说明：'What I expect is that I should be able to override this function.'",
+        "Issue 提到在 Django 2.1 中此覆盖是有效的，这暗示了修复后的正确行为应与 2.1 版本一致。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Model.get_FIELD_display",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 的核心是关于覆盖模型上的 get_FIELD_display 方法。"
+      },
+      {
+        "name": "Model.__str__",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 示例中在 __str__ 方法中调用了 get_foo_bar_display，这是触发问题的场景之一。"
+      },
+      {
+        "name": "CharField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 示例中使用了带有 choices 的 CharField。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/base.py",
+        "object": "Model",
+        "lines": "",
+        "reason": "Model 类负责生成 get_FIELD_display 方法。Issue 表明在 2.2 版本中覆盖行为发生了变化，问题可能出在 Model 类或其元类（ModelBase）如何动态创建或解析这些方法上。"
+      },
+      {
+        "path": "django/db/models/base.py",
+        "object": "_get_FIELD_display",
+        "lines": "",
+        "reason": "源码片段 1 中列出了 _get_FIELD_display 方法，这可能是默认实现或内部方法。覆盖失败可能与这个方法或生成它的机制有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GetFieldDisplayTests.test_choices_and_field_display",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试直接测试了 get_FIELD_display 方法在各种输入下的行为，包括有效值、无效值和空值。",
+        "reusable_parts": [
+          "测试类的结构（SimpleTestCase）",
+          "模型（如 Whiz）的构造方式",
+          "调用 get_FIELD_display 的 API 模式",
+          "使用 assertEqual 进行断言"
+        ],
+        "possible_gap": "该测试没有尝试覆盖 get_FIELD_display 方法。它测试的是默认行为，而不是用户自定义覆盖的行为。"
+      },
+      {
+        "test_name": "GetFieldDisplayTests.test_get_FIELD_display_translated",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试也调用了 get_FIELD_display 并检查其返回值，关注翻译场景。",
+        "reusable_parts": [
+          "测试类的结构",
+          "模型实例化",
+          "调用 get_FIELD_display 并检查返回类型和值"
+        ],
+        "possible_gap": "同样，没有测试用户覆盖该方法的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型类（如 Whiz）没有定义自定义的 get_FIELD_display 方法，直接使用 Django 默认生成的。",
+        "target_pattern": "创建一个新的模型类，其中包含一个带有 choices 的字段，并显式定义一个同名的 get_<fieldname>_display 方法，返回一个固定的字符串（如 'something'）。",
+        "reason": "Issue 表明，当用户定义此方法时，它应该被调用。将测试变异为包含此覆盖方法是触发缺陷的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用 instance.get_FIELD_display()。",
+        "target_pattern": "在模型的另一个方法（如 __str__）中调用 instance.get_FIELD_display()，就像 Issue 示例一样。",
+        "reason": "Issue 示例在 __str__ 中调用，这可能影响方法解析的上下文。确保测试调用路径与 Issue 一致。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "instance.get_foo_bar_display() 的返回值。",
+        "reason": "Issue 的核心是返回值错误。观察实际返回值是 'foo'/'bar'（默认）还是 'something'（覆盖），可以直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(instance) 的输出，因为 __str__ 调用了 get_foo_bar_display。",
+        "reason": "如果 __str__ 依赖于被覆盖的方法，那么观察 str(instance) 的输出可以间接验证覆盖是否生效。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证调用自定义的 get_FIELD_display 方法时，返回的是覆盖方法中定义的固定字符串，而不是默认的 choices 显示值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言返回完整的默认 choices 显示值，因为具体的 'foo' 或 'bar' 字符串可能因 choices 定义而变化。应断言等于覆盖方法返回的固定值。",
+        "reason": "Issue 明确指出期望返回 'something'（覆盖值），而不是 'foo' 或 'bar'（默认值）。equals 断言直接且稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建一个简单的 Django 模型，包含一个带有 choices 的字段，并定义覆盖的 get_FIELD_display 方法。测试可能需要在 Django 的测试环境中运行，可能涉及数据库（如果模型是 managed）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "参考相关测试，使用 SimpleTestCase 或 TransactionTestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切根源是在 Model 类的哪个具体方法或属性描述符中。",
+      "是否所有类型的字段（如 CharField, IntegerField）的 get_FIELD_display 覆盖都会失败，还是仅限于某些情况。",
+      "除了 __str__ 方法，在其他上下文中调用覆盖的方法是否也会失败。"
+    ]
+  }
+}

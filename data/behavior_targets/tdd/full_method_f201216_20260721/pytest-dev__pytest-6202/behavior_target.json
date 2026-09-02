@@ -1,0 +1,286 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-6202",
+  "issue_summary": "pytest 在生成测试报告标题时，错误地将参数化测试名中的 '.[' 替换为 '['，导致显示错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 `testdir` fixture 来创建和运行包含参数化测试的临时测试文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `pytestconfig` fixture 来访问钩子或配置，以获取或生成报告对象。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestHooks.test_test_report",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "该测试涉及测试报告的生成和序列化，与 Issue 中报告标题显示问题直接相关。",
+        "reusable_parts": [
+          "使用 `testdir.makepyfile` 创建测试文件",
+          "使用 `testdir.inline_run()` 运行测试并获取报告",
+          "对 `pytest_runtest_logreport` 报告的断言模式"
+        ],
+        "possible_gap": "该测试使用简单的测试函数，未涉及参数化测试，特别是未使用可能生成 '.[' 子串的参数值。"
+      },
+      {
+        "test_name": "TestReportSerialization.test_xdist_longrepr_to_str_issue_241",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "该测试关注报告的序列化（`_to_json`），与报告生成和显示过程相关。",
+        "reusable_parts": [
+          "使用 `testdir.makepyfile` 和 `testdir.inline_run()` 的测试设置",
+          "对报告对象属性的检查和断言"
+        ],
+        "possible_gap": "测试焦点是 `longrepr` 的序列化，而非报告标题（`nodeid` 或 `headline`）的生成。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 @pytest.mark.parametrize 装饰器，且参数值包含字符串 '..[' 或类似模式，使得生成的测试节点名包含 '.[' 子串。",
+      "evidence": [
+        "Issue 中提供了测试代码 `@pytest.mark.parametrize(\"a\",[\"..[\"])` 和错误输出 `test_boo[.[]`。",
+        "Issue 指出问题源于 `return s.replace(\".[\", \"[\")` 这行代码。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "测试报告标题中，参数化测试的显示名称被错误修改，例如 `test_boo[..[]` 被显示为 `test_boo[.[]`。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中展示了错误输出：`test_boo[.[]` 替换了 `test_boo[..[]`。",
+        "Issue 提到该问题还导致了 vscode-python 测试发现错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PyobjMixin.getmodpath",
+        "kind": "method",
+        "source_path": "src/_pytest/python.py",
+        "reason": "Issue 明确指出问题源于此方法中的 `return s.replace(\".[\", \"[\")` 代码行。"
+      },
+      {
+        "name": "PyobjMixin.reportinfo",
+        "kind": "method",
+        "source_path": "src/_pytest/python.py",
+        "reason": "Issue 指出 `reportinfo` 方法调用了 `getmodpath` 来生成报告信息。"
+      },
+      {
+        "name": "pytest.mark.parametrize",
+        "kind": "function",
+        "source_path": "src/_pytest/python.py",
+        "reason": "Issue 中触发问题的测试使用了此装饰器，且相关源码片段 1 描述了其实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/python.py",
+        "object": "PyobjMixin.getmodpath",
+        "lines": "271-289",
+        "reason": "Issue 和源码片段 3 都指向此方法中的 `return s.replace(\".[\", \"[\")` 行，认为其错误地替换了字符串。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通字符串作为测试函数名或参数值。",
+        "target_pattern": "在 `@pytest.mark.parametrize` 中使用包含 '..[' 的字符串作为参数值，以生成包含 '.[' 子串的节点名。",
+        "reason": "Issue 表明，当生成的节点路径字符串包含 '.[' 时，`getmodpath` 方法会错误地替换它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能直接断言报告属性，未深入触发 `getmodpath` 的特定路径。",
+        "target_pattern": "构造一个测试场景，使得 `PyobjMixin.reportinfo` -> `getmodpath` 的调用链被触发，并生成包含 '.[' 的 `modpath`。",
+        "reason": "Issue 追踪了从报告标题到 `getmodpath` 的调用链，这是触发缺陷的关键路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "测试报告标题应正确显示参数化测试的完整名称，不应修改其中的 '.[' 子串。",
+      "evidence": [
+        "Issue 作者建议将 `return s.replace(\".[\", \"[\")` 改为 `return s` 以解决问题。",
+        "Issue 作者在修改后运行 `tox -e linting,py37` 通过了所有测试。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "str",
+        "expression_hint": "测试报告对象的 `nodeid` 属性或报告标题字符串。",
+        "reason": "Issue 的核心错误是显示的名称被错误修改，观察最终输出的字符串可以判断问题是否发生。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`PyobjMixin.getmodpath()` 方法的返回值。",
+        "reason": "这是被怀疑有缺陷的代码点，观察其返回值可以确认替换行为是否发生。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证参数化测试的报告标题（或节点ID）中包含原始的、未被错误替换的参数字符串（如 '..['）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的报告标题字符串，因为具体格式可能因 pytest 版本或配置而变化。",
+        "reason": "Issue 表明错误是替换了特定子串，因此断言原始子串存在比断言完整字符串相等更稳定。"
+      },
+      {
+        "assertion_goal": "验证 `getmodpath` 返回的字符串中，'.[' 子串未被替换为 '['。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 `getmodpath` 返回的完整路径字符串，因为路径生成逻辑可能复杂。",
+        "reason": "直接针对被怀疑的缺陷代码点进行断言，可以精确验证修复是否有效。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`getmodpath` 方法中 `return s.replace(\".[\", \"[\")` 这行代码的原始目的未知，Issue 作者也表示无法找到其用途。",
+    "除了 '..[' 之外，是否还有其他字符串模式会触发此替换并导致问题？",
+    "该缺陷是否会影响测试发现之外的其他功能（如测试筛选、重运行）？"
+  ],
+  "raw": {
+    "issue_summary": "pytest 在生成测试报告标题时，错误地将参数化测试名中的 '.[' 替换为 '['，导致显示错误。",
+    "trigger_condition": {
+      "text": "使用 @pytest.mark.parametrize 装饰器，且参数值包含字符串 '..[' 或类似模式，使得生成的测试节点名包含 '.[' 子串。",
+      "evidence": [
+        "Issue 中提供了测试代码 `@pytest.mark.parametrize(\"a\",[\"..[\"])` 和错误输出 `test_boo[.[]`。",
+        "Issue 指出问题源于 `return s.replace(\".[\", \"[\")` 这行代码。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "测试报告标题中，参数化测试的显示名称被错误修改，例如 `test_boo[..[]` 被显示为 `test_boo[.[]`。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中展示了错误输出：`test_boo[.[]` 替换了 `test_boo[..[]`。",
+        "Issue 提到该问题还导致了 vscode-python 测试发现错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "测试报告标题应正确显示参数化测试的完整名称，不应修改其中的 '.[' 子串。",
+      "evidence": [
+        "Issue 作者建议将 `return s.replace(\".[\", \"[\")` 改为 `return s` 以解决问题。",
+        "Issue 作者在修改后运行 `tox -e linting,py37` 通过了所有测试。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PyobjMixin.getmodpath",
+        "kind": "method",
+        "source_path": "src/_pytest/python.py",
+        "reason": "Issue 明确指出问题源于此方法中的 `return s.replace(\".[\", \"[\")` 代码行。"
+      },
+      {
+        "name": "PyobjMixin.reportinfo",
+        "kind": "method",
+        "source_path": "src/_pytest/python.py",
+        "reason": "Issue 指出 `reportinfo` 方法调用了 `getmodpath` 来生成报告信息。"
+      },
+      {
+        "name": "pytest.mark.parametrize",
+        "kind": "function",
+        "source_path": "src/_pytest/python.py",
+        "reason": "Issue 中触发问题的测试使用了此装饰器，且相关源码片段 1 描述了其实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/python.py",
+        "object": "PyobjMixin.getmodpath",
+        "lines": "271-289",
+        "reason": "Issue 和源码片段 3 都指向此方法中的 `return s.replace(\".[\", \"[\")` 行，认为其错误地替换了字符串。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestHooks.test_test_report",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "该测试涉及测试报告的生成和序列化，与 Issue 中报告标题显示问题直接相关。",
+        "reusable_parts": [
+          "使用 `testdir.makepyfile` 创建测试文件",
+          "使用 `testdir.inline_run()` 运行测试并获取报告",
+          "对 `pytest_runtest_logreport` 报告的断言模式"
+        ],
+        "possible_gap": "该测试使用简单的测试函数，未涉及参数化测试，特别是未使用可能生成 '.[' 子串的参数值。"
+      },
+      {
+        "test_name": "TestReportSerialization.test_xdist_longrepr_to_str_issue_241",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "该测试关注报告的序列化（`_to_json`），与报告生成和显示过程相关。",
+        "reusable_parts": [
+          "使用 `testdir.makepyfile` 和 `testdir.inline_run()` 的测试设置",
+          "对报告对象属性的检查和断言"
+        ],
+        "possible_gap": "测试焦点是 `longrepr` 的序列化，而非报告标题（`nodeid` 或 `headline`）的生成。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通字符串作为测试函数名或参数值。",
+        "target_pattern": "在 `@pytest.mark.parametrize` 中使用包含 '..[' 的字符串作为参数值，以生成包含 '.[' 子串的节点名。",
+        "reason": "Issue 表明，当生成的节点路径字符串包含 '.[' 时，`getmodpath` 方法会错误地替换它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能直接断言报告属性，未深入触发 `getmodpath` 的特定路径。",
+        "target_pattern": "构造一个测试场景，使得 `PyobjMixin.reportinfo` -> `getmodpath` 的调用链被触发，并生成包含 '.[' 的 `modpath`。",
+        "reason": "Issue 追踪了从报告标题到 `getmodpath` 的调用链，这是触发缺陷的关键路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "str",
+        "expression_hint": "测试报告对象的 `nodeid` 属性或报告标题字符串。",
+        "reason": "Issue 的核心错误是显示的名称被错误修改，观察最终输出的字符串可以判断问题是否发生。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`PyobjMixin.getmodpath()` 方法的返回值。",
+        "reason": "这是被怀疑有缺陷的代码点，观察其返回值可以确认替换行为是否发生。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证参数化测试的报告标题（或节点ID）中包含原始的、未被错误替换的参数字符串（如 '..['）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的报告标题字符串，因为具体格式可能因 pytest 版本或配置而变化。",
+        "reason": "Issue 表明错误是替换了特定子串，因此断言原始子串存在比断言完整字符串相等更稳定。"
+      },
+      {
+        "assertion_goal": "验证 `getmodpath` 返回的字符串中，'.[' 子串未被替换为 '['。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 `getmodpath` 返回的完整路径字符串，因为路径生成逻辑可能复杂。",
+        "reason": "直接针对被怀疑的缺陷代码点进行断言，可以精确验证修复是否有效。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 `testdir` fixture 来创建和运行包含参数化测试的临时测试文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `pytestconfig` fixture 来访问钩子或配置，以获取或生成报告对象。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "`getmodpath` 方法中 `return s.replace(\".[\", \"[\")` 这行代码的原始目的未知，Issue 作者也表示无法找到其用途。",
+      "除了 '..[' 之外，是否还有其他字符串模式会触发此替换并导致问题？",
+      "该缺陷是否会影响测试发现之外的其他功能（如测试筛选、重运行）？"
+    ]
+  }
+}

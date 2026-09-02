@@ -1,0 +1,260 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-22080",
+  "issue_summary": "lambdify 函数在指定 modules=[] 时，会将表达式 expr * Mod(a, b) 错误地重写为 Mod(expr * a, b)，导致计算结果错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 Mod, lambdify, symbols。可能需要使用 inspect 模块查看生成代码。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_issue9474",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试直接测试 lambdify 函数在不同 modules 参数下的行为，包含对 floor 和 Abs 等函数的测试，模式相似。",
+        "reusable_parts": [
+          "lambdify 调用模式",
+          "对不同 modules 的循环测试结构",
+          "assert 返回值"
+        ],
+        "possible_gap": "该测试未涉及 Mod 函数，也未测试表达式前有乘数（如负号）的情况。"
+      },
+      {
+        "test_name": "test_Mod",
+        "test_file": "sympy/core/tests/test_arit.py",
+        "why_relevant": "该测试包含大量 Mod 运算的语义测试，包括符号计算和数值替换，有助于理解 Mod 的正确行为。",
+        "reusable_parts": [
+          "Mod 对象的构造",
+          "符号替换和数值验证",
+          "assert 等式"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及 lambdify 转换过程。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 lambdify 转换包含 Mod 函数且前面有负号（或乘数）的表达式，并指定 modules=[] 参数。",
+      "evidence": [
+        "Issue 示例：`expr = -Mod(x, y)`，`g = lambdify([x, y], expr, modules=[])`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于相同的输入，使用 modules=[] 的 lambdify 函数返回了错误的计算结果（例如，-3 % 7 应得 -3，但实际得到 4）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 示例：`f(3, 7)` 返回 `-3`，`g(3, 7)` 返回 `4`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 直接关于此函数在特定参数下的行为。"
+      },
+      {
+        "name": "Mod",
+        "kind": "class",
+        "source_path": "sympy/core/mod.py",
+        "reason": "Issue 涉及 Mod 对象的 lambdify 转换。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify",
+        "lines": "",
+        "reason": "Issue 表明问题与 lambdify 的 modules=[] 处理逻辑相关，可能是在生成代码时对 Mod 表达式的重写规则有误。"
+      },
+      {
+        "path": "sympy/core/mod.py",
+        "object": "Mod",
+        "lines": "",
+        "reason": "Mod 类可能定义了影响 lambdify 转换的 _eval_rewrite 或类似方法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_issue9474 中测试的表达式如 `S.One/x` 或 `absfunc(x)`。",
+        "target_pattern": "使用 `-Mod(x, y)` 或更一般的 `expr * Mod(a, b)` 形式的表达式。",
+        "reason": "Issue 表明问题特定于 Mod 表达式前有乘数的情况。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "test_issue9474 中测试了 modules 为 None, 'math' 等。",
+        "target_pattern": "增加 modules=[] 的测试分支。",
+        "reason": "Issue 表明 bug 仅在指定 modules=[] 时触发。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论是否指定 modules=[]，lambdify 转换后的函数对于相同的输入应返回相同的结果，即保持 `-Mod(x, y)` 的语义为 `-(x % y)`。",
+      "evidence": [
+        "Issue 中未指定 modules 时返回 `-3`，符合 Python 取余运算 `-3 % 7 == -3` 的语义（根据 sympy/core/mod.py 文档，约定与 Python 相同）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "lambdify 生成的函数的返回值，与预期计算结果比较。",
+        "reason": "Issue 的核心是返回值错误。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "inspect.getsource 查看 lambdify 生成的函数源代码字符串。",
+        "reason": "Issue 展示了生成代码的差异，有助于定位重写问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于相同的输入，使用 modules=[] 和不指定 modules（或指定其他 modules）的 lambdify 函数应返回相同的数值结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的生成代码字符串相等，因为不同 modules 的代码实现可能不同。",
+        "reason": "应关注语义等价性，而非代码文本。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "modules=[] 的确切含义及其内部处理流程。",
+    "除了负号外，其他乘数（如 2*Mod(x, y)）是否也会触发此问题。",
+    "lambdify 内部对 Mod 表达式的重写规则具体在何处实现。"
+  ],
+  "raw": {
+    "issue_summary": "lambdify 函数在指定 modules=[] 时，会将表达式 expr * Mod(a, b) 错误地重写为 Mod(expr * a, b)，导致计算结果错误。",
+    "trigger_condition": {
+      "text": "使用 lambdify 转换包含 Mod 函数且前面有负号（或乘数）的表达式，并指定 modules=[] 参数。",
+      "evidence": [
+        "Issue 示例：`expr = -Mod(x, y)`，`g = lambdify([x, y], expr, modules=[])`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于相同的输入，使用 modules=[] 的 lambdify 函数返回了错误的计算结果（例如，-3 % 7 应得 -3，但实际得到 4）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 示例：`f(3, 7)` 返回 `-3`，`g(3, 7)` 返回 `4`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论是否指定 modules=[]，lambdify 转换后的函数对于相同的输入应返回相同的结果，即保持 `-Mod(x, y)` 的语义为 `-(x % y)`。",
+      "evidence": [
+        "Issue 中未指定 modules 时返回 `-3`，符合 Python 取余运算 `-3 % 7 == -3` 的语义（根据 sympy/core/mod.py 文档，约定与 Python 相同）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 直接关于此函数在特定参数下的行为。"
+      },
+      {
+        "name": "Mod",
+        "kind": "class",
+        "source_path": "sympy/core/mod.py",
+        "reason": "Issue 涉及 Mod 对象的 lambdify 转换。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify",
+        "lines": "",
+        "reason": "Issue 表明问题与 lambdify 的 modules=[] 处理逻辑相关，可能是在生成代码时对 Mod 表达式的重写规则有误。"
+      },
+      {
+        "path": "sympy/core/mod.py",
+        "object": "Mod",
+        "lines": "",
+        "reason": "Mod 类可能定义了影响 lambdify 转换的 _eval_rewrite 或类似方法。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_issue9474",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试直接测试 lambdify 函数在不同 modules 参数下的行为，包含对 floor 和 Abs 等函数的测试，模式相似。",
+        "reusable_parts": [
+          "lambdify 调用模式",
+          "对不同 modules 的循环测试结构",
+          "assert 返回值"
+        ],
+        "possible_gap": "该测试未涉及 Mod 函数，也未测试表达式前有乘数（如负号）的情况。"
+      },
+      {
+        "test_name": "test_Mod",
+        "test_file": "sympy/core/tests/test_arit.py",
+        "why_relevant": "该测试包含大量 Mod 运算的语义测试，包括符号计算和数值替换，有助于理解 Mod 的正确行为。",
+        "reusable_parts": [
+          "Mod 对象的构造",
+          "符号替换和数值验证",
+          "assert 等式"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及 lambdify 转换过程。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_issue9474 中测试的表达式如 `S.One/x` 或 `absfunc(x)`。",
+        "target_pattern": "使用 `-Mod(x, y)` 或更一般的 `expr * Mod(a, b)` 形式的表达式。",
+        "reason": "Issue 表明问题特定于 Mod 表达式前有乘数的情况。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "test_issue9474 中测试了 modules 为 None, 'math' 等。",
+        "target_pattern": "增加 modules=[] 的测试分支。",
+        "reason": "Issue 表明 bug 仅在指定 modules=[] 时触发。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "lambdify 生成的函数的返回值，与预期计算结果比较。",
+        "reason": "Issue 的核心是返回值错误。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "inspect.getsource 查看 lambdify 生成的函数源代码字符串。",
+        "reason": "Issue 展示了生成代码的差异，有助于定位重写问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于相同的输入，使用 modules=[] 和不指定 modules（或指定其他 modules）的 lambdify 函数应返回相同的数值结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的生成代码字符串相等，因为不同 modules 的代码实现可能不同。",
+        "reason": "应关注语义等价性，而非代码文本。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 Mod, lambdify, symbols。可能需要使用 inspect 模块查看生成代码。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "modules=[] 的确切含义及其内部处理流程。",
+      "除了负号外，其他乘数（如 2*Mod(x, y)）是否也会触发此问题。",
+      "lambdify 内部对 Mod 表达式的重写规则具体在何处实现。"
+    ]
+  }
+}

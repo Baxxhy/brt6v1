@@ -1,0 +1,344 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14140",
+  "issue_summary": "Q 对象的 deconstruct 方法在处理单个非元组子节点时会因尝试下标访问而抛出 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要一个可用的 Django 项目设置和数据库，以便创建 User 模型和 Exists 查询。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试类应继承自合适的 TestCase（如 SimpleTestCase 或 TestCase），取决于是否需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.db.models.Q, django.db.models.Exists, django.contrib.auth.get_user_model。",
+        "source": "issue|retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_deconstruct",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了单子节点 Q 对象的 deconstruct 方法，展示了正常情况下的解构行为。",
+        "reusable_parts": [
+          "导入 Q 和 F 对象",
+          "调用 q.deconstruct()",
+          "使用 assertEqual 验证返回的 path, args, kwargs"
+        ],
+        "possible_gap": "它使用的子节点是 ('price__gt', F(...)) 形式的元组，不会触发缺陷。需要将子节点替换为非元组对象（如 Exists）。"
+      },
+      {
+        "test_name": "test_deconstruct_nested",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了子节点是另一个 Q 对象的情况，展示了当 isinstance(child, Q) 为 True 时，代码会走 else 分支，不会触发缺陷。",
+        "reusable_parts": [
+          "嵌套 Q 对象的构造",
+          "对 deconstruct 返回值的断言风格"
+        ],
+        "possible_gap": "它的子节点是 Q 实例，而缺陷需要子节点是非 Q 且非元组的对象。"
+      },
+      {
+        "test_name": "test_boolean_expression_combined_with_empty_Q",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它展示了如何将 Exists 表达式与 Q 对象结合使用（通过 & 和 | 操作符），这是 Issue 中涉及的场景。",
+        "reusable_parts": [
+          "Exists 对象的构造",
+          "Q() 对象的构造",
+          "将布尔表达式与 Q 对象组合",
+          "在 filter 中使用组合条件"
+        ],
+        "possible_gap": "它没有直接调用 deconstruct 方法，而是将组合后的条件用于数据库查询。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Q 对象的 deconstruct 方法，且该 Q 对象只有一个子节点，该子节点不是长度为 2 的元组（例如是一个 Exists 对象）。",
+      "evidence": [
+        "Issue 中展示了 Q(Exists(...)).deconstruct() 导致崩溃的示例。",
+        "源码片段 2 显示当 len(self.children) == 1 且子节点不是 Q 实例时，会执行 kwargs = {child[0]: child[1]}。",
+        "源码片段 3 显示 Exists 是一个类，其对象默认不可下标访问。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 deconstruct 方法时抛出 TypeError: 'Exists' object is not subscriptable。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的 Traceback，显示错误发生在 deconstruct 方法内部。",
+        "源码片段 2 中第 90 行（kwargs = {child[0]: child[1]}）是错误发生的直接位置。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 类的 deconstruct 方法的行为。"
+      },
+      {
+        "name": "django.db.models.Q.deconstruct",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "这是触发缺陷的直接方法。"
+      },
+      {
+        "name": "django.db.models.Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中使用了 Exists 作为导致崩溃的非元组子节点的例子。"
+      },
+      {
+        "name": "django.contrib.auth.get_user_model",
+        "kind": "function",
+        "source_path": "django/contrib/auth/__init__.py",
+        "reason": "Issue 中的示例使用了此函数来构建 Exists 查询。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q.deconstruct",
+        "lines": "83-97",
+        "reason": "该方法中的条件分支（if len(self.children) == 1 and not isinstance(self.children[0], Q):）假设单子节点是长度为 2 的元组，并尝试下标访问，这导致了 TypeError。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_deconstruct 中，Q 的子节点是 ('price__gt', F('discounted_price')) 这样的键值对元组。",
+        "target_pattern": "将 Q 的子节点替换为一个非元组、非 Q 的对象，例如 Exists(...)。",
+        "reason": "这会使 deconstruct 方法进入 if len(self.children) == 1 分支，并尝试对不可下标对象进行 child[0] 操作，从而触发 TypeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试 test_boolean_expression_combined_with_empty_Q 中，Exists 与 Q() 组合后用于 filter。",
+        "target_pattern": "不将组合条件用于 filter，而是直接对包含 Exists 的 Q 对象调用 deconstruct 方法。",
+        "reason": "Issue 中的崩溃发生在直接调用 deconstruct 时，而不是在数据库查询时。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Q 对象的 deconstruct 方法应能正确处理包含单个非元组子节点（如 Exists 对象）的情况，并返回有效的 (path, args, kwargs) 三元组，而不抛出 TypeError。",
+      "evidence": [
+        "Issue 中提到补丁移除了特殊处理，意味着单子节点 Q 对象应解构为 args 而非 kwargs。",
+        "相关测试 1 和 2 展示了 deconstruct 方法对嵌套 Q 和单子节点 Q 的正常行为预期。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 q.deconstruct() 时是否抛出 TypeError 及其消息。",
+        "reason": "这是 Issue 中直接观察到的错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用 deconstruct 后返回的 (path, args, kwargs) 三元组的结构，特别是 args 和 kwargs 的内容。",
+        "reason": "修复后，单子节点 Q 对象应能正常解构，返回有效的元组。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Q 对象的 children 属性中第一个元素的类型（例如 isinstance(child, tuple)）。",
+        "reason": "缺陷触发的关键条件是子节点不是元组。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对包含单个 Exists 子节点的 Q 对象调用 deconstruct 不会抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因 Python 版本或实现细节而异。",
+        "reason": "修复后，该方法应正常执行，不应抛出异常。在生成复现测试时，可以先断言会抛出异常（以捕获当前缺陷），修复后该断言应反转。"
+      },
+      {
+        "assertion_goal": "验证 deconstruct 返回的 args 和 kwargs 符合预期（例如，单子节点 Exists 应出现在 args 中，而不是 kwargs 中）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 path 字符串，除非与 Issue 直接相关。应关注 args 和 kwargs 的结构。",
+        "reason": "Issue 暗示修复后单子节点 Q 对象应解构为 args。断言返回值结构可以验证修复是否有效。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后，对于单子节点且子节点为长度为 2 的元组（如 ('x', 1)）的 Q 对象，deconstruct 是返回 args 还是 kwargs？Issue 提到补丁移除了特殊处理，但未明确说明此边界情况。",
+    "除了 Exists，还有哪些类型的对象作为 Q 的单子节点会触发此缺陷？",
+    "在真实的 Django 项目中，这种使用模式（Q(Exists(...))）是否常见？"
+  ],
+  "raw": {
+    "issue_summary": "Q 对象的 deconstruct 方法在处理单个非元组子节点时会因尝试下标访问而抛出 TypeError。",
+    "trigger_condition": {
+      "text": "调用 Q 对象的 deconstruct 方法，且该 Q 对象只有一个子节点，该子节点不是长度为 2 的元组（例如是一个 Exists 对象）。",
+      "evidence": [
+        "Issue 中展示了 Q(Exists(...)).deconstruct() 导致崩溃的示例。",
+        "源码片段 2 显示当 len(self.children) == 1 且子节点不是 Q 实例时，会执行 kwargs = {child[0]: child[1]}。",
+        "源码片段 3 显示 Exists 是一个类，其对象默认不可下标访问。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 deconstruct 方法时抛出 TypeError: 'Exists' object is not subscriptable。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的 Traceback，显示错误发生在 deconstruct 方法内部。",
+        "源码片段 2 中第 90 行（kwargs = {child[0]: child[1]}）是错误发生的直接位置。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Q 对象的 deconstruct 方法应能正确处理包含单个非元组子节点（如 Exists 对象）的情况，并返回有效的 (path, args, kwargs) 三元组，而不抛出 TypeError。",
+      "evidence": [
+        "Issue 中提到补丁移除了特殊处理，意味着单子节点 Q 对象应解构为 args 而非 kwargs。",
+        "相关测试 1 和 2 展示了 deconstruct 方法对嵌套 Q 和单子节点 Q 的正常行为预期。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 类的 deconstruct 方法的行为。"
+      },
+      {
+        "name": "django.db.models.Q.deconstruct",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "这是触发缺陷的直接方法。"
+      },
+      {
+        "name": "django.db.models.Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中使用了 Exists 作为导致崩溃的非元组子节点的例子。"
+      },
+      {
+        "name": "django.contrib.auth.get_user_model",
+        "kind": "function",
+        "source_path": "django/contrib/auth/__init__.py",
+        "reason": "Issue 中的示例使用了此函数来构建 Exists 查询。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q.deconstruct",
+        "lines": "83-97",
+        "reason": "该方法中的条件分支（if len(self.children) == 1 and not isinstance(self.children[0], Q):）假设单子节点是长度为 2 的元组，并尝试下标访问，这导致了 TypeError。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_deconstruct",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了单子节点 Q 对象的 deconstruct 方法，展示了正常情况下的解构行为。",
+        "reusable_parts": [
+          "导入 Q 和 F 对象",
+          "调用 q.deconstruct()",
+          "使用 assertEqual 验证返回的 path, args, kwargs"
+        ],
+        "possible_gap": "它使用的子节点是 ('price__gt', F(...)) 形式的元组，不会触发缺陷。需要将子节点替换为非元组对象（如 Exists）。"
+      },
+      {
+        "test_name": "test_deconstruct_nested",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "它测试了子节点是另一个 Q 对象的情况，展示了当 isinstance(child, Q) 为 True 时，代码会走 else 分支，不会触发缺陷。",
+        "reusable_parts": [
+          "嵌套 Q 对象的构造",
+          "对 deconstruct 返回值的断言风格"
+        ],
+        "possible_gap": "它的子节点是 Q 实例，而缺陷需要子节点是非 Q 且非元组的对象。"
+      },
+      {
+        "test_name": "test_boolean_expression_combined_with_empty_Q",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它展示了如何将 Exists 表达式与 Q 对象结合使用（通过 & 和 | 操作符），这是 Issue 中涉及的场景。",
+        "reusable_parts": [
+          "Exists 对象的构造",
+          "Q() 对象的构造",
+          "将布尔表达式与 Q 对象组合",
+          "在 filter 中使用组合条件"
+        ],
+        "possible_gap": "它没有直接调用 deconstruct 方法，而是将组合后的条件用于数据库查询。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_deconstruct 中，Q 的子节点是 ('price__gt', F('discounted_price')) 这样的键值对元组。",
+        "target_pattern": "将 Q 的子节点替换为一个非元组、非 Q 的对象，例如 Exists(...)。",
+        "reason": "这会使 deconstruct 方法进入 if len(self.children) == 1 分支，并尝试对不可下标对象进行 child[0] 操作，从而触发 TypeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试 test_boolean_expression_combined_with_empty_Q 中，Exists 与 Q() 组合后用于 filter。",
+        "target_pattern": "不将组合条件用于 filter，而是直接对包含 Exists 的 Q 对象调用 deconstruct 方法。",
+        "reason": "Issue 中的崩溃发生在直接调用 deconstruct 时，而不是在数据库查询时。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 q.deconstruct() 时是否抛出 TypeError 及其消息。",
+        "reason": "这是 Issue 中直接观察到的错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用 deconstruct 后返回的 (path, args, kwargs) 三元组的结构，特别是 args 和 kwargs 的内容。",
+        "reason": "修复后，单子节点 Q 对象应能正常解构，返回有效的元组。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Q 对象的 children 属性中第一个元素的类型（例如 isinstance(child, tuple)）。",
+        "reason": "缺陷触发的关键条件是子节点不是元组。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对包含单个 Exists 子节点的 Q 对象调用 deconstruct 不会抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因 Python 版本或实现细节而异。",
+        "reason": "修复后，该方法应正常执行，不应抛出异常。在生成复现测试时，可以先断言会抛出异常（以捕获当前缺陷），修复后该断言应反转。"
+      },
+      {
+        "assertion_goal": "验证 deconstruct 返回的 args 和 kwargs 符合预期（例如，单子节点 Exists 应出现在 args 中，而不是 kwargs 中）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 path 字符串，除非与 Issue 直接相关。应关注 args 和 kwargs 的结构。",
+        "reason": "Issue 暗示修复后单子节点 Q 对象应解构为 args。断言返回值结构可以验证修复是否有效。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要一个可用的 Django 项目设置和数据库，以便创建 User 模型和 Exists 查询。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试类应继承自合适的 TestCase（如 SimpleTestCase 或 TestCase），取决于是否需要数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.db.models.Q, django.db.models.Exists, django.contrib.auth.get_user_model。",
+        "source": "issue|retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后，对于单子节点且子节点为长度为 2 的元组（如 ('x', 1)）的 Q 对象，deconstruct 是返回 args 还是 kwargs？Issue 提到补丁移除了特殊处理，但未明确说明此边界情况。",
+      "除了 Exists，还有哪些类型的对象作为 Q 的单子节点会触发此缺陷？",
+      "在真实的 Django 项目中，这种使用模式（Q(Exists(...))）是否常见？"
+    ]
+  }
+}

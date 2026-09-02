@@ -1,0 +1,304 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-17029",
+  "issue_summary": "Apps.clear_cache() 未清除 get_swappable_settings_name 的缓存。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能用到 override_settings 来修改 AUTH_USER_MODEL 等设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 isolate_lru_cache 上下文管理器来隔离其他测试对 get_swappable_settings_name 缓存的影响。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RelationTreeTests.test_clear_cache_clears_relation_tree",
+        "test_file": "tests/model_meta/tests.py",
+        "why_relevant": "它直接测试了 clear_cache 方法对缓存的清除效果，可以作为测试缓存清除的起点。",
+        "reusable_parts": [
+          "使用 SimpleTestCase",
+          "检查缓存状态（如 _relation_tree）的断言模式"
+        ],
+        "possible_gap": "它只检查了模型元数据的 _relation_tree 缓存，没有涉及 get_swappable_settings_name 的缓存。"
+      },
+      {
+        "test_name": "AutodetectorTests.test_swappable_first_setting",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "它使用了 isolate_lru_cache 来隔离 apps.get_swappable_settings_name 的缓存，表明该方法的缓存行为是可测试的。",
+        "reusable_parts": [
+          "使用 isolate_lru_cache 上下文管理器",
+          "与 swappable 模型相关的设置和操作"
+        ],
+        "possible_gap": "它主要测试迁移检测逻辑，而不是 clear_cache 对缓存的影响。"
+      },
+      {
+        "test_name": "AppsTests.test_models_not_loaded",
+        "test_file": "tests/apps/tests.py",
+        "why_relevant": "它直接操作了 apps.get_models.cache_clear()，展示了如何清除特定方法的缓存。",
+        "reusable_parts": [
+          "直接调用 .cache_clear() 的方法",
+          "使用 apps 全局对象"
+        ],
+        "possible_gap": "它关注的是 models_ready 状态异常，而不是 clear_cache 的完整性。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 apps.clear_cache() 后，再次调用 get_swappable_settings_name 方法。",
+      "evidence": [
+        "Issue 描述中提到使用 apps.clear_cache() 来重置状态，但 get_swappable_settings_name 的缓存未被清除。",
+        "源码片段 1 显示 clear_cache 方法清除了 get_models 的缓存，但未提及 get_swappable_settings_name。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "get_swappable_settings_name 返回的缓存值未在 clear_cache 调用后被清除，导致后续调用可能返回过时或不正确的结果。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述指出 get_swappable_settings_name 是一个 functools._lru_cache_wrapper，未被 clear_cache 清除。",
+        "源码片段 2 显示 get_swappable_settings_name 使用了 @functools.cache 装饰器。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Apps.clear_cache",
+        "kind": "method",
+        "source_path": "django/apps/registry.py",
+        "reason": "这是 Issue 中讨论的需要修复的方法，它应该清除所有内部缓存。"
+      },
+      {
+        "name": "Apps.get_swappable_settings_name",
+        "kind": "method",
+        "source_path": "django/apps/registry.py",
+        "reason": "其缓存未被 clear_cache 清除，是缺陷的核心。"
+      },
+      {
+        "name": "functools.cache_clear",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提议使用此方法来清除 get_swappable_settings_name 的缓存。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/apps/registry.py",
+        "object": "Apps.clear_cache",
+        "lines": "370-384",
+        "reason": "该方法未包含对 get_swappable_settings_name.cache_clear() 的调用，导致其缓存未被清除。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中可能只调用了 clear_cache 并检查了部分缓存（如模型关系树）。",
+        "target_pattern": "在调用 clear_cache 后，紧接着调用 get_swappable_settings_name 并检查其缓存是否被清除。",
+        "reason": "Issue 的核心是 clear_cache 后 get_swappable_settings_name 的缓存残留，此变异能直接触发该路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用默认或简单的 INSTALLED_APPS 配置。",
+        "target_pattern": "使用包含可交换模型（swappable models）的配置，例如设置了 AUTH_USER_MODEL。",
+        "reason": "get_swappable_settings_name 专门处理可交换模型，需要相关配置才能产生有意义的缓存。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "调用 apps.clear_cache() 后，所有内部缓存（包括 get_swappable_settings_name 的缓存）都应被清除。",
+      "evidence": [
+        "Issue 中引用的 clear_cache 文档说明：'Clear all internal caches, for methods that alter the app registry.'",
+        "Issue 提议添加 self.get_swappable_settings_name.cache_clear() 到 clear_cache 方法中。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "cache",
+        "expression_hint": "apps.get_swappable_settings_name.cache_info() 在 clear_cache 调用前后的变化。",
+        "reason": "可以直接观察该方法的缓存命中/未命中次数，判断缓存是否被清除。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在更改可交换模型设置后，调用 get_swappable_settings_name 的返回值。",
+        "reason": "如果缓存未被清除，即使设置更改，方法可能仍返回旧的缓存值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 clear_cache 后，get_swappable_settings_name 的缓存信息应显示缓存为空（例如 hits=0, misses=0, currsize=0）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 cache_info() 字符串，因为具体数字可能因测试执行顺序而变化。",
+        "reason": "关注缓存是否被重置，而不是具体的命中/未命中计数，这更稳定且与 Issue 对齐。"
+      },
+      {
+        "assertion_goal": "在更改可交换模型设置并调用 clear_cache 后，get_swappable_settings_name 应返回与新设置一致的值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的模型字符串或复杂的嵌套结构，除非必要。",
+        "reason": "验证缓存清除后方法能正确反映最新的配置状态。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "get_swappable_settings_name 缓存的具体实现细节（如是否是 LRU）及其 cache_clear 方法的确切行为。",
+    "除了 get_swappable_settings_name，是否还有其他使用 functools.cache/lru_cache 装饰的方法也未被 clear_cache 清除。",
+    "在真实的多步操作序列中，缓存未清除会导致的具体错误场景是什么。"
+  ],
+  "raw": {
+    "issue_summary": "Apps.clear_cache() 未清除 get_swappable_settings_name 的缓存。",
+    "trigger_condition": {
+      "text": "调用 apps.clear_cache() 后，再次调用 get_swappable_settings_name 方法。",
+      "evidence": [
+        "Issue 描述中提到使用 apps.clear_cache() 来重置状态，但 get_swappable_settings_name 的缓存未被清除。",
+        "源码片段 1 显示 clear_cache 方法清除了 get_models 的缓存，但未提及 get_swappable_settings_name。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "get_swappable_settings_name 返回的缓存值未在 clear_cache 调用后被清除，导致后续调用可能返回过时或不正确的结果。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述指出 get_swappable_settings_name 是一个 functools._lru_cache_wrapper，未被 clear_cache 清除。",
+        "源码片段 2 显示 get_swappable_settings_name 使用了 @functools.cache 装饰器。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "调用 apps.clear_cache() 后，所有内部缓存（包括 get_swappable_settings_name 的缓存）都应被清除。",
+      "evidence": [
+        "Issue 中引用的 clear_cache 文档说明：'Clear all internal caches, for methods that alter the app registry.'",
+        "Issue 提议添加 self.get_swappable_settings_name.cache_clear() 到 clear_cache 方法中。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Apps.clear_cache",
+        "kind": "method",
+        "source_path": "django/apps/registry.py",
+        "reason": "这是 Issue 中讨论的需要修复的方法，它应该清除所有内部缓存。"
+      },
+      {
+        "name": "Apps.get_swappable_settings_name",
+        "kind": "method",
+        "source_path": "django/apps/registry.py",
+        "reason": "其缓存未被 clear_cache 清除，是缺陷的核心。"
+      },
+      {
+        "name": "functools.cache_clear",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 提议使用此方法来清除 get_swappable_settings_name 的缓存。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/apps/registry.py",
+        "object": "Apps.clear_cache",
+        "lines": "370-384",
+        "reason": "该方法未包含对 get_swappable_settings_name.cache_clear() 的调用，导致其缓存未被清除。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RelationTreeTests.test_clear_cache_clears_relation_tree",
+        "test_file": "tests/model_meta/tests.py",
+        "why_relevant": "它直接测试了 clear_cache 方法对缓存的清除效果，可以作为测试缓存清除的起点。",
+        "reusable_parts": [
+          "使用 SimpleTestCase",
+          "检查缓存状态（如 _relation_tree）的断言模式"
+        ],
+        "possible_gap": "它只检查了模型元数据的 _relation_tree 缓存，没有涉及 get_swappable_settings_name 的缓存。"
+      },
+      {
+        "test_name": "AutodetectorTests.test_swappable_first_setting",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "它使用了 isolate_lru_cache 来隔离 apps.get_swappable_settings_name 的缓存，表明该方法的缓存行为是可测试的。",
+        "reusable_parts": [
+          "使用 isolate_lru_cache 上下文管理器",
+          "与 swappable 模型相关的设置和操作"
+        ],
+        "possible_gap": "它主要测试迁移检测逻辑，而不是 clear_cache 对缓存的影响。"
+      },
+      {
+        "test_name": "AppsTests.test_models_not_loaded",
+        "test_file": "tests/apps/tests.py",
+        "why_relevant": "它直接操作了 apps.get_models.cache_clear()，展示了如何清除特定方法的缓存。",
+        "reusable_parts": [
+          "直接调用 .cache_clear() 的方法",
+          "使用 apps 全局对象"
+        ],
+        "possible_gap": "它关注的是 models_ready 状态异常，而不是 clear_cache 的完整性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中可能只调用了 clear_cache 并检查了部分缓存（如模型关系树）。",
+        "target_pattern": "在调用 clear_cache 后，紧接着调用 get_swappable_settings_name 并检查其缓存是否被清除。",
+        "reason": "Issue 的核心是 clear_cache 后 get_swappable_settings_name 的缓存残留，此变异能直接触发该路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用默认或简单的 INSTALLED_APPS 配置。",
+        "target_pattern": "使用包含可交换模型（swappable models）的配置，例如设置了 AUTH_USER_MODEL。",
+        "reason": "get_swappable_settings_name 专门处理可交换模型，需要相关配置才能产生有意义的缓存。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "cache",
+        "expression_hint": "apps.get_swappable_settings_name.cache_info() 在 clear_cache 调用前后的变化。",
+        "reason": "可以直接观察该方法的缓存命中/未命中次数，判断缓存是否被清除。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在更改可交换模型设置后，调用 get_swappable_settings_name 的返回值。",
+        "reason": "如果缓存未被清除，即使设置更改，方法可能仍返回旧的缓存值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 clear_cache 后，get_swappable_settings_name 的缓存信息应显示缓存为空（例如 hits=0, misses=0, currsize=0）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 cache_info() 字符串，因为具体数字可能因测试执行顺序而变化。",
+        "reason": "关注缓存是否被重置，而不是具体的命中/未命中计数，这更稳定且与 Issue 对齐。"
+      },
+      {
+        "assertion_goal": "在更改可交换模型设置并调用 clear_cache 后，get_swappable_settings_name 应返回与新设置一致的值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的模型字符串或复杂的嵌套结构，除非必要。",
+        "reason": "验证缓存清除后方法能正确反映最新的配置状态。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能用到 override_settings 来修改 AUTH_USER_MODEL 等设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 isolate_lru_cache 上下文管理器来隔离其他测试对 get_swappable_settings_name 缓存的影响。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "get_swappable_settings_name 缓存的具体实现细节（如是否是 LRU）及其 cache_clear 方法的确切行为。",
+      "除了 get_swappable_settings_name，是否还有其他使用 functools.cache/lru_cache 装饰的方法也未被 clear_cache 清除。",
+      "在真实的多步操作序列中，缓存未清除会导致的具体错误场景是什么。"
+    ]
+  }
+}

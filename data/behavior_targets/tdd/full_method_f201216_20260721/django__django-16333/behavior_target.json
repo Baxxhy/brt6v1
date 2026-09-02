@@ -1,0 +1,302 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16333",
+  "issue_summary": "UserCreationForm 在自定义 User 模型包含 ManyToManyField 时，不会保存 ManyToMany 表单字段的数据。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个包含 ManyToManyField 的自定义 User 模型作为测试上下文。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和数据库事务来确保测试隔离。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建 ManyToMany 关联的 related 对象，以便在表单中选择。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_custom_form",
+        "test_file": "tests/auth_tests/test_forms.py",
+        "why_relevant": "它测试了自定义的 UserCreationForm，与 Issue 场景（自定义 User 模型）相似。",
+        "reusable_parts": [
+          "UserCreationFormTest 类结构",
+          "创建 CustomUserCreationForm 子类的模式",
+          "使用 TestDataMixin 和 TestCase",
+          "构造表单数据字典",
+          "调用 form.is_valid()"
+        ],
+        "possible_gap": "它只测试了普通字段（date_of_birth），没有测试 ManyToMany 字段，也没有测试保存操作。"
+      },
+      {
+        "test_name": "test_many_to_many_inlines",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "它测试了 ManyToMany 内联的显示，涉及 ManyToMany 关系。",
+        "reusable_parts": [
+          "使用 TestCase",
+          "使用 override_settings",
+          "使用 reverse 和 client.get"
+        ],
+        "possible_gap": "它测试的是 admin 界面，不是 UserCreationForm；它测试的是渲染，不是数据保存。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 UserCreationForm 并传入一个包含 ManyToManyField 的自定义 User 模型，提交包含 ManyToMany 字段数据的表单。",
+      "evidence": [
+        "Issue 描述：'When using contrib.auth.forms.UserCreationForm with a custom User model which has ManyToManyField fields'",
+        "源码片段 2 显示 UserCreationForm.save 方法没有调用 save_m2m。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ManyToMany 字段的数据在表单提交后没有被保存到数据库中。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'the data in all related form fields (e.g. a ModelMultipleChoiceField) is not saved.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.contrib.auth.forms.UserCreationForm",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "这是 Issue 报告的有缺陷的类。"
+      },
+      {
+        "name": "UserCreationForm.save",
+        "kind": "method",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "Issue 指出其 save 方法缺少对 save_m2m 的调用。"
+      },
+      {
+        "name": "django.forms.models.ModelForm",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "UserCreationForm 的父类，其 save 方法应正确处理 ManyToMany 字段。"
+      },
+      {
+        "name": "save_m2m",
+        "kind": "method",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 指出 UserCreationForm 没有调用此方法来保存多对多数据。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/forms.py",
+        "object": "UserCreationForm.save",
+        "lines": "139-144",
+        "reason": "Issue 明确指出此方法在 commit=True 时没有调用 self.save_m2m()。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试（如 test_custom_form）中，表单数据只包含普通字段（如 username, password, date_of_birth）。",
+        "target_pattern": "表单数据应包含 ManyToMany 字段的数据（例如，一个 ModelMultipleChoiceField 的选定值）。",
+        "reason": "Issue 的核心是 ManyToMany 字段数据未被保存，因此测试输入必须包含此类数据才能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，只调用 form.is_valid() 进行验证。",
+        "target_pattern": "在验证后，需要调用 form.save(commit=True) 来触发保存逻辑。",
+        "reason": "缺陷发生在 save 方法中，因此测试必须执行保存操作才能观察到数据未保存的现象。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "UserCreationForm 应该像其父类 ModelForm 一样，在保存时正确处理并保存 ManyToMany 字段的数据。",
+      "evidence": [
+        "Issue 描述：'This is because unlike its parent class django.forms.ModelForm, UserCreationForm.save(commit=True) omits to call self.save_m2m().'",
+        "源码片段 4 显示 ModelForm 的 save_m2m 方法负责保存多对多数据。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "调用 form.save() 后，检查数据库中与 User 实例关联的 ManyToMany 关系是否被创建。",
+        "reason": "Issue 的症状是 ManyToMany 数据未保存，因此需要观测数据库状态以确认数据是否被持久化。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 form.save() 返回的 user 实例，检查其 ManyToMany 字段（如 .all()）在内存中的状态。",
+        "reason": "在 commit=True 时，save 方法返回的 user 实例可能没有关联的 ManyToMany 数据，这可以指示问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言 ManyToMany 字段的数据在调用 form.save() 后被正确保存到数据库中。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言完整的 SQL 查询字符串或无关的模型字段。",
+        "reason": "这种断言直接验证 Issue 的核心问题（数据是否被保存），并且不依赖于具体的实现细节（如 SQL 生成）。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "自定义 User 模型中 ManyToManyField 的具体定义和关联模型是什么？",
+    "表单中用于 ManyToMany 字段的 widget 类型（如 ModelMultipleChoiceField）的具体配置是什么？",
+    "UserCreationForm 的 Meta.fields 是否默认包含 ManyToMany 字段，还是需要显式添加？",
+    "在 commit=False 的情况下，UserCreationForm 的 save 方法行为是否符合预期？"
+  ],
+  "raw": {
+    "issue_summary": "UserCreationForm 在自定义 User 模型包含 ManyToManyField 时，不会保存 ManyToMany 表单字段的数据。",
+    "trigger_condition": {
+      "text": "使用 UserCreationForm 并传入一个包含 ManyToManyField 的自定义 User 模型，提交包含 ManyToMany 字段数据的表单。",
+      "evidence": [
+        "Issue 描述：'When using contrib.auth.forms.UserCreationForm with a custom User model which has ManyToManyField fields'",
+        "源码片段 2 显示 UserCreationForm.save 方法没有调用 save_m2m。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ManyToMany 字段的数据在表单提交后没有被保存到数据库中。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'the data in all related form fields (e.g. a ModelMultipleChoiceField) is not saved.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "UserCreationForm 应该像其父类 ModelForm 一样，在保存时正确处理并保存 ManyToMany 字段的数据。",
+      "evidence": [
+        "Issue 描述：'This is because unlike its parent class django.forms.ModelForm, UserCreationForm.save(commit=True) omits to call self.save_m2m().'",
+        "源码片段 4 显示 ModelForm 的 save_m2m 方法负责保存多对多数据。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.contrib.auth.forms.UserCreationForm",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "这是 Issue 报告的有缺陷的类。"
+      },
+      {
+        "name": "UserCreationForm.save",
+        "kind": "method",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "Issue 指出其 save 方法缺少对 save_m2m 的调用。"
+      },
+      {
+        "name": "django.forms.models.ModelForm",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "UserCreationForm 的父类，其 save 方法应正确处理 ManyToMany 字段。"
+      },
+      {
+        "name": "save_m2m",
+        "kind": "method",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 指出 UserCreationForm 没有调用此方法来保存多对多数据。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/forms.py",
+        "object": "UserCreationForm.save",
+        "lines": "139-144",
+        "reason": "Issue 明确指出此方法在 commit=True 时没有调用 self.save_m2m()。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_custom_form",
+        "test_file": "tests/auth_tests/test_forms.py",
+        "why_relevant": "它测试了自定义的 UserCreationForm，与 Issue 场景（自定义 User 模型）相似。",
+        "reusable_parts": [
+          "UserCreationFormTest 类结构",
+          "创建 CustomUserCreationForm 子类的模式",
+          "使用 TestDataMixin 和 TestCase",
+          "构造表单数据字典",
+          "调用 form.is_valid()"
+        ],
+        "possible_gap": "它只测试了普通字段（date_of_birth），没有测试 ManyToMany 字段，也没有测试保存操作。"
+      },
+      {
+        "test_name": "test_many_to_many_inlines",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "它测试了 ManyToMany 内联的显示，涉及 ManyToMany 关系。",
+        "reusable_parts": [
+          "使用 TestCase",
+          "使用 override_settings",
+          "使用 reverse 和 client.get"
+        ],
+        "possible_gap": "它测试的是 admin 界面，不是 UserCreationForm；它测试的是渲染，不是数据保存。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试（如 test_custom_form）中，表单数据只包含普通字段（如 username, password, date_of_birth）。",
+        "target_pattern": "表单数据应包含 ManyToMany 字段的数据（例如，一个 ModelMultipleChoiceField 的选定值）。",
+        "reason": "Issue 的核心是 ManyToMany 字段数据未被保存，因此测试输入必须包含此类数据才能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，只调用 form.is_valid() 进行验证。",
+        "target_pattern": "在验证后，需要调用 form.save(commit=True) 来触发保存逻辑。",
+        "reason": "缺陷发生在 save 方法中，因此测试必须执行保存操作才能观察到数据未保存的现象。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "调用 form.save() 后，检查数据库中与 User 实例关联的 ManyToMany 关系是否被创建。",
+        "reason": "Issue 的症状是 ManyToMany 数据未保存，因此需要观测数据库状态以确认数据是否被持久化。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 form.save() 返回的 user 实例，检查其 ManyToMany 字段（如 .all()）在内存中的状态。",
+        "reason": "在 commit=True 时，save 方法返回的 user 实例可能没有关联的 ManyToMany 数据，这可以指示问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言 ManyToMany 字段的数据在调用 form.save() 后被正确保存到数据库中。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言完整的 SQL 查询字符串或无关的模型字段。",
+        "reason": "这种断言直接验证 Issue 的核心问题（数据是否被保存），并且不依赖于具体的实现细节（如 SQL 生成）。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个包含 ManyToManyField 的自定义 User 模型作为测试上下文。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和数据库事务来确保测试隔离。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建 ManyToMany 关联的 related 对象，以便在表单中选择。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "自定义 User 模型中 ManyToManyField 的具体定义和关联模型是什么？",
+      "表单中用于 ManyToMany 字段的 widget 类型（如 ModelMultipleChoiceField）的具体配置是什么？",
+      "UserCreationForm 的 Meta.fields 是否默认包含 ManyToMany 字段，还是需要显式添加？",
+      "在 commit=False 的情况下，UserCreationForm 的 save 方法行为是否符合预期？"
+    ]
+  }
+}

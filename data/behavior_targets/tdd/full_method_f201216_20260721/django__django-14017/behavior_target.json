@@ -1,0 +1,360 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14017",
+  "issue_summary": "Q 对象与 Exists 对象使用 & 运算符时顺序不满足交换律，Q() & Exists(...) 会抛出 TypeError，而 Exists(...) & Q() 正常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase（如 SimpleTestCase 或 TestCase），并可能涉及数据库模型（如 Product）来构造 Exists 查询。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 Q 和 Exists 类，以及相关的模型。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以参考相关测试文件 tests/queries/test_q.py 中的测试类结构和导入。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_combine_not_q_object",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "该测试直接验证了 Q 对象与非 Q 对象进行 & 和 | 运算时会抛出 TypeError，与当前 Issue 的错误现象高度相似。",
+        "reusable_parts": [
+          "测试类 QTests(SimpleTestCase)",
+          "Q 对象的构造 (q = Q(x=1))",
+          "使用 assertRaisesMessage 捕获 TypeError",
+          "测试结构和对异常信息的断言风格"
+        ],
+        "possible_gap": "该测试使用通用的 object() 作为非 Q 对象，而 Issue 涉及的是特定的 Exists 对象。它验证了当前代码的“错误”行为，但无法验证修复后 Q 与 Exists 应能正常组合的期望行为。"
+      },
+      {
+        "test_name": "test_combine_and_empty",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "该测试验证了 Q 对象与空 Q 对象 (& Q()) 的组合行为，展示了 & 运算符在 Q 对象之间的正常使用模式。",
+        "reusable_parts": [
+          "Q() 的构造",
+          "& 运算符的使用",
+          "使用 self.assertEqual 进行结果比较的断言风格"
+        ],
+        "possible_gap": "该测试只涉及 Q 对象之间的组合，不涉及与非 Q 对象（如 Exists）的组合。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 & 运算符连接一个 Q 对象和一个 Exists 对象，且 Q 对象在运算符左侧，Exists 对象在右侧。",
+      "evidence": [
+        "Issue 中：'Q() & Exists(Product.objects.all())' 导致 TypeError。",
+        "Issue 中：'Exists(...) & Q(...) works' 表明顺序相反时正常。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 Q() & Exists(...) 时抛出 TypeError，异常信息为 Exists 对象。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中：'TypeError: <django.db.models.expressions.Exists object at 0x7fc18dd21400>'。",
+        "源码片段 4 中：'_combine' 方法检查 'if not isinstance(other, Q): raise TypeError(other)'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 类的 & 运算符行为。"
+      },
+      {
+        "name": "Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中与 Q 对象进行 & 运算的另一方是 Exists 对象。"
+      },
+      {
+        "name": "Q.__and__",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "触发错误的直接方法是 Q 对象的 __and__ 方法。"
+      },
+      {
+        "name": "Q._combine",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "__and__ 方法调用了 _combine，而 _combine 中进行了类型检查并抛出 TypeError。"
+      },
+      {
+        "name": "Product.objects.all",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 示例中用于构造 Exists 对象的 queryset 来源。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q.__and__",
+        "lines": "64-65",
+        "reason": "该方法直接处理 & 运算符，并将右侧对象传递给 _combine 进行严格的 Q 类型检查。"
+      },
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q._combine",
+        "lines": "42-59",
+        "reason": "该方法在组合前检查 'isinstance(other, Q)'，导致非 Q 对象（如 Exists）被拒绝。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Exists",
+        "lines": "1150-1182",
+        "reason": "Exists 类可能缺少与 Q 类互操作的机制（如 __rand__），导致其无法作为 & 运算符的右操作数被 Q 处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试 'test_combine_not_q_object' 中使用通用 object() 作为 & 的右操作数。",
+        "target_pattern": "将右操作数替换为 Exists(Product.objects.all()) 或类似的 Exists 对象。",
+        "reason": "Issue 明确指出 Exists 对象作为右操作数时会触发 TypeError，而通用 object 的测试已经存在。变异后可以复现特定于 Exists 的缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接使用 q & obj，其中 obj 是通用对象。",
+        "target_pattern": "构造一个 Exists 查询对象（如 Exists(Product.objects.all())）作为 & 的右操作数。",
+        "reason": "Issue 的触发条件需要 Exists 实例，而不仅仅是任何非 Q 对象。这需要构建一个具体的数据库查询上下文。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "& 运算符在 Q 对象和 Exists 对象之间应满足交换律，即 Q() & Exists(...) 和 Exists(...) & Q() 都应正常工作，返回组合后的对象。",
+      "evidence": [
+        "Issue 中：'The & (and |) operators should be commutative on Q-Exists pairs, but it's not'。",
+        "Issue 中：'Exists(...) & Q(...) works' 展示了期望的一侧行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 'Q() & exists_obj' 时是否抛出 TypeError。",
+        "reason": "Issue 的核心错误现象就是抛出 TypeError。观测此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "成功执行 'exists_obj & Q()' 后返回结果的类型。",
+        "reason": "Issue 表明此顺序正常，观测其返回类型有助于理解期望的组合结果形式，可能与 Q 对象相关。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "成功执行 'exists_obj & Q()' 后返回结果的 repr() 字符串。",
+        "reason": "Issue 中展示了 Exists(...) & Q() 的输出为 '<Q: (AND: ...)>'，表明结果被包装成了 Q 对象。观测此 repr 可以确认组合机制。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Q() & Exists(...) 不会抛出 TypeError，并能返回一个组合对象（修复后的期望）。",
+        "preferred_assertion_style": "not raises",
+        "avoid": "断言完整的、可能变化的 repr 字符串或内部结构完全相等。",
+        "reason": "Issue 的期望是操作成功，不抛出异常。断言不抛出异常比断言具体的输出结构更稳定，因为内部表示可能在修复中改变。"
+      },
+      {
+        "assertion_goal": "验证 Q() & Exists(...) 和 Exists(...) & Q() 返回的对象在逻辑上是等价的（例如，都能用于构建查询）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "直接使用 == 比较两个可能内部结构不同的对象。",
+        "reason": "Issue 强调交换律。断言两种顺序产生在查询构建上等效的结果，比断言它们是完全相同的 Python 对象更符合语义。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Exists 类是否应该被 Q._combine 方法接受？还是应该在 Exists 类上实现 __rand__ 来处理 Q() & Exists(...)？",
+    "修复后，Q() & Exists(...) 返回的对象的确切类型和内部结构是什么？是否与 Exists(...) & Q() 完全相同？",
+    "除了 & 运算符，| 运算符是否也存在同样的非交换性问题？Issue 提到了 '& (and |)'，但只展示了 & 的例子。",
+    "是否需要为其他表达式类（如 Subquery, OuterRef）也提供相同的交换性支持？"
+  ],
+  "raw": {
+    "issue_summary": "Q 对象与 Exists 对象使用 & 运算符时顺序不满足交换律，Q() & Exists(...) 会抛出 TypeError，而 Exists(...) & Q() 正常。",
+    "trigger_condition": {
+      "text": "使用 & 运算符连接一个 Q 对象和一个 Exists 对象，且 Q 对象在运算符左侧，Exists 对象在右侧。",
+      "evidence": [
+        "Issue 中：'Q() & Exists(Product.objects.all())' 导致 TypeError。",
+        "Issue 中：'Exists(...) & Q(...) works' 表明顺序相反时正常。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 Q() & Exists(...) 时抛出 TypeError，异常信息为 Exists 对象。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中：'TypeError: <django.db.models.expressions.Exists object at 0x7fc18dd21400>'。",
+        "源码片段 4 中：'_combine' 方法检查 'if not isinstance(other, Q): raise TypeError(other)'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "& 运算符在 Q 对象和 Exists 对象之间应满足交换律，即 Q() & Exists(...) 和 Exists(...) & Q() 都应正常工作，返回组合后的对象。",
+      "evidence": [
+        "Issue 中：'The & (and |) operators should be commutative on Q-Exists pairs, but it's not'。",
+        "Issue 中：'Exists(...) & Q(...) works' 展示了期望的一侧行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 的核心是关于 Q 类的 & 运算符行为。"
+      },
+      {
+        "name": "Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中与 Q 对象进行 & 运算的另一方是 Exists 对象。"
+      },
+      {
+        "name": "Q.__and__",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "触发错误的直接方法是 Q 对象的 __and__ 方法。"
+      },
+      {
+        "name": "Q._combine",
+        "kind": "method",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "__and__ 方法调用了 _combine，而 _combine 中进行了类型检查并抛出 TypeError。"
+      },
+      {
+        "name": "Product.objects.all",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 示例中用于构造 Exists 对象的 queryset 来源。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q.__and__",
+        "lines": "64-65",
+        "reason": "该方法直接处理 & 运算符，并将右侧对象传递给 _combine 进行严格的 Q 类型检查。"
+      },
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q._combine",
+        "lines": "42-59",
+        "reason": "该方法在组合前检查 'isinstance(other, Q)'，导致非 Q 对象（如 Exists）被拒绝。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Exists",
+        "lines": "1150-1182",
+        "reason": "Exists 类可能缺少与 Q 类互操作的机制（如 __rand__），导致其无法作为 & 运算符的右操作数被 Q 处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_combine_not_q_object",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "该测试直接验证了 Q 对象与非 Q 对象进行 & 和 | 运算时会抛出 TypeError，与当前 Issue 的错误现象高度相似。",
+        "reusable_parts": [
+          "测试类 QTests(SimpleTestCase)",
+          "Q 对象的构造 (q = Q(x=1))",
+          "使用 assertRaisesMessage 捕获 TypeError",
+          "测试结构和对异常信息的断言风格"
+        ],
+        "possible_gap": "该测试使用通用的 object() 作为非 Q 对象，而 Issue 涉及的是特定的 Exists 对象。它验证了当前代码的“错误”行为，但无法验证修复后 Q 与 Exists 应能正常组合的期望行为。"
+      },
+      {
+        "test_name": "test_combine_and_empty",
+        "test_file": "tests/queries/test_q.py",
+        "why_relevant": "该测试验证了 Q 对象与空 Q 对象 (& Q()) 的组合行为，展示了 & 运算符在 Q 对象之间的正常使用模式。",
+        "reusable_parts": [
+          "Q() 的构造",
+          "& 运算符的使用",
+          "使用 self.assertEqual 进行结果比较的断言风格"
+        ],
+        "possible_gap": "该测试只涉及 Q 对象之间的组合，不涉及与非 Q 对象（如 Exists）的组合。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试 'test_combine_not_q_object' 中使用通用 object() 作为 & 的右操作数。",
+        "target_pattern": "将右操作数替换为 Exists(Product.objects.all()) 或类似的 Exists 对象。",
+        "reason": "Issue 明确指出 Exists 对象作为右操作数时会触发 TypeError，而通用 object 的测试已经存在。变异后可以复现特定于 Exists 的缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接使用 q & obj，其中 obj 是通用对象。",
+        "target_pattern": "构造一个 Exists 查询对象（如 Exists(Product.objects.all())）作为 & 的右操作数。",
+        "reason": "Issue 的触发条件需要 Exists 实例，而不仅仅是任何非 Q 对象。这需要构建一个具体的数据库查询上下文。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 'Q() & exists_obj' 时是否抛出 TypeError。",
+        "reason": "Issue 的核心错误现象就是抛出 TypeError。观测此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "成功执行 'exists_obj & Q()' 后返回结果的类型。",
+        "reason": "Issue 表明此顺序正常，观测其返回类型有助于理解期望的组合结果形式，可能与 Q 对象相关。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "成功执行 'exists_obj & Q()' 后返回结果的 repr() 字符串。",
+        "reason": "Issue 中展示了 Exists(...) & Q() 的输出为 '<Q: (AND: ...)>'，表明结果被包装成了 Q 对象。观测此 repr 可以确认组合机制。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Q() & Exists(...) 不会抛出 TypeError，并能返回一个组合对象（修复后的期望）。",
+        "preferred_assertion_style": "not raises",
+        "avoid": "断言完整的、可能变化的 repr 字符串或内部结构完全相等。",
+        "reason": "Issue 的期望是操作成功，不抛出异常。断言不抛出异常比断言具体的输出结构更稳定，因为内部表示可能在修复中改变。"
+      },
+      {
+        "assertion_goal": "验证 Q() & Exists(...) 和 Exists(...) & Q() 返回的对象在逻辑上是等价的（例如，都能用于构建查询）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "直接使用 == 比较两个可能内部结构不同的对象。",
+        "reason": "Issue 强调交换律。断言两种顺序产生在查询构建上等效的结果，比断言它们是完全相同的 Python 对象更符合语义。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase（如 SimpleTestCase 或 TestCase），并可能涉及数据库模型（如 Product）来构造 Exists 查询。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 Q 和 Exists 类，以及相关的模型。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以参考相关测试文件 tests/queries/test_q.py 中的测试类结构和导入。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Exists 类是否应该被 Q._combine 方法接受？还是应该在 Exists 类上实现 __rand__ 来处理 Q() & Exists(...)？",
+      "修复后，Q() & Exists(...) 返回的对象的确切类型和内部结构是什么？是否与 Exists(...) & Q() 完全相同？",
+      "除了 & 运算符，| 运算符是否也存在同样的非交换性问题？Issue 提到了 '& (and |)'，但只展示了 & 的例子。",
+      "是否需要为其他表达式类（如 Subquery, OuterRef）也提供相同的交换性支持？"
+    ]
+  }
+}

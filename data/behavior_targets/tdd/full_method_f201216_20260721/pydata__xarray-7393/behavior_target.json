@@ -1,0 +1,278 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-7393",
+  "issue_summary": "Dataset.stack() 操作将 int32 坐标的数据类型错误地转换为 int64。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy 来创建具有特定数据类型的 Dataset。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个简单的函数或 TestCase 方法中运行，无需复杂 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_stack",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试直接验证了 Dataset.stack() 的功能，包括坐标和索引的处理。",
+        "reusable_parts": [
+          "Dataset 构造模式",
+          "stack() 调用方式",
+          "assert_identical 断言风格",
+          "坐标和索引的验证逻辑"
+        ],
+        "possible_gap": "现有测试没有专门检查坐标在 stack 操作前后的数据类型是否保持不变，尤其是对于非默认数据类型（如 int32）。"
+      },
+      {
+        "test_name": "TestDataset.test_stack_unstack_fast",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "测试了 stack 和 unstack 的往返操作，涉及坐标的完整性。",
+        "reusable_parts": [
+          "Dataset 构造",
+          "stack 和 unstack 的链式调用",
+          "broadcast_equals/identical 断言"
+        ],
+        "possible_gap": "没有检查中间状态（stack 后）的坐标数据类型，只验证了最终结果与原始数据在值上的等价性。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个包含 int32 ('i4') 数据类型坐标的 Dataset 调用 stack() 方法。",
+      "evidence": [
+        "Issue 中的 MVCE: `ds = xr.Dataset(coords={'a': np.array([0], dtype='i4')}); ds.stack(b=('a',))`",
+        "源码片段 4 显示了 Dataset.stack() 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "stack 操作后，坐标 'a' 的数据类型从 int32 ('i4') 变为 int64 ('i8')，导致 `ds['a'].values.dtype == ds.stack(b=('a',))['a'].values.dtype` 返回 False。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述: 'The data type of the `a` coordinate is changed from 'i4' to 'i8'.'",
+        "MVCE 直接展示了比较结果为 False。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 涉及 Dataset 的创建和 stack 操作。"
+      },
+      {
+        "name": "Dataset.stack",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "触发缺陷的核心 API 调用。"
+      },
+      {
+        "name": "Dataset.coords",
+        "kind": "property",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "用于访问坐标及其数据类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.stack",
+        "lines": "4554-4602",
+        "reason": "这是执行 stack 操作的方法，可能在其中或其调用的内部方法（如 _stack_once）中发生了数据类型转换。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用默认数据类型（如 int64）或字符串作为坐标值。",
+        "target_pattern": "使用显式指定为 int32 ('i4') 的 numpy 数组作为坐标值。",
+        "reason": "Issue 表明缺陷在坐标数据类型为 int32 时触发，而现有测试可能使用了其他数据类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中 stack 操作后可能直接验证整体结构或进行 unstack。",
+        "target_pattern": "在 stack 操作后，立即提取并比较原始坐标和 stack 结果中同名坐标的数据类型。",
+        "reason": "缺陷现象是数据类型在 stack 过程中被改变，需要直接观测这个中间状态。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Dataset.stack() 操作不应改变其构建索引的原始坐标的数据类型。",
+      "evidence": [
+        "Issue 中的期望: 'Creating a MultiIndex should not change the data type of the Indexes from which it is built.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "ds['a'].values.dtype 和 ds.stack(...)['a'].values.dtype",
+        "reason": "Issue 的核心是数据类型比较，直接观察这两个表达式的 dtype 属性可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ds.stack(b=('a',))['a'].values",
+        "reason": "观察 stack 操作后坐标 'a' 的实际数据值（虽然值可能相同，但底层数组类型可能已变）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 stack 操作前后，指定坐标的数据类型保持不变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 或复杂的对象结构相等，只关注 dtype 属性。",
+        "reason": "Issue 明确期望数据类型相等，这是一个稳定且直接的断言目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只发生在 stack 单个维度时，还是 stack 多个维度时也会发生。",
+    "缺陷是否与 create_index 参数的值有关。",
+    "缺陷的确切位置是在 stack 方法内部，还是在它调用的某个底层函数（如用于构建 MultiIndex 的函数）中。",
+    "除了 int32，其他非 int64 的整数类型（如 int8, int16）或浮点类型是否也会受到影响。"
+  ],
+  "raw": {
+    "issue_summary": "Dataset.stack() 操作将 int32 坐标的数据类型错误地转换为 int64。",
+    "trigger_condition": {
+      "text": "对一个包含 int32 ('i4') 数据类型坐标的 Dataset 调用 stack() 方法。",
+      "evidence": [
+        "Issue 中的 MVCE: `ds = xr.Dataset(coords={'a': np.array([0], dtype='i4')}); ds.stack(b=('a',))`",
+        "源码片段 4 显示了 Dataset.stack() 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "stack 操作后，坐标 'a' 的数据类型从 int32 ('i4') 变为 int64 ('i8')，导致 `ds['a'].values.dtype == ds.stack(b=('a',))['a'].values.dtype` 返回 False。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述: 'The data type of the `a` coordinate is changed from 'i4' to 'i8'.'",
+        "MVCE 直接展示了比较结果为 False。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Dataset.stack() 操作不应改变其构建索引的原始坐标的数据类型。",
+      "evidence": [
+        "Issue 中的期望: 'Creating a MultiIndex should not change the data type of the Indexes from which it is built.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 涉及 Dataset 的创建和 stack 操作。"
+      },
+      {
+        "name": "Dataset.stack",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "触发缺陷的核心 API 调用。"
+      },
+      {
+        "name": "Dataset.coords",
+        "kind": "property",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "用于访问坐标及其数据类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.stack",
+        "lines": "4554-4602",
+        "reason": "这是执行 stack 操作的方法，可能在其中或其调用的内部方法（如 _stack_once）中发生了数据类型转换。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_stack",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试直接验证了 Dataset.stack() 的功能，包括坐标和索引的处理。",
+        "reusable_parts": [
+          "Dataset 构造模式",
+          "stack() 调用方式",
+          "assert_identical 断言风格",
+          "坐标和索引的验证逻辑"
+        ],
+        "possible_gap": "现有测试没有专门检查坐标在 stack 操作前后的数据类型是否保持不变，尤其是对于非默认数据类型（如 int32）。"
+      },
+      {
+        "test_name": "TestDataset.test_stack_unstack_fast",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "测试了 stack 和 unstack 的往返操作，涉及坐标的完整性。",
+        "reusable_parts": [
+          "Dataset 构造",
+          "stack 和 unstack 的链式调用",
+          "broadcast_equals/identical 断言"
+        ],
+        "possible_gap": "没有检查中间状态（stack 后）的坐标数据类型，只验证了最终结果与原始数据在值上的等价性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用默认数据类型（如 int64）或字符串作为坐标值。",
+        "target_pattern": "使用显式指定为 int32 ('i4') 的 numpy 数组作为坐标值。",
+        "reason": "Issue 表明缺陷在坐标数据类型为 int32 时触发，而现有测试可能使用了其他数据类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中 stack 操作后可能直接验证整体结构或进行 unstack。",
+        "target_pattern": "在 stack 操作后，立即提取并比较原始坐标和 stack 结果中同名坐标的数据类型。",
+        "reason": "缺陷现象是数据类型在 stack 过程中被改变，需要直接观测这个中间状态。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "ds['a'].values.dtype 和 ds.stack(...)['a'].values.dtype",
+        "reason": "Issue 的核心是数据类型比较，直接观察这两个表达式的 dtype 属性可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ds.stack(b=('a',))['a'].values",
+        "reason": "观察 stack 操作后坐标 'a' 的实际数据值（虽然值可能相同，但底层数组类型可能已变）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 stack 操作前后，指定坐标的数据类型保持不变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 或复杂的对象结构相等，只关注 dtype 属性。",
+        "reason": "Issue 明确期望数据类型相等，这是一个稳定且直接的断言目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy 来创建具有特定数据类型的 Dataset。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个简单的函数或 TestCase 方法中运行，无需复杂 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只发生在 stack 单个维度时，还是 stack 多个维度时也会发生。",
+      "缺陷是否与 create_index 参数的值有关。",
+      "缺陷的确切位置是在 stack 方法内部，还是在它调用的某个底层函数（如用于构建 MultiIndex 的函数）中。",
+      "除了 int32，其他非 int64 的整数类型（如 int8, int16）或浮点类型是否也会受到影响。"
+    ]
+  }
+}

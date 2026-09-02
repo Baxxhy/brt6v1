@@ -1,0 +1,370 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15380",
+  "issue_summary": "Migration autodetector 在同时重命名模型和字段时崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `TestCase`（如 `AutodetectorTests`）并继承其 `get_changes` 等方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造 `ModelState` 对象来表示模型定义在重命名前和后的状态。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 `MigrationQuestioner` 并配置适当的参数字典来模拟用户对重命名问题的确认。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 `testapp` 或类似的应用上下文中运行。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_rename_model_with_renamed_rel_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试明确处理了同时重命名模型和相关字段的场景，与 Issue 描述的场景高度相似。",
+        "reusable_parts": [
+          "AutodetectorTests 测试类",
+          "`self.get_changes` 方法调用模式",
+          "使用 `MigrationQuestioner` 模拟用户确认",
+          "`assertNumberMigrations` 和 `assertOperationTypes` 等断言风格"
+        ],
+        "possible_gap": "该测试可能使用了不同的模型/字段初始状态，或者其交互流程（`ask_rename` 和 `ask_rename_model` 的配置）与触发 Issue 的确切场景不完全一致。"
+      },
+      {
+        "test_name": "test_rename_model",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "测试了模型重命名，是 Issue 中复合操作的一部分。",
+        "reusable_parts": [
+          "测试类",
+          "`get_changes` 调用",
+          "使用 `MigrationQuestioner` 并设置 `ask_rename_model`",
+          "对 `RenameModel` 操作的断言"
+        ],
+        "possible_gap": "仅测试模型重命名，未涉及字段重命名，因此无法复现复合操作导致的 KeyError。"
+      },
+      {
+        "test_name": "test_rename_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "测试了字段重命名，是 Issue 中复合操作的另一部分。",
+        "reusable_parts": [
+          "测试类",
+          "`get_changes` 调用",
+          "使用 `MigrationQuestioner` 并设置 `ask_rename`",
+          "对 `RenameField` 操作的断言"
+        ],
+        "possible_gap": "仅测试字段重命名，未涉及模型重命名，因此无法复现复合操作导致的 KeyError。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "运行 `python manage.py makemigrations` 命令，并在单个步骤中同时重命名一个模型及其字段。",
+      "evidence": [
+        "Issue 描述：'Migration autodetector crashes when renaming a model and field in a single step'",
+        "Issue 中命令执行和用户交互：'Did you rename the test_one.MyModel model to MyModel2? [y/N] y'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 KeyError: ('test_one', 'mymodel') 异常，导致 makemigrations 命令崩溃。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 最后一行：'KeyError: (\\'test_one\\', \\'mymodel\\')'",
+        "Traceback 指向 `autodetector.py` 的 `generate_renamed_fields` 方法第 823 行。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 中触发 bug 的命令。"
+      },
+      {
+        "name": "MigrationAutodetector.changes",
+        "kind": "method",
+        "source_path": "django/db/migrations/autodetector.py",
+        "reason": "Traceback 显示异常发生在 autodetector 的调用链中。"
+      },
+      {
+        "name": "MigrationAutodetector._detect_changes",
+        "kind": "method",
+        "source_path": "django/db/migrations/autodetector.py",
+        "reason": "Traceback 显示调用链经过此方法。"
+      },
+      {
+        "name": "MigrationAutodetector.generate_renamed_fields",
+        "kind": "method",
+        "source_path": "django/db/migrations/autodetector.py",
+        "reason": "Traceback 显示异常直接发生在此方法内。"
+      },
+      {
+        "name": "MigrationQuestioner",
+        "kind": "class",
+        "source_path": "django/db/migrations/questioner.py",
+        "reason": "相关测试中用于模拟用户交互（如确认重命名）的关键类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/autodetector.py",
+        "object": "MigrationAutodetector.generate_renamed_fields",
+        "lines": "823",
+        "reason": "Issue 的 Traceback 直接指向此行代码：`new_model_state = self.to_state.models[app_label, old_model_name]` 抛出 KeyError。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中，`before` 和 `after` 的 ModelState 列表通常是分开定义的（如 `self.author_with_book`, `self.book`）。",
+        "target_pattern": "构造一个 `before` 状态包含模型 A 和字段 F，`after` 状态将模型 A 重命名为 B，同时将字段 F 重命名为 G 的场景。",
+        "reason": "Issue 描述在单个步骤中同时重命名模型和字段，这可能是导致 `generate_renamed_fields` 方法内部状态不一致（如查找旧模型名失败）的原因。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，`MigrationQuestioner` 的参数字典可能同时设置了 `ask_rename` 和 `ask_rename_model` 为 True。",
+        "target_pattern": "确保 `MigrationQuestioner` 配置能模拟用户对模型重命名和字段重命名都回答“是”的交互。",
+        "reason": "Issue 中显示了用户确认模型重命名的提示，字段重命名可能也需要确认。正确的问答模拟是触发完整检测流程的关键。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Migration autodetector 应能正确处理同时重命名模型和字段的场景，成功生成迁移文件，而不抛出 KeyError。",
+      "evidence": [
+        "相关测试 `test_rename_model_with_renamed_rel_field` 表明系统设计上支持同时处理模型重命名和相关字段重命名。",
+        "Issue 标题和描述暗示这是一个应被支持的正常操作，但当前版本存在缺陷。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `autodetector.changes()` 或 `self.get_changes()` 时是否抛出 `KeyError`，特别是关于 `('test_one', 'mymodel')` 或类似键。",
+        "reason": "Issue 的核心错误现象是 KeyError，观测此异常是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 `generate_renamed_fields` 方法内部或前后，`self.from_state.models` 和 `self.to_state.models` 字典的内容，特别是与重命名模型相关的键。",
+        "reason": "KeyError 表明在 `to_state.models` 中找不到预期的键，观测这两个状态字典有助于理解状态不一致的原因。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`autodetector.changes()` 的返回值（一个变更字典），观察是否成功生成了包含 `RenameModel` 和 `RenameField` 操作的迁移计划。",
+        "reason": "在正常（修复后）情况下，应返回正确的迁移计划；在缺陷情况下，可能因异常而返回不完整结果或直接崩溃。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在同时重命名模型和字段的场景下，迁移检测过程不会抛出 KeyError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的迁移操作列表或具体的 SQL 语句，因为这些可能随修复细节变化。",
+        "reason": "Issue 的核心是崩溃（KeyError），因此首要断言是操作不会引发该异常。使用 `assertRaises` 的否定形式（或 `assertNotRaises` 模式）来验证稳定性。"
+      },
+      {
+        "assertion_goal": "验证迁移检测成功完成并产生了变更（changes 非空或包含预期操作）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言 changes 字典的精确结构或操作顺序。",
+        "reason": "在修复后，系统应能处理该场景并生成迁移。断言有变更产生，比断言特定操作类型更稳定，因为修复可能调整操作的具体组织方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发 KeyError 所需的确切模型和字段结构（除了同时重命名）是否还有其他必要条件。",
+    "`generate_renamed_fields` 方法内部导致状态不一致（`to_state.models` 中缺少键）的具体逻辑顺序是什么。",
+    "修复后的正确行为下，生成的迁移操作的具体类型和顺序是否会与现有相关测试（如 `test_rename_model_with_renamed_rel_field`）完全相同。"
+  ],
+  "raw": {
+    "issue_summary": "Migration autodetector 在同时重命名模型和字段时崩溃。",
+    "trigger_condition": {
+      "text": "运行 `python manage.py makemigrations` 命令，并在单个步骤中同时重命名一个模型及其字段。",
+      "evidence": [
+        "Issue 描述：'Migration autodetector crashes when renaming a model and field in a single step'",
+        "Issue 中命令执行和用户交互：'Did you rename the test_one.MyModel model to MyModel2? [y/N] y'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 KeyError: ('test_one', 'mymodel') 异常，导致 makemigrations 命令崩溃。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 最后一行：'KeyError: (\\'test_one\\', \\'mymodel\\')'",
+        "Traceback 指向 `autodetector.py` 的 `generate_renamed_fields` 方法第 823 行。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Migration autodetector 应能正确处理同时重命名模型和字段的场景，成功生成迁移文件，而不抛出 KeyError。",
+      "evidence": [
+        "相关测试 `test_rename_model_with_renamed_rel_field` 表明系统设计上支持同时处理模型重命名和相关字段重命名。",
+        "Issue 标题和描述暗示这是一个应被支持的正常操作，但当前版本存在缺陷。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 中触发 bug 的命令。"
+      },
+      {
+        "name": "MigrationAutodetector.changes",
+        "kind": "method",
+        "source_path": "django/db/migrations/autodetector.py",
+        "reason": "Traceback 显示异常发生在 autodetector 的调用链中。"
+      },
+      {
+        "name": "MigrationAutodetector._detect_changes",
+        "kind": "method",
+        "source_path": "django/db/migrations/autodetector.py",
+        "reason": "Traceback 显示调用链经过此方法。"
+      },
+      {
+        "name": "MigrationAutodetector.generate_renamed_fields",
+        "kind": "method",
+        "source_path": "django/db/migrations/autodetector.py",
+        "reason": "Traceback 显示异常直接发生在此方法内。"
+      },
+      {
+        "name": "MigrationQuestioner",
+        "kind": "class",
+        "source_path": "django/db/migrations/questioner.py",
+        "reason": "相关测试中用于模拟用户交互（如确认重命名）的关键类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/autodetector.py",
+        "object": "MigrationAutodetector.generate_renamed_fields",
+        "lines": "823",
+        "reason": "Issue 的 Traceback 直接指向此行代码：`new_model_state = self.to_state.models[app_label, old_model_name]` 抛出 KeyError。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_rename_model_with_renamed_rel_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试明确处理了同时重命名模型和相关字段的场景，与 Issue 描述的场景高度相似。",
+        "reusable_parts": [
+          "AutodetectorTests 测试类",
+          "`self.get_changes` 方法调用模式",
+          "使用 `MigrationQuestioner` 模拟用户确认",
+          "`assertNumberMigrations` 和 `assertOperationTypes` 等断言风格"
+        ],
+        "possible_gap": "该测试可能使用了不同的模型/字段初始状态，或者其交互流程（`ask_rename` 和 `ask_rename_model` 的配置）与触发 Issue 的确切场景不完全一致。"
+      },
+      {
+        "test_name": "test_rename_model",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "测试了模型重命名，是 Issue 中复合操作的一部分。",
+        "reusable_parts": [
+          "测试类",
+          "`get_changes` 调用",
+          "使用 `MigrationQuestioner` 并设置 `ask_rename_model`",
+          "对 `RenameModel` 操作的断言"
+        ],
+        "possible_gap": "仅测试模型重命名，未涉及字段重命名，因此无法复现复合操作导致的 KeyError。"
+      },
+      {
+        "test_name": "test_rename_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "测试了字段重命名，是 Issue 中复合操作的另一部分。",
+        "reusable_parts": [
+          "测试类",
+          "`get_changes` 调用",
+          "使用 `MigrationQuestioner` 并设置 `ask_rename`",
+          "对 `RenameField` 操作的断言"
+        ],
+        "possible_gap": "仅测试字段重命名，未涉及模型重命名，因此无法复现复合操作导致的 KeyError。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中，`before` 和 `after` 的 ModelState 列表通常是分开定义的（如 `self.author_with_book`, `self.book`）。",
+        "target_pattern": "构造一个 `before` 状态包含模型 A 和字段 F，`after` 状态将模型 A 重命名为 B，同时将字段 F 重命名为 G 的场景。",
+        "reason": "Issue 描述在单个步骤中同时重命名模型和字段，这可能是导致 `generate_renamed_fields` 方法内部状态不一致（如查找旧模型名失败）的原因。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，`MigrationQuestioner` 的参数字典可能同时设置了 `ask_rename` 和 `ask_rename_model` 为 True。",
+        "target_pattern": "确保 `MigrationQuestioner` 配置能模拟用户对模型重命名和字段重命名都回答“是”的交互。",
+        "reason": "Issue 中显示了用户确认模型重命名的提示，字段重命名可能也需要确认。正确的问答模拟是触发完整检测流程的关键。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `autodetector.changes()` 或 `self.get_changes()` 时是否抛出 `KeyError`，特别是关于 `('test_one', 'mymodel')` 或类似键。",
+        "reason": "Issue 的核心错误现象是 KeyError，观测此异常是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 `generate_renamed_fields` 方法内部或前后，`self.from_state.models` 和 `self.to_state.models` 字典的内容，特别是与重命名模型相关的键。",
+        "reason": "KeyError 表明在 `to_state.models` 中找不到预期的键，观测这两个状态字典有助于理解状态不一致的原因。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`autodetector.changes()` 的返回值（一个变更字典），观察是否成功生成了包含 `RenameModel` 和 `RenameField` 操作的迁移计划。",
+        "reason": "在正常（修复后）情况下，应返回正确的迁移计划；在缺陷情况下，可能因异常而返回不完整结果或直接崩溃。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在同时重命名模型和字段的场景下，迁移检测过程不会抛出 KeyError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的迁移操作列表或具体的 SQL 语句，因为这些可能随修复细节变化。",
+        "reason": "Issue 的核心是崩溃（KeyError），因此首要断言是操作不会引发该异常。使用 `assertRaises` 的否定形式（或 `assertNotRaises` 模式）来验证稳定性。"
+      },
+      {
+        "assertion_goal": "验证迁移检测成功完成并产生了变更（changes 非空或包含预期操作）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言 changes 字典的精确结构或操作顺序。",
+        "reason": "在修复后，系统应能处理该场景并生成迁移。断言有变更产生，比断言特定操作类型更稳定，因为修复可能调整操作的具体组织方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `TestCase`（如 `AutodetectorTests`）并继承其 `get_changes` 等方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造 `ModelState` 对象来表示模型定义在重命名前和后的状态。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 `MigrationQuestioner` 并配置适当的参数字典来模拟用户对重命名问题的确认。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 `testapp` 或类似的应用上下文中运行。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "触发 KeyError 所需的确切模型和字段结构（除了同时重命名）是否还有其他必要条件。",
+      "`generate_renamed_fields` 方法内部导致状态不一致（`to_state.models` 中缺少键）的具体逻辑顺序是什么。",
+      "修复后的正确行为下，生成的迁移操作的具体类型和顺序是否会与现有相关测试（如 `test_rename_model_with_renamed_rel_field`）完全相同。"
+    ]
+  }
+}

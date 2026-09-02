@@ -1,0 +1,264 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12155",
+  "issue_summary": "当文档字符串的第一行非空时，trim_docstring 函数计算缩进错误，导致 admindocs 渲染视图文档字符串时报错。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要确保 docutils 可用，使用 @unittest.skipUnless(docutils_is_available, ...) 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 AdminDocsSimpleTestCase 或类似测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造一个第一行非空的文档字符串作为测试输入。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestUtils.test_trim_docstring",
+        "test_file": "tests/admin_docs/test_utils.py",
+        "why_relevant": "它直接测试了 trim_docstring 函数，是生成缺陷复现测试最直接的起点。",
+        "reusable_parts": [
+          "imports",
+          "class TestUtils(AdminDocsSimpleTestCase)",
+          "skipUnless(docutils_is_available, ...) 装饰器",
+          "调用 trim_docstring 的 pattern",
+          "使用 assertEqual 进行字符串比较"
+        ],
+        "possible_gap": "当前测试使用的 self.docstring 可能是一个第一行为空的文档字符串（符合 Django 惯例），因此不会触发缺陷。"
+      },
+      {
+        "test_name": "TestUtils.test_parse_docstring",
+        "test_file": "tests/admin_docs/test_utils.py",
+        "why_relevant": "它测试了 parse_docstring，后者可能内部使用了 trim_docstring，且关注文档字符串的解析结果。",
+        "reusable_parts": [
+          "测试类结构",
+          "对 parse_docstring 的调用",
+          "对 title, description, metadata 的断言模式"
+        ],
+        "possible_gap": "它同样依赖于 self.docstring，可能不包含触发缺陷的输入模式。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 trim_docstring 函数处理一个第一行非空（即首行文本前没有空行）的文档字符串。",
+      "evidence": [
+        "Issue 描述：'docutils reports an error rendering view docstring when the first line is not empty'",
+        "Issue 示例：def test(): \"\"\"test tests something.\n\"\"\"",
+        "源码片段 1 中 trim_docstring 函数计算缩进时使用了所有行：indent = min(len(line) - len(line.lstrip()) for line in lines if line.lstrip())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "渲染文档字符串时出现 docutils 错误：'Error in \"default-role\" directive: no content permitted.'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：'Error in \"default-role\" directive:\nno content permitted.\n.. default-role:: cmsreference'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "trim_docstring",
+        "kind": "function",
+        "source_path": "django/contrib/admindocs/utils.py",
+        "reason": "Issue 直接指出该函数是问题的根源，其计算缩进的逻辑有缺陷。"
+      },
+      {
+        "name": "parse_docstring",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 3 和 4 使用了此函数，它可能调用 trim_docstring 或处理其输出，与文档字符串解析流程相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admindocs/utils.py",
+        "object": "trim_docstring",
+        "lines": "27-39",
+        "reason": "Issue 明确指出问题在于该函数中计算 indent 的代码行，它错误地包含了第一行（其缩进为0）。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用的 self.docstring（推测第一行为空，符合 Django 惯例）。",
+        "target_pattern": "一个第一行非空（即文本直接从第一行开始）的文档字符串。",
+        "reason": "Issue 明确指出当前缺陷仅在文档字符串第一行非空时触发，因为此时第一行缩进为0，导致 min 计算错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "trim_docstring 函数应能正确处理第一行非空的文档字符串，正确计算后续行的缩进并均匀修剪，使得 admindocs 能正常渲染视图文档字符串。",
+      "evidence": [
+        "Issue 中提出的解决方案：'The solution is to skip the first line: indent = min(len(line) - len(line.lstrip()) for line in lines[1:] if line.lstrip())'",
+        "Issue 描述：'Currently admindocs works correctly only with docstrings where the first line is empty'，隐含期望是也能处理第一行非空的情况。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "trim_docstring(docstring) 的返回值，特别是其字符串内容和格式。",
+        "reason": "观察修剪后的文档字符串是否因缩进计算错误而导致格式混乱，这可能是后续渲染错误的根源。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 parse_rst 或相关渲染函数时抛出的异常（如 docutils.utils.SystemMessage）。",
+        "reason": "Issue 中观察到的错误症状是渲染时抛出的 docutils 异常，这是缺陷的直接表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "trim_docstring 函数处理第一行非空的文档字符串时，应返回正确修剪（即后续行缩进被正确移除）的字符串，且该字符串能被后续渲染函数正常处理而不引发 docutils 异常。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言与特定渲染输出（如完整 HTML）的精确相等，因为 Issue 未提供修复后的精确输出。",
+        "reason": "Issue 的核心是避免渲染错误。一个稳定的断言是验证渲染过程不抛出特定异常，或者验证修剪后的字符串不包含因缩进错误引入的异常前导空格。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "self.docstring 在现有测试中的确切内容（是否第一行为空）未在提供片段中明确。",
+    "触发渲染错误的完整调用链（例如，是否必须通过特定视图）未完全明确。",
+    "修复后 trim_docstring 对于第一行非空输入的确切输出格式未在 Issue 中详细说明。"
+  ],
+  "raw": {
+    "issue_summary": "当文档字符串的第一行非空时，trim_docstring 函数计算缩进错误，导致 admindocs 渲染视图文档字符串时报错。",
+    "trigger_condition": {
+      "text": "调用 trim_docstring 函数处理一个第一行非空（即首行文本前没有空行）的文档字符串。",
+      "evidence": [
+        "Issue 描述：'docutils reports an error rendering view docstring when the first line is not empty'",
+        "Issue 示例：def test(): \"\"\"test tests something.\n\"\"\"",
+        "源码片段 1 中 trim_docstring 函数计算缩进时使用了所有行：indent = min(len(line) - len(line.lstrip()) for line in lines if line.lstrip())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "渲染文档字符串时出现 docutils 错误：'Error in \"default-role\" directive: no content permitted.'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：'Error in \"default-role\" directive:\nno content permitted.\n.. default-role:: cmsreference'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "trim_docstring 函数应能正确处理第一行非空的文档字符串，正确计算后续行的缩进并均匀修剪，使得 admindocs 能正常渲染视图文档字符串。",
+      "evidence": [
+        "Issue 中提出的解决方案：'The solution is to skip the first line: indent = min(len(line) - len(line.lstrip()) for line in lines[1:] if line.lstrip())'",
+        "Issue 描述：'Currently admindocs works correctly only with docstrings where the first line is empty'，隐含期望是也能处理第一行非空的情况。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "trim_docstring",
+        "kind": "function",
+        "source_path": "django/contrib/admindocs/utils.py",
+        "reason": "Issue 直接指出该函数是问题的根源，其计算缩进的逻辑有缺陷。"
+      },
+      {
+        "name": "parse_docstring",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 3 和 4 使用了此函数，它可能调用 trim_docstring 或处理其输出，与文档字符串解析流程相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admindocs/utils.py",
+        "object": "trim_docstring",
+        "lines": "27-39",
+        "reason": "Issue 明确指出问题在于该函数中计算 indent 的代码行，它错误地包含了第一行（其缩进为0）。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestUtils.test_trim_docstring",
+        "test_file": "tests/admin_docs/test_utils.py",
+        "why_relevant": "它直接测试了 trim_docstring 函数，是生成缺陷复现测试最直接的起点。",
+        "reusable_parts": [
+          "imports",
+          "class TestUtils(AdminDocsSimpleTestCase)",
+          "skipUnless(docutils_is_available, ...) 装饰器",
+          "调用 trim_docstring 的 pattern",
+          "使用 assertEqual 进行字符串比较"
+        ],
+        "possible_gap": "当前测试使用的 self.docstring 可能是一个第一行为空的文档字符串（符合 Django 惯例），因此不会触发缺陷。"
+      },
+      {
+        "test_name": "TestUtils.test_parse_docstring",
+        "test_file": "tests/admin_docs/test_utils.py",
+        "why_relevant": "它测试了 parse_docstring，后者可能内部使用了 trim_docstring，且关注文档字符串的解析结果。",
+        "reusable_parts": [
+          "测试类结构",
+          "对 parse_docstring 的调用",
+          "对 title, description, metadata 的断言模式"
+        ],
+        "possible_gap": "它同样依赖于 self.docstring，可能不包含触发缺陷的输入模式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用的 self.docstring（推测第一行为空，符合 Django 惯例）。",
+        "target_pattern": "一个第一行非空（即文本直接从第一行开始）的文档字符串。",
+        "reason": "Issue 明确指出当前缺陷仅在文档字符串第一行非空时触发，因为此时第一行缩进为0，导致 min 计算错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "trim_docstring(docstring) 的返回值，特别是其字符串内容和格式。",
+        "reason": "观察修剪后的文档字符串是否因缩进计算错误而导致格式混乱，这可能是后续渲染错误的根源。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 parse_rst 或相关渲染函数时抛出的异常（如 docutils.utils.SystemMessage）。",
+        "reason": "Issue 中观察到的错误症状是渲染时抛出的 docutils 异常，这是缺陷的直接表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "trim_docstring 函数处理第一行非空的文档字符串时，应返回正确修剪（即后续行缩进被正确移除）的字符串，且该字符串能被后续渲染函数正常处理而不引发 docutils 异常。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言与特定渲染输出（如完整 HTML）的精确相等，因为 Issue 未提供修复后的精确输出。",
+        "reason": "Issue 的核心是避免渲染错误。一个稳定的断言是验证渲染过程不抛出特定异常，或者验证修剪后的字符串不包含因缩进错误引入的异常前导空格。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要确保 docutils 可用，使用 @unittest.skipUnless(docutils_is_available, ...) 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 AdminDocsSimpleTestCase 或类似测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造一个第一行非空的文档字符串作为测试输入。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "self.docstring 在现有测试中的确切内容（是否第一行为空）未在提供片段中明确。",
+      "触发渲染错误的完整调用链（例如，是否必须通过特定视图）未完全明确。",
+      "修复后 trim_docstring 对于第一行非空输入的确切输出格式未在 Issue 中详细说明。"
+    ]
+  }
+}

@@ -1,0 +1,312 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-20826",
+  "issue_summary": "当使用共享坐标轴时，调用 ax.clear() 会导致本应隐藏的刻度线和刻度标签重新显示，并出现额外的顶部和右侧刻度线。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 matplotlib.pyplot 和 numpy。测试应在一个独立的图形上下文中运行，以避免与其他测试的图形状态干扰。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以参考相关测试中使用的 check_visible 辅助函数来简化对刻度标签可见性的断言。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_shared",
+        "test_file": "lib/matplotlib/tests/test_subplots.py",
+        "why_relevant": "该测试专门验证了共享坐标轴（sharex, sharey）在不同配置下的行为，包括刻度标签的可见性（check_visible）。",
+        "reusable_parts": [
+          "使用 plt.subplots 创建共享坐标轴子图的模式",
+          "check_visible 辅助函数（可从测试上下文推断）用于验证刻度标签可见性",
+          "对不同 sharex/sharey 选项的测试循环结构"
+        ],
+        "possible_gap": "该测试没有涉及在创建子图后调用 ax.clear() 的操作，这是触发当前 Issue 的关键步骤。"
+      },
+      {
+        "test_name": "test_shared_axes_retick",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试在共享坐标轴设置下操作刻度（set_xticks, set_yticks），并验证所有坐标轴的 limits 保持一致，这与 Issue 中坐标轴链接仍保持的描述一致。",
+        "reusable_parts": [
+          "创建共享坐标轴子图（sharex='all', sharey='all'）",
+          "使用 axs.flat 遍历子图",
+          "使用 assert 验证所有子图的坐标轴范围（get_xlim, get_ylim）一致"
+        ],
+        "possible_gap": "该测试关注的是设置刻度后的范围一致性，而非 clear() 操作后刻度标签的可见性。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 plt.subplots(2, 2, sharex=True, sharey=True) 创建共享坐标轴的子图，然后对每个子图调用 ax.clear() 并重新绘图。",
+      "evidence": [
+        "Issue 中的代码示例：fig, axes = plt.subplots(2, 2, sharex=True, sharey=True); for ax in axes.flatten(): ax.clear(); ax.plot(x, y)",
+        "Issue 描述：'When using shared axes (e.g. from `plt.subplots(2, 2, sharex=True, sharey=True)`), calling `ax.clear()` causes ticks and tick labels to be shown that should be hidden.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "共享坐标轴下，本应隐藏的刻度标签（tick labels）被显示出来，并且每个子图的顶部和右侧出现了额外的刻度线（ticks）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'The presence of tick labels that should be hidden by virtue of the shared axes is the clearest problem... there are also ticks that appear along the top and right side of each subplot'",
+        "Issue 中的图片对比展示了 3.4.2（有额外刻度）和 3.4.1（正常）的差异。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.subplots",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "用于创建具有共享坐标轴的子图，是触发缺陷的初始条件。"
+      },
+      {
+        "name": "Axes.clear",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出调用 ax.clear() 是触发缺陷的关键操作。"
+      },
+      {
+        "name": "Axes.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 代码中在 clear() 后调用 plot 重新绘图。"
+      },
+      {
+        "name": "numpy.flatten",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 代码中使用 axes.flatten() 遍历子图。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "Axes.clear",
+        "lines": "",
+        "reason": "Issue 的核心是调用 ax.clear() 后共享坐标轴的刻度状态被错误重置。clear 方法可能没有正确处理共享坐标轴的刻度可见性状态。"
+      },
+      {
+        "path": "lib/matplotlib/axis.py",
+        "object": "Axis 相关方法",
+        "lines": "",
+        "reason": "刻度线和刻度标签的显示/隐藏逻辑由 Axis 对象管理，clear 操作可能错误地影响了这些对象的内部状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中，创建共享坐标轴子图后直接进行绘图或设置刻度操作。",
+        "target_pattern": "在创建共享坐标轴子图后，对每个子图插入 ax.clear() 调用，然后再进行绘图操作。",
+        "reason": "Issue 明确指出，在共享坐标轴子图中调用 ax.clear() 是触发额外刻度和标签显示的必要步骤。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中共享坐标轴的初始状态（由 plt.subplots 创建）是正常的。",
+        "target_pattern": "在 clear() 调用后，共享坐标轴子图的状态（特别是刻度相关对象的内部状态）可能被错误重置，失去了隐藏部分标签的配置。",
+        "reason": "Issue 描述 clear() 后坐标轴链接仍保持，但刻度可见性状态被破坏，表明 clear 可能没有正确恢复共享相关的状态。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在共享坐标轴的子图中调用 ax.clear() 后，重新绘制的图形应保持共享坐标轴的特性，即只有底部/左侧子图显示刻度标签，并且不出现额外的顶部和右侧刻度线。",
+      "evidence": [
+        "Issue 描述：'The axes are still linked, though (e.g. adjusting the plotting range on one subplot adjusts the others as well).' 表明链接关系应保持。",
+        "Issue 中 3.4.1 版本的图片展示了预期的正确行为：刻度标签隐藏，无额外刻度线。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "对于每个子图，观察 ax.xaxis.get_ticklabels() 和 ax.yaxis.get_ticklabels() 的可见性（例如 label.get_visible()），以及 ax.xaxis._major_tick_kw 和 ax.yaxis._major_tick_kw 中 'top', 'bottom', 'left', 'right' 等键的值。",
+        "reason": "Issue 的核心错误是刻度标签的可见性错误和额外刻度线的出现，直接观测这些状态可以判断缺陷是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察子图之间坐标轴对象的链接关系，例如 axs[0,0]._shared_x_axes 和 axs[0,0]._shared_y_axes 的属性。",
+        "reason": "Issue 提到坐标轴链接仍然保持，但刻度状态错误。观测链接状态有助于理解 clear() 对共享关系的影响。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在共享坐标轴（sharex=True, sharey=True）的 2x2 子图中，只有底部一行子图的 x 轴刻度标签可见，只有左侧一列子图的 y 轴刻度标签可见。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的刻度标签文本列表，因为具体数值可能因绘图数据而变化。",
+        "reason": "Issue 的预期行为是共享坐标轴的标签隐藏规则应被遵守。断言可见性布尔值列表是稳定且直接的验证方式。"
+      },
+      {
+        "assertion_goal": "子图的顶部和右侧不应显示刻度线（即默认的 'both' 或 'in' 样式不应被意外改为 'both' 并显示顶部/右侧刻度）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的刻度线位置数组，因为范围可能变化。",
+        "reason": "Issue 明确指出出现了额外的顶部和右侧刻度线，这是错误现象的一部分。断言刻度线的位置属性（如 tick_params 的 'top', 'right' 设置）更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "ax.clear() 方法内部具体是哪个步骤错误地重置了刻度状态（是清除了特定属性，还是错误地调用了某个重置函数）。",
+    "顶部和右侧刻度线的出现是否与共享坐标轴设置直接相关，还是 clear() 的一个独立副作用（Issue 中提到这可能是一个独立问题）。",
+    "除了 2x2 网格，其他共享配置（如 sharex='col', sharey='row'）是否也会受到相同影响。"
+  ],
+  "raw": {
+    "issue_summary": "当使用共享坐标轴时，调用 ax.clear() 会导致本应隐藏的刻度线和刻度标签重新显示，并出现额外的顶部和右侧刻度线。",
+    "trigger_condition": {
+      "text": "使用 plt.subplots(2, 2, sharex=True, sharey=True) 创建共享坐标轴的子图，然后对每个子图调用 ax.clear() 并重新绘图。",
+      "evidence": [
+        "Issue 中的代码示例：fig, axes = plt.subplots(2, 2, sharex=True, sharey=True); for ax in axes.flatten(): ax.clear(); ax.plot(x, y)",
+        "Issue 描述：'When using shared axes (e.g. from `plt.subplots(2, 2, sharex=True, sharey=True)`), calling `ax.clear()` causes ticks and tick labels to be shown that should be hidden.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "共享坐标轴下，本应隐藏的刻度标签（tick labels）被显示出来，并且每个子图的顶部和右侧出现了额外的刻度线（ticks）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'The presence of tick labels that should be hidden by virtue of the shared axes is the clearest problem... there are also ticks that appear along the top and right side of each subplot'",
+        "Issue 中的图片对比展示了 3.4.2（有额外刻度）和 3.4.1（正常）的差异。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在共享坐标轴的子图中调用 ax.clear() 后，重新绘制的图形应保持共享坐标轴的特性，即只有底部/左侧子图显示刻度标签，并且不出现额外的顶部和右侧刻度线。",
+      "evidence": [
+        "Issue 描述：'The axes are still linked, though (e.g. adjusting the plotting range on one subplot adjusts the others as well).' 表明链接关系应保持。",
+        "Issue 中 3.4.1 版本的图片展示了预期的正确行为：刻度标签隐藏，无额外刻度线。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.subplots",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "用于创建具有共享坐标轴的子图，是触发缺陷的初始条件。"
+      },
+      {
+        "name": "Axes.clear",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出调用 ax.clear() 是触发缺陷的关键操作。"
+      },
+      {
+        "name": "Axes.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 代码中在 clear() 后调用 plot 重新绘图。"
+      },
+      {
+        "name": "numpy.flatten",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 代码中使用 axes.flatten() 遍历子图。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "Axes.clear",
+        "lines": "",
+        "reason": "Issue 的核心是调用 ax.clear() 后共享坐标轴的刻度状态被错误重置。clear 方法可能没有正确处理共享坐标轴的刻度可见性状态。"
+      },
+      {
+        "path": "lib/matplotlib/axis.py",
+        "object": "Axis 相关方法",
+        "lines": "",
+        "reason": "刻度线和刻度标签的显示/隐藏逻辑由 Axis 对象管理，clear 操作可能错误地影响了这些对象的内部状态。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_shared",
+        "test_file": "lib/matplotlib/tests/test_subplots.py",
+        "why_relevant": "该测试专门验证了共享坐标轴（sharex, sharey）在不同配置下的行为，包括刻度标签的可见性（check_visible）。",
+        "reusable_parts": [
+          "使用 plt.subplots 创建共享坐标轴子图的模式",
+          "check_visible 辅助函数（可从测试上下文推断）用于验证刻度标签可见性",
+          "对不同 sharex/sharey 选项的测试循环结构"
+        ],
+        "possible_gap": "该测试没有涉及在创建子图后调用 ax.clear() 的操作，这是触发当前 Issue 的关键步骤。"
+      },
+      {
+        "test_name": "test_shared_axes_retick",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试在共享坐标轴设置下操作刻度（set_xticks, set_yticks），并验证所有坐标轴的 limits 保持一致，这与 Issue 中坐标轴链接仍保持的描述一致。",
+        "reusable_parts": [
+          "创建共享坐标轴子图（sharex='all', sharey='all'）",
+          "使用 axs.flat 遍历子图",
+          "使用 assert 验证所有子图的坐标轴范围（get_xlim, get_ylim）一致"
+        ],
+        "possible_gap": "该测试关注的是设置刻度后的范围一致性，而非 clear() 操作后刻度标签的可见性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中，创建共享坐标轴子图后直接进行绘图或设置刻度操作。",
+        "target_pattern": "在创建共享坐标轴子图后，对每个子图插入 ax.clear() 调用，然后再进行绘图操作。",
+        "reason": "Issue 明确指出，在共享坐标轴子图中调用 ax.clear() 是触发额外刻度和标签显示的必要步骤。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中共享坐标轴的初始状态（由 plt.subplots 创建）是正常的。",
+        "target_pattern": "在 clear() 调用后，共享坐标轴子图的状态（特别是刻度相关对象的内部状态）可能被错误重置，失去了隐藏部分标签的配置。",
+        "reason": "Issue 描述 clear() 后坐标轴链接仍保持，但刻度可见性状态被破坏，表明 clear 可能没有正确恢复共享相关的状态。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "对于每个子图，观察 ax.xaxis.get_ticklabels() 和 ax.yaxis.get_ticklabels() 的可见性（例如 label.get_visible()），以及 ax.xaxis._major_tick_kw 和 ax.yaxis._major_tick_kw 中 'top', 'bottom', 'left', 'right' 等键的值。",
+        "reason": "Issue 的核心错误是刻度标签的可见性错误和额外刻度线的出现，直接观测这些状态可以判断缺陷是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察子图之间坐标轴对象的链接关系，例如 axs[0,0]._shared_x_axes 和 axs[0,0]._shared_y_axes 的属性。",
+        "reason": "Issue 提到坐标轴链接仍然保持，但刻度状态错误。观测链接状态有助于理解 clear() 对共享关系的影响。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在共享坐标轴（sharex=True, sharey=True）的 2x2 子图中，只有底部一行子图的 x 轴刻度标签可见，只有左侧一列子图的 y 轴刻度标签可见。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的刻度标签文本列表，因为具体数值可能因绘图数据而变化。",
+        "reason": "Issue 的预期行为是共享坐标轴的标签隐藏规则应被遵守。断言可见性布尔值列表是稳定且直接的验证方式。"
+      },
+      {
+        "assertion_goal": "子图的顶部和右侧不应显示刻度线（即默认的 'both' 或 'in' 样式不应被意外改为 'both' 并显示顶部/右侧刻度）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的刻度线位置数组，因为范围可能变化。",
+        "reason": "Issue 明确指出出现了额外的顶部和右侧刻度线，这是错误现象的一部分。断言刻度线的位置属性（如 tick_params 的 'top', 'right' 设置）更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 matplotlib.pyplot 和 numpy。测试应在一个独立的图形上下文中运行，以避免与其他测试的图形状态干扰。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以参考相关测试中使用的 check_visible 辅助函数来简化对刻度标签可见性的断言。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "ax.clear() 方法内部具体是哪个步骤错误地重置了刻度状态（是清除了特定属性，还是错误地调用了某个重置函数）。",
+      "顶部和右侧刻度线的出现是否与共享坐标轴设置直接相关，还是 clear() 的一个独立副作用（Issue 中提到这可能是一个独立问题）。",
+      "除了 2x2 网格，其他共享配置（如 sharex='col', sharey='row'）是否也会受到相同影响。"
+    ]
+  }
+}

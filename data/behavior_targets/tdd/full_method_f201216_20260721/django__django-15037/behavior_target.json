@@ -1,0 +1,320 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15037",
+  "issue_summary": "inspectdb 命令在生成模型时，未能正确处理指向特定字段（非主键）的外键约束。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `TransactionTestCase` 或能够安全创建和销毁数据库表的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在测试开始时通过原始 SQL (`connection.cursor().execute(...)`) 或 Django 的 `schema_editor` 创建符合 Issue 描述的 `foo` 和 `bar` 表。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要针对 PostgreSQL 数据库，因为 Issue 中的 SQL 语法（`serial` 类型）和某些测试（如 `test_foreign_data_wrapper`）暗示了 PostgreSQL 环境。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要使用 `StringIO` 来捕获 `inspectdb` 命令的标准输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "InspectDBTestCase.test_field_types",
+        "test_file": "tests/inspectdb/tests.py",
+        "why_relevant": "该测试验证 inspectdb 对各种字段类型的自省能力，包含生成字段定义的断言模式，是测试 inspectdb 输出格式的典型起点。",
+        "reusable_parts": [
+          "使用 `call_command('inspectdb', ...)` 调用命令并捕获输出（`StringIO`）的模式。",
+          "对输出内容进行断言检查的模式（如 `self.assertIn`）。",
+          "测试类 `InspectDBTestCase` 和 `TestCase` 基类。"
+        ],
+        "possible_gap": "该测试主要关注基本字段类型（CharField, TextField等），不涉及复杂的外键约束，特别是外键指向非主键唯一字段的场景。"
+      },
+      {
+        "test_name": "InspectDBTestCase.test_unique_together_meta",
+        "test_file": "tests/inspectdb/tests.py",
+        "why_relevant": "该测试验证 inspectdb 对数据库唯一约束（unique_together）的自省能力，展示了如何检查命令输出中是否包含特定的元数据声明。",
+        "reusable_parts": [
+          "使用 `call_command` 并指定特定表名（`'inspectdb_uniquetogether'`）的模式。",
+          "使用正则表达式（`self.unique_re`）从输出中提取结构化信息的模式。",
+          "对输出片段进行断言（`self.assertIn`）的模式。"
+        ],
+        "possible_gap": "该测试关注的是表级唯一约束（unique_together），而非列级唯一约束（用于支持外键的 `to_field`）。"
+      },
+      {
+        "test_name": "SchemaTests.test_namespaced_db_table_foreign_key_reference",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "该测试涉及外键的创建和数据库模式操作，展示了在 PostgreSQL 上设置复杂表名（带模式）和外键的测试模式。",
+        "reusable_parts": [
+          "在 PostgreSQL 上执行自定义 SQL 来创建数据库对象（如表、模式）的模式。",
+          "使用 `TransactionTestCase` 和 `isolate_apps` 装饰器进行数据库事务测试的模式。",
+          "使用 `connection.schema_editor()` 进行模式操作的上下文管理器模式。"
+        ],
+        "possible_gap": "该测试关注的是 Django 模型层创建外键的行为，而非 inspectdb 从现有数据库自省外键的行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个包含外键约束的数据库表运行 inspectdb 命令，该外键指向另一个表的非主键唯一字段。",
+      "evidence": [
+        "Issue 中提供的 SQL 示例：`FOREIGN KEY(other_id) references foo(other_id)`，其中 `foo(other_id)` 是唯一字段但不是主键。",
+        "Issue 标题和描述明确指出问题与 inspectdb 处理外键到特定字段有关。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的模型代码中，外键字段被错误地关联到目标表的主键（例如 `models.ForeignKey(Foo, on_delete=models.CASCADE)`），而不是关联到指定的目标字段（例如 `models.ForeignKey(Foo, on_delete=models.CASCADE, to_field='other_id')`）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：\"the generated model for the bar table will have the other_id be a FK to foo and not foo(other_id).\"",
+        "Issue 标题 \"Foreign key to a specific field is not handled in inspectdb\" 直接描述了症状。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "用于调用 inspectdb 管理命令，是触发缺陷复现的主要入口。"
+      },
+      {
+        "name": "inspectdb",
+        "kind": "command",
+        "source_path": "django/contrib/gis/management/commands/inspectdb.py",
+        "reason": "Issue 直接针对 inspectdb 命令的功能缺陷。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/gis/management/commands/inspectdb.py",
+        "object": "inspectdb 命令的实现代码",
+        "lines": "",
+        "reason": "Issue 直接指向 inspectdb 功能，且相关源码片段 1 指向此文件。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中通常使用简单的表结构或内置测试模型。",
+        "target_pattern": "创建一个包含 Issue 描述中特定结构的数据库表：一个表（foo）有唯一非主键字段，另一个表（bar）有指向该唯一字段的外键。",
+        "reason": "Issue 的触发依赖于数据库中存在指向非主键唯一字段的外键约束，这是当前测试未覆盖的输入模式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用 `call_command('inspectdb')` 并检查输出。",
+        "target_pattern": "在调用 `call_command('inspectdb', ...)` 之前，需要先通过原始 SQL 或 Django 的 schema 编辑器创建出具有特定外键约束的测试表。",
+        "reason": "为了复现缺陷，测试环境必须包含 Issue 描述的特定数据库结构，这需要在测试设置阶段构建。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "inspectdb 命令应能正确识别并生成指向目标表特定字段（非主键）的外键字段定义，在生成的模型代码中包含 `to_field` 参数。",
+      "evidence": [
+        "Issue 描述中隐含的期望：外键应指向 `foo(other_id)` 而非默认的 `foo` 主键。",
+        "相关测试代码（如 `test_field_types`）展示了 inspectdb 应能正确生成各种字段定义的模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "`call_command('inspectdb', stdout=out)` 后 `out.getvalue()` 返回的完整字符串输出。",
+        "reason": "缺陷症状直接体现在 inspectdb 命令生成的模型代码文本中，需要检查输出是否包含正确的 `to_field='other_id'` 参数。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在创建测试表之前/之后，通过 `connection.introspection.get_constraints` 或类似 API 获取的外键约束信息。",
+        "reason": "可以验证数据库中外键约束是否确实指向了正确的列（`foo.other_id`），为后续断言提供依据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 inspectdb 为 bar 表的 other_id 字段生成的模型代码中，包含了指向 foo 表 other_id 字段的正确外键定义（即包含 `to_field='other_id'`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对整个输出文件进行完整的字符串相等比较，因为生成的其他部分（如字段顺序、注释）可能变化。",
+        "reason": "Issue 的核心是缺失 `to_field` 参数，因此断言应聚焦于输出中是否包含该关键片段，这比完整字符串匹配更稳定。"
+      },
+      {
+        "assertion_goal": "验证生成的模型代码中，没有错误地将外键简单地关联到 foo 表的主键（即不应只有 `models.ForeignKey(Foo, ...)` 而没有 `to_field`）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言外键定义完全等于某个特定字符串，因为字段名、related_name 等可能因实现细节而异。",
+        "reason": "可以补充性地断言输出不包含明显错误的简化形式，以增强测试的鲁棒性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "inspectdb 内部处理外键约束的具体代码位置和逻辑尚不明确，需要进一步分析源码或通过插桩确认。",
+    "Issue 中提到的 \"potential fix\" 的具体内容未知，因此无法确定修复后的精确输出格式，只能推断应包含 `to_field` 参数。",
+    "不同数据库后端（如 PostgreSQL、MySQL）对唯一约束和外键的 introspection 支持可能不同，Issue 可能只针对特定后端。",
+    "除了 `to_field` 参数，生成的外键定义是否还需要其他相关参数（如 `db_column`）尚不确定。"
+  ],
+  "raw": {
+    "issue_summary": "inspectdb 命令在生成模型时，未能正确处理指向特定字段（非主键）的外键约束。",
+    "trigger_condition": {
+      "text": "对一个包含外键约束的数据库表运行 inspectdb 命令，该外键指向另一个表的非主键唯一字段。",
+      "evidence": [
+        "Issue 中提供的 SQL 示例：`FOREIGN KEY(other_id) references foo(other_id)`，其中 `foo(other_id)` 是唯一字段但不是主键。",
+        "Issue 标题和描述明确指出问题与 inspectdb 处理外键到特定字段有关。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的模型代码中，外键字段被错误地关联到目标表的主键（例如 `models.ForeignKey(Foo, on_delete=models.CASCADE)`），而不是关联到指定的目标字段（例如 `models.ForeignKey(Foo, on_delete=models.CASCADE, to_field='other_id')`）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：\"the generated model for the bar table will have the other_id be a FK to foo and not foo(other_id).\"",
+        "Issue 标题 \"Foreign key to a specific field is not handled in inspectdb\" 直接描述了症状。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "inspectdb 命令应能正确识别并生成指向目标表特定字段（非主键）的外键字段定义，在生成的模型代码中包含 `to_field` 参数。",
+      "evidence": [
+        "Issue 描述中隐含的期望：外键应指向 `foo(other_id)` 而非默认的 `foo` 主键。",
+        "相关测试代码（如 `test_field_types`）展示了 inspectdb 应能正确生成各种字段定义的模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "用于调用 inspectdb 管理命令，是触发缺陷复现的主要入口。"
+      },
+      {
+        "name": "inspectdb",
+        "kind": "command",
+        "source_path": "django/contrib/gis/management/commands/inspectdb.py",
+        "reason": "Issue 直接针对 inspectdb 命令的功能缺陷。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/gis/management/commands/inspectdb.py",
+        "object": "inspectdb 命令的实现代码",
+        "lines": "",
+        "reason": "Issue 直接指向 inspectdb 功能，且相关源码片段 1 指向此文件。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "InspectDBTestCase.test_field_types",
+        "test_file": "tests/inspectdb/tests.py",
+        "why_relevant": "该测试验证 inspectdb 对各种字段类型的自省能力，包含生成字段定义的断言模式，是测试 inspectdb 输出格式的典型起点。",
+        "reusable_parts": [
+          "使用 `call_command('inspectdb', ...)` 调用命令并捕获输出（`StringIO`）的模式。",
+          "对输出内容进行断言检查的模式（如 `self.assertIn`）。",
+          "测试类 `InspectDBTestCase` 和 `TestCase` 基类。"
+        ],
+        "possible_gap": "该测试主要关注基本字段类型（CharField, TextField等），不涉及复杂的外键约束，特别是外键指向非主键唯一字段的场景。"
+      },
+      {
+        "test_name": "InspectDBTestCase.test_unique_together_meta",
+        "test_file": "tests/inspectdb/tests.py",
+        "why_relevant": "该测试验证 inspectdb 对数据库唯一约束（unique_together）的自省能力，展示了如何检查命令输出中是否包含特定的元数据声明。",
+        "reusable_parts": [
+          "使用 `call_command` 并指定特定表名（`'inspectdb_uniquetogether'`）的模式。",
+          "使用正则表达式（`self.unique_re`）从输出中提取结构化信息的模式。",
+          "对输出片段进行断言（`self.assertIn`）的模式。"
+        ],
+        "possible_gap": "该测试关注的是表级唯一约束（unique_together），而非列级唯一约束（用于支持外键的 `to_field`）。"
+      },
+      {
+        "test_name": "SchemaTests.test_namespaced_db_table_foreign_key_reference",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "该测试涉及外键的创建和数据库模式操作，展示了在 PostgreSQL 上设置复杂表名（带模式）和外键的测试模式。",
+        "reusable_parts": [
+          "在 PostgreSQL 上执行自定义 SQL 来创建数据库对象（如表、模式）的模式。",
+          "使用 `TransactionTestCase` 和 `isolate_apps` 装饰器进行数据库事务测试的模式。",
+          "使用 `connection.schema_editor()` 进行模式操作的上下文管理器模式。"
+        ],
+        "possible_gap": "该测试关注的是 Django 模型层创建外键的行为，而非 inspectdb 从现有数据库自省外键的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中通常使用简单的表结构或内置测试模型。",
+        "target_pattern": "创建一个包含 Issue 描述中特定结构的数据库表：一个表（foo）有唯一非主键字段，另一个表（bar）有指向该唯一字段的外键。",
+        "reason": "Issue 的触发依赖于数据库中存在指向非主键唯一字段的外键约束，这是当前测试未覆盖的输入模式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用 `call_command('inspectdb')` 并检查输出。",
+        "target_pattern": "在调用 `call_command('inspectdb', ...)` 之前，需要先通过原始 SQL 或 Django 的 schema 编辑器创建出具有特定外键约束的测试表。",
+        "reason": "为了复现缺陷，测试环境必须包含 Issue 描述的特定数据库结构，这需要在测试设置阶段构建。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "`call_command('inspectdb', stdout=out)` 后 `out.getvalue()` 返回的完整字符串输出。",
+        "reason": "缺陷症状直接体现在 inspectdb 命令生成的模型代码文本中，需要检查输出是否包含正确的 `to_field='other_id'` 参数。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在创建测试表之前/之后，通过 `connection.introspection.get_constraints` 或类似 API 获取的外键约束信息。",
+        "reason": "可以验证数据库中外键约束是否确实指向了正确的列（`foo.other_id`），为后续断言提供依据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 inspectdb 为 bar 表的 other_id 字段生成的模型代码中，包含了指向 foo 表 other_id 字段的正确外键定义（即包含 `to_field='other_id'`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对整个输出文件进行完整的字符串相等比较，因为生成的其他部分（如字段顺序、注释）可能变化。",
+        "reason": "Issue 的核心是缺失 `to_field` 参数，因此断言应聚焦于输出中是否包含该关键片段，这比完整字符串匹配更稳定。"
+      },
+      {
+        "assertion_goal": "验证生成的模型代码中，没有错误地将外键简单地关联到 foo 表的主键（即不应只有 `models.ForeignKey(Foo, ...)` 而没有 `to_field`）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言外键定义完全等于某个特定字符串，因为字段名、related_name 等可能因实现细节而异。",
+        "reason": "可以补充性地断言输出不包含明显错误的简化形式，以增强测试的鲁棒性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `TransactionTestCase` 或能够安全创建和销毁数据库表的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在测试开始时通过原始 SQL (`connection.cursor().execute(...)`) 或 Django 的 `schema_editor` 创建符合 Issue 描述的 `foo` 和 `bar` 表。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要针对 PostgreSQL 数据库，因为 Issue 中的 SQL 语法（`serial` 类型）和某些测试（如 `test_foreign_data_wrapper`）暗示了 PostgreSQL 环境。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要使用 `StringIO` 来捕获 `inspectdb` 命令的标准输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "inspectdb 内部处理外键约束的具体代码位置和逻辑尚不明确，需要进一步分析源码或通过插桩确认。",
+      "Issue 中提到的 \"potential fix\" 的具体内容未知，因此无法确定修复后的精确输出格式，只能推断应包含 `to_field` 参数。",
+      "不同数据库后端（如 PostgreSQL、MySQL）对唯一约束和外键的 introspection 支持可能不同，Issue 可能只针对特定后端。",
+      "除了 `to_field` 参数，生成的外键定义是否还需要其他相关参数（如 `db_column`）尚不确定。"
+    ]
+  }
+}

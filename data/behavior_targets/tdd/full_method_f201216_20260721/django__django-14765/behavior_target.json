@@ -1,0 +1,246 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14765",
+  "issue_summary": "ProjectState.__init__() 的 real_apps 参数现在应该始终是集合，但代码仍包含类型检查和转换逻辑。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 作为测试基类，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 ProjectState 和 ModelState。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_real_apps",
+        "test_file": "tests/migrations/test_state.py",
+        "why_relevant": "它直接测试了 ProjectState 的 real_apps 参数，并展示了如何使用集合（如 {'contenttypes'}）进行构造。",
+        "reusable_parts": [
+          "ProjectState 的导入和构造",
+          "使用 real_apps 参数",
+          "SimpleTestCase 基类"
+        ],
+        "possible_gap": "该测试传递的是集合，没有测试传递非集合可迭代对象的情况，而这正是 Issue 讨论的触发条件。"
+      },
+      {
+        "test_name": "test_equality",
+        "test_file": "tests/migrations/test_state.py",
+        "why_relevant": "它展示了 ProjectState 的基本构造和克隆，提供了测试框架。",
+        "reusable_parts": [
+          "ProjectState() 的无参构造",
+          "ModelState 的使用",
+          "assertEqual/assertNotEqual 断言风格"
+        ],
+        "possible_gap": "没有涉及 real_apps 参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 ProjectState.__init__(real_apps=...) 时传入一个非集合（如列表或元组）但可迭代的对象。",
+      "evidence": [
+        "Issue 提到 PR #14760 已确保所有调用都传递集合，但 __init__ 方法仍包含 `isinstance(real_apps, set)` 检查和转换。",
+        "源码片段 2 显示 __init__ 方法包含 `real_apps if isinstance(real_apps, set) else set(real_apps)` 的逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前代码不会引发错误，但会执行不必要的类型检查和转换，与内部 API 的假设不一致。Issue 建议应改为断言（assert）以确保参数是集合。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'instead of checking that real_apps is a set and converting it to a set if not, it can just assert that it's a set when non-None.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ProjectState.__init__",
+        "kind": "method",
+        "source_path": "django/db/migrations/state.py",
+        "reason": "这是 Issue 直接讨论的方法，其 real_apps 参数的处理是核心。"
+      },
+      {
+        "name": "ProjectState",
+        "kind": "class",
+        "source_path": "django/db/migrations/state.py",
+        "reason": "缺陷涉及该类的构造函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/state.py",
+        "object": "ProjectState.__init__",
+        "lines": "91-100",
+        "reason": "源码片段 2 显示该方法包含对 real_apps 的类型检查和转换逻辑，而 Issue 认为这已不再必要。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中调用 ProjectState(real_apps={'contenttypes'})，传递一个集合字面量。",
+        "target_pattern": "调用 ProjectState(real_apps=['contenttypes']) 或 ProjectState(real_apps=('contenttypes',))，传递一个列表或元组。",
+        "reason": "Issue 暗示所有调用现在都应传递集合，但代码仍处理非集合情况。传递非集合可迭代对象可以测试当前代码的隐式转换行为，并验证是否应改为断言。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ProjectState.__init__() 应假设 real_apps 参数在非 None 时是一个集合，并可能通过断言来强制执行此约定，而不是进行隐式转换。",
+      "evidence": [
+        "Issue 明确说明：'it can just assert that it's a set when non-None.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(project_state_instance.real_apps)",
+        "reason": "观察 real_apps 实例属性的类型，以确认传入非集合参数时是否被隐式转换为集合，或是否触发了断言。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 ProjectState.__init__(real_apps=非集合可迭代对象) 时是否引发 AssertionError 或其他异常。",
+        "reason": "如果按照 Issue 建议改为断言，传递非集合应引发断言错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 real_apps 为非 None 且不是集合时，__init__ 方法的行为（是隐式转换还是引发断言）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的错误消息字符串，因为具体实现（断言或转换）可能变化。",
+        "reason": "Issue 建议改为断言，因此测试应关注是否在错误输入时引发适当异常（如 AssertionError），或是否仍静默转换。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 PR #14760 具体修改了哪些调用点以确保 real_apps 是集合，这超出了给定上下文。",
+    "当前代码库中是否已经应用了 Issue 的建议（即改为断言），或者是否仍保留隐式转换逻辑。",
+    "如果改为断言，断言的具体条件是什么（例如 `assert real_apps is None or isinstance(real_apps, set)`）。"
+  ],
+  "raw": {
+    "issue_summary": "ProjectState.__init__() 的 real_apps 参数现在应该始终是集合，但代码仍包含类型检查和转换逻辑。",
+    "trigger_condition": {
+      "text": "调用 ProjectState.__init__(real_apps=...) 时传入一个非集合（如列表或元组）但可迭代的对象。",
+      "evidence": [
+        "Issue 提到 PR #14760 已确保所有调用都传递集合，但 __init__ 方法仍包含 `isinstance(real_apps, set)` 检查和转换。",
+        "源码片段 2 显示 __init__ 方法包含 `real_apps if isinstance(real_apps, set) else set(real_apps)` 的逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前代码不会引发错误，但会执行不必要的类型检查和转换，与内部 API 的假设不一致。Issue 建议应改为断言（assert）以确保参数是集合。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'instead of checking that real_apps is a set and converting it to a set if not, it can just assert that it's a set when non-None.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ProjectState.__init__() 应假设 real_apps 参数在非 None 时是一个集合，并可能通过断言来强制执行此约定，而不是进行隐式转换。",
+      "evidence": [
+        "Issue 明确说明：'it can just assert that it's a set when non-None.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ProjectState.__init__",
+        "kind": "method",
+        "source_path": "django/db/migrations/state.py",
+        "reason": "这是 Issue 直接讨论的方法，其 real_apps 参数的处理是核心。"
+      },
+      {
+        "name": "ProjectState",
+        "kind": "class",
+        "source_path": "django/db/migrations/state.py",
+        "reason": "缺陷涉及该类的构造函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/state.py",
+        "object": "ProjectState.__init__",
+        "lines": "91-100",
+        "reason": "源码片段 2 显示该方法包含对 real_apps 的类型检查和转换逻辑，而 Issue 认为这已不再必要。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_real_apps",
+        "test_file": "tests/migrations/test_state.py",
+        "why_relevant": "它直接测试了 ProjectState 的 real_apps 参数，并展示了如何使用集合（如 {'contenttypes'}）进行构造。",
+        "reusable_parts": [
+          "ProjectState 的导入和构造",
+          "使用 real_apps 参数",
+          "SimpleTestCase 基类"
+        ],
+        "possible_gap": "该测试传递的是集合，没有测试传递非集合可迭代对象的情况，而这正是 Issue 讨论的触发条件。"
+      },
+      {
+        "test_name": "test_equality",
+        "test_file": "tests/migrations/test_state.py",
+        "why_relevant": "它展示了 ProjectState 的基本构造和克隆，提供了测试框架。",
+        "reusable_parts": [
+          "ProjectState() 的无参构造",
+          "ModelState 的使用",
+          "assertEqual/assertNotEqual 断言风格"
+        ],
+        "possible_gap": "没有涉及 real_apps 参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中调用 ProjectState(real_apps={'contenttypes'})，传递一个集合字面量。",
+        "target_pattern": "调用 ProjectState(real_apps=['contenttypes']) 或 ProjectState(real_apps=('contenttypes',))，传递一个列表或元组。",
+        "reason": "Issue 暗示所有调用现在都应传递集合，但代码仍处理非集合情况。传递非集合可迭代对象可以测试当前代码的隐式转换行为，并验证是否应改为断言。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(project_state_instance.real_apps)",
+        "reason": "观察 real_apps 实例属性的类型，以确认传入非集合参数时是否被隐式转换为集合，或是否触发了断言。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "调用 ProjectState.__init__(real_apps=非集合可迭代对象) 时是否引发 AssertionError 或其他异常。",
+        "reason": "如果按照 Issue 建议改为断言，传递非集合应引发断言错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 real_apps 为非 None 且不是集合时，__init__ 方法的行为（是隐式转换还是引发断言）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的错误消息字符串，因为具体实现（断言或转换）可能变化。",
+        "reason": "Issue 建议改为断言，因此测试应关注是否在错误输入时引发适当异常（如 AssertionError），或是否仍静默转换。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 作为测试基类，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 ProjectState 和 ModelState。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 PR #14760 具体修改了哪些调用点以确保 real_apps 是集合，这超出了给定上下文。",
+      "当前代码库中是否已经应用了 Issue 的建议（即改为断言），或者是否仍保留隐式转换逻辑。",
+      "如果改为断言，断言的具体条件是什么（例如 `assert real_apps is None or isinstance(real_apps, set)`）。"
+    ]
+  }
+}

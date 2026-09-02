@@ -1,0 +1,288 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15973",
+  "issue_summary": "当 ManyToManyField 的 through 模型定义在另一个 Django app 时，迁移过程中会抛出 AttributeError: 'str' object has no attribute '_meta'。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要设置多个 Django app，并在不同 app 中定义模型。可能需要使用 migrations 测试框架或手动创建 Migration 对象。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 或 TransactionTestCase 来支持数据库操作和迁移。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_many_to_many_through_isolate_apps_model",
+        "test_file": "tests/invalid_models_tests/test_relative_fields.py",
+        "why_relevant": "该测试专门检查 ManyToManyField 的 through 模型在隔离 app 上下文中的注册和查找，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "使用 @isolate_apps 装饰器创建独立的 app 上下文。",
+          "定义跨 app 引用的模型结构（Group、Person、GroupMember）。",
+          "调用 field.check() 进行验证。"
+        ],
+        "possible_gap": "该测试只进行静态检查（field.check），不涉及迁移操作或数据库 schema 创建，因此可能无法触发迁移时的 AttributeError。"
+      },
+      {
+        "test_name": "test_intermediary",
+        "test_file": "tests/m2m_intermediary/tests.py",
+        "why_relevant": "该测试演示了使用 through 模型的 ManyToManyField 的正常工作流程，包括对象创建和查询。",
+        "reusable_parts": [
+          "定义 Reporter、Article、Writer（through 模型）的模型结构。",
+          "创建对象并建立多对多关系。",
+          "使用 assertQuerysetEqual 和 assertEqual 进行断言。"
+        ],
+        "possible_gap": "该测试的 through 模型（Writer）与源模型（Article）在同一个 app 中，没有测试跨 app 的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个 ManyToManyField，其 through 参数指向另一个 Django app 中的模型，然后运行迁移。",
+      "evidence": [
+        "Issue 中描述了三个 app：fonte、fonte_variavel 和 variavel。fonte 模型中的 ManyToManyField 使用 through=\"fonte_variavel.FonteVariavelModel\"。",
+        "Issue 指出将 through 模型放在同一个 app 的 models.py 中有效，但放在另一个 app 中则失败。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在应用迁移时，抛出 AttributeError: 'str' object has no attribute '_meta'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的完整堆栈跟踪显示错误发生在 django/db/backends/base/schema.py 的 create_model 方法中，具体是 if field.remote_field.through._meta.auto_created: 这一行。",
+        "错误信息是 AttributeError: 'str' object has no attribute '_meta'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.fields.related.ManyToManyField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 的核心是 ManyToManyField 的 through 参数处理。"
+      },
+      {
+        "name": "django.db.migrations.operations.models.CreateModel",
+        "kind": "class",
+        "source_path": "",
+        "reason": "错误发生在迁移操作创建模型时。"
+      },
+      {
+        "name": "django.db.backends.base.schema.BaseDatabaseSchemaEditor.create_model",
+        "kind": "method",
+        "source_path": "",
+        "reason": "堆栈跟踪指向此方法中的特定行。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/schema.py",
+        "object": "BaseDatabaseSchemaEditor.create_model",
+        "lines": "",
+        "reason": "堆栈跟踪显示错误发生在此方法中，涉及 field.remote_field.through._meta 的访问。"
+      },
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ManyToManyField",
+        "lines": "",
+        "reason": "ManyToManyField 负责处理 through 参数，可能在迁移期间未正确解析跨 app 的模型引用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，through 模型通常与源模型定义在同一个隔离的 app 上下文或同一个 models.py 文件中。",
+        "target_pattern": "将 through 模型定义在另一个独立的 Django app 中，并在源模型的 ManyToManyField 中通过字符串引用它。",
+        "reason": "Issue 表明，当 through 模型位于另一个 app 时，迁移过程会出错。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接创建模型实例并操作关系，或进行静态检查。",
+        "target_pattern": "需要触发迁移操作，例如通过 migrations.CreateModel 或运行 manage.py migrate。",
+        "reason": "错误发生在迁移执行期间，而不是模型定义或静态检查时。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移应成功执行，即使 ManyToManyField 的 through 模型定义在另一个 Django app 中。",
+      "evidence": [
+        "Issue 提到将 through 模型放在同一个 models.py 文件中可以工作。",
+        "相关测试 test_many_to_many_through_isolate_apps_model 表明 Django 支持跨 app 的 through 模型查找。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行迁移操作（如 schema_editor.create_model）期间捕获 AttributeError。",
+        "reason": "Issue 的核心错误是 AttributeError，观测此异常能直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在迁移过程中检查 field.remote_field.through 的类型，看它是否是字符串而不是模型类。",
+        "reason": "错误表明 through 被当作字符串处理，而不是一个具有 _meta 属性的模型类。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功完成，不抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的完整错误消息字符串，因为修复后消息可能改变。",
+        "reason": "Issue 的核心是迁移失败并抛出异常。修复后，迁移应正常进行。因此，在缺陷版本中，断言会引发特定异常；在修复版本中，断言迁移成功。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误的确切触发点是在 ManyToManyField 初始化时、迁移序列化时，还是在 schema 创建时？",
+    "是否所有跨 app 的 through 模型引用都会失败，还是仅在特定迁移顺序下？",
+    "修复后，field.remote_field.through 在迁移期间应该是什么类型？"
+  ],
+  "raw": {
+    "issue_summary": "当 ManyToManyField 的 through 模型定义在另一个 Django app 时，迁移过程中会抛出 AttributeError: 'str' object has no attribute '_meta'。",
+    "trigger_condition": {
+      "text": "定义一个 ManyToManyField，其 through 参数指向另一个 Django app 中的模型，然后运行迁移。",
+      "evidence": [
+        "Issue 中描述了三个 app：fonte、fonte_variavel 和 variavel。fonte 模型中的 ManyToManyField 使用 through=\"fonte_variavel.FonteVariavelModel\"。",
+        "Issue 指出将 through 模型放在同一个 app 的 models.py 中有效，但放在另一个 app 中则失败。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在应用迁移时，抛出 AttributeError: 'str' object has no attribute '_meta'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的完整堆栈跟踪显示错误发生在 django/db/backends/base/schema.py 的 create_model 方法中，具体是 if field.remote_field.through._meta.auto_created: 这一行。",
+        "错误信息是 AttributeError: 'str' object has no attribute '_meta'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移应成功执行，即使 ManyToManyField 的 through 模型定义在另一个 Django app 中。",
+      "evidence": [
+        "Issue 提到将 through 模型放在同一个 models.py 文件中可以工作。",
+        "相关测试 test_many_to_many_through_isolate_apps_model 表明 Django 支持跨 app 的 through 模型查找。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.fields.related.ManyToManyField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 的核心是 ManyToManyField 的 through 参数处理。"
+      },
+      {
+        "name": "django.db.migrations.operations.models.CreateModel",
+        "kind": "class",
+        "source_path": "",
+        "reason": "错误发生在迁移操作创建模型时。"
+      },
+      {
+        "name": "django.db.backends.base.schema.BaseDatabaseSchemaEditor.create_model",
+        "kind": "method",
+        "source_path": "",
+        "reason": "堆栈跟踪指向此方法中的特定行。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/schema.py",
+        "object": "BaseDatabaseSchemaEditor.create_model",
+        "lines": "",
+        "reason": "堆栈跟踪显示错误发生在此方法中，涉及 field.remote_field.through._meta 的访问。"
+      },
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ManyToManyField",
+        "lines": "",
+        "reason": "ManyToManyField 负责处理 through 参数，可能在迁移期间未正确解析跨 app 的模型引用。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_many_to_many_through_isolate_apps_model",
+        "test_file": "tests/invalid_models_tests/test_relative_fields.py",
+        "why_relevant": "该测试专门检查 ManyToManyField 的 through 模型在隔离 app 上下文中的注册和查找，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "使用 @isolate_apps 装饰器创建独立的 app 上下文。",
+          "定义跨 app 引用的模型结构（Group、Person、GroupMember）。",
+          "调用 field.check() 进行验证。"
+        ],
+        "possible_gap": "该测试只进行静态检查（field.check），不涉及迁移操作或数据库 schema 创建，因此可能无法触发迁移时的 AttributeError。"
+      },
+      {
+        "test_name": "test_intermediary",
+        "test_file": "tests/m2m_intermediary/tests.py",
+        "why_relevant": "该测试演示了使用 through 模型的 ManyToManyField 的正常工作流程，包括对象创建和查询。",
+        "reusable_parts": [
+          "定义 Reporter、Article、Writer（through 模型）的模型结构。",
+          "创建对象并建立多对多关系。",
+          "使用 assertQuerysetEqual 和 assertEqual 进行断言。"
+        ],
+        "possible_gap": "该测试的 through 模型（Writer）与源模型（Article）在同一个 app 中，没有测试跨 app 的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，through 模型通常与源模型定义在同一个隔离的 app 上下文或同一个 models.py 文件中。",
+        "target_pattern": "将 through 模型定义在另一个独立的 Django app 中，并在源模型的 ManyToManyField 中通过字符串引用它。",
+        "reason": "Issue 表明，当 through 模型位于另一个 app 时，迁移过程会出错。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接创建模型实例并操作关系，或进行静态检查。",
+        "target_pattern": "需要触发迁移操作，例如通过 migrations.CreateModel 或运行 manage.py migrate。",
+        "reason": "错误发生在迁移执行期间，而不是模型定义或静态检查时。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行迁移操作（如 schema_editor.create_model）期间捕获 AttributeError。",
+        "reason": "Issue 的核心错误是 AttributeError，观测此异常能直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在迁移过程中检查 field.remote_field.through 的类型，看它是否是字符串而不是模型类。",
+        "reason": "错误表明 through 被当作字符串处理，而不是一个具有 _meta 属性的模型类。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功完成，不抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的完整错误消息字符串，因为修复后消息可能改变。",
+        "reason": "Issue 的核心是迁移失败并抛出异常。修复后，迁移应正常进行。因此，在缺陷版本中，断言会引发特定异常；在修复版本中，断言迁移成功。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要设置多个 Django app，并在不同 app 中定义模型。可能需要使用 migrations 测试框架或手动创建 Migration 对象。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 或 TransactionTestCase 来支持数据库操作和迁移。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "错误的确切触发点是在 ManyToManyField 初始化时、迁移序列化时，还是在 schema 创建时？",
+      "是否所有跨 app 的 through 模型引用都会失败，还是仅在特定迁移顺序下？",
+      "修复后，field.remote_field.through 在迁移期间应该是什么类型？"
+    ]
+  }
+}

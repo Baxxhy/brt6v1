@@ -1,0 +1,366 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-25479",
+  "issue_summary": "使用 register_cmap 注册自定义色彩映射时，如果注册名称与色彩映射对象的 name 属性不同，后续通过 pyplot 接口使用注册名称会失败，因为内部查找使用了色彩映射对象的 name 属性而非注册名称。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 作为 plt，以及 matplotlib.cm 和 matplotlib.colors。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 pytest 的 fixture 或直接编写函数式测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在非交互式后端下运行，以避免弹出图形窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_register_cmap",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试直接测试了 cm.register_cmap 和 cm.get_cmap 的功能，涉及注册和查找色彩映射。",
+        "reusable_parts": [
+          "imports (pytest, mpl, cm)",
+          "使用 cm.register_cmap 注册色彩映射",
+          "使用 cm.get_cmap 查找色彩映射",
+          "assert 验证色彩映射对象相等"
+        ],
+        "possible_gap": "该测试中注册的名称和色彩映射对象的 name 属性相同（都是 'viridis' 的副本）。它没有测试注册名称与色彩映射对象 name 属性不同的情况，而这正是 Issue 触发条件。"
+      },
+      {
+        "test_name": "test_colormaps_get_cmap",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试测试了 colormaps.get_cmap 的行为，包括对字符串名称和 Colormap 对象的处理。",
+        "reusable_parts": [
+          "imports (mpl)",
+          "使用 mpl.colormaps.get_cmap 查找色彩映射",
+          "assert 验证返回的色彩映射对象",
+          "对错误名称的 ValueError 断言"
+        ],
+        "possible_gap": "该测试主要关注 mpl.colormaps 接口，而 Issue 涉及的是 pyplot 接口（plt.set_cmap, plt.imshow）与 cm.register_cmap 的交互。它没有模拟 pyplot 的使用场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 LinearSegmentedColormap.from_list 创建色彩映射时指定一个名称（例如 'some_cmap_name'），然后使用 cm.register_cmap 以不同名称（例如 'my_cmap_name'）注册该色彩映射，最后通过 pyplot 接口（如 plt.set_cmap 和 plt.imshow）使用注册名称。",
+      "evidence": [
+        "Issue 中的代码示例展示了创建、注册和使用过程，其中名称不同。",
+        "Issue 描述：'Note the difference in the names `some_cmap_name` and `my_cmap_name`.'",
+        "Issue 描述：'As seen from the error message, it's `my_cmap.name (=some_cmap_name)` that is looked up instead of the registered colormap name, `my_cmap_name`.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 plt.imshow 时抛出 ValueError: Colormap some_cmap_name is not recognized. Possible values are: ...，错误信息显示查找的是色彩映射对象的 name 属性（some_cmap_name），而不是注册的名称（my_cmap_name）。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈和错误信息：'ValueError: Colormap some_cmap_name is not recognized. Possible values are: ...'",
+        "Issue 描述：'it's `my_cmap.name (=some_cmap_name)` that is looked up instead of the registered colormap name, `my_cmap_name`.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LinearSegmentedColormap.from_list",
+        "kind": "method",
+        "source_path": "lib/matplotlib/colors.py",
+        "reason": "用于创建具有特定名称的自定义色彩映射。"
+      },
+      {
+        "name": "cm.register_cmap",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "用于将色彩映射注册到全局注册表，并指定一个使用名称。"
+      },
+      {
+        "name": "plt.set_cmap",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于设置当前色彩映射的 pyplot 接口。"
+      },
+      {
+        "name": "plt.imshow",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "触发错误的绘图函数，内部会查找色彩映射。"
+      },
+      {
+        "name": "cm.get_cmap",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "Issue 中手动查找注册名称成功，但 pyplot 接口内部查找失败。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/cm.py",
+        "object": "ScalarMappable.__init__ 或相关色彩映射查找逻辑",
+        "lines": "",
+        "reason": "Issue 错误堆栈指向 cm.ScalarMappable.__init__，其中调用了 get_cmap。错误表明在 pyplot 接口中，色彩映射查找可能使用了色彩映射对象的 name 属性，而不是用户通过 register_cmap 指定的名称。"
+      },
+      {
+        "path": "lib/matplotlib/cm.py",
+        "object": "_ensure_cmap",
+        "lines": "",
+        "reason": "源码片段 3 中 set_cmap 调用了 _ensure_cmap，该函数可能负责将名称字符串转换为 Colormap 对象，其内部查找逻辑可能与 register_cmap 的注册表不一致。"
+      },
+      {
+        "path": "lib/matplotlib/cm.py",
+        "object": "get_cmap / _get_cmap",
+        "lines": "",
+        "reason": "错误信息来自 get_cmap 函数（源码片段 5），它负责根据名称查找色彩映射。Issue 表明当通过 pyplot 接口调用时，传入的名称可能被替换或忽略了。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中，注册色彩映射时使用的名称与色彩映射对象的 name 属性相同（例如 test_register_cmap 中使用 'viridis2' 注册 'viridis' 的副本，但副本的 name 可能也是 'viridis2'）。",
+        "target_pattern": "创建色彩映射时指定一个名称（如 'some_cmap_name'），然后使用不同的名称（如 'my_cmap_name'）通过 cm.register_cmap 注册。",
+        "reason": "Issue 的核心是注册名称与色彩映射对象内部 name 属性的不一致导致后续查找失败。变异输入以制造这种不一致是触发缺陷的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中，直接调用 cm.get_cmap 或 mpl.colormaps.get_cmap 来验证注册。",
+        "target_pattern": "通过 pyplot 接口（如 plt.set_cmap 和 plt.imshow）来使用注册的名称，模拟 Issue 中的用户操作流程。",
+        "reason": "Issue 表明手动调用 cm.get_cmap 成功，但通过 pyplot 接口调用失败。变异调用链以包含 pyplot 接口可能暴露内部查找逻辑的缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用 cm.register_cmap 注册色彩映射后，应能通过注册的名称在 pyplot 接口（如 plt.set_cmap 和 plt.imshow）中成功使用该色彩映射，无论色彩映射对象的 name 属性是什么。",
+      "evidence": [
+        "Issue 中用户期望：'at which point, I expected to be able to refer to my newly registered colormap by the name `my_cmap_name`.'",
+        "Issue 中手动查找成功：'cm.get_cmap('my_cmap_name')' 正常工作。",
+        "源码片段 2 中 register_cmap 的文档说明：'The name that can be used in :func:`get_cmap` or :rc:`image.cmap`'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 plt.imshow 时是否抛出 ValueError，以及错误信息中提到的色彩映射名称是哪个（是注册名称还是色彩映射对象的 name 属性）。",
+        "reason": "Issue 中观察到的错误现象是抛出 ValueError，且错误信息显示了错误的查找名称。这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在调用 plt.set_cmap('my_cmap_name') 后，观察当前图形的色彩映射对象（如 plt.gca().get_cmap() 或其 name 属性）是什么。",
+        "reason": "可以验证 set_cmap 是否成功设置了正确的色彩映射，或者内部是否使用了错误的名称进行查找。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在注册前后，观察全局色彩映射注册表（如 mpl.colormaps 或 cm.cmap_d）中 'my_cmap_name' 和 'some_cmap_name' 对应的条目。",
+        "reason": "有助于理解注册是否成功，以及内部查找时访问的是哪个注册表条目。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 plt.set_cmap 和 plt.imshow 时，不应抛出 ValueError，且应能成功使用通过 register_cmap 注册的名称。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为错误信息可能因版本或环境而异。",
+        "reason": "Issue 的核心是异常被错误地抛出。修复后，该操作应正常完成而不抛出异常。因此，断言不抛出特定异常（或断言成功完成）是合适的。注意：在生成测试时，我们通常断言当前（缺陷）行为会抛出异常。但根据规则9，expected_behavior 是正向的，所以这里的 assertion_goal 应描述修复后的正向目标。然而，在生成缺陷复现测试时，我们通常需要断言当前缺陷行为（即会抛出异常）。为了符合规则，这里描述修复后的目标。实际测试生成可能需要调整。"
+      },
+      {
+        "assertion_goal": "通过 pyplot 接口使用的色彩映射应与通过 register_cmap 注册的色彩映射对象相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言色彩映射对象的完整 repr 或内部 _lut 数组，这些可能不稳定。",
+        "reason": "修复后，通过 pyplot 接口获取的色彩映射对象应与注册的对象一致。断言对象相等（==）比断言身份（is）更稳定，因为可能涉及副本。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 ScalarMappable.__init__、_ensure_cmap、get_cmap 还是其他内部函数中。",
+    "pyplot 接口内部如何将名称传递给色彩映射查找逻辑，以及为何会使用色彩映射对象的 name 属性而非用户提供的名称。",
+    "是否所有 pyplot 接口（如 plt.scatter, plt.pcolor）都会表现出相同的问题，还是仅限于 imshow。",
+    "当前 matplotlib 版本中，cm.get_cmap 已被弃用，但 Issue 发生在旧版本。新版本中 colormaps 注册表的行为是否已修复此问题。"
+  ],
+  "raw": {
+    "issue_summary": "使用 register_cmap 注册自定义色彩映射时，如果注册名称与色彩映射对象的 name 属性不同，后续通过 pyplot 接口使用注册名称会失败，因为内部查找使用了色彩映射对象的 name 属性而非注册名称。",
+    "trigger_condition": {
+      "text": "使用 LinearSegmentedColormap.from_list 创建色彩映射时指定一个名称（例如 'some_cmap_name'），然后使用 cm.register_cmap 以不同名称（例如 'my_cmap_name'）注册该色彩映射，最后通过 pyplot 接口（如 plt.set_cmap 和 plt.imshow）使用注册名称。",
+      "evidence": [
+        "Issue 中的代码示例展示了创建、注册和使用过程，其中名称不同。",
+        "Issue 描述：'Note the difference in the names `some_cmap_name` and `my_cmap_name`.'",
+        "Issue 描述：'As seen from the error message, it's `my_cmap.name (=some_cmap_name)` that is looked up instead of the registered colormap name, `my_cmap_name`.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 plt.imshow 时抛出 ValueError: Colormap some_cmap_name is not recognized. Possible values are: ...，错误信息显示查找的是色彩映射对象的 name 属性（some_cmap_name），而不是注册的名称（my_cmap_name）。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈和错误信息：'ValueError: Colormap some_cmap_name is not recognized. Possible values are: ...'",
+        "Issue 描述：'it's `my_cmap.name (=some_cmap_name)` that is looked up instead of the registered colormap name, `my_cmap_name`.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 cm.register_cmap 注册色彩映射后，应能通过注册的名称在 pyplot 接口（如 plt.set_cmap 和 plt.imshow）中成功使用该色彩映射，无论色彩映射对象的 name 属性是什么。",
+      "evidence": [
+        "Issue 中用户期望：'at which point, I expected to be able to refer to my newly registered colormap by the name `my_cmap_name`.'",
+        "Issue 中手动查找成功：'cm.get_cmap('my_cmap_name')' 正常工作。",
+        "源码片段 2 中 register_cmap 的文档说明：'The name that can be used in :func:`get_cmap` or :rc:`image.cmap`'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LinearSegmentedColormap.from_list",
+        "kind": "method",
+        "source_path": "lib/matplotlib/colors.py",
+        "reason": "用于创建具有特定名称的自定义色彩映射。"
+      },
+      {
+        "name": "cm.register_cmap",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "用于将色彩映射注册到全局注册表，并指定一个使用名称。"
+      },
+      {
+        "name": "plt.set_cmap",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于设置当前色彩映射的 pyplot 接口。"
+      },
+      {
+        "name": "plt.imshow",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "触发错误的绘图函数，内部会查找色彩映射。"
+      },
+      {
+        "name": "cm.get_cmap",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "Issue 中手动查找注册名称成功，但 pyplot 接口内部查找失败。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/cm.py",
+        "object": "ScalarMappable.__init__ 或相关色彩映射查找逻辑",
+        "lines": "",
+        "reason": "Issue 错误堆栈指向 cm.ScalarMappable.__init__，其中调用了 get_cmap。错误表明在 pyplot 接口中，色彩映射查找可能使用了色彩映射对象的 name 属性，而不是用户通过 register_cmap 指定的名称。"
+      },
+      {
+        "path": "lib/matplotlib/cm.py",
+        "object": "_ensure_cmap",
+        "lines": "",
+        "reason": "源码片段 3 中 set_cmap 调用了 _ensure_cmap，该函数可能负责将名称字符串转换为 Colormap 对象，其内部查找逻辑可能与 register_cmap 的注册表不一致。"
+      },
+      {
+        "path": "lib/matplotlib/cm.py",
+        "object": "get_cmap / _get_cmap",
+        "lines": "",
+        "reason": "错误信息来自 get_cmap 函数（源码片段 5），它负责根据名称查找色彩映射。Issue 表明当通过 pyplot 接口调用时，传入的名称可能被替换或忽略了。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_register_cmap",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试直接测试了 cm.register_cmap 和 cm.get_cmap 的功能，涉及注册和查找色彩映射。",
+        "reusable_parts": [
+          "imports (pytest, mpl, cm)",
+          "使用 cm.register_cmap 注册色彩映射",
+          "使用 cm.get_cmap 查找色彩映射",
+          "assert 验证色彩映射对象相等"
+        ],
+        "possible_gap": "该测试中注册的名称和色彩映射对象的 name 属性相同（都是 'viridis' 的副本）。它没有测试注册名称与色彩映射对象 name 属性不同的情况，而这正是 Issue 触发条件。"
+      },
+      {
+        "test_name": "test_colormaps_get_cmap",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试测试了 colormaps.get_cmap 的行为，包括对字符串名称和 Colormap 对象的处理。",
+        "reusable_parts": [
+          "imports (mpl)",
+          "使用 mpl.colormaps.get_cmap 查找色彩映射",
+          "assert 验证返回的色彩映射对象",
+          "对错误名称的 ValueError 断言"
+        ],
+        "possible_gap": "该测试主要关注 mpl.colormaps 接口，而 Issue 涉及的是 pyplot 接口（plt.set_cmap, plt.imshow）与 cm.register_cmap 的交互。它没有模拟 pyplot 的使用场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中，注册色彩映射时使用的名称与色彩映射对象的 name 属性相同（例如 test_register_cmap 中使用 'viridis2' 注册 'viridis' 的副本，但副本的 name 可能也是 'viridis2'）。",
+        "target_pattern": "创建色彩映射时指定一个名称（如 'some_cmap_name'），然后使用不同的名称（如 'my_cmap_name'）通过 cm.register_cmap 注册。",
+        "reason": "Issue 的核心是注册名称与色彩映射对象内部 name 属性的不一致导致后续查找失败。变异输入以制造这种不一致是触发缺陷的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中，直接调用 cm.get_cmap 或 mpl.colormaps.get_cmap 来验证注册。",
+        "target_pattern": "通过 pyplot 接口（如 plt.set_cmap 和 plt.imshow）来使用注册的名称，模拟 Issue 中的用户操作流程。",
+        "reason": "Issue 表明手动调用 cm.get_cmap 成功，但通过 pyplot 接口调用失败。变异调用链以包含 pyplot 接口可能暴露内部查找逻辑的缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 plt.imshow 时是否抛出 ValueError，以及错误信息中提到的色彩映射名称是哪个（是注册名称还是色彩映射对象的 name 属性）。",
+        "reason": "Issue 中观察到的错误现象是抛出 ValueError，且错误信息显示了错误的查找名称。这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在调用 plt.set_cmap('my_cmap_name') 后，观察当前图形的色彩映射对象（如 plt.gca().get_cmap() 或其 name 属性）是什么。",
+        "reason": "可以验证 set_cmap 是否成功设置了正确的色彩映射，或者内部是否使用了错误的名称进行查找。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在注册前后，观察全局色彩映射注册表（如 mpl.colormaps 或 cm.cmap_d）中 'my_cmap_name' 和 'some_cmap_name' 对应的条目。",
+        "reason": "有助于理解注册是否成功，以及内部查找时访问的是哪个注册表条目。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 plt.set_cmap 和 plt.imshow 时，不应抛出 ValueError，且应能成功使用通过 register_cmap 注册的名称。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为错误信息可能因版本或环境而异。",
+        "reason": "Issue 的核心是异常被错误地抛出。修复后，该操作应正常完成而不抛出异常。因此，断言不抛出特定异常（或断言成功完成）是合适的。注意：在生成测试时，我们通常断言当前（缺陷）行为会抛出异常。但根据规则9，expected_behavior 是正向的，所以这里的 assertion_goal 应描述修复后的正向目标。然而，在生成缺陷复现测试时，我们通常需要断言当前缺陷行为（即会抛出异常）。为了符合规则，这里描述修复后的目标。实际测试生成可能需要调整。"
+      },
+      {
+        "assertion_goal": "通过 pyplot 接口使用的色彩映射应与通过 register_cmap 注册的色彩映射对象相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言色彩映射对象的完整 repr 或内部 _lut 数组，这些可能不稳定。",
+        "reason": "修复后，通过 pyplot 接口获取的色彩映射对象应与注册的对象一致。断言对象相等（==）比断言身份（is）更稳定，因为可能涉及副本。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 作为 plt，以及 matplotlib.cm 和 matplotlib.colors。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 pytest 的 fixture 或直接编写函数式测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在非交互式后端下运行，以避免弹出图形窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 ScalarMappable.__init__、_ensure_cmap、get_cmap 还是其他内部函数中。",
+      "pyplot 接口内部如何将名称传递给色彩映射查找逻辑，以及为何会使用色彩映射对象的 name 属性而非用户提供的名称。",
+      "是否所有 pyplot 接口（如 plt.scatter, plt.pcolor）都会表现出相同的问题，还是仅限于 imshow。",
+      "当前 matplotlib 版本中，cm.get_cmap 已被弃用，但 Issue 发生在旧版本。新版本中 colormaps 注册表的行为是否已修复此问题。"
+    ]
+  }
+}

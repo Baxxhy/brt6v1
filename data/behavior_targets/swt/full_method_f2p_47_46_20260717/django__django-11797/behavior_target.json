@@ -1,0 +1,312 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11797",
+  "issue_summary": "在子查询中使用 GROUP BY 后，外层查询的 filter 条件错误地覆盖了内层查询的 GROUP BY 字段。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django 测试用例（如 `TestCase`）并启用数据库支持，因为查询涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建 `User` 模型实例或使用测试夹具来填充数据库，以便查询可以执行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_group_by_subquery_annotation",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试涉及子查询、GROUP BY 和注解，与 Issue 中描述的场景（子查询包含 GROUP BY）高度相似。",
+        "reusable_parts": [
+          "使用 `OuterRef` 和 `Subquery` 构建嵌套查询的模式。",
+          "使用 `annotate` 和聚合函数。",
+          "使用 `TestCase` 和数据库断言。"
+        ],
+        "possible_gap": "该测试主要验证子查询注解是否被包含在 GROUP BY 中，而 Issue 是外层 `filter` 覆盖了内层 GROUP BY，触发路径不同。"
+      },
+      {
+        "test_name": "test_subquery_condition",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试涉及多层嵌套子查询和过滤条件，测试了子查询别名和 SQL 生成，与 Issue 中 `filter(id=a[:1])` 的结构类似。",
+        "reusable_parts": [
+          "构建嵌套 `filter` 链的模式。",
+          "检查 `query.subq_aliases` 和 SQL 字符串的方法。",
+          "使用 `TestCase` 进行断言。"
+        ],
+        "possible_gap": "该测试没有涉及 `values().annotate()` 这种会触发 GROUP BY 的查询集构造。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "构建一个查询集 (QuerySet) `a`，它包含 `filter`、`values`、`annotate` 和再次 `values` 操作，然后将其切片（如 `a[:1]`）作为另一个查询集 `b` 的 `filter` 条件参数。",
+      "evidence": [
+        "Issue 中展示了 `a = models.User.objects.filter(email__isnull=True).values('email').annotate(m=Max('id')).values('m')` 和 `b = models.User.objects.filter(id=a[:1])`。",
+        "Issue 中展示了 `a[:1].query` 的 SQL 包含 `GROUP BY \"auth_user\".\"email\"`，但 `b.query` 的 SQL 显示为 `GROUP BY U0.\"id\"`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询中，子查询的 GROUP BY 子句使用了错误的字段（应该是 `email`，但实际是 `id`），导致语义错误。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中 `print(b.query)` 的注释指出 `GROUP BY U0.\"id\" should be GROUP BY U0.\"email\"`。",
+        "Issue 中展示了错误的 SQL 片段：`GROUP BY U0.\"id\"`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的操作是调用 `filter` 方法，并将一个包含 GROUP BY 的子查询作为参数。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中构建查询集 `a` 时使用了 `values` 方法，这影响了查询的 SELECT 和 GROUP BY 子句。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中构建查询集 `a` 时使用了 `annotate` 方法进行聚合（Max），这可能导致 GROUP BY 被触发。"
+      },
+      {
+        "name": "django.db.models.aggregates.Max",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 中使用了 `Max('id')` 作为聚合函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._filter_or_exclude",
+        "lines": "",
+        "reason": "`filter` 方法最终调用 `_filter_or_exclude`，处理子查询参数时可能错误地处理了 GROUP BY 信息。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "负责构建 SQL 查询，可能是在将子查询转换为 SQL 字符串时丢失或覆盖了 GROUP BY 信息。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，子查询通常作为 `filter` 的参数（如 `parent__in=qs1`），但子查询本身可能不包含 `values().annotate()` 这种特定组合。",
+        "target_pattern": "构建一个查询集，其调用链为 `filter(...).values(...).annotate(...).values(...)`，然后将其切片作为另一个 `filter` 的参数。",
+        "reason": "Issue 表明，这种特定的查询集构造和切片操作，在作为 `filter` 参数时，会导致 GROUP BY 字段被错误替换。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，`filter` 的参数可能是字段查找（如 `pk__lte`）或另一个查询集。",
+        "target_pattern": "`filter` 的参数是一个经过切片（`[:1]`）的、包含 `values().annotate().values()` 的查询集。",
+        "reason": "Issue 显示，对查询集 `a` 进行切片后作为 `filter` 参数是触发条件的关键部分。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当子查询包含 GROUP BY 子句时，外层查询使用该子查询作为过滤条件时，不应改变子查询原有的 GROUP BY 逻辑，生成的 SQL 应保持内层查询的 GROUP BY 字段。",
+      "evidence": [
+        "Issue 中展示了 `a.query` 和 `a[:1].query` 的正确 SQL 都包含 `GROUP BY \"auth_user\".\"email\"`。",
+        "Issue 的注释明确指出了正确的 GROUP BY 字段应为 `email`。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "最终生成的查询集（如 `b`）的 `query` 属性字符串表示（`str(b.query)`）。",
+        "reason": "Issue 的核心错误体现在生成的 SQL 语句中，特别是 GROUP BY 子句的字段。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "子查询对象（如 `a[:1]`）在传递给 `filter` 之前和之后，其内部 `query` 对象的 `group_by` 属性或相关状态。",
+        "reason": "需要观察 GROUP BY 信息在处理过程中是否被丢失或篡改。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言最终查询生成的 SQL 中，子查询部分的 GROUP BY 子句包含正确的字段（例如 `email`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为数据库后端、别名生成可能导致差异。",
+        "reason": "Issue 关注的是 GROUP BY 字段的错误，而不是整个 SQL 的格式。检查 SQL 片段更稳定。"
+      },
+      {
+        "assertion_goal": "断言最终查询生成的 SQL 中，子查询部分的 GROUP BY 子句不包含错误的字段（例如 `id`）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串不相等。",
+        "reason": "直接验证错误字段没有出现在 GROUP BY 中，与正向断言互补。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发 bug 的确切内部代码路径（例如，是 `filter` 方法、查询编译过程还是子查询处理逻辑）。",
+    "除了 `User` 模型和 `email`、`id` 字段外，是否还有其他模型或字段组合会触发此问题。",
+    "查询集切片（`[:1]`）是否是必要条件，还是其他形式的子查询引用也会触发。"
+  ],
+  "raw": {
+    "issue_summary": "在子查询中使用 GROUP BY 后，外层查询的 filter 条件错误地覆盖了内层查询的 GROUP BY 字段。",
+    "trigger_condition": {
+      "text": "构建一个查询集 (QuerySet) `a`，它包含 `filter`、`values`、`annotate` 和再次 `values` 操作，然后将其切片（如 `a[:1]`）作为另一个查询集 `b` 的 `filter` 条件参数。",
+      "evidence": [
+        "Issue 中展示了 `a = models.User.objects.filter(email__isnull=True).values('email').annotate(m=Max('id')).values('m')` 和 `b = models.User.objects.filter(id=a[:1])`。",
+        "Issue 中展示了 `a[:1].query` 的 SQL 包含 `GROUP BY \"auth_user\".\"email\"`，但 `b.query` 的 SQL 显示为 `GROUP BY U0.\"id\"`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询中，子查询的 GROUP BY 子句使用了错误的字段（应该是 `email`，但实际是 `id`），导致语义错误。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中 `print(b.query)` 的注释指出 `GROUP BY U0.\"id\" should be GROUP BY U0.\"email\"`。",
+        "Issue 中展示了错误的 SQL 片段：`GROUP BY U0.\"id\"`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当子查询包含 GROUP BY 子句时，外层查询使用该子查询作为过滤条件时，不应改变子查询原有的 GROUP BY 逻辑，生成的 SQL 应保持内层查询的 GROUP BY 字段。",
+      "evidence": [
+        "Issue 中展示了 `a.query` 和 `a[:1].query` 的正确 SQL 都包含 `GROUP BY \"auth_user\".\"email\"`。",
+        "Issue 的注释明确指出了正确的 GROUP BY 字段应为 `email`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的操作是调用 `filter` 方法，并将一个包含 GROUP BY 的子查询作为参数。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中构建查询集 `a` 时使用了 `values` 方法，这影响了查询的 SELECT 和 GROUP BY 子句。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中构建查询集 `a` 时使用了 `annotate` 方法进行聚合（Max），这可能导致 GROUP BY 被触发。"
+      },
+      {
+        "name": "django.db.models.aggregates.Max",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 中使用了 `Max('id')` 作为聚合函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._filter_or_exclude",
+        "lines": "",
+        "reason": "`filter` 方法最终调用 `_filter_or_exclude`，处理子查询参数时可能错误地处理了 GROUP BY 信息。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "负责构建 SQL 查询，可能是在将子查询转换为 SQL 字符串时丢失或覆盖了 GROUP BY 信息。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_group_by_subquery_annotation",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试涉及子查询、GROUP BY 和注解，与 Issue 中描述的场景（子查询包含 GROUP BY）高度相似。",
+        "reusable_parts": [
+          "使用 `OuterRef` 和 `Subquery` 构建嵌套查询的模式。",
+          "使用 `annotate` 和聚合函数。",
+          "使用 `TestCase` 和数据库断言。"
+        ],
+        "possible_gap": "该测试主要验证子查询注解是否被包含在 GROUP BY 中，而 Issue 是外层 `filter` 覆盖了内层 GROUP BY，触发路径不同。"
+      },
+      {
+        "test_name": "test_subquery_condition",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试涉及多层嵌套子查询和过滤条件，测试了子查询别名和 SQL 生成，与 Issue 中 `filter(id=a[:1])` 的结构类似。",
+        "reusable_parts": [
+          "构建嵌套 `filter` 链的模式。",
+          "检查 `query.subq_aliases` 和 SQL 字符串的方法。",
+          "使用 `TestCase` 进行断言。"
+        ],
+        "possible_gap": "该测试没有涉及 `values().annotate()` 这种会触发 GROUP BY 的查询集构造。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，子查询通常作为 `filter` 的参数（如 `parent__in=qs1`），但子查询本身可能不包含 `values().annotate()` 这种特定组合。",
+        "target_pattern": "构建一个查询集，其调用链为 `filter(...).values(...).annotate(...).values(...)`，然后将其切片作为另一个 `filter` 的参数。",
+        "reason": "Issue 表明，这种特定的查询集构造和切片操作，在作为 `filter` 参数时，会导致 GROUP BY 字段被错误替换。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，`filter` 的参数可能是字段查找（如 `pk__lte`）或另一个查询集。",
+        "target_pattern": "`filter` 的参数是一个经过切片（`[:1]`）的、包含 `values().annotate().values()` 的查询集。",
+        "reason": "Issue 显示，对查询集 `a` 进行切片后作为 `filter` 参数是触发条件的关键部分。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "最终生成的查询集（如 `b`）的 `query` 属性字符串表示（`str(b.query)`）。",
+        "reason": "Issue 的核心错误体现在生成的 SQL 语句中，特别是 GROUP BY 子句的字段。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "子查询对象（如 `a[:1]`）在传递给 `filter` 之前和之后，其内部 `query` 对象的 `group_by` 属性或相关状态。",
+        "reason": "需要观察 GROUP BY 信息在处理过程中是否被丢失或篡改。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言最终查询生成的 SQL 中，子查询部分的 GROUP BY 子句包含正确的字段（例如 `email`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为数据库后端、别名生成可能导致差异。",
+        "reason": "Issue 关注的是 GROUP BY 字段的错误，而不是整个 SQL 的格式。检查 SQL 片段更稳定。"
+      },
+      {
+        "assertion_goal": "断言最终查询生成的 SQL 中，子查询部分的 GROUP BY 子句不包含错误的字段（例如 `id`）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串不相等。",
+        "reason": "直接验证错误字段没有出现在 GROUP BY 中，与正向断言互补。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django 测试用例（如 `TestCase`）并启用数据库支持，因为查询涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建 `User` 模型实例或使用测试夹具来填充数据库，以便查询可以执行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "触发 bug 的确切内部代码路径（例如，是 `filter` 方法、查询编译过程还是子查询处理逻辑）。",
+      "除了 `User` 模型和 `email`、`id` 字段外，是否还有其他模型或字段组合会触发此问题。",
+      "查询集切片（`[:1]`）是否是必要条件，还是其他形式的子查询引用也会触发。"
+    ]
+  }
+}

@@ -1,0 +1,282 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sphinx-doc__sphinx-8506",
+  "issue_summary": "Sphinx 3.2 对之前版本接受的 option:: 语法发出错误警告。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Sphinx 应用 fixture (`app`)，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 `app.warningiserror = True` 来模拟严格模式。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_rst_directive_option",
+        "test_file": "tests/test_domain_rst.py",
+        "why_relevant": "它直接测试 `.. rst:directive:option::` 指令的解析，与 Issue 中的 `.. option::` 指令在概念上相关，可能共享底层解析逻辑。",
+        "reusable_parts": [
+          "使用 restructuredtext.parse(app, text) 解析指令文本",
+          "使用 assert_node 验证生成的文档树结构",
+          "测试 fixture `app` 的用法"
+        ],
+        "possible_gap": "它测试的是 `rst:directive:option` 域内的指令，而 Issue 是关于通用的 `option::` 指令。此外，它使用的输入是简单的 `foo`，而非 Issue 中复杂的 `[enable=]PATTERN`。"
+      },
+      {
+        "test_name": "test_rst_directive_option_with_argument",
+        "test_file": "tests/test_domain_rst.py",
+        "why_relevant": "它测试了 `.. rst:directive:option::` 指令带参数 (`foo: bar baz`) 的情况，展示了指令后跟冒号和额外文本的解析模式。",
+        "reusable_parts": [
+          "指令文本包含冒号和后续参数的格式",
+          "assert_node 检查 desc_annotation 节点"
+        ],
+        "possible_gap": "同样，它测试的是特定域内的指令，且参数格式 `foo: bar baz` 与 Issue 中的 `[enable=]PATTERN` 不同。"
+      },
+      {
+        "test_name": "test_warningiserror",
+        "test_file": "tests/test_util_logging.py",
+        "why_relevant": "它展示了当 `app.warningiserror = True` 时，警告会转化为 SphinxWarning 异常，这与 Issue 中“Warning, treated as error”的现象直接对应。",
+        "reusable_parts": [
+          "设置 `app.warningiserror` 属性",
+          "使用 `pytest.raises(SphinxWarning)` 捕获异常"
+        ],
+        "possible_gap": "它测试的是通用的日志警告机制，而非由特定指令解析触发的警告内容。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 option:: 指令描述一个包含方括号和等号的选项模式，例如 `[enable=]PATTERN`。",
+      "evidence": [
+        "Issue 中提供的 QEMU 文档片段：`.. option:: [enable=]PATTERN`",
+        "Issue 中错误信息提到：\"Malformed option description '[enable=]PATTERN', should look like...\""
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Sphinx 3.2 将 option:: 指令中的特定语法视为格式错误并发出警告，当 warningiserror 为 True 时，该警告会引发异常，导致构建失败。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中错误信息：\"Warning, treated as error: ... Malformed option description '[enable=]PATTERN', should look like...\"",
+        "相关测试 5 (test_warningiserror) 展示了当 app.warningiserror = True 时，logger.warning 会引发 SphinxWarning 异常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Sphinx",
+        "kind": "class",
+        "source_path": "sphinx/application.py",
+        "reason": "Issue 是关于 Sphinx 应用程序的行为变化，相关源码片段 1 提供了 Sphinx 类的定义。"
+      },
+      {
+        "name": "restructuredtext.parse",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1-4 都使用此函数来解析包含指令的文本，这是触发 option:: 指令处理的入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/application.py",
+        "object": "Sphinx",
+        "lines": "",
+        "reason": "作为主应用类，它管理构建过程和警告处理，错误可能源于其内部对 option:: 指令的解析或验证逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中的 `.. rst:directive:option:: foo`",
+        "target_pattern": "Issue 中的 `.. option:: [enable=]PATTERN`",
+        "reason": "将测试输入从简单的选项名 `foo` 替换为包含方括号和等号的复杂模式 `[enable=]PATTERN`，可能触发 Sphinx 3.2 新增的格式验证逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 5 中显式设置 `app.warningiserror = True`",
+        "target_pattern": "在测试中设置 `app.warningiserror = True`",
+        "reason": "为了复现 Issue 中“Warning, treated as error”导致构建失败的现象，需要确保警告被视为错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Sphinx 应该接受 option:: 指令中更灵活的语法（如包含方括号和等号的模式），或者至少不将其视为错误，以保持与旧版本的兼容性。",
+      "evidence": [
+        "Issue 描述：\"Earlier versions of Sphinx were fine with this...\"",
+        "Issue 建议：\"it would be better if it just accepted any string, because not all programs and OSes have option syntax that matches the limited list...\""
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "解析后检查是否有警告被记录，特别是包含 'Malformed option description' 字样的警告。",
+        "reason": "Issue 的核心现象是 Sphinx 3.2 对特定 option:: 语法发出了格式错误的警告。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "当 app.warningiserror = True 时，观察 restructuredtext.parse 调用是否引发 SphinxWarning 异常。",
+        "reason": "如果警告被视为错误，构建过程会因异常而中断，这是 Issue 报告的问题表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 `.. option:: [enable=]PATTERN` 语法时，不会产生关于格式错误的警告（或当 warningiserror=True 时不会引发异常）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告信息字符串完全相等，因为信息可能因版本微调。",
+        "reason": "修复后，Sphinx 应接受该语法，因此警告信息中不应包含 'Malformed option description' 片段。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`.. option::` 指令与 `.. rst:directive:option::` 指令的确切关系及解析路径是否相同。",
+    "导致警告的具体验证逻辑位于哪个模块或函数中。",
+    "Sphinx 3.2 与之前版本在 option:: 语法验证上的具体差异点。"
+  ],
+  "raw": {
+    "issue_summary": "Sphinx 3.2 对之前版本接受的 option:: 语法发出错误警告。",
+    "trigger_condition": {
+      "text": "使用 option:: 指令描述一个包含方括号和等号的选项模式，例如 `[enable=]PATTERN`。",
+      "evidence": [
+        "Issue 中提供的 QEMU 文档片段：`.. option:: [enable=]PATTERN`",
+        "Issue 中错误信息提到：\"Malformed option description '[enable=]PATTERN', should look like...\""
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Sphinx 3.2 将 option:: 指令中的特定语法视为格式错误并发出警告，当 warningiserror 为 True 时，该警告会引发异常，导致构建失败。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中错误信息：\"Warning, treated as error: ... Malformed option description '[enable=]PATTERN', should look like...\"",
+        "相关测试 5 (test_warningiserror) 展示了当 app.warningiserror = True 时，logger.warning 会引发 SphinxWarning 异常。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Sphinx 应该接受 option:: 指令中更灵活的语法（如包含方括号和等号的模式），或者至少不将其视为错误，以保持与旧版本的兼容性。",
+      "evidence": [
+        "Issue 描述：\"Earlier versions of Sphinx were fine with this...\"",
+        "Issue 建议：\"it would be better if it just accepted any string, because not all programs and OSes have option syntax that matches the limited list...\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Sphinx",
+        "kind": "class",
+        "source_path": "sphinx/application.py",
+        "reason": "Issue 是关于 Sphinx 应用程序的行为变化，相关源码片段 1 提供了 Sphinx 类的定义。"
+      },
+      {
+        "name": "restructuredtext.parse",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1-4 都使用此函数来解析包含指令的文本，这是触发 option:: 指令处理的入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/application.py",
+        "object": "Sphinx",
+        "lines": "",
+        "reason": "作为主应用类，它管理构建过程和警告处理，错误可能源于其内部对 option:: 指令的解析或验证逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_rst_directive_option",
+        "test_file": "tests/test_domain_rst.py",
+        "why_relevant": "它直接测试 `.. rst:directive:option::` 指令的解析，与 Issue 中的 `.. option::` 指令在概念上相关，可能共享底层解析逻辑。",
+        "reusable_parts": [
+          "使用 restructuredtext.parse(app, text) 解析指令文本",
+          "使用 assert_node 验证生成的文档树结构",
+          "测试 fixture `app` 的用法"
+        ],
+        "possible_gap": "它测试的是 `rst:directive:option` 域内的指令，而 Issue 是关于通用的 `option::` 指令。此外，它使用的输入是简单的 `foo`，而非 Issue 中复杂的 `[enable=]PATTERN`。"
+      },
+      {
+        "test_name": "test_rst_directive_option_with_argument",
+        "test_file": "tests/test_domain_rst.py",
+        "why_relevant": "它测试了 `.. rst:directive:option::` 指令带参数 (`foo: bar baz`) 的情况，展示了指令后跟冒号和额外文本的解析模式。",
+        "reusable_parts": [
+          "指令文本包含冒号和后续参数的格式",
+          "assert_node 检查 desc_annotation 节点"
+        ],
+        "possible_gap": "同样，它测试的是特定域内的指令，且参数格式 `foo: bar baz` 与 Issue 中的 `[enable=]PATTERN` 不同。"
+      },
+      {
+        "test_name": "test_warningiserror",
+        "test_file": "tests/test_util_logging.py",
+        "why_relevant": "它展示了当 `app.warningiserror = True` 时，警告会转化为 SphinxWarning 异常，这与 Issue 中“Warning, treated as error”的现象直接对应。",
+        "reusable_parts": [
+          "设置 `app.warningiserror` 属性",
+          "使用 `pytest.raises(SphinxWarning)` 捕获异常"
+        ],
+        "possible_gap": "它测试的是通用的日志警告机制，而非由特定指令解析触发的警告内容。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中的 `.. rst:directive:option:: foo`",
+        "target_pattern": "Issue 中的 `.. option:: [enable=]PATTERN`",
+        "reason": "将测试输入从简单的选项名 `foo` 替换为包含方括号和等号的复杂模式 `[enable=]PATTERN`，可能触发 Sphinx 3.2 新增的格式验证逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 5 中显式设置 `app.warningiserror = True`",
+        "target_pattern": "在测试中设置 `app.warningiserror = True`",
+        "reason": "为了复现 Issue 中“Warning, treated as error”导致构建失败的现象，需要确保警告被视为错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "解析后检查是否有警告被记录，特别是包含 'Malformed option description' 字样的警告。",
+        "reason": "Issue 的核心现象是 Sphinx 3.2 对特定 option:: 语法发出了格式错误的警告。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "当 app.warningiserror = True 时，观察 restructuredtext.parse 调用是否引发 SphinxWarning 异常。",
+        "reason": "如果警告被视为错误，构建过程会因异常而中断，这是 Issue 报告的问题表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 `.. option:: [enable=]PATTERN` 语法时，不会产生关于格式错误的警告（或当 warningiserror=True 时不会引发异常）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告信息字符串完全相等，因为信息可能因版本微调。",
+        "reason": "修复后，Sphinx 应接受该语法，因此警告信息中不应包含 'Malformed option description' 片段。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Sphinx 应用 fixture (`app`)，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 `app.warningiserror = True` 来模拟严格模式。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`.. option::` 指令与 `.. rst:directive:option::` 指令的确切关系及解析路径是否相同。",
+      "导致警告的具体验证逻辑位于哪个模块或函数中。",
+      "Sphinx 3.2 与之前版本在 option:: 语法验证上的具体差异点。"
+    ]
+  }
+}

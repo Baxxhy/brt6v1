@@ -1,0 +1,380 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15382",
+  "issue_summary": "在 filter 中使用 Exists 子查询且子查询为空时，整个 WHERE 子句被错误地移除。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和至少一个具有简单字段（如 `name`）的测试模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `connection` 和 `CaptureQueriesContext` 来捕获生成的 SQL。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试数据库需要支持 EXISTS 子查询。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "LookupQueryingTests.test_filter_exists_lhs",
+        "test_file": "tests/lookup/tests.py",
+        "why_relevant": "它测试了在 filter 中使用 Exists 表达式，展示了正常的组合模式。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "Exists 和 OuterRef 的导入与使用",
+          "filter 与 annotate 的组合",
+          "assertCountEqual 断言风格"
+        ],
+        "possible_gap": "它没有使用 `~` 取反操作符，也没有使用 `.none()` 创建空子查询。"
+      },
+      {
+        "test_name": "LookupTests.test_exact_exists",
+        "test_file": "tests/lookup/tests.py",
+        "why_relevant": "它直接在 filter 条件中使用了 Exists 表达式。",
+        "reusable_parts": [
+          "Article 和 Season 模型的使用模式",
+          "在 filter 中直接使用 Exists",
+          "assertCountEqual 断言"
+        ],
+        "possible_gap": "它没有对 Exists 取反，子查询也不是空的。"
+      },
+      {
+        "test_name": "QuerySetSetOperationTests.test_exists_union_empty_result",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "它涉及空结果集和 exists 方法，与空查询集主题相关。",
+        "reusable_parts": [
+          "使用 `pk__in=[]` 创建空 QuerySet",
+          "对 exists() 的断言"
+        ],
+        "possible_gap": "它测试的是 `exists()` 方法，而不是 filter 中的 Exists 表达式，且没有取反操作。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对 QuerySet 调用 filter 方法，其中一个参数是取反的 Exists 表达式，且该 Exists 表达式的子查询是一个通过 .none() 方法得到的空 QuerySet。",
+      "evidence": [
+        "Issue 中：`MyModel.objects.filter(~models.Exists(MyModel.objects.none()), name='test')`",
+        "源码片段 3：`none()` 方法返回一个设置了空的 QuerySet。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 QuerySet 是空的，其内部 query 属性是一个 EmptyResultSet 对象，并且生成的 SQL 查询的 WHERE 子句完全缺失。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中：`<QuerySet []>` 和 `print(qs.query)` 输出 `EmptyResultSet`，以及 `WHERE block is missing completely`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的主要 API 调用。"
+      },
+      {
+        "name": "Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中导致问题的表达式类。"
+      },
+      {
+        "name": "QuerySet.none",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于创建空子查询，是触发条件的关键部分。"
+      },
+      {
+        "name": "QuerySet.query",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 中用于检查生成的 SQL 结构。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._filter_or_exclude",
+        "lines": "",
+        "reason": "filter 方法最终调用此方法，可能在此处理带 Exists 和空子查询的组合时出现问题。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Exists",
+        "lines": "1199-1231",
+        "reason": "Exists 类的 `__invert__` 或 `as_sql` 方法可能在子查询为空时产生特殊输出，导致后续查询构建错误。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "负责构建 SQL WHERE 子句，可能是 WHERE 子句被错误移除的位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中 Exists 通常直接使用（如 `Exists(qs)`）或与特定值比较（如 `before_20=...`）。",
+        "target_pattern": "对 Exists 表达式应用 `~` 取反操作符。",
+        "reason": "Issue 中 bug 触发条件包含 `~models.Exists(...)`。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 Exists 的子查询通常是非空的（如 `Season.objects.filter(...)`）。",
+        "target_pattern": "将 Exists 的子查询替换为通过 `.none()` 方法得到的空 QuerySet。",
+        "reason": "Issue 中使用了 `MyModel.objects.none()` 作为子查询。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能将 Exists 用于 annotate 或与其他条件分开。",
+        "target_pattern": "在单个 filter 调用中，将取反的 Exists 空子查询与另一个普通过滤条件（如 `name='test'`）组合。",
+        "reason": "Issue 中展示了 `filter(~Exists(...), name='test')` 这种组合调用。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "filter 方法应生成一个包含正确 WHERE 子句的 SQL 查询，该 WHERE 子句应包含对 Exists 子查询的取反条件以及对 name 字段的过滤条件。",
+      "evidence": [
+        "Issue 描述暗示 WHERE 子句不应缺失，且引用了类似 Issue #33018。",
+        "相关测试 1 和 3 展示了 Exists 在 filter 中正常工作的模式。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 WHERE 子句的存在与内容。",
+        "reason": "Issue 的核心错误是 WHERE 子句缺失，检查 SQL 是直接证据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "filter 返回的 QuerySet 对象的 `query` 属性或其字符串表示。",
+        "reason": "Issue 中打印 `qs.query` 得到了 `EmptyResultSet`，这是错误症状。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 filter 前后，内部 Query 对象的状态（如 where 子句节点）。",
+        "reason": "有助于定位 WHERE 子句是在构建过程的哪一步被错误移除的。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 查询应包含一个 WHERE 子句，且该子句应包含与 EXISTS 子查询相关的条件。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 SQL 字符串，因为不同数据库后端可能有差异。",
+        "reason": "Issue 是关于 WHERE 子句的存在性，而不是其精确的字符串形式。"
+      },
+      {
+        "assertion_goal": "filter 返回的 QuerySet 的 `query` 属性不应是 `EmptyResultSet` 类型（或其字符串表示不应是 'EmptyResultSet'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 QuerySet 的结果为空，因为即使 SQL 正确，数据也可能为空。",
+        "reason": "`EmptyResultSet` 是内部用于表示空查询的特殊对象，其出现表明查询构建过早失败。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致 WHERE 子句被移除的确切代码路径和逻辑条件是什么？",
+    "除了 `~Exists(queryset.none())` 这种组合，是否还有其他变体（如不取反的 Exists 空子查询）也会触发此 bug？",
+    "Issue 中提到的 #33018 的具体内容是什么，以确认相似性？",
+    "修复后的正确 SQL 应该是什么样子（例如，WHERE NOT EXISTS(...) AND name='test' 还是其他形式）？"
+  ],
+  "raw": {
+    "issue_summary": "在 filter 中使用 Exists 子查询且子查询为空时，整个 WHERE 子句被错误地移除。",
+    "trigger_condition": {
+      "text": "对 QuerySet 调用 filter 方法，其中一个参数是取反的 Exists 表达式，且该 Exists 表达式的子查询是一个通过 .none() 方法得到的空 QuerySet。",
+      "evidence": [
+        "Issue 中：`MyModel.objects.filter(~models.Exists(MyModel.objects.none()), name='test')`",
+        "源码片段 3：`none()` 方法返回一个设置了空的 QuerySet。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 QuerySet 是空的，其内部 query 属性是一个 EmptyResultSet 对象，并且生成的 SQL 查询的 WHERE 子句完全缺失。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中：`<QuerySet []>` 和 `print(qs.query)` 输出 `EmptyResultSet`，以及 `WHERE block is missing completely`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "filter 方法应生成一个包含正确 WHERE 子句的 SQL 查询，该 WHERE 子句应包含对 Exists 子查询的取反条件以及对 name 字段的过滤条件。",
+      "evidence": [
+        "Issue 描述暗示 WHERE 子句不应缺失，且引用了类似 Issue #33018。",
+        "相关测试 1 和 3 展示了 Exists 在 filter 中正常工作的模式。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的主要 API 调用。"
+      },
+      {
+        "name": "Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中导致问题的表达式类。"
+      },
+      {
+        "name": "QuerySet.none",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于创建空子查询，是触发条件的关键部分。"
+      },
+      {
+        "name": "QuerySet.query",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 中用于检查生成的 SQL 结构。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._filter_or_exclude",
+        "lines": "",
+        "reason": "filter 方法最终调用此方法，可能在此处理带 Exists 和空子查询的组合时出现问题。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Exists",
+        "lines": "1199-1231",
+        "reason": "Exists 类的 `__invert__` 或 `as_sql` 方法可能在子查询为空时产生特殊输出，导致后续查询构建错误。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "负责构建 SQL WHERE 子句，可能是 WHERE 子句被错误移除的位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "LookupQueryingTests.test_filter_exists_lhs",
+        "test_file": "tests/lookup/tests.py",
+        "why_relevant": "它测试了在 filter 中使用 Exists 表达式，展示了正常的组合模式。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "Exists 和 OuterRef 的导入与使用",
+          "filter 与 annotate 的组合",
+          "assertCountEqual 断言风格"
+        ],
+        "possible_gap": "它没有使用 `~` 取反操作符，也没有使用 `.none()` 创建空子查询。"
+      },
+      {
+        "test_name": "LookupTests.test_exact_exists",
+        "test_file": "tests/lookup/tests.py",
+        "why_relevant": "它直接在 filter 条件中使用了 Exists 表达式。",
+        "reusable_parts": [
+          "Article 和 Season 模型的使用模式",
+          "在 filter 中直接使用 Exists",
+          "assertCountEqual 断言"
+        ],
+        "possible_gap": "它没有对 Exists 取反，子查询也不是空的。"
+      },
+      {
+        "test_name": "QuerySetSetOperationTests.test_exists_union_empty_result",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "它涉及空结果集和 exists 方法，与空查询集主题相关。",
+        "reusable_parts": [
+          "使用 `pk__in=[]` 创建空 QuerySet",
+          "对 exists() 的断言"
+        ],
+        "possible_gap": "它测试的是 `exists()` 方法，而不是 filter 中的 Exists 表达式，且没有取反操作。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中 Exists 通常直接使用（如 `Exists(qs)`）或与特定值比较（如 `before_20=...`）。",
+        "target_pattern": "对 Exists 表达式应用 `~` 取反操作符。",
+        "reason": "Issue 中 bug 触发条件包含 `~models.Exists(...)`。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 Exists 的子查询通常是非空的（如 `Season.objects.filter(...)`）。",
+        "target_pattern": "将 Exists 的子查询替换为通过 `.none()` 方法得到的空 QuerySet。",
+        "reason": "Issue 中使用了 `MyModel.objects.none()` 作为子查询。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能将 Exists 用于 annotate 或与其他条件分开。",
+        "target_pattern": "在单个 filter 调用中，将取反的 Exists 空子查询与另一个普通过滤条件（如 `name='test'`）组合。",
+        "reason": "Issue 中展示了 `filter(~Exists(...), name='test')` 这种组合调用。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 WHERE 子句的存在与内容。",
+        "reason": "Issue 的核心错误是 WHERE 子句缺失，检查 SQL 是直接证据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "filter 返回的 QuerySet 对象的 `query` 属性或其字符串表示。",
+        "reason": "Issue 中打印 `qs.query` 得到了 `EmptyResultSet`，这是错误症状。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 filter 前后，内部 Query 对象的状态（如 where 子句节点）。",
+        "reason": "有助于定位 WHERE 子句是在构建过程的哪一步被错误移除的。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 查询应包含一个 WHERE 子句，且该子句应包含与 EXISTS 子查询相关的条件。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 SQL 字符串，因为不同数据库后端可能有差异。",
+        "reason": "Issue 是关于 WHERE 子句的存在性，而不是其精确的字符串形式。"
+      },
+      {
+        "assertion_goal": "filter 返回的 QuerySet 的 `query` 属性不应是 `EmptyResultSet` 类型（或其字符串表示不应是 'EmptyResultSet'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 QuerySet 的结果为空，因为即使 SQL 正确，数据也可能为空。",
+        "reason": "`EmptyResultSet` 是内部用于表示空查询的特殊对象，其出现表明查询构建过早失败。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和至少一个具有简单字段（如 `name`）的测试模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `connection` 和 `CaptureQueriesContext` 来捕获生成的 SQL。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试数据库需要支持 EXISTS 子查询。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致 WHERE 子句被移除的确切代码路径和逻辑条件是什么？",
+      "除了 `~Exists(queryset.none())` 这种组合，是否还有其他变体（如不取反的 Exists 空子查询）也会触发此 bug？",
+      "Issue 中提到的 #33018 的具体内容是什么，以确认相似性？",
+      "修复后的正确 SQL 应该是什么样子（例如，WHERE NOT EXISTS(...) AND name='test' 还是其他形式）？"
+    ]
+  }
+}

@@ -1,0 +1,350 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sphinx-doc__sphinx-11510",
+  "issue_summary": "Sphinx 的 source-read 事件对通过 .. include:: 指令包含的文件内容所做的修改不会反映在最终生成的 HTML 中。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 pytest.mark.sphinx fixture 来创建 Sphinx 应用对象 (app)。可能需要指定 testroot 或手动创建 srcdir 包含必要的 .rst 和 .py 文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "在临时目录中创建测试所需的文件结构：conf.py、index.rst、something-to-include.rst 和自定义扩展模块。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "自定义扩展模块需要定义 setup(app) 函数，并使用 app.connect('source-read', callback) 连接事件。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_events",
+        "test_file": "tests/test_application.py",
+        "why_relevant": "该测试直接验证了 Sphinx 应用的事件机制，包括 app.connect、app.emit 和 app.disconnect 的使用。",
+        "reusable_parts": [
+          "app 对象的获取方式（通过 fixture）",
+          "app.connect 和 app.emit 的调用模式",
+          "对事件回调返回值的断言风格"
+        ],
+        "possible_gap": "该测试仅验证了自定义事件的连接和触发，没有涉及 'source-read' 这个内置事件，也没有涉及对源文件内容的修改和验证。"
+      },
+      {
+        "test_name": "test_todo_not_included",
+        "test_file": "tests/test_ext_todo.py",
+        "why_relevant": "该测试使用了 app.connect 来监听 'todo-defined' 事件，并检查最终 HTML 输出内容，这与 Issue 中监听事件并检查输出的模式相似。",
+        "reusable_parts": [
+          "使用 app.connect 连接事件",
+          "在事件回调中收集数据",
+          "使用 app.builder.build_all()",
+          "读取并断言 (app.outdir / 'index.html').read_text() 的内容"
+        ],
+        "possible_gap": "该测试监听的是不同的事件（'todo-defined'），并且不涉及修改 source 内容或处理 .. include:: 指令。"
+      },
+      {
+        "test_name": "test_local_source_files",
+        "test_file": "tests/test_ext_viewcode.py",
+        "why_relevant": "该测试连接了 'viewcode-find-source' 事件，并涉及文件路径和源内容处理，最终断言 HTML 输出中的链接。",
+        "reusable_parts": [
+          "app.connect 的使用",
+          "app.srcdir 和 app.outdir 的路径操作",
+          "读取和断言最终 HTML 文件内容"
+        ],
+        "possible_gap": "该测试关注的是特定扩展（viewcode）的事件和模块查找，与 source-read 事件和源文件内容替换的核心问题不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用自定义 Sphinx 扩展，通过 app.connect('source-read', callback) 注册事件处理函数，该函数修改 source[0] 的内容。构建包含 .. include:: 指令引用其他 .rst 文件的文档。",
+      "evidence": [
+        "Issue 中提供了完整的复现步骤，包括 conf.py、index.rst、something-to-include.rst 和 my-extension.py 文件。",
+        "Issue 说明：'source-read event does not modify include'd files source'。",
+        "Issue 中的复现步骤显示，对 something-to-include.rst 文件的 source[0] 修改在回调函数中生效，但最终 HTML 未更新。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "最终生成的 HTML 文件中，被包含文件（something-to-include.rst）中的占位符 &REPLACE_ME; 未被替换为 REPLACED，而主文件（index.rst）中的占位符被成功替换。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中展示了错误的 HTML 输出：'<p>&amp;REPLACE_ME;</p>' 出现在被包含文件内容对应的部分。",
+        "Issue 说明：'it just does not make it to the final HTML file for some reason'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Sphinx.connect",
+        "kind": "method",
+        "source_path": "sphinx/application.py",
+        "reason": "Issue 中自定义扩展使用此 API 连接 'source-read' 事件。"
+      },
+      {
+        "name": "Sphinx.emit",
+        "kind": "method",
+        "source_path": "sphinx/application.py",
+        "reason": "可能用于触发 'source-read' 事件，需要了解事件传播机制。"
+      },
+      {
+        "name": "SphinxBaseReader.setup",
+        "kind": "method",
+        "source_path": "sphinx/io.py",
+        "reason": "与 Sphinx 读取源文件相关，可能涉及事件触发时机。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/io.py",
+        "object": "SphinxBaseReader 或其子类中处理 .. include:: 指令或触发 source-read 事件的方法",
+        "lines": "",
+        "reason": "Issue 表明 source-read 事件回调被调用且 source[0] 被修改，但修改未持久化到最终输出。问题可能在于读取包含文件后，修改后的 source 数据未被正确传递到后续处理阶段。"
+      },
+      {
+        "path": "sphinx/application.py",
+        "object": "Sphinx 类中与事件处理和文档构建相关的方法",
+        "lines": "",
+        "reason": "'source-read' 事件的触发、回调执行以及数据流管理由 Sphinx 应用核心控制。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中监听与文档结构或特定扩展相关的事件（如 'todo-defined', 'viewcode-find-source'）。",
+        "target_pattern": "监听 'source-read' 事件，并在回调函数中修改传入的 source 列表的内容。",
+        "reason": "Issue 的核心是 'source-read' 事件回调对 source 的修改对包含文件无效。需要变异测试以使用该特定事件和修改操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试可能使用标准的 Sphinx 配置或特定于测试的配置（如 testroot）。",
+        "target_pattern": "配置一个包含 .. include:: 指令的 .rst 主文件和一个被包含的 .rst 文件。",
+        "reason": "Issue 表明缺陷仅在处理通过 .. include:: 指令包含的文件时出现。测试需要包含此指令才能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，事件回调可能只是收集数据或返回信息，不修改输入参数。",
+        "target_pattern": "事件回调函数需要直接修改传入的 source 参数（例如 source[0] = source[0].replace(...)）。",
+        "reason": "Issue 中缺陷表现为对 source 的修改未生效，因此回调必须包含修改操作。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "最终生成的 HTML 文件中，所有文件（包括通过 .. include:: 指令包含的文件）中的占位符 &REPLACE_ME; 都应被替换为 REPLACED。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分展示了正确的 HTML 输出，其中所有 <p>REPLACED</p>。",
+        "Issue 说明：'build/index.html should contain: ... <p>REPLACED</p> <p>REPLACED</p>'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在 'source-read' 事件回调函数内部，打印或记录 docname 和 source[0] 的值，确认回调是否被调用以及修改是否发生。",
+        "reason": "Issue 提到调试显示回调被调用且 source[0] 被正确修改，但最终输出未反映。观测此点可以确认缺陷触发前的状态。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "构建完成后，读取生成的 HTML 文件（如 (app.outdir / 'index.html').read_text()），检查其中是否包含替换后的字符串和未替换的原始占位符。",
+        "reason": "缺陷的最终表现是 HTML 输出内容错误。这是判断测试是否复现 Issue 的直接依据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在构建过程中，观测包含文件内容在被 'source-read' 事件处理后的传递路径，例如是否被复制到其他数据结构（如 doctree）中。",
+        "reason": "缺陷可能在于修改后的 source 数据在后续处理步骤中被覆盖或忽略。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "最终生成的 HTML 文件中，所有预期被替换的占位符（如 &REPLACE_ME;）都已被目标字符串（如 REPLACED）替换，且没有残留的原始占位符。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、格式化的 HTML 字符串完全相等，因为 HTML 输出可能因 Sphinx 版本或主题而有细微变化。",
+        "reason": "Issue 关注的是特定文本片段的替换是否成功。使用 not_contains_fragment 来断言原始占位符不存在，比断言完整 HTML 更稳定。也可以结合使用 contains_fragment 断言替换后的字符串存在。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "source-read 事件对于包含文件是在哪个具体阶段被触发的？是在解析主文件时立即触发，还是在后续某个处理阶段？",
+    "修改后的 source 数据是在哪个后续步骤中被丢弃或覆盖的？可能是在构建 doctree 时，还是在写入输出文件时？",
+    "除了 .. include::，其他包含或引用内容的方式（如 .. literalinclude::）是否也存在同样问题？",
+    "Sphinx 内部处理包含文件时，是否使用了 source 数据的副本，导致回调中的修改无效？"
+  ],
+  "raw": {
+    "issue_summary": "Sphinx 的 source-read 事件对通过 .. include:: 指令包含的文件内容所做的修改不会反映在最终生成的 HTML 中。",
+    "trigger_condition": {
+      "text": "使用自定义 Sphinx 扩展，通过 app.connect('source-read', callback) 注册事件处理函数，该函数修改 source[0] 的内容。构建包含 .. include:: 指令引用其他 .rst 文件的文档。",
+      "evidence": [
+        "Issue 中提供了完整的复现步骤，包括 conf.py、index.rst、something-to-include.rst 和 my-extension.py 文件。",
+        "Issue 说明：'source-read event does not modify include'd files source'。",
+        "Issue 中的复现步骤显示，对 something-to-include.rst 文件的 source[0] 修改在回调函数中生效，但最终 HTML 未更新。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "最终生成的 HTML 文件中，被包含文件（something-to-include.rst）中的占位符 &REPLACE_ME; 未被替换为 REPLACED，而主文件（index.rst）中的占位符被成功替换。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中展示了错误的 HTML 输出：'<p>&amp;REPLACE_ME;</p>' 出现在被包含文件内容对应的部分。",
+        "Issue 说明：'it just does not make it to the final HTML file for some reason'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "最终生成的 HTML 文件中，所有文件（包括通过 .. include:: 指令包含的文件）中的占位符 &REPLACE_ME; 都应被替换为 REPLACED。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分展示了正确的 HTML 输出，其中所有 <p>REPLACED</p>。",
+        "Issue 说明：'build/index.html should contain: ... <p>REPLACED</p> <p>REPLACED</p>'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Sphinx.connect",
+        "kind": "method",
+        "source_path": "sphinx/application.py",
+        "reason": "Issue 中自定义扩展使用此 API 连接 'source-read' 事件。"
+      },
+      {
+        "name": "Sphinx.emit",
+        "kind": "method",
+        "source_path": "sphinx/application.py",
+        "reason": "可能用于触发 'source-read' 事件，需要了解事件传播机制。"
+      },
+      {
+        "name": "SphinxBaseReader.setup",
+        "kind": "method",
+        "source_path": "sphinx/io.py",
+        "reason": "与 Sphinx 读取源文件相关，可能涉及事件触发时机。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/io.py",
+        "object": "SphinxBaseReader 或其子类中处理 .. include:: 指令或触发 source-read 事件的方法",
+        "lines": "",
+        "reason": "Issue 表明 source-read 事件回调被调用且 source[0] 被修改，但修改未持久化到最终输出。问题可能在于读取包含文件后，修改后的 source 数据未被正确传递到后续处理阶段。"
+      },
+      {
+        "path": "sphinx/application.py",
+        "object": "Sphinx 类中与事件处理和文档构建相关的方法",
+        "lines": "",
+        "reason": "'source-read' 事件的触发、回调执行以及数据流管理由 Sphinx 应用核心控制。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_events",
+        "test_file": "tests/test_application.py",
+        "why_relevant": "该测试直接验证了 Sphinx 应用的事件机制，包括 app.connect、app.emit 和 app.disconnect 的使用。",
+        "reusable_parts": [
+          "app 对象的获取方式（通过 fixture）",
+          "app.connect 和 app.emit 的调用模式",
+          "对事件回调返回值的断言风格"
+        ],
+        "possible_gap": "该测试仅验证了自定义事件的连接和触发，没有涉及 'source-read' 这个内置事件，也没有涉及对源文件内容的修改和验证。"
+      },
+      {
+        "test_name": "test_todo_not_included",
+        "test_file": "tests/test_ext_todo.py",
+        "why_relevant": "该测试使用了 app.connect 来监听 'todo-defined' 事件，并检查最终 HTML 输出内容，这与 Issue 中监听事件并检查输出的模式相似。",
+        "reusable_parts": [
+          "使用 app.connect 连接事件",
+          "在事件回调中收集数据",
+          "使用 app.builder.build_all()",
+          "读取并断言 (app.outdir / 'index.html').read_text() 的内容"
+        ],
+        "possible_gap": "该测试监听的是不同的事件（'todo-defined'），并且不涉及修改 source 内容或处理 .. include:: 指令。"
+      },
+      {
+        "test_name": "test_local_source_files",
+        "test_file": "tests/test_ext_viewcode.py",
+        "why_relevant": "该测试连接了 'viewcode-find-source' 事件，并涉及文件路径和源内容处理，最终断言 HTML 输出中的链接。",
+        "reusable_parts": [
+          "app.connect 的使用",
+          "app.srcdir 和 app.outdir 的路径操作",
+          "读取和断言最终 HTML 文件内容"
+        ],
+        "possible_gap": "该测试关注的是特定扩展（viewcode）的事件和模块查找，与 source-read 事件和源文件内容替换的核心问题不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中监听与文档结构或特定扩展相关的事件（如 'todo-defined', 'viewcode-find-source'）。",
+        "target_pattern": "监听 'source-read' 事件，并在回调函数中修改传入的 source 列表的内容。",
+        "reason": "Issue 的核心是 'source-read' 事件回调对 source 的修改对包含文件无效。需要变异测试以使用该特定事件和修改操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试可能使用标准的 Sphinx 配置或特定于测试的配置（如 testroot）。",
+        "target_pattern": "配置一个包含 .. include:: 指令的 .rst 主文件和一个被包含的 .rst 文件。",
+        "reason": "Issue 表明缺陷仅在处理通过 .. include:: 指令包含的文件时出现。测试需要包含此指令才能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，事件回调可能只是收集数据或返回信息，不修改输入参数。",
+        "target_pattern": "事件回调函数需要直接修改传入的 source 参数（例如 source[0] = source[0].replace(...)）。",
+        "reason": "Issue 中缺陷表现为对 source 的修改未生效，因此回调必须包含修改操作。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在 'source-read' 事件回调函数内部，打印或记录 docname 和 source[0] 的值，确认回调是否被调用以及修改是否发生。",
+        "reason": "Issue 提到调试显示回调被调用且 source[0] 被正确修改，但最终输出未反映。观测此点可以确认缺陷触发前的状态。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "构建完成后，读取生成的 HTML 文件（如 (app.outdir / 'index.html').read_text()），检查其中是否包含替换后的字符串和未替换的原始占位符。",
+        "reason": "缺陷的最终表现是 HTML 输出内容错误。这是判断测试是否复现 Issue 的直接依据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在构建过程中，观测包含文件内容在被 'source-read' 事件处理后的传递路径，例如是否被复制到其他数据结构（如 doctree）中。",
+        "reason": "缺陷可能在于修改后的 source 数据在后续处理步骤中被覆盖或忽略。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "最终生成的 HTML 文件中，所有预期被替换的占位符（如 &REPLACE_ME;）都已被目标字符串（如 REPLACED）替换，且没有残留的原始占位符。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、格式化的 HTML 字符串完全相等，因为 HTML 输出可能因 Sphinx 版本或主题而有细微变化。",
+        "reason": "Issue 关注的是特定文本片段的替换是否成功。使用 not_contains_fragment 来断言原始占位符不存在，比断言完整 HTML 更稳定。也可以结合使用 contains_fragment 断言替换后的字符串存在。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytest.mark.sphinx fixture 来创建 Sphinx 应用对象 (app)。可能需要指定 testroot 或手动创建 srcdir 包含必要的 .rst 和 .py 文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "在临时目录中创建测试所需的文件结构：conf.py、index.rst、something-to-include.rst 和自定义扩展模块。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "自定义扩展模块需要定义 setup(app) 函数，并使用 app.connect('source-read', callback) 连接事件。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "source-read 事件对于包含文件是在哪个具体阶段被触发的？是在解析主文件时立即触发，还是在后续某个处理阶段？",
+      "修改后的 source 数据是在哪个后续步骤中被丢弃或覆盖的？可能是在构建 doctree 时，还是在写入输出文件时？",
+      "除了 .. include::，其他包含或引用内容的方式（如 .. literalinclude::）是否也存在同样问题？",
+      "Sphinx 内部处理包含文件时，是否使用了 source 数据的副本，导致回调中的修改无效？"
+    ]
+  }
+}

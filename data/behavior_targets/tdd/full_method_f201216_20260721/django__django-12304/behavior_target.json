@@ -1,0 +1,316 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12304",
+  "issue_summary": "Django 模板中无法使用枚举类型，因为模板引擎会无参数调用可调用对象，而枚举类需要参数。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的测试用例（如 SimpleTestCase 或 TestCase），因为它们提供了模板渲染的客户端和工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个包含问题中模板代码片段的模板字符串，并将其加载到 Django 模板引擎中。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构建一个包含枚举类（YearInSchool）和比较变量（如 student.year_in_school）的模板上下文。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ChoicesTests.test_textchoices",
+        "test_file": "tests/model_enums/tests.py",
+        "why_relevant": "该测试直接使用了 YearInSchool 枚举类及其成员，展示了其正常用法和属性，是构建测试的基础。",
+        "reusable_parts": [
+          "YearInSchool 类的导入和定义",
+          "对枚举成员属性（如 .value, .label）的断言风格",
+          "使用 SimpleTestCase"
+        ],
+        "possible_gap": "该测试在纯 Python 环境下运行，没有涉及 Django 模板渲染上下文，因此无法复现模板引擎调用枚举类的问题。"
+      },
+      {
+        "test_name": "TestCharField.test_assignment_from_choice_enum",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "该测试展示了在模型字段赋值中使用 TextChoices 枚举，涉及了 Django 模型层与枚举的交互。",
+        "reusable_parts": [
+          "从 models.TextChoices 创建枚举子类的模式",
+          "将枚举成员赋值给模型字段",
+          "使用 TestCase 和数据库操作"
+        ],
+        "possible_gap": "该测试专注于模型层的赋值和数据库操作，没有测试模板层的渲染行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 模板中使用枚举类成员与枚举类属性进行比较，例如 {% if student.year_in_school == YearInSchool.FRESHMAN %}。",
+      "evidence": [
+        "Issue 描述：'The new enumeration types are great but can't be used in Django templates due to their being callable. For example this doesn't work: {% if student.year_in_school == YearInSchool.FRESHMAN %}'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "模板渲染失败，因为 Django 模板引擎尝试无参数调用枚举类 YearInSchool，而调用需要参数。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'The call fails because the required value argument is missing.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "models.TextChoices",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中提到的 YearInSchool 继承自 models.TextChoices，这是问题涉及的枚举类型基类。"
+      },
+      {
+        "name": "YearInSchool",
+        "kind": "class",
+        "source_path": "tests/model_enums/tests.py",
+        "reason": "Issue 中使用的具体枚举类示例，是触发问题的核心对象。"
+      },
+      {
+        "name": "YearInSchool.FRESHMAN",
+        "kind": "unknown",
+        "source_path": "tests/model_enums/tests.py",
+        "reason": "Issue 中模板比较操作的目标枚举成员。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/...",
+        "object": "Django 模板引擎中处理变量和可调用对象的部分",
+        "lines": "",
+        "reason": "Issue 指出 Django 模板总是无参数调用可调用对象，这应该是模板引擎的通用行为，是触发问题的根源。"
+      },
+      {
+        "path": "django/db/models/enums.py",
+        "object": "Choices 类及其子类（如 TextChoices, IntegerChoices）",
+        "lines": "",
+        "reason": "Issue 建议的解决方案是在 Choices 类上设置 do_not_call_in_templates = True，这表明缺陷与这些枚举类的定义或行为有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 Python 代码中直接访问枚举成员属性（如 YearInSchool.FRESHMAN.value）。",
+        "target_pattern": "在 Django 模板渲染上下文中，通过模板变量系统访问枚举类本身（如 {{ YearInSchool }}）或进行比较（如 {{ student.year_in_school == YearInSchool.FRESHMAN }}）。",
+        "reason": "Issue 明确指出问题发生在模板渲染时，模板引擎将枚举类视为可调用对象并尝试调用。将测试环境从纯 Python 切换到模板渲染是触发缺陷的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在标准单元测试环境中运行，不涉及模板引擎。",
+        "target_pattern": "配置测试以使用 Django 的模板加载器和渲染器来渲染一个包含问题比较语句的模板字符串。",
+        "reason": "为了复现 Issue，需要模拟出触发缺陷的 Django 模板渲染环境。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "枚举类在 Django 模板中应能被正常使用，模板引擎不应尝试调用它们。",
+      "evidence": [
+        "Issue 描述：'The easy solution would be to declare do_not_call_in_templates = True on the various Choices classes.' 这暗示了修复后的预期行为是枚举类在模板中不可调用，从而避免错误。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 template.render(context) 时捕获的异常及其消息。",
+        "reason": "Issue 描述调用失败，观察渲染过程中是否抛出异常（如 TypeError 关于缺少参数）是判断问题是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "template.render(context) 的返回值（渲染后的字符串）。",
+        "reason": "如果渲染成功，可以观察输出是否包含预期内容；如果失败，返回值可能为空或包含错误信息。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在模板上下文中 YearInSchool 的类型，以及它是否具有 __call__ 属性。",
+        "reason": "Issue 的核心是枚举类在模板中被视为可调用对象。观察其类型和可调用性有助于理解上下文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 Django 模板渲染上下文中，使用枚举类进行比较的模板应能正常渲染，不抛出因无参数调用枚举类而导致的异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的、具体的异常消息字符串，因为消息可能因 Django 版本或具体实现而变化。",
+        "reason": "Issue 明确指出当前行为会抛出异常，而修复后应不再抛出。使用 `assertRaises` 或 `pytest.raises` 来验证异常的存在与否是直接且稳定的方式。"
+      },
+      {
+        "assertion_goal": "渲染后的模板输出应包含预期的文本片段（如果模板设计为输出特定内容）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言整个渲染输出的精确相等，因为模板可能包含动态或无关内容。",
+        "reason": "如果修复后模板能正常渲染，可以验证其输出是否包含关键内容，这是一个更健壮的断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发缺陷是否需要特定的 Django 模板后端配置或设置。",
+    "除了 TextChoices，其他 Choices 子类（如 IntegerChoices）是否也存在同样的问题。",
+    "在模板中直接访问枚举成员（如 YearInSchool.FRESHMAN）是否也会触发调用，还是仅当枚举类本身出现在模板变量中时才会。",
+    "错误的具体异常类型和消息是什么（Issue 未明确给出）。"
+  ],
+  "raw": {
+    "issue_summary": "Django 模板中无法使用枚举类型，因为模板引擎会无参数调用可调用对象，而枚举类需要参数。",
+    "trigger_condition": {
+      "text": "在 Django 模板中使用枚举类成员与枚举类属性进行比较，例如 {% if student.year_in_school == YearInSchool.FRESHMAN %}。",
+      "evidence": [
+        "Issue 描述：'The new enumeration types are great but can't be used in Django templates due to their being callable. For example this doesn't work: {% if student.year_in_school == YearInSchool.FRESHMAN %}'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "模板渲染失败，因为 Django 模板引擎尝试无参数调用枚举类 YearInSchool，而调用需要参数。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'The call fails because the required value argument is missing.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "枚举类在 Django 模板中应能被正常使用，模板引擎不应尝试调用它们。",
+      "evidence": [
+        "Issue 描述：'The easy solution would be to declare do_not_call_in_templates = True on the various Choices classes.' 这暗示了修复后的预期行为是枚举类在模板中不可调用，从而避免错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "models.TextChoices",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中提到的 YearInSchool 继承自 models.TextChoices，这是问题涉及的枚举类型基类。"
+      },
+      {
+        "name": "YearInSchool",
+        "kind": "class",
+        "source_path": "tests/model_enums/tests.py",
+        "reason": "Issue 中使用的具体枚举类示例，是触发问题的核心对象。"
+      },
+      {
+        "name": "YearInSchool.FRESHMAN",
+        "kind": "unknown",
+        "source_path": "tests/model_enums/tests.py",
+        "reason": "Issue 中模板比较操作的目标枚举成员。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/...",
+        "object": "Django 模板引擎中处理变量和可调用对象的部分",
+        "lines": "",
+        "reason": "Issue 指出 Django 模板总是无参数调用可调用对象，这应该是模板引擎的通用行为，是触发问题的根源。"
+      },
+      {
+        "path": "django/db/models/enums.py",
+        "object": "Choices 类及其子类（如 TextChoices, IntegerChoices）",
+        "lines": "",
+        "reason": "Issue 建议的解决方案是在 Choices 类上设置 do_not_call_in_templates = True，这表明缺陷与这些枚举类的定义或行为有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ChoicesTests.test_textchoices",
+        "test_file": "tests/model_enums/tests.py",
+        "why_relevant": "该测试直接使用了 YearInSchool 枚举类及其成员，展示了其正常用法和属性，是构建测试的基础。",
+        "reusable_parts": [
+          "YearInSchool 类的导入和定义",
+          "对枚举成员属性（如 .value, .label）的断言风格",
+          "使用 SimpleTestCase"
+        ],
+        "possible_gap": "该测试在纯 Python 环境下运行，没有涉及 Django 模板渲染上下文，因此无法复现模板引擎调用枚举类的问题。"
+      },
+      {
+        "test_name": "TestCharField.test_assignment_from_choice_enum",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "该测试展示了在模型字段赋值中使用 TextChoices 枚举，涉及了 Django 模型层与枚举的交互。",
+        "reusable_parts": [
+          "从 models.TextChoices 创建枚举子类的模式",
+          "将枚举成员赋值给模型字段",
+          "使用 TestCase 和数据库操作"
+        ],
+        "possible_gap": "该测试专注于模型层的赋值和数据库操作，没有测试模板层的渲染行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 Python 代码中直接访问枚举成员属性（如 YearInSchool.FRESHMAN.value）。",
+        "target_pattern": "在 Django 模板渲染上下文中，通过模板变量系统访问枚举类本身（如 {{ YearInSchool }}）或进行比较（如 {{ student.year_in_school == YearInSchool.FRESHMAN }}）。",
+        "reason": "Issue 明确指出问题发生在模板渲染时，模板引擎将枚举类视为可调用对象并尝试调用。将测试环境从纯 Python 切换到模板渲染是触发缺陷的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在标准单元测试环境中运行，不涉及模板引擎。",
+        "target_pattern": "配置测试以使用 Django 的模板加载器和渲染器来渲染一个包含问题比较语句的模板字符串。",
+        "reason": "为了复现 Issue，需要模拟出触发缺陷的 Django 模板渲染环境。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 template.render(context) 时捕获的异常及其消息。",
+        "reason": "Issue 描述调用失败，观察渲染过程中是否抛出异常（如 TypeError 关于缺少参数）是判断问题是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "template.render(context) 的返回值（渲染后的字符串）。",
+        "reason": "如果渲染成功，可以观察输出是否包含预期内容；如果失败，返回值可能为空或包含错误信息。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在模板上下文中 YearInSchool 的类型，以及它是否具有 __call__ 属性。",
+        "reason": "Issue 的核心是枚举类在模板中被视为可调用对象。观察其类型和可调用性有助于理解上下文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 Django 模板渲染上下文中，使用枚举类进行比较的模板应能正常渲染，不抛出因无参数调用枚举类而导致的异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的、具体的异常消息字符串，因为消息可能因 Django 版本或具体实现而变化。",
+        "reason": "Issue 明确指出当前行为会抛出异常，而修复后应不再抛出。使用 `assertRaises` 或 `pytest.raises` 来验证异常的存在与否是直接且稳定的方式。"
+      },
+      {
+        "assertion_goal": "渲染后的模板输出应包含预期的文本片段（如果模板设计为输出特定内容）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言整个渲染输出的精确相等，因为模板可能包含动态或无关内容。",
+        "reason": "如果修复后模板能正常渲染，可以验证其输出是否包含关键内容，这是一个更健壮的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的测试用例（如 SimpleTestCase 或 TestCase），因为它们提供了模板渲染的客户端和工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个包含问题中模板代码片段的模板字符串，并将其加载到 Django 模板引擎中。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构建一个包含枚举类（YearInSchool）和比较变量（如 student.year_in_school）的模板上下文。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发缺陷是否需要特定的 Django 模板后端配置或设置。",
+      "除了 TextChoices，其他 Choices 子类（如 IntegerChoices）是否也存在同样的问题。",
+      "在模板中直接访问枚举成员（如 YearInSchool.FRESHMAN）是否也会触发调用，还是仅当枚举类本身出现在模板变量中时才会。",
+      "错误的具体异常类型和消息是什么（Issue 未明确给出）。"
+    ]
+  }
+}

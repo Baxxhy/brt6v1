@@ -1,0 +1,318 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-4687",
+  "issue_summary": "xr.where 在 DataArray 上使用时丢失了属性和 dtype。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy，构造带有 attrs 和特定 dtype 的 DataArray。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 assert_identical 或 assert_equal 进行断言，类似于现有测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataArray.test_where",
+        "test_file": "xarray/tests/test_dataarray.py",
+        "why_relevant": "直接测试 DataArray 的 where 方法，包含断言风格和对象构造。",
+        "reusable_parts": [
+          "imports (DataArray, np)",
+          "DataArray 构造",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "现有测试未检查 attrs 的保留情况。"
+      },
+      {
+        "test_name": "TestDataset.test_where",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "包含对 attrs 保留的测试用例，展示了期望的行为模式。",
+        "reusable_parts": [
+          "attrs 设置模式",
+          "assert actual.attrs == ds.attrs 的断言"
+        ],
+        "possible_gap": "测试的是 Dataset.where 而非 DataArray.where 或 xr.where。"
+      },
+      {
+        "test_name": "test_where",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "直接测试 xr.where 函数，是 Issue 中调用的 API。",
+        "reusable_parts": [
+          "xr.where 调用模式",
+          "assert_identical 断言"
+        ],
+        "possible_gap": "测试用例简单，未涉及 attrs 或复杂 dtype。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对具有 attrs 属性的 DataArray 调用 xr.where 函数。",
+      "evidence": [
+        "Issue 中的 MCVE 代码：`data2 = xr.where(data == 1, 5, 0)` 和 `xr.where(da==0, -1, da).attrs`",
+        "Issue 描述：'Using `xr.where` on a DataArray with attributes results in a new DataArray without attributes.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 DataArray 的 attrs 字典为空，且 dtype 可能被改变（例如从 np.int8 变为 np.int64）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的 MCVE 输出：`# shows: {}`",
+        "Issue 描述：'Apart from loosing attributes the dtype is not conserved. In the example the resulting DataArray has dtype np.int64 instead of np.int8.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.where",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了此函数的行为问题。"
+      },
+      {
+        "name": "DataArray.where",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "xr.where 可能内部调用 DataArray 的 where 方法。"
+      },
+      {
+        "name": "Variable.where",
+        "kind": "method",
+        "source_path": "xarray/core/variable.py",
+        "reason": "源码片段 2 显示 Variable 类有 where 方法，DataArray 的 where 可能依赖它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/variable.py",
+        "object": "Variable.where",
+        "lines": "1740-1741",
+        "reason": "Variable.where 方法调用 ops.where_method，可能未正确处理 attrs 的传递。"
+      },
+      {
+        "path": "xarray/core/dataarray.py",
+        "object": "DataArray",
+        "lines": "",
+        "reason": "DataArray 的 where 方法或相关操作可能未正确调用 _copy_attrs_from 或设置 keep_attrs。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用没有 attrs 或简单 dtype 的 DataArray 作为输入。",
+        "target_pattern": "使用带有 attrs 字典和非默认 dtype（如 np.int8）的 DataArray 作为输入。",
+        "reason": "Issue 表明 bug 在输入 DataArray 有 attrs 和特定 dtype 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中 where 的条件参数通常是 DataArray 的比较结果。",
+        "target_pattern": "保持条件参数为 DataArray 的比较结果，但确保输入 DataArray 有 attrs。",
+        "reason": "Issue 的 MCVE 使用了 `data == 1` 作为条件，这是常见模式，但输入需有 attrs。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "xr.where 返回的 DataArray 应保留输入 DataArray 的 attrs 属性，并尽可能保持 dtype。",
+      "evidence": [
+        "Issue 中的期望：'Attributes should be preserved' 和 'I would expect the attributes to remain in the data array.'",
+        "相关测试 2 中 attrs 被保留的测试用例：`assert actual.a.attrs == ds.a.attrs`"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "result.attrs",
+        "reason": "Issue 的核心是返回的 DataArray 的 attrs 字典为空。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "result.dtype",
+        "reason": "Issue 还提到 dtype 未被保留，需要观察。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "xr.where 返回的 DataArray 的 attrs 应与输入 DataArray 的 attrs 相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串或与无关属性的相等性。",
+        "reason": "attrs 字典应被保留，这是 Issue 的核心期望。"
+      },
+      {
+        "assertion_goal": "xr.where 返回的 DataArray 的 dtype 应与输入 DataArray 的 dtype 一致（或至少不是意外提升）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的数值结果，除非与 dtype 相关。",
+        "reason": "Issue 指出 dtype 未被保留，这也是一个潜在问题。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "bug 的确切位置是在 Variable.where、DataArray.where 还是 xr.where 的包装层。",
+    "dtype 丢失是 xarray 的问题还是底层 numpy 的问题（如 Issue 所推测）。",
+    "attrs 的保留是否应通过 keep_attrs 参数控制，以及默认行为应该是什么。"
+  ],
+  "raw": {
+    "issue_summary": "xr.where 在 DataArray 上使用时丢失了属性和 dtype。",
+    "trigger_condition": {
+      "text": "对具有 attrs 属性的 DataArray 调用 xr.where 函数。",
+      "evidence": [
+        "Issue 中的 MCVE 代码：`data2 = xr.where(data == 1, 5, 0)` 和 `xr.where(da==0, -1, da).attrs`",
+        "Issue 描述：'Using `xr.where` on a DataArray with attributes results in a new DataArray without attributes.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 DataArray 的 attrs 字典为空，且 dtype 可能被改变（例如从 np.int8 变为 np.int64）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的 MCVE 输出：`# shows: {}`",
+        "Issue 描述：'Apart from loosing attributes the dtype is not conserved. In the example the resulting DataArray has dtype np.int64 instead of np.int8.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "xr.where 返回的 DataArray 应保留输入 DataArray 的 attrs 属性，并尽可能保持 dtype。",
+      "evidence": [
+        "Issue 中的期望：'Attributes should be preserved' 和 'I would expect the attributes to remain in the data array.'",
+        "相关测试 2 中 attrs 被保留的测试用例：`assert actual.a.attrs == ds.a.attrs`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.where",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了此函数的行为问题。"
+      },
+      {
+        "name": "DataArray.where",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "xr.where 可能内部调用 DataArray 的 where 方法。"
+      },
+      {
+        "name": "Variable.where",
+        "kind": "method",
+        "source_path": "xarray/core/variable.py",
+        "reason": "源码片段 2 显示 Variable 类有 where 方法，DataArray 的 where 可能依赖它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/variable.py",
+        "object": "Variable.where",
+        "lines": "1740-1741",
+        "reason": "Variable.where 方法调用 ops.where_method，可能未正确处理 attrs 的传递。"
+      },
+      {
+        "path": "xarray/core/dataarray.py",
+        "object": "DataArray",
+        "lines": "",
+        "reason": "DataArray 的 where 方法或相关操作可能未正确调用 _copy_attrs_from 或设置 keep_attrs。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataArray.test_where",
+        "test_file": "xarray/tests/test_dataarray.py",
+        "why_relevant": "直接测试 DataArray 的 where 方法，包含断言风格和对象构造。",
+        "reusable_parts": [
+          "imports (DataArray, np)",
+          "DataArray 构造",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "现有测试未检查 attrs 的保留情况。"
+      },
+      {
+        "test_name": "TestDataset.test_where",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "包含对 attrs 保留的测试用例，展示了期望的行为模式。",
+        "reusable_parts": [
+          "attrs 设置模式",
+          "assert actual.attrs == ds.attrs 的断言"
+        ],
+        "possible_gap": "测试的是 Dataset.where 而非 DataArray.where 或 xr.where。"
+      },
+      {
+        "test_name": "test_where",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "直接测试 xr.where 函数，是 Issue 中调用的 API。",
+        "reusable_parts": [
+          "xr.where 调用模式",
+          "assert_identical 断言"
+        ],
+        "possible_gap": "测试用例简单，未涉及 attrs 或复杂 dtype。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用没有 attrs 或简单 dtype 的 DataArray 作为输入。",
+        "target_pattern": "使用带有 attrs 字典和非默认 dtype（如 np.int8）的 DataArray 作为输入。",
+        "reason": "Issue 表明 bug 在输入 DataArray 有 attrs 和特定 dtype 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中 where 的条件参数通常是 DataArray 的比较结果。",
+        "target_pattern": "保持条件参数为 DataArray 的比较结果，但确保输入 DataArray 有 attrs。",
+        "reason": "Issue 的 MCVE 使用了 `data == 1` 作为条件，这是常见模式，但输入需有 attrs。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "result.attrs",
+        "reason": "Issue 的核心是返回的 DataArray 的 attrs 字典为空。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "result.dtype",
+        "reason": "Issue 还提到 dtype 未被保留，需要观察。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "xr.where 返回的 DataArray 的 attrs 应与输入 DataArray 的 attrs 相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串或与无关属性的相等性。",
+        "reason": "attrs 字典应被保留，这是 Issue 的核心期望。"
+      },
+      {
+        "assertion_goal": "xr.where 返回的 DataArray 的 dtype 应与输入 DataArray 的 dtype 一致（或至少不是意外提升）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的数值结果，除非与 dtype 相关。",
+        "reason": "Issue 指出 dtype 未被保留，这也是一个潜在问题。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy，构造带有 attrs 和特定 dtype 的 DataArray。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 assert_identical 或 assert_equal 进行断言，类似于现有测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "bug 的确切位置是在 Variable.where、DataArray.where 还是 xr.where 的包装层。",
+      "dtype 丢失是 xarray 的问题还是底层 numpy 的问题（如 Issue 所推测）。",
+      "attrs 的保留是否应通过 keep_attrs 参数控制，以及默认行为应该是什么。"
+    ]
+  }
+}

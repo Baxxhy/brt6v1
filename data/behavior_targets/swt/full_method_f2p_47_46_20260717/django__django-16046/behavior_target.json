@@ -1,0 +1,280 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16046",
+  "issue_summary": "在 Django admin 的 list_display 格式化过程中，当 numberformat.py 遇到 null 值时，会因索引访问空字符串而抛出 IndexError: string index out of range。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类。需要从 django.db import models 来创建字段实例。需要导入 display_for_field 函数。需要准备一个 empty_value（如 '-' 或空字符串）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在 Django 的 admin 上下文下运行，但相关测试表明可以直接调用 display_for_field 函数进行单元测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UtilsTests.test_null_display_for_field",
+        "test_file": "tests/admin_utils/tests.py",
+        "why_relevant": "它直接测试 display_for_field 对 None 值的处理，覆盖了多种字段类型，包括数字字段（DecimalField, FloatField）。",
+        "reusable_parts": [
+          "导入 display_for_field",
+          "使用 SimpleTestCase",
+          "使用 models 模块创建字段实例",
+          "使用 self.empty_value",
+          "使用 assertEqual 断言返回值"
+        ],
+        "possible_gap": "该测试目前断言 null 值能正常返回 self.empty_value，但根据 Issue，在特定配置或代码路径下（可能涉及 numberformat.py），实际会抛出 IndexError。测试可能没有触发有问题的格式化分支。"
+      },
+      {
+        "test_name": "UtilsTests.test_number_formats_display_for_field",
+        "test_file": "tests/admin_utils/tests.py",
+        "why_relevant": "它测试 display_for_field 对正常数字值的格式化，展示了数字字段（FloatField, DecimalField, IntegerField）的正常调用模式。",
+        "reusable_parts": [
+          "调用 display_for_field 并传入数字值和数字字段实例",
+          "断言格式化后的字符串输出"
+        ],
+        "possible_gap": "它只测试了非 null 的正常数字值，没有测试值为 None 的情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当 display_for_field 函数处理一个值为 null 的数字字段（例如 FloatField、DecimalField、IntegerField）时，在 admin list_display 上下文中进行格式化。",
+      "evidence": [
+        "Issue 描述提到 'number field that's null when formatting for the admin list_display'",
+        "相关测试 1 显示 display_for_field 被调用时第一个参数为 None，用于测试各种字段类型（包括 DecimalField、FloatField）的 null 值处理。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 IndexError: string index out of range 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确提到 'IndexError: string index out of range'",
+        "Issue 中代码片段 'if str_number[0] == \"-\"' 暗示了对字符串进行索引访问。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "display_for_field",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 和所有相关测试都围绕此函数展开，它是 admin 中格式化字段显示的核心函数，处理 null 值是其职责。"
+      },
+      {
+        "name": "numberformat.py",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 标题和描述直接提及此模块，其中可能存在导致 IndexError 的格式化逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "numberformat.py",
+        "object": "某个格式化数字字符串的函数",
+        "lines": "",
+        "reason": "Issue 明确指出问题在 numberformat.py 中，且代码片段 'if str_number[0] == \"-\"' 暗示了该模块内存在对字符串进行不安全索引访问的逻辑。"
+      },
+      {
+        "path": "django/contrib/admin/utils.py",
+        "object": "display_for_field",
+        "lines": "",
+        "reason": "相关测试都调用 display_for_field，它是触发问题的入口点，可能将 null 值传递给底层的 numberformat 逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，调用 display_for_field 时第一个参数是具体的数字值（如 12345.6789, Decimal(\"12345.6789\"), 12345）。",
+        "target_pattern": "将第一个参数改为 None。",
+        "reason": "Issue 明确指出当字段值为 null 时会触发 bug。将输入从有效数字变为 None 应能导向有缺陷的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，调用 display_for_field 时传入的字段是具体的模型字段实例（如 models.FloatField(), models.DecimalField()）。",
+        "target_pattern": "保持使用数字字段实例（如 FloatField, DecimalField, IntegerField）。",
+        "reason": "Issue 提到的是 'number field'，因此需要保持字段类型为数字类型，以触发 numberformat.py 中的逻辑。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当数字字段的值为 null 时，display_for_field 应能正常处理，返回指定的空值表示（例如 self.empty_value），而不是抛出 IndexError。",
+      "evidence": [
+        "相关测试 1 中，对于 DecimalField、FloatField 等数字字段，当值为 None 时，测试断言 display_for_field 返回 self.empty_value。",
+        "Issue 标题 'Fix numberformat.py \"string index out of range\" when null' 暗示修复目标是处理 null 值。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 display_for_field(value=None, field=数字字段实例, empty_value) 时是否抛出 IndexError。",
+        "reason": "Issue 的核心错误现象就是 IndexError，直接观测此调用是否引发该异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "display_for_field 的返回值，特别是当 value 为 None 且 field 为数字字段时。",
+        "reason": "在修复后，期望行为是返回指定的空值表示（如 self.empty_value）。观测返回值有助于验证预期行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 value 为 None 且 field 为数字字段时，调用 display_for_field 不应抛出 IndexError，并应返回一个合理的表示（如传入的 empty_value 参数）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的输出字符串内容，因为 empty_value 的具体形式可能变化。避免断言与数字格式化相关的具体字符串（如带千位分隔符的格式）。",
+        "reason": "Issue 的核心是异常，因此首先需要断言不抛出特定异常。修复后，返回值应与处理 null 值的语义一致（返回空值表示）。使用 raises 断言异常缺失（assertNotRaises 或 try-except）或直接调用并检查返回值。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发 IndexError 的确切代码路径和条件是否还需要特定的配置（如 USE_THOUSAND_SEPARATOR）？",
+    "numberformat.py 中具体哪个函数或哪行代码导致了问题？",
+    "除了 FloatField、DecimalField、IntegerField，其他数字字段类型（如 PositiveIntegerField）是否也会触发此问题？",
+    "empty_value 参数的具体值是否会影响 bug 的触发？"
+  ],
+  "raw": {
+    "issue_summary": "在 Django admin 的 list_display 格式化过程中，当 numberformat.py 遇到 null 值时，会因索引访问空字符串而抛出 IndexError: string index out of range。",
+    "trigger_condition": {
+      "text": "当 display_for_field 函数处理一个值为 null 的数字字段（例如 FloatField、DecimalField、IntegerField）时，在 admin list_display 上下文中进行格式化。",
+      "evidence": [
+        "Issue 描述提到 'number field that's null when formatting for the admin list_display'",
+        "相关测试 1 显示 display_for_field 被调用时第一个参数为 None，用于测试各种字段类型（包括 DecimalField、FloatField）的 null 值处理。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 IndexError: string index out of range 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确提到 'IndexError: string index out of range'",
+        "Issue 中代码片段 'if str_number[0] == \"-\"' 暗示了对字符串进行索引访问。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当数字字段的值为 null 时，display_for_field 应能正常处理，返回指定的空值表示（例如 self.empty_value），而不是抛出 IndexError。",
+      "evidence": [
+        "相关测试 1 中，对于 DecimalField、FloatField 等数字字段，当值为 None 时，测试断言 display_for_field 返回 self.empty_value。",
+        "Issue 标题 'Fix numberformat.py \"string index out of range\" when null' 暗示修复目标是处理 null 值。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "display_for_field",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 和所有相关测试都围绕此函数展开，它是 admin 中格式化字段显示的核心函数，处理 null 值是其职责。"
+      },
+      {
+        "name": "numberformat.py",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 标题和描述直接提及此模块，其中可能存在导致 IndexError 的格式化逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "numberformat.py",
+        "object": "某个格式化数字字符串的函数",
+        "lines": "",
+        "reason": "Issue 明确指出问题在 numberformat.py 中，且代码片段 'if str_number[0] == \"-\"' 暗示了该模块内存在对字符串进行不安全索引访问的逻辑。"
+      },
+      {
+        "path": "django/contrib/admin/utils.py",
+        "object": "display_for_field",
+        "lines": "",
+        "reason": "相关测试都调用 display_for_field，它是触发问题的入口点，可能将 null 值传递给底层的 numberformat 逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UtilsTests.test_null_display_for_field",
+        "test_file": "tests/admin_utils/tests.py",
+        "why_relevant": "它直接测试 display_for_field 对 None 值的处理，覆盖了多种字段类型，包括数字字段（DecimalField, FloatField）。",
+        "reusable_parts": [
+          "导入 display_for_field",
+          "使用 SimpleTestCase",
+          "使用 models 模块创建字段实例",
+          "使用 self.empty_value",
+          "使用 assertEqual 断言返回值"
+        ],
+        "possible_gap": "该测试目前断言 null 值能正常返回 self.empty_value，但根据 Issue，在特定配置或代码路径下（可能涉及 numberformat.py），实际会抛出 IndexError。测试可能没有触发有问题的格式化分支。"
+      },
+      {
+        "test_name": "UtilsTests.test_number_formats_display_for_field",
+        "test_file": "tests/admin_utils/tests.py",
+        "why_relevant": "它测试 display_for_field 对正常数字值的格式化，展示了数字字段（FloatField, DecimalField, IntegerField）的正常调用模式。",
+        "reusable_parts": [
+          "调用 display_for_field 并传入数字值和数字字段实例",
+          "断言格式化后的字符串输出"
+        ],
+        "possible_gap": "它只测试了非 null 的正常数字值，没有测试值为 None 的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，调用 display_for_field 时第一个参数是具体的数字值（如 12345.6789, Decimal(\"12345.6789\"), 12345）。",
+        "target_pattern": "将第一个参数改为 None。",
+        "reason": "Issue 明确指出当字段值为 null 时会触发 bug。将输入从有效数字变为 None 应能导向有缺陷的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，调用 display_for_field 时传入的字段是具体的模型字段实例（如 models.FloatField(), models.DecimalField()）。",
+        "target_pattern": "保持使用数字字段实例（如 FloatField, DecimalField, IntegerField）。",
+        "reason": "Issue 提到的是 'number field'，因此需要保持字段类型为数字类型，以触发 numberformat.py 中的逻辑。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 display_for_field(value=None, field=数字字段实例, empty_value) 时是否抛出 IndexError。",
+        "reason": "Issue 的核心错误现象就是 IndexError，直接观测此调用是否引发该异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "display_for_field 的返回值，特别是当 value 为 None 且 field 为数字字段时。",
+        "reason": "在修复后，期望行为是返回指定的空值表示（如 self.empty_value）。观测返回值有助于验证预期行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 value 为 None 且 field 为数字字段时，调用 display_for_field 不应抛出 IndexError，并应返回一个合理的表示（如传入的 empty_value 参数）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的输出字符串内容，因为 empty_value 的具体形式可能变化。避免断言与数字格式化相关的具体字符串（如带千位分隔符的格式）。",
+        "reason": "Issue 的核心是异常，因此首先需要断言不抛出特定异常。修复后，返回值应与处理 null 值的语义一致（返回空值表示）。使用 raises 断言异常缺失（assertNotRaises 或 try-except）或直接调用并检查返回值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类。需要从 django.db import models 来创建字段实例。需要导入 display_for_field 函数。需要准备一个 empty_value（如 '-' 或空字符串）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在 Django 的 admin 上下文下运行，但相关测试表明可以直接调用 display_for_field 函数进行单元测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发 IndexError 的确切代码路径和条件是否还需要特定的配置（如 USE_THOUSAND_SEPARATOR）？",
+      "numberformat.py 中具体哪个函数或哪行代码导致了问题？",
+      "除了 FloatField、DecimalField、IntegerField，其他数字字段类型（如 PositiveIntegerField）是否也会触发此问题？",
+      "empty_value 参数的具体值是否会影响 bug 的触发？"
+    ]
+  }
+}

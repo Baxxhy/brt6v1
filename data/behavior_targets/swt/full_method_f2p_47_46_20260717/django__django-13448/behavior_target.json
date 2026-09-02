@@ -1,0 +1,382 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13448",
+  "issue_summary": "当数据库配置中设置 'TEST': {'MIGRATE': False} 时，运行测试命令会导致 setup_databases 崩溃，抛出 'relation does not exist' 和 'InvalidCursorName' 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用一个支持迁移和序列化的数据库后端（如 PostgreSQL、SQLite 的内存数据库）进行测试，而不是 dummy 后端。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要创建一个包含 django.contrib.admin 或其他需要 django_admin_log 表的应用的 Django 项目/测试环境。",
+        "source": "inference",
+        "confidence": "low"
+      },
+      {
+        "hint": "可能需要使用 DiscoverRunner 或直接调用 setup_databases 函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库连接的 TEST 字典，设置 MIGRATE=False，并可能调整 SERIALIZE 设置。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDbCreationTests.test_migrate_test_setting_false",
+        "test_file": "tests/backends/base/test_creation.py",
+        "why_relevant": "该测试直接验证了当 TEST['MIGRATE'] = False 时，create_test_db 的行为（确保 migrate 未被调用）。",
+        "reusable_parts": [
+          "设置 test_connection.settings_dict['TEST']['MIGRATE'] = False",
+          "使用 creation_class 和 create_test_db 方法",
+          "mock 的使用模式"
+        ],
+        "possible_gap": "该测试 mock 了 _create_test_db 和 migrate，因此没有实际执行数据库序列化或查询操作，可能无法触发 Issue 中表不存在的错误。"
+      },
+      {
+        "test_name": "SetupDatabasesTests.test_serialized_off",
+        "test_file": "tests/test_runner/tests.py",
+        "why_relevant": "该测试验证了当 TEST['SERIALIZE'] = False 时，setup_databases 的行为，这与 Issue 中涉及的序列化过程相关。",
+        "reusable_parts": [
+          "创建带特定 TEST 配置的 ConnectionHandler",
+          "使用 mock 来验证 create_test_db 的调用参数（如 serialize=False）",
+          "使用 DiscoverRunner 实例"
+        ],
+        "possible_gap": "该测试使用了 dummy 数据库后端，并且 mock 了 creation_class，因此不会执行真实的数据库操作或序列化。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在数据库配置的 TEST 字典中设置 MIGRATE 为 False，然后运行测试命令（例如 ./manage.py test）。",
+      "evidence": [
+        "Issue 描述：'I'm trying to upgrade a project from Django 3.0 to Django 3.1 and wanted to try out the new \"TEST\": {\"MIGRATE\": False} database setting.'",
+        "Issue 描述：'Removing the \"TEST\": {\"MIGRATE\": False} line allows the tests to run.'",
+        "相关测试 1 代码：test_connection.settings_dict['TEST']['MIGRATE'] = False"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行测试时抛出 ProgrammingError: relation \"django_admin_log\" does not exist，随后在处理该异常时又抛出 InvalidCursorName: cursor \"_django_curs_..._sync_1\" does not exist。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示：django.db.utils.ProgrammingError: relation \"django_admin_log\" does not exist",
+        "Issue 中的 traceback 显示：psycopg2.errors.InvalidCursorName: cursor \"_django_curs_139860821038912_sync_1\" does not exist"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DiscoverRunner.setup_databases",
+        "kind": "method",
+        "source_path": "django/test/runner.py",
+        "reason": "Issue 的 traceback 指向此方法，它是测试运行器设置数据库的入口。"
+      },
+      {
+        "name": "django.test.utils.setup_databases",
+        "kind": "function",
+        "source_path": "django/test/utils.py",
+        "reason": "源码片段 1 显示 setup_databases 调用了 _setup_databases，而 traceback 指向了 django/test/utils.py 第 174 行的 setup_databases 调用。"
+      },
+      {
+        "name": "BaseDatabaseCreation.create_test_db",
+        "kind": "method",
+        "source_path": "django/db/backends/base/creation.py",
+        "reason": "traceback 显示错误发生在 create_test_db 方法内部调用 serialize_db_to_string 时。"
+      },
+      {
+        "name": "BaseDatabaseCreation.serialize_db_to_string",
+        "kind": "method",
+        "source_path": "django/db/backends/base/creation.py",
+        "reason": "traceback 显示错误发生在 serialize_db_to_string 方法内部。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/creation.py",
+        "object": "serialize_db_to_string",
+        "lines": "",
+        "reason": "Issue traceback 显示错误发生在该方法内部，当 MIGRATE=False 时，序列化过程可能尝试查询尚未创建的表（如 django_admin_log）。"
+      },
+      {
+        "path": "django/db/backends/base/creation.py",
+        "object": "create_test_db",
+        "lines": "",
+        "reason": "traceback 显示 create_test_db 调用了 serialize_db_to_string，并且该方法处理了 TEST 设置（如 SERIALIZE）。"
+      },
+      {
+        "path": "django/test/utils.py",
+        "object": "setup_databases",
+        "lines": "",
+        "reason": "traceback 显示 setup_databases 调用了 create_test_db，并传递了 serialize 参数，该参数可能受 TEST 设置影响。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中设置了 'TEST': {'MIGRATE': False}，但 mock 了关键操作。",
+        "target_pattern": "在更真实的测试环境中（如使用真实或模拟的数据库连接）设置 'TEST': {'MIGRATE': False}，并允许执行序列化逻辑。",
+        "reason": "Issue 表明当 MIGRATE=False 且序列化（可能默认开启）尝试运行时，会因表不存在而崩溃。现有测试 mock 了这些步骤，需要移除或调整 mock 以触发真实路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 2 中设置了 'TEST': {'SERIALIZE': False}。",
+        "target_pattern": "设置 'TEST': {'MIGRATE': False} 但保持 SERIALIZE 为默认值（可能为 True），或者同时设置两者。",
+        "reason": "Issue 的 traceback 显示序列化过程（serialize_db_to_string）被调用并出错，表明 SERIALIZE 可能未被显式设置为 False。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常使用干净的数据库状态。",
+        "target_pattern": "模拟一个包含需要序列化内容（如预定义模型实例）的数据库状态，但表因 MIGRATE=False 而未创建。",
+        "reason": "错误发生在序列化查询时（查询 django_admin_log 表），表明数据库中有内容需要序列化，但相应的表不存在。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当设置 'TEST': {'MIGRATE': False} 时，测试运行器应能成功设置测试数据库并运行测试，而不会因表不存在或游标无效而崩溃。",
+      "evidence": [
+        "Issue 描述：'it would be nice if we were able to use the new feature to skip migrations during testing.'",
+        "相关测试 1 名称：test_migrate_test_setting_false，暗示该设置应被支持。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 setup_databases 或 create_test_db 时捕获的异常（如 ProgrammingError, InvalidCursorName）。",
+        "reason": "Issue 的核心现象是抛出特定异常，观测异常类型和消息是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在序列化过程中执行的 SQL 查询（特别是尝试查询 django_admin_log 等系统表的查询）。",
+        "reason": "错误直接原因是查询了不存在的表，观测生成的 SQL 可以确认问题根源。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在设置 MIGRATE=False 后，测试数据库中的表存在状态（特别是 django_admin_log 等表）。",
+        "reason": "MIGRATE=False 应跳过迁移，因此某些表可能不存在，观测表状态可以验证配置是否生效。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "传递给 create_test_db 的 serialize 参数值，以及 connection.settings_dict['TEST'] 的内容。",
+        "reason": "序列化行为由 TEST 设置控制，观测这些配置可以理解执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 TEST['MIGRATE'] = False 时，运行测试不应抛出 ProgrammingError (relation does not exist) 或 InvalidCursorName 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串（可能因数据库后端或具体表名而异）。",
+        "reason": "Issue 的核心是异常崩溃，修复后应不再抛出这些异常。使用 raises 断言可以捕获异常，但修复后测试应通过（即不抛出）。注意：修复后，断言不应 raises，但此处提示的是测试生成时的目标。"
+      },
+      {
+        "assertion_goal": "测试数据库设置过程应成功完成（setup_databases 返回正常配置，或后续测试能运行）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的返回值内容（可能因配置而异）。",
+        "reason": "更稳定的断言是验证关键操作（如 setup_databases）没有因异常而中断，可以比较调用前后的状态（如数据库连接是否建立）。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "SERIALIZE 设置的默认值在 MIGRATE=False 时是什么？是否总是 True 从而导致序列化尝试？",
+    "除了 django_admin_log，是否还有其他表在 MIGRATE=False 时会被查询但不存在？",
+    "InvalidCursorName 异常是 ProgrammingError 的后续结果，还是独立的并发问题？",
+    "Issue 中提到的项目从 Django 1.4 升级而来，这是否是触发问题的必要条件（例如遗留的迁移状态）？"
+  ],
+  "raw": {
+    "issue_summary": "当数据库配置中设置 'TEST': {'MIGRATE': False} 时，运行测试命令会导致 setup_databases 崩溃，抛出 'relation does not exist' 和 'InvalidCursorName' 异常。",
+    "trigger_condition": {
+      "text": "在数据库配置的 TEST 字典中设置 MIGRATE 为 False，然后运行测试命令（例如 ./manage.py test）。",
+      "evidence": [
+        "Issue 描述：'I'm trying to upgrade a project from Django 3.0 to Django 3.1 and wanted to try out the new \"TEST\": {\"MIGRATE\": False} database setting.'",
+        "Issue 描述：'Removing the \"TEST\": {\"MIGRATE\": False} line allows the tests to run.'",
+        "相关测试 1 代码：test_connection.settings_dict['TEST']['MIGRATE'] = False"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行测试时抛出 ProgrammingError: relation \"django_admin_log\" does not exist，随后在处理该异常时又抛出 InvalidCursorName: cursor \"_django_curs_..._sync_1\" does not exist。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示：django.db.utils.ProgrammingError: relation \"django_admin_log\" does not exist",
+        "Issue 中的 traceback 显示：psycopg2.errors.InvalidCursorName: cursor \"_django_curs_139860821038912_sync_1\" does not exist"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当设置 'TEST': {'MIGRATE': False} 时，测试运行器应能成功设置测试数据库并运行测试，而不会因表不存在或游标无效而崩溃。",
+      "evidence": [
+        "Issue 描述：'it would be nice if we were able to use the new feature to skip migrations during testing.'",
+        "相关测试 1 名称：test_migrate_test_setting_false，暗示该设置应被支持。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DiscoverRunner.setup_databases",
+        "kind": "method",
+        "source_path": "django/test/runner.py",
+        "reason": "Issue 的 traceback 指向此方法，它是测试运行器设置数据库的入口。"
+      },
+      {
+        "name": "django.test.utils.setup_databases",
+        "kind": "function",
+        "source_path": "django/test/utils.py",
+        "reason": "源码片段 1 显示 setup_databases 调用了 _setup_databases，而 traceback 指向了 django/test/utils.py 第 174 行的 setup_databases 调用。"
+      },
+      {
+        "name": "BaseDatabaseCreation.create_test_db",
+        "kind": "method",
+        "source_path": "django/db/backends/base/creation.py",
+        "reason": "traceback 显示错误发生在 create_test_db 方法内部调用 serialize_db_to_string 时。"
+      },
+      {
+        "name": "BaseDatabaseCreation.serialize_db_to_string",
+        "kind": "method",
+        "source_path": "django/db/backends/base/creation.py",
+        "reason": "traceback 显示错误发生在 serialize_db_to_string 方法内部。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/creation.py",
+        "object": "serialize_db_to_string",
+        "lines": "",
+        "reason": "Issue traceback 显示错误发生在该方法内部，当 MIGRATE=False 时，序列化过程可能尝试查询尚未创建的表（如 django_admin_log）。"
+      },
+      {
+        "path": "django/db/backends/base/creation.py",
+        "object": "create_test_db",
+        "lines": "",
+        "reason": "traceback 显示 create_test_db 调用了 serialize_db_to_string，并且该方法处理了 TEST 设置（如 SERIALIZE）。"
+      },
+      {
+        "path": "django/test/utils.py",
+        "object": "setup_databases",
+        "lines": "",
+        "reason": "traceback 显示 setup_databases 调用了 create_test_db，并传递了 serialize 参数，该参数可能受 TEST 设置影响。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDbCreationTests.test_migrate_test_setting_false",
+        "test_file": "tests/backends/base/test_creation.py",
+        "why_relevant": "该测试直接验证了当 TEST['MIGRATE'] = False 时，create_test_db 的行为（确保 migrate 未被调用）。",
+        "reusable_parts": [
+          "设置 test_connection.settings_dict['TEST']['MIGRATE'] = False",
+          "使用 creation_class 和 create_test_db 方法",
+          "mock 的使用模式"
+        ],
+        "possible_gap": "该测试 mock 了 _create_test_db 和 migrate，因此没有实际执行数据库序列化或查询操作，可能无法触发 Issue 中表不存在的错误。"
+      },
+      {
+        "test_name": "SetupDatabasesTests.test_serialized_off",
+        "test_file": "tests/test_runner/tests.py",
+        "why_relevant": "该测试验证了当 TEST['SERIALIZE'] = False 时，setup_databases 的行为，这与 Issue 中涉及的序列化过程相关。",
+        "reusable_parts": [
+          "创建带特定 TEST 配置的 ConnectionHandler",
+          "使用 mock 来验证 create_test_db 的调用参数（如 serialize=False）",
+          "使用 DiscoverRunner 实例"
+        ],
+        "possible_gap": "该测试使用了 dummy 数据库后端，并且 mock 了 creation_class，因此不会执行真实的数据库操作或序列化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中设置了 'TEST': {'MIGRATE': False}，但 mock 了关键操作。",
+        "target_pattern": "在更真实的测试环境中（如使用真实或模拟的数据库连接）设置 'TEST': {'MIGRATE': False}，并允许执行序列化逻辑。",
+        "reason": "Issue 表明当 MIGRATE=False 且序列化（可能默认开启）尝试运行时，会因表不存在而崩溃。现有测试 mock 了这些步骤，需要移除或调整 mock 以触发真实路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 2 中设置了 'TEST': {'SERIALIZE': False}。",
+        "target_pattern": "设置 'TEST': {'MIGRATE': False} 但保持 SERIALIZE 为默认值（可能为 True），或者同时设置两者。",
+        "reason": "Issue 的 traceback 显示序列化过程（serialize_db_to_string）被调用并出错，表明 SERIALIZE 可能未被显式设置为 False。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常使用干净的数据库状态。",
+        "target_pattern": "模拟一个包含需要序列化内容（如预定义模型实例）的数据库状态，但表因 MIGRATE=False 而未创建。",
+        "reason": "错误发生在序列化查询时（查询 django_admin_log 表），表明数据库中有内容需要序列化，但相应的表不存在。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 setup_databases 或 create_test_db 时捕获的异常（如 ProgrammingError, InvalidCursorName）。",
+        "reason": "Issue 的核心现象是抛出特定异常，观测异常类型和消息是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在序列化过程中执行的 SQL 查询（特别是尝试查询 django_admin_log 等系统表的查询）。",
+        "reason": "错误直接原因是查询了不存在的表，观测生成的 SQL 可以确认问题根源。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在设置 MIGRATE=False 后，测试数据库中的表存在状态（特别是 django_admin_log 等表）。",
+        "reason": "MIGRATE=False 应跳过迁移，因此某些表可能不存在，观测表状态可以验证配置是否生效。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "传递给 create_test_db 的 serialize 参数值，以及 connection.settings_dict['TEST'] 的内容。",
+        "reason": "序列化行为由 TEST 设置控制，观测这些配置可以理解执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 TEST['MIGRATE'] = False 时，运行测试不应抛出 ProgrammingError (relation does not exist) 或 InvalidCursorName 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串（可能因数据库后端或具体表名而异）。",
+        "reason": "Issue 的核心是异常崩溃，修复后应不再抛出这些异常。使用 raises 断言可以捕获异常，但修复后测试应通过（即不抛出）。注意：修复后，断言不应 raises，但此处提示的是测试生成时的目标。"
+      },
+      {
+        "assertion_goal": "测试数据库设置过程应成功完成（setup_databases 返回正常配置，或后续测试能运行）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的返回值内容（可能因配置而异）。",
+        "reason": "更稳定的断言是验证关键操作（如 setup_databases）没有因异常而中断，可以比较调用前后的状态（如数据库连接是否建立）。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用一个支持迁移和序列化的数据库后端（如 PostgreSQL、SQLite 的内存数据库）进行测试，而不是 dummy 后端。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要创建一个包含 django.contrib.admin 或其他需要 django_admin_log 表的应用的 Django 项目/测试环境。",
+        "source": "inference",
+        "confidence": "low"
+      },
+      {
+        "hint": "可能需要使用 DiscoverRunner 或直接调用 setup_databases 函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库连接的 TEST 字典，设置 MIGRATE=False，并可能调整 SERIALIZE 设置。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "SERIALIZE 设置的默认值在 MIGRATE=False 时是什么？是否总是 True 从而导致序列化尝试？",
+      "除了 django_admin_log，是否还有其他表在 MIGRATE=False 时会被查询但不存在？",
+      "InvalidCursorName 异常是 ProgrammingError 的后续结果，还是独立的并发问题？",
+      "Issue 中提到的项目从 Django 1.4 升级而来，这是否是触发问题的必要条件（例如遗留的迁移状态）？"
+    ]
+  }
+}

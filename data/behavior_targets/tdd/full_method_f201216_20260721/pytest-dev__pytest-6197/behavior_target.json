@@ -1,0 +1,274 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-6197",
+  "issue_summary": "pytest 5.2.3 在收集测试时错误地尝试导入当前目录下的任意 __init__.py 文件，导致在无法导入的包上引发异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture（来自 pytest testdir 插件）来创建临时目录和文件结构。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个包含无法导入代码的 __init__.py 文件。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_collect_pkg_init_only",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "该测试专门处理 __init__.py 文件的收集行为，与 Issue 主题直接相关。",
+        "reusable_parts": [
+          "使用 testdir fixture 创建目录和 __init__.py 文件",
+          "调用 testdir.runpytest 并检查输出"
+        ],
+        "possible_gap": "该测试中的 __init__.py 文件是可导入的（包含测试函数），而 Issue 中的文件包含 assert False 导致导入失败。"
+      },
+      {
+        "test_name": "test_collect_init_tests",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "该测试检查当 __init__.py 文件匹配 'python_files' 模式时的收集行为，涉及包和文件的收集逻辑。",
+        "reusable_parts": [
+          "使用 testdir.copy_example 或创建测试结构",
+          "使用 --collect-only 选项并解析输出",
+          "检查收集到的模块和函数列表"
+        ],
+        "possible_gap": "该测试关注的是正确收集 __init__.py 中的测试，而 Issue 是关于错误地收集了不应作为测试模块的 __init__.py。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在包含 __init__.py 文件的目录（该文件包含无法执行的代码，如 assert False）下运行 pytest 命令。",
+      "evidence": [
+        "Issue 中提供了 tox 配置和命令，显示在包含 foobar/__init__.py (assert False) 的目录中运行 pytest 5.2.3 会触发错误。",
+        "相关测试 1 和 2 表明 pytest 通常处理 __init__.py 文件作为测试收集的一部分。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "pytest 在收集阶段尝试导入 __init__.py 文件，导致文件中的 assert False 被执行，引发 AssertionError，测试收集被中断。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 错误日志显示：'ERROR collecting foobar/__init__.py' 和 'AssertionError'。",
+        "Issue 描述：'pytest 5.2.3 tries to import any `__init__.py` file under the current directory.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "src/pytest.py",
+        "reason": "Issue 中通过命令行调用 pytest，这是主要的入口点。"
+      },
+      {
+        "name": "pytest.collect",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 涉及测试收集行为，相关测试都位于 test_collection.py。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/pytest.py",
+        "object": "pytest",
+        "lines": "",
+        "reason": "Issue 表明是 pytest 5.2.3 的回归问题，核心收集逻辑可能在此文件或相关模块中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中创建的 __init__.py 文件包含有效的测试函数（如 def test_init(): pass）。",
+        "target_pattern": "__init__.py 文件包含会导致导入失败的代码（如 assert False）。",
+        "reason": "Issue 的触发条件是一个无法成功导入的 __init__.py 文件。将正常内容替换为错误内容可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中可能使用默认配置或特定选项（如 -o python_files=*.py）。",
+        "target_pattern": "使用默认配置（无特殊选项）运行 pytest，模拟 Issue 中的命令。",
+        "reason": "Issue 中仅运行 'pytest' 命令，没有额外选项。配置差异可能影响收集行为。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "pytest 不应尝试导入与测试收集无关的 __init__.py 文件，或者应正确处理无法导入的包，避免在收集阶段因导入失败而中断。",
+      "evidence": [
+        "Issue 显示 pytest 5.2.2 版本下测试通过，没有收集 foobar/__init__.py。",
+        "相关测试 3 提到：'__init__.py is not collected since it does not match python_files.' 暗示了预期的过滤行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "pytest 收集过程中的异常信息，特别是收集 __init__.py 文件时是否抛出 AssertionError 或其他 ImportError。",
+        "reason": "Issue 的核心错误现象是在收集阶段因导入 __init__.py 而引发异常。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 的 stdout/stderr 输出，特别是 'ERROR collecting' 行和错误回溯。",
+        "reason": "Issue 通过 pytest 的输出日志展示了错误。观测输出可以判断是否触发了相同的错误模式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pytest 在收集阶段不会因尝试导入无关的 __init__.py 文件而引发异常（如 AssertionError）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的输出字符串相等，因为输出可能包含路径、时间等可变信息。",
+        "reason": "Issue 期望的行为是收集过程正常完成，不出现特定的错误信息片段。"
+      },
+      {
+        "assertion_goal": "验证测试收集成功完成（例如，收集到预期的测试项或正常退出）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言收集到的具体测试项数量，除非 Issue 明确指定。",
+        "reason": "修复后，pytest 应能像 5.2.2 版本一样正常运行，不因 __init__.py 而中断。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致回归的具体代码变更位置（在 5.2.2 和 5.2.3 之间）未知。",
+    "pytest 收集文件的确切过滤规则和触发错误导入的条件细节。",
+    "修复后的精确行为：是跳过所有无关的 __init__.py，还是仅处理导入错误更优雅？"
+  ],
+  "raw": {
+    "issue_summary": "pytest 5.2.3 在收集测试时错误地尝试导入当前目录下的任意 __init__.py 文件，导致在无法导入的包上引发异常。",
+    "trigger_condition": {
+      "text": "在包含 __init__.py 文件的目录（该文件包含无法执行的代码，如 assert False）下运行 pytest 命令。",
+      "evidence": [
+        "Issue 中提供了 tox 配置和命令，显示在包含 foobar/__init__.py (assert False) 的目录中运行 pytest 5.2.3 会触发错误。",
+        "相关测试 1 和 2 表明 pytest 通常处理 __init__.py 文件作为测试收集的一部分。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "pytest 在收集阶段尝试导入 __init__.py 文件，导致文件中的 assert False 被执行，引发 AssertionError，测试收集被中断。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 错误日志显示：'ERROR collecting foobar/__init__.py' 和 'AssertionError'。",
+        "Issue 描述：'pytest 5.2.3 tries to import any `__init__.py` file under the current directory.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pytest 不应尝试导入与测试收集无关的 __init__.py 文件，或者应正确处理无法导入的包，避免在收集阶段因导入失败而中断。",
+      "evidence": [
+        "Issue 显示 pytest 5.2.2 版本下测试通过，没有收集 foobar/__init__.py。",
+        "相关测试 3 提到：'__init__.py is not collected since it does not match python_files.' 暗示了预期的过滤行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "src/pytest.py",
+        "reason": "Issue 中通过命令行调用 pytest，这是主要的入口点。"
+      },
+      {
+        "name": "pytest.collect",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 涉及测试收集行为，相关测试都位于 test_collection.py。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/pytest.py",
+        "object": "pytest",
+        "lines": "",
+        "reason": "Issue 表明是 pytest 5.2.3 的回归问题，核心收集逻辑可能在此文件或相关模块中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_collect_pkg_init_only",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "该测试专门处理 __init__.py 文件的收集行为，与 Issue 主题直接相关。",
+        "reusable_parts": [
+          "使用 testdir fixture 创建目录和 __init__.py 文件",
+          "调用 testdir.runpytest 并检查输出"
+        ],
+        "possible_gap": "该测试中的 __init__.py 文件是可导入的（包含测试函数），而 Issue 中的文件包含 assert False 导致导入失败。"
+      },
+      {
+        "test_name": "test_collect_init_tests",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "该测试检查当 __init__.py 文件匹配 'python_files' 模式时的收集行为，涉及包和文件的收集逻辑。",
+        "reusable_parts": [
+          "使用 testdir.copy_example 或创建测试结构",
+          "使用 --collect-only 选项并解析输出",
+          "检查收集到的模块和函数列表"
+        ],
+        "possible_gap": "该测试关注的是正确收集 __init__.py 中的测试，而 Issue 是关于错误地收集了不应作为测试模块的 __init__.py。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中创建的 __init__.py 文件包含有效的测试函数（如 def test_init(): pass）。",
+        "target_pattern": "__init__.py 文件包含会导致导入失败的代码（如 assert False）。",
+        "reason": "Issue 的触发条件是一个无法成功导入的 __init__.py 文件。将正常内容替换为错误内容可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中可能使用默认配置或特定选项（如 -o python_files=*.py）。",
+        "target_pattern": "使用默认配置（无特殊选项）运行 pytest，模拟 Issue 中的命令。",
+        "reason": "Issue 中仅运行 'pytest' 命令，没有额外选项。配置差异可能影响收集行为。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "pytest 收集过程中的异常信息，特别是收集 __init__.py 文件时是否抛出 AssertionError 或其他 ImportError。",
+        "reason": "Issue 的核心错误现象是在收集阶段因导入 __init__.py 而引发异常。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 的 stdout/stderr 输出，特别是 'ERROR collecting' 行和错误回溯。",
+        "reason": "Issue 通过 pytest 的输出日志展示了错误。观测输出可以判断是否触发了相同的错误模式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pytest 在收集阶段不会因尝试导入无关的 __init__.py 文件而引发异常（如 AssertionError）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的输出字符串相等，因为输出可能包含路径、时间等可变信息。",
+        "reason": "Issue 期望的行为是收集过程正常完成，不出现特定的错误信息片段。"
+      },
+      {
+        "assertion_goal": "验证测试收集成功完成（例如，收集到预期的测试项或正常退出）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言收集到的具体测试项数量，除非 Issue 明确指定。",
+        "reason": "修复后，pytest 应能像 5.2.2 版本一样正常运行，不因 __init__.py 而中断。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture（来自 pytest testdir 插件）来创建临时目录和文件结构。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个包含无法导入代码的 __init__.py 文件。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致回归的具体代码变更位置（在 5.2.2 和 5.2.3 之间）未知。",
+      "pytest 收集文件的确切过滤规则和触发错误导入的条件细节。",
+      "修复后的精确行为：是跳过所有无关的 __init__.py，还是仅处理导入错误更优雅？"
+    ]
+  }
+}

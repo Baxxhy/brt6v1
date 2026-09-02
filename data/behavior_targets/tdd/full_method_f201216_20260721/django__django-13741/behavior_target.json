@@ -1,0 +1,360 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13741",
+  "issue_summary": "ReadOnlyPasswordHashField 默认未设置 disabled 属性，导致需要额外的 clean_password 方法来防止密码被意外修改。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个具有密码的 User 实例作为 UserChangeForm 的 instance。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 或 SimpleTestCase，并涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 HTTP POST 请求来提交表单数据（如相关测试 3）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ReadOnlyPasswordHashTest.test_readonly_field_has_changed",
+        "test_file": "tests/auth_tests/test_forms.py",
+        "why_relevant": "直接测试了 ReadOnlyPasswordHashField 的 has_changed 方法，这与字段是否感知数据变化相关。",
+        "reusable_parts": [
+          "ReadOnlyPasswordHashField 的实例化",
+          "has_changed 方法的调用",
+          "SimpleTestCase 的使用"
+        ],
+        "possible_gap": "该测试没有涉及 disabled 属性或表单提交场景。"
+      },
+      {
+        "test_name": "ChangelistTests.test_view_user_password_is_readonly",
+        "test_file": "tests/auth_tests/test_views.py",
+        "why_relevant": "测试了在管理界面中密码字段是只读的，并且 POST 数据中的密码值被忽略，这与 Issue 描述的防止意外更改的场景高度相关。",
+        "reusable_parts": [
+          "User 对象的创建和配置",
+          "使用 UserChangeForm（通过管理视图）",
+          "模拟 POST 请求并检查密码未更改",
+          "assertContains 检查 HTML 输出"
+        ],
+        "possible_gap": "该测试依赖于管理视图和权限设置，较为复杂，且没有直接测试 ReadOnlyPasswordHashField 的 disabled 属性。"
+      },
+      {
+        "test_name": "UserChangeFormTest.test_bug_19349_bound_password_field",
+        "test_file": "tests/auth_tests/test_forms.py",
+        "why_relevant": "直接测试了 UserChangeForm 中密码字段的绑定行为，涉及 initial 值和 field.value()。",
+        "reusable_parts": [
+          "UserChangeForm 的实例化（带 instance）",
+          "检查 form.initial 和 form['password'].value() 的关系",
+          "TestCase 和 TestDataMixin 的使用"
+        ],
+        "possible_gap": "该测试没有涉及 disabled 属性或表单提交后的数据验证。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 ReadOnlyPasswordHashField 但不实现 clean_password 方法，并且用户可能篡改表单提交的密码字段值。",
+      "evidence": [
+        "Issue 描述中提到：'the potential pitfall when using the ReadOnlyPasswordHashField without implementing clean_password is removed'",
+        "源码片段 4 显示 UserChangeForm 的 clean_password 方法返回初始值以防止更改。",
+        "相关测试 3 显示 POST 数据中的密码值被忽略。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "如果未实现 clean_password 方法，用户可能通过篡改提交的数据来意外更改密码值。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述中提到：'prevent (accidental) changes to the password value'",
+        "源码片段 4 的注释：'Regardless of what the user provides, return the initial value.'"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "ReadOnlyPasswordHashField",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "Issue 的核心是关于这个字段的默认 disabled 属性设置。"
+      },
+      {
+        "name": "UserChangeForm",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "Issue 中提到的表单，它使用了 ReadOnlyPasswordHashField 并定义了 clean_password 方法。"
+      },
+      {
+        "name": "Field.__init__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Field 基类定义了 disabled 参数，这是实现预期行为的关键。"
+      },
+      {
+        "name": "ReadOnlyPasswordHashField.has_changed",
+        "kind": "method",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "相关测试 1 测试了此方法，它与字段数据变化检测相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/forms.py",
+        "object": "ReadOnlyPasswordHashField.__init__",
+        "lines": "54-67",
+        "reason": "这是 ReadOnlyPasswordHashField 的构造函数，Issue 建议在此处设置 disabled=True 作为默认值。"
+      },
+      {
+        "path": "django/contrib/auth/forms.py",
+        "object": "UserChangeForm.clean_password",
+        "lines": "166-170",
+        "reason": "Issue 认为如果 ReadOnlyPasswordHashField 默认 disabled，此方法可能不再必要。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "ReadOnlyPasswordHashField() 或 ReadOnlyPasswordHashField(..., disabled=False)（默认）",
+        "target_pattern": "ReadOnlyPasswordHashField(..., disabled=True) 或检查其默认值是否为 True",
+        "reason": "Issue 的核心建议是将 disabled 属性默认设置为 True。变异可以测试默认值或显式设置 disabled=True 时的行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "表单提交后，依赖 clean_password 方法返回初始值。",
+        "target_pattern": "表单提交后，依赖字段的 disabled 属性来忽略提交值。",
+        "reason": "Issue 认为 disabled 属性可以替代 clean_password 方法的功能。变异可以测试在缺少 clean_password 方法时，disabled 字段是否仍能防止更改。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ReadOnlyPasswordHashField 应默认设置 disabled=True，使得该字段在 HTML 中不可编辑，并且服务器会忽略任何被篡改的提交值，从而无需依赖 clean_password 方法。",
+      "evidence": [
+        "Issue 描述中提到：'this property could be set to True be default on the ReadOnlyPasswordHashField'",
+        "源码片段 3 显示 Field 类有 disabled 参数，其作用是忽略用户篡改的值。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "表单提交前后 User 实例的 password 字段值。",
+        "reason": "Issue 的核心是防止密码被意外更改。观察密码是否在提交后被修改是直接的验证方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ReadOnlyPasswordHashField 实例的 disabled 属性值。",
+        "reason": "Issue 建议该字段默认 disabled=True。观察其实际默认值或构造后的属性是关键。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "表单验证过程中是否有关于密码字段被忽略的警告或日志（如果存在）。",
+        "reason": "disabled 字段被篡改的值应被静默忽略，但观察是否有相关提示有助于理解行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 ReadOnlyPasswordHashField 默认或显式设置 disabled=True 后，通过表单 POST 提交的密码值不会改变数据库中的密码。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 输出字符串，因为渲染细节可能变化。",
+        "reason": "Issue 的最终目标是防止密码被意外更改。断言密码哈希值在表单提交前后保持不变是稳定且直接的验证。"
+      },
+      {
+        "assertion_goal": "验证 ReadOnlyPasswordHashField 实例的 disabled 属性为 True（或默认如此）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言内部私有属性或与 Issue 无关的字段属性。",
+        "reason": "这是 Issue 提出的具体代码变更建议。直接验证该属性值是否符合预期。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "ReadOnlyPasswordHashField 当前 __init__ 方法的具体实现和默认参数值未知（检索出的片段不完整）。",
+    "disabled 属性设置为 True 后，ReadOnlyPasswordHashWidget 的渲染输出是否会发生变化（例如，添加 'disabled' HTML 属性）？",
+    "如果 disabled=True 是默认值，现有的 clean_password 方法是否应该被移除或标记为过时？Issue 没有明确说明。",
+    "除了 UserChangeForm，是否还有其他地方使用了 ReadOnlyPasswordHashField 并可能受到影响？"
+  ],
+  "raw": {
+    "issue_summary": "ReadOnlyPasswordHashField 默认未设置 disabled 属性，导致需要额外的 clean_password 方法来防止密码被意外修改。",
+    "trigger_condition": {
+      "text": "使用 ReadOnlyPasswordHashField 但不实现 clean_password 方法，并且用户可能篡改表单提交的密码字段值。",
+      "evidence": [
+        "Issue 描述中提到：'the potential pitfall when using the ReadOnlyPasswordHashField without implementing clean_password is removed'",
+        "源码片段 4 显示 UserChangeForm 的 clean_password 方法返回初始值以防止更改。",
+        "相关测试 3 显示 POST 数据中的密码值被忽略。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "如果未实现 clean_password 方法，用户可能通过篡改提交的数据来意外更改密码值。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述中提到：'prevent (accidental) changes to the password value'",
+        "源码片段 4 的注释：'Regardless of what the user provides, return the initial value.'"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "ReadOnlyPasswordHashField 应默认设置 disabled=True，使得该字段在 HTML 中不可编辑，并且服务器会忽略任何被篡改的提交值，从而无需依赖 clean_password 方法。",
+      "evidence": [
+        "Issue 描述中提到：'this property could be set to True be default on the ReadOnlyPasswordHashField'",
+        "源码片段 3 显示 Field 类有 disabled 参数，其作用是忽略用户篡改的值。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ReadOnlyPasswordHashField",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "Issue 的核心是关于这个字段的默认 disabled 属性设置。"
+      },
+      {
+        "name": "UserChangeForm",
+        "kind": "class",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "Issue 中提到的表单，它使用了 ReadOnlyPasswordHashField 并定义了 clean_password 方法。"
+      },
+      {
+        "name": "Field.__init__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Field 基类定义了 disabled 参数，这是实现预期行为的关键。"
+      },
+      {
+        "name": "ReadOnlyPasswordHashField.has_changed",
+        "kind": "method",
+        "source_path": "django/contrib/auth/forms.py",
+        "reason": "相关测试 1 测试了此方法，它与字段数据变化检测相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/forms.py",
+        "object": "ReadOnlyPasswordHashField.__init__",
+        "lines": "54-67",
+        "reason": "这是 ReadOnlyPasswordHashField 的构造函数，Issue 建议在此处设置 disabled=True 作为默认值。"
+      },
+      {
+        "path": "django/contrib/auth/forms.py",
+        "object": "UserChangeForm.clean_password",
+        "lines": "166-170",
+        "reason": "Issue 认为如果 ReadOnlyPasswordHashField 默认 disabled，此方法可能不再必要。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ReadOnlyPasswordHashTest.test_readonly_field_has_changed",
+        "test_file": "tests/auth_tests/test_forms.py",
+        "why_relevant": "直接测试了 ReadOnlyPasswordHashField 的 has_changed 方法，这与字段是否感知数据变化相关。",
+        "reusable_parts": [
+          "ReadOnlyPasswordHashField 的实例化",
+          "has_changed 方法的调用",
+          "SimpleTestCase 的使用"
+        ],
+        "possible_gap": "该测试没有涉及 disabled 属性或表单提交场景。"
+      },
+      {
+        "test_name": "ChangelistTests.test_view_user_password_is_readonly",
+        "test_file": "tests/auth_tests/test_views.py",
+        "why_relevant": "测试了在管理界面中密码字段是只读的，并且 POST 数据中的密码值被忽略，这与 Issue 描述的防止意外更改的场景高度相关。",
+        "reusable_parts": [
+          "User 对象的创建和配置",
+          "使用 UserChangeForm（通过管理视图）",
+          "模拟 POST 请求并检查密码未更改",
+          "assertContains 检查 HTML 输出"
+        ],
+        "possible_gap": "该测试依赖于管理视图和权限设置，较为复杂，且没有直接测试 ReadOnlyPasswordHashField 的 disabled 属性。"
+      },
+      {
+        "test_name": "UserChangeFormTest.test_bug_19349_bound_password_field",
+        "test_file": "tests/auth_tests/test_forms.py",
+        "why_relevant": "直接测试了 UserChangeForm 中密码字段的绑定行为，涉及 initial 值和 field.value()。",
+        "reusable_parts": [
+          "UserChangeForm 的实例化（带 instance）",
+          "检查 form.initial 和 form['password'].value() 的关系",
+          "TestCase 和 TestDataMixin 的使用"
+        ],
+        "possible_gap": "该测试没有涉及 disabled 属性或表单提交后的数据验证。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "ReadOnlyPasswordHashField() 或 ReadOnlyPasswordHashField(..., disabled=False)（默认）",
+        "target_pattern": "ReadOnlyPasswordHashField(..., disabled=True) 或检查其默认值是否为 True",
+        "reason": "Issue 的核心建议是将 disabled 属性默认设置为 True。变异可以测试默认值或显式设置 disabled=True 时的行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "表单提交后，依赖 clean_password 方法返回初始值。",
+        "target_pattern": "表单提交后，依赖字段的 disabled 属性来忽略提交值。",
+        "reason": "Issue 认为 disabled 属性可以替代 clean_password 方法的功能。变异可以测试在缺少 clean_password 方法时，disabled 字段是否仍能防止更改。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "表单提交前后 User 实例的 password 字段值。",
+        "reason": "Issue 的核心是防止密码被意外更改。观察密码是否在提交后被修改是直接的验证方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ReadOnlyPasswordHashField 实例的 disabled 属性值。",
+        "reason": "Issue 建议该字段默认 disabled=True。观察其实际默认值或构造后的属性是关键。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "表单验证过程中是否有关于密码字段被忽略的警告或日志（如果存在）。",
+        "reason": "disabled 字段被篡改的值应被静默忽略，但观察是否有相关提示有助于理解行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 ReadOnlyPasswordHashField 默认或显式设置 disabled=True 后，通过表单 POST 提交的密码值不会改变数据库中的密码。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 输出字符串，因为渲染细节可能变化。",
+        "reason": "Issue 的最终目标是防止密码被意外更改。断言密码哈希值在表单提交前后保持不变是稳定且直接的验证。"
+      },
+      {
+        "assertion_goal": "验证 ReadOnlyPasswordHashField 实例的 disabled 属性为 True（或默认如此）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言内部私有属性或与 Issue 无关的字段属性。",
+        "reason": "这是 Issue 提出的具体代码变更建议。直接验证该属性值是否符合预期。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个具有密码的 User 实例作为 UserChangeForm 的 instance。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 或 SimpleTestCase，并涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 HTTP POST 请求来提交表单数据（如相关测试 3）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "ReadOnlyPasswordHashField 当前 __init__ 方法的具体实现和默认参数值未知（检索出的片段不完整）。",
+      "disabled 属性设置为 True 后，ReadOnlyPasswordHashWidget 的渲染输出是否会发生变化（例如，添加 'disabled' HTML 属性）？",
+      "如果 disabled=True 是默认值，现有的 clean_password 方法是否应该被移除或标记为过时？Issue 没有明确说明。",
+      "除了 UserChangeForm，是否还有其他地方使用了 ReadOnlyPasswordHashField 并可能受到影响？"
+    ]
+  }
+}

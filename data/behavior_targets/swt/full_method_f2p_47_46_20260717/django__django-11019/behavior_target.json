@@ -1,0 +1,352 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11019",
+  "issue_summary": "合并三个或更多 Media 对象时可能抛出不必要的 MediaOrderConflictWarning，且最终顺序可能不正确。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能使用 @override_settings(STATIC_URL=...) 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义多个继承自 forms.Widget 的类，并在其中定义 Media 内部类。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个包含这些 Widget 的 Form 类。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FormsMediaTestCase.test_merge_js_three_way",
+        "test_file": "tests/forms_tests/tests/test_media.py",
+        "why_relevant": "它测试了三个 Media 对象的合并，并关注 JS 文件的顺序保留，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "Media 对象的构造方式",
+          "使用 __add__ 运算符进行合并",
+          "对 _js 属性顺序的断言风格",
+          "测试类 FormsMediaTestCase 和 @override_settings 装饰器"
+        ],
+        "possible_gap": "该测试使用的依赖关系（uses_jquery.js 依赖于 jquery.js）是明确的，且合并过程没有触发警告。而 Issue 中的依赖关系（text-editor-extras.js 依赖于 text-editor.js）在合并过程中被错误地反向约束了。"
+      },
+      {
+        "test_name": "FormsMediaTestCase.test_merge_warning",
+        "test_file": "tests/forms_tests/tests/test_media.py",
+        "why_relevant": "它直接测试了 Media.merge 方法在检测到相反顺序时抛出 MediaOrderConflictWarning。",
+        "reusable_parts": [
+          "使用 assertWarnsMessage 来捕获 RuntimeWarning (MediaOrderConflictWarning 的父类)",
+          "调用 Media.merge 的方式"
+        ],
+        "possible_gap": "该测试只测试了两个列表的简单反向情况，没有涉及三个或更多 Media 对象的多步合并场景，也没有测试警告是否被不必要地抛出。"
+      },
+      {
+        "test_name": "test_merge",
+        "test_file": "tests/forms_tests/tests/test_media.py",
+        "why_relevant": "它使用多种输入组合测试 Media.merge 方法，覆盖了多种顺序情况。",
+        "reusable_parts": [
+          "Media.merge 的调用模式",
+          "使用 subTest 进行参数化测试的结构"
+        ],
+        "possible_gap": "这些测试用例都是两个列表的合并，没有覆盖 Issue 中描述的多步合并（A+B，然后 (A+B)+C）可能产生的副作用。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义多个包含 Media 类的 Widget，其中一些 Widget 的 Media 定义存在依赖关系（例如 text-editor-extras.js 依赖于 text-editor.js），然后将这些 Widget 组合到一个 Form 中，访问 Form 的 media 属性。",
+      "evidence": [
+        "Issue 中提供了 ColorPicker、SimpleTextWidget、FancyTextWidget 的定义，并展示了访问 MyForm().media 时触发警告。",
+        "Issue 描述了合并顺序：ColorPicker().media + SimpleTextWidget().media 产生了一个约束，影响了后续合并。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 MediaOrderConflictWarning，警告信息提示检测到相反顺序的重复文件（例如 text-editor-extras.js 和 text-editor.js），且最终生成的 JS 文件顺序（['text-editor-extras.js', 'color-picker.js', 'text-editor.js']）不符合预期（应为 ['text-editor.js', 'text-editor-extras.js', 'color-picker.js']）。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中显示了警告输出和最终 Media 对象的 repr。",
+        "源码片段 5 定义了 MediaOrderConflictWarning 类。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Media",
+        "kind": "class",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 的核心是关于 Media 对象的合并逻辑。"
+      },
+      {
+        "name": "Media.__add__",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Media 对象的合并通过 __add__ 方法进行。"
+      },
+      {
+        "name": "Media.merge",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "相关测试 2 和 4 直接测试了 Media.merge 方法，它是合并逻辑的核心。"
+      },
+      {
+        "name": "Form.media",
+        "kind": "property",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 中通过访问 MyForm().media 触发问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/widgets.py",
+        "object": "Media.__add__",
+        "lines": "41-156",
+        "reason": "该方法是 Media 对象合并的入口，负责调用合并逻辑并可能生成警告。"
+      },
+      {
+        "path": "django/forms/widgets.py",
+        "object": "Media.merge",
+        "lines": "41-156",
+        "reason": "该静态方法是合并两个列表的核心算法，可能在处理三个或更多对象的多步合并时引入错误的约束。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常测试两个 Media 对象的直接合并，或一个合并结果与另一个 Media 的合并。",
+        "target_pattern": "创建三个或更多具有特定依赖关系的 Media 对象，并按特定顺序进行多次合并（例如 (widget1.media + widget2.media) + widget3.media 或 form.media 的自动聚合）。",
+        "reason": "Issue 表明问题在合并三个或更多对象时出现，且中间合并步骤可能建立错误的顺序约束。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用的依赖关系是单向且明确的（如 uses_jquery.js 依赖于 jquery.js）。",
+        "target_pattern": "使用 Issue 中描述的依赖模式：一个文件（text-editor-extras.js）依赖于另一个（text-editor.js），但第三个文件（color-picker.js）是独立的。",
+        "reason": "这种特定的依赖组合在多次合并中可能导致算法错误地推断出反向约束。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "合并多个 Media 对象时，应正确解析 JS 文件的依赖顺序，不抛出不必要的 MediaOrderConflictWarning，并生成符合依赖关系的正确文件顺序。",
+      "evidence": [
+        "Issue 中明确说明 Django 应该能够将最终表单的 JS 文件解析为顺序 text-editor.js, text-editor-extras.js, color-picker.js。",
+        "相关测试 1 (test_merge_js_three_way) 展示了合并时保留相对顺序的预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 或使用 assertWarns 捕获 MediaOrderConflictWarning。",
+        "reason": "Issue 的核心症状是抛出了不必要的警告。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "最终合并 Media 对象的 _js 属性列表顺序。",
+        "reason": "Issue 指出最终顺序错误，且与预期顺序不符。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "中间合并步骤产生的 Media 对象及其 _js 列表。",
+        "reason": "Issue 分析指出，中间合并（ColorPicker().media + SimpleTextWidget().media）错误地建立了约束，观察中间状态有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "最终 Media 对象的 JS 列表顺序应符合依赖关系（text-editor.js 在 text-editor-extras.js 之前）。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "避免断言完整的、包含路径的 repr 字符串，因为路径可能因设置而变化。",
+        "reason": "Issue 明确给出了正确的顺序目标。"
+      },
+      {
+        "assertion_goal": "在合并过程中，不应抛出 MediaOrderConflictWarning。",
+        "preferred_assertion_style": "warns",
+        "avoid": "避免断言警告消息的完整精确字符串，除非 Issue 明确给出。断言警告类型或消息片段更稳定。",
+        "reason": "Issue 认为该警告是“不必要”的，修复后应消失。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Media.merge 算法在处理多步合并时具体如何建立和存储顺序约束的细节。",
+    "是否所有三个或更多 Media 对象的合并都会触发此问题，还是仅限于特定的依赖图模式。",
+    "修复后的确切行为是消除所有警告，还是仅在某些情况下消除，同时保留必要的警告。"
+  ],
+  "raw": {
+    "issue_summary": "合并三个或更多 Media 对象时可能抛出不必要的 MediaOrderConflictWarning，且最终顺序可能不正确。",
+    "trigger_condition": {
+      "text": "定义多个包含 Media 类的 Widget，其中一些 Widget 的 Media 定义存在依赖关系（例如 text-editor-extras.js 依赖于 text-editor.js），然后将这些 Widget 组合到一个 Form 中，访问 Form 的 media 属性。",
+      "evidence": [
+        "Issue 中提供了 ColorPicker、SimpleTextWidget、FancyTextWidget 的定义，并展示了访问 MyForm().media 时触发警告。",
+        "Issue 描述了合并顺序：ColorPicker().media + SimpleTextWidget().media 产生了一个约束，影响了后续合并。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 MediaOrderConflictWarning，警告信息提示检测到相反顺序的重复文件（例如 text-editor-extras.js 和 text-editor.js），且最终生成的 JS 文件顺序（['text-editor-extras.js', 'color-picker.js', 'text-editor.js']）不符合预期（应为 ['text-editor.js', 'text-editor-extras.js', 'color-picker.js']）。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中显示了警告输出和最终 Media 对象的 repr。",
+        "源码片段 5 定义了 MediaOrderConflictWarning 类。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "合并多个 Media 对象时，应正确解析 JS 文件的依赖顺序，不抛出不必要的 MediaOrderConflictWarning，并生成符合依赖关系的正确文件顺序。",
+      "evidence": [
+        "Issue 中明确说明 Django 应该能够将最终表单的 JS 文件解析为顺序 text-editor.js, text-editor-extras.js, color-picker.js。",
+        "相关测试 1 (test_merge_js_three_way) 展示了合并时保留相对顺序的预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Media",
+        "kind": "class",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 的核心是关于 Media 对象的合并逻辑。"
+      },
+      {
+        "name": "Media.__add__",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Media 对象的合并通过 __add__ 方法进行。"
+      },
+      {
+        "name": "Media.merge",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "相关测试 2 和 4 直接测试了 Media.merge 方法，它是合并逻辑的核心。"
+      },
+      {
+        "name": "Form.media",
+        "kind": "property",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 中通过访问 MyForm().media 触发问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/widgets.py",
+        "object": "Media.__add__",
+        "lines": "41-156",
+        "reason": "该方法是 Media 对象合并的入口，负责调用合并逻辑并可能生成警告。"
+      },
+      {
+        "path": "django/forms/widgets.py",
+        "object": "Media.merge",
+        "lines": "41-156",
+        "reason": "该静态方法是合并两个列表的核心算法，可能在处理三个或更多对象的多步合并时引入错误的约束。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FormsMediaTestCase.test_merge_js_three_way",
+        "test_file": "tests/forms_tests/tests/test_media.py",
+        "why_relevant": "它测试了三个 Media 对象的合并，并关注 JS 文件的顺序保留，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "Media 对象的构造方式",
+          "使用 __add__ 运算符进行合并",
+          "对 _js 属性顺序的断言风格",
+          "测试类 FormsMediaTestCase 和 @override_settings 装饰器"
+        ],
+        "possible_gap": "该测试使用的依赖关系（uses_jquery.js 依赖于 jquery.js）是明确的，且合并过程没有触发警告。而 Issue 中的依赖关系（text-editor-extras.js 依赖于 text-editor.js）在合并过程中被错误地反向约束了。"
+      },
+      {
+        "test_name": "FormsMediaTestCase.test_merge_warning",
+        "test_file": "tests/forms_tests/tests/test_media.py",
+        "why_relevant": "它直接测试了 Media.merge 方法在检测到相反顺序时抛出 MediaOrderConflictWarning。",
+        "reusable_parts": [
+          "使用 assertWarnsMessage 来捕获 RuntimeWarning (MediaOrderConflictWarning 的父类)",
+          "调用 Media.merge 的方式"
+        ],
+        "possible_gap": "该测试只测试了两个列表的简单反向情况，没有涉及三个或更多 Media 对象的多步合并场景，也没有测试警告是否被不必要地抛出。"
+      },
+      {
+        "test_name": "test_merge",
+        "test_file": "tests/forms_tests/tests/test_media.py",
+        "why_relevant": "它使用多种输入组合测试 Media.merge 方法，覆盖了多种顺序情况。",
+        "reusable_parts": [
+          "Media.merge 的调用模式",
+          "使用 subTest 进行参数化测试的结构"
+        ],
+        "possible_gap": "这些测试用例都是两个列表的合并，没有覆盖 Issue 中描述的多步合并（A+B，然后 (A+B)+C）可能产生的副作用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常测试两个 Media 对象的直接合并，或一个合并结果与另一个 Media 的合并。",
+        "target_pattern": "创建三个或更多具有特定依赖关系的 Media 对象，并按特定顺序进行多次合并（例如 (widget1.media + widget2.media) + widget3.media 或 form.media 的自动聚合）。",
+        "reason": "Issue 表明问题在合并三个或更多对象时出现，且中间合并步骤可能建立错误的顺序约束。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用的依赖关系是单向且明确的（如 uses_jquery.js 依赖于 jquery.js）。",
+        "target_pattern": "使用 Issue 中描述的依赖模式：一个文件（text-editor-extras.js）依赖于另一个（text-editor.js），但第三个文件（color-picker.js）是独立的。",
+        "reason": "这种特定的依赖组合在多次合并中可能导致算法错误地推断出反向约束。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 或使用 assertWarns 捕获 MediaOrderConflictWarning。",
+        "reason": "Issue 的核心症状是抛出了不必要的警告。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "最终合并 Media 对象的 _js 属性列表顺序。",
+        "reason": "Issue 指出最终顺序错误，且与预期顺序不符。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "中间合并步骤产生的 Media 对象及其 _js 列表。",
+        "reason": "Issue 分析指出，中间合并（ColorPicker().media + SimpleTextWidget().media）错误地建立了约束，观察中间状态有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "最终 Media 对象的 JS 列表顺序应符合依赖关系（text-editor.js 在 text-editor-extras.js 之前）。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "避免断言完整的、包含路径的 repr 字符串，因为路径可能因设置而变化。",
+        "reason": "Issue 明确给出了正确的顺序目标。"
+      },
+      {
+        "assertion_goal": "在合并过程中，不应抛出 MediaOrderConflictWarning。",
+        "preferred_assertion_style": "warns",
+        "avoid": "避免断言警告消息的完整精确字符串，除非 Issue 明确给出。断言警告类型或消息片段更稳定。",
+        "reason": "Issue 认为该警告是“不必要”的，修复后应消失。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能使用 @override_settings(STATIC_URL=...) 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义多个继承自 forms.Widget 的类，并在其中定义 Media 内部类。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个包含这些 Widget 的 Form 类。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Media.merge 算法在处理多步合并时具体如何建立和存储顺序约束的细节。",
+      "是否所有三个或更多 Media 对象的合并都会触发此问题，还是仅限于特定的依赖图模式。",
+      "修复后的确切行为是消除所有警告，还是仅在某些情况下消除，同时保留必要的警告。"
+    ]
+  }
+}

@@ -1,0 +1,334 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15280",
+  "issue_summary": "在通过 prefetch_related 链式预取回到父对象时，延迟字段（deferred fields）被错误地继承，导致不必要的数据库查询。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义 User 和 Profile 模型，并建立 OneToOneField 或 ForeignKey 关系。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 类，并可能继承自 Django 的 TestCase 以支持数据库和 assertNumQueries。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_onetoone_reverse_with_to_field_pk",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "测试了 OneToOneField 的 prefetch_related 和 assertNumQueries 的使用。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "assertNumQueries 的使用模式",
+          "模型创建和查询集构建"
+        ],
+        "possible_gap": "没有涉及 only() 和嵌套的 Prefetch，也没有测试延迟字段的继承问题。"
+      },
+      {
+        "test_name": "test_filter_deferred",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "测试了 prefetch_related 与延迟字段的交互。",
+        "reusable_parts": [
+          "prefetch_related 的测试上下文",
+          "对延迟行为的关注"
+        ],
+        "possible_gap": "测试的是过滤延迟，而不是嵌套预取导致的字段延迟状态错误传播。"
+      },
+      {
+        "test_name": "test_refresh_not_loading_deferred_fields",
+        "test_file": "tests/defer/tests.py",
+        "why_relevant": "测试了 only() 和 deferred fields 的行为，以及 assertNumQueries 的使用。",
+        "reusable_parts": [
+          "only() 的使用",
+          "assertNumQueries 的上下文管理器模式",
+          "延迟字段的访问测试"
+        ],
+        "possible_gap": "没有涉及 prefetch_related 和嵌套关系。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 only() 限制字段，并通过嵌套的 Prefetch 进行 prefetch_related，其中内层查询集也使用了 only()，然后访问内层对象的延迟字段。",
+      "evidence": [
+        "Issue 中的测试用例：User.objects.only(\"email\").prefetch_related(Prefetch(\"profile\", queryset=Profile.objects.prefetch_related(Prefetch(\"user\", queryset=User.objects.only(\"kind\")))))",
+        "Issue 描述：'Printing user.profile.user.get_deferred_fields() returns {'kind'}.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在预期没有数据库查询（assertNumQueries(0)）的情况下，访问 user.profile.user.kind 时执行了一次额外的 SELECT 查询。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 中的错误信息：'AssertionError: 1 != 0 : 1 queries executed, 0 expected'",
+        "捕获的查询：'SELECT \"tests_user\".\"id\", \"tests_user\".\"kind\" FROM \"tests_user\" WHERE \"tests_user\".\"id\" = 1'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于限制加载字段的核心方法。"
+      },
+      {
+        "name": "QuerySet.prefetch_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于预取相关对象的核心方法。"
+      },
+      {
+        "name": "Prefetch",
+        "kind": "class",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于构建嵌套预取的对象。"
+      },
+      {
+        "name": "assertNumQueries",
+        "kind": "method",
+        "source_path": "django/test/testcases.py",
+        "reason": "Issue 中用于断言查询数量的测试方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "prefetch_related_objects",
+        "lines": "",
+        "reason": "负责处理 prefetch_related 逻辑，可能涉及延迟字段状态的传播。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._prefetch_related_objects",
+        "lines": "",
+        "reason": "执行预取的具体实现，可能错误地合并了不同查询集的 deferred fields 状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "简单的 prefetch_related 或 only 使用。",
+        "target_pattern": "使用 only() 和嵌套的 Prefetch 构建复杂的 prefetch_related 链。",
+        "reason": "Issue 表明缺陷在嵌套预取且内层查询集也使用 only() 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "访问预取对象的非延迟字段。",
+        "target_pattern": "访问预取链中内层对象的、在外层查询集中被延迟但在内层查询集中应已加载的字段。",
+        "reason": "缺陷表现为内层对象错误地继承了外层对象的延迟字段状态。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在预取链完成后，访问内层 User 对象的 kind 字段不应触发额外的数据库查询，因为该字段已在预取时加载。",
+      "evidence": [
+        "Issue 中的期望：'with self.assertNumQueries(0): self.assertEqual(user.profile.user.kind, \"ADMIN\")'",
+        "Issue 描述：'This is exactly the query I'd expect to see if kind on the inner User queryset had been deferred, which it hasn't.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在访问 user.profile.user.kind 前后捕获的 SQL 查询。",
+        "reason": "Issue 的核心是出现了预期之外的查询。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "user.profile.user.get_deferred_fields() 的返回值。",
+        "reason": "Issue 指出该方法返回了错误的 {'kind'}，表明延迟状态不正确。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在预取完成后，访问特定字段不会触发新的数据库查询。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或查询顺序。",
+        "reason": "Issue 的核心是查询数量，而非查询内容。使用 assertNumQueries 是直接且稳定的方式。"
+      },
+      {
+        "assertion_goal": "验证内层对象的特定字段值符合预期。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个对象的 repr 或所有字段。",
+        "reason": "在确认无额外查询后，验证字段值正确是必要的语义目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否也影响 ManyToManyField 或其他类型的关联关系。",
+    "嵌套 Prefetch 的深度是否影响缺陷触发。",
+    "除了 only()，使用 defer() 是否也会触发类似问题。",
+    "具体的修复代码位置和修改方式。"
+  ],
+  "raw": {
+    "issue_summary": "在通过 prefetch_related 链式预取回到父对象时，延迟字段（deferred fields）被错误地继承，导致不必要的数据库查询。",
+    "trigger_condition": {
+      "text": "使用 only() 限制字段，并通过嵌套的 Prefetch 进行 prefetch_related，其中内层查询集也使用了 only()，然后访问内层对象的延迟字段。",
+      "evidence": [
+        "Issue 中的测试用例：User.objects.only(\"email\").prefetch_related(Prefetch(\"profile\", queryset=Profile.objects.prefetch_related(Prefetch(\"user\", queryset=User.objects.only(\"kind\")))))",
+        "Issue 描述：'Printing user.profile.user.get_deferred_fields() returns {'kind'}.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在预期没有数据库查询（assertNumQueries(0)）的情况下，访问 user.profile.user.kind 时执行了一次额外的 SELECT 查询。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 中的错误信息：'AssertionError: 1 != 0 : 1 queries executed, 0 expected'",
+        "捕获的查询：'SELECT \"tests_user\".\"id\", \"tests_user\".\"kind\" FROM \"tests_user\" WHERE \"tests_user\".\"id\" = 1'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在预取链完成后，访问内层 User 对象的 kind 字段不应触发额外的数据库查询，因为该字段已在预取时加载。",
+      "evidence": [
+        "Issue 中的期望：'with self.assertNumQueries(0): self.assertEqual(user.profile.user.kind, \"ADMIN\")'",
+        "Issue 描述：'This is exactly the query I'd expect to see if kind on the inner User queryset had been deferred, which it hasn't.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于限制加载字段的核心方法。"
+      },
+      {
+        "name": "QuerySet.prefetch_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于预取相关对象的核心方法。"
+      },
+      {
+        "name": "Prefetch",
+        "kind": "class",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于构建嵌套预取的对象。"
+      },
+      {
+        "name": "assertNumQueries",
+        "kind": "method",
+        "source_path": "django/test/testcases.py",
+        "reason": "Issue 中用于断言查询数量的测试方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "prefetch_related_objects",
+        "lines": "",
+        "reason": "负责处理 prefetch_related 逻辑，可能涉及延迟字段状态的传播。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._prefetch_related_objects",
+        "lines": "",
+        "reason": "执行预取的具体实现，可能错误地合并了不同查询集的 deferred fields 状态。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_onetoone_reverse_with_to_field_pk",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "测试了 OneToOneField 的 prefetch_related 和 assertNumQueries 的使用。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "assertNumQueries 的使用模式",
+          "模型创建和查询集构建"
+        ],
+        "possible_gap": "没有涉及 only() 和嵌套的 Prefetch，也没有测试延迟字段的继承问题。"
+      },
+      {
+        "test_name": "test_filter_deferred",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "测试了 prefetch_related 与延迟字段的交互。",
+        "reusable_parts": [
+          "prefetch_related 的测试上下文",
+          "对延迟行为的关注"
+        ],
+        "possible_gap": "测试的是过滤延迟，而不是嵌套预取导致的字段延迟状态错误传播。"
+      },
+      {
+        "test_name": "test_refresh_not_loading_deferred_fields",
+        "test_file": "tests/defer/tests.py",
+        "why_relevant": "测试了 only() 和 deferred fields 的行为，以及 assertNumQueries 的使用。",
+        "reusable_parts": [
+          "only() 的使用",
+          "assertNumQueries 的上下文管理器模式",
+          "延迟字段的访问测试"
+        ],
+        "possible_gap": "没有涉及 prefetch_related 和嵌套关系。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "简单的 prefetch_related 或 only 使用。",
+        "target_pattern": "使用 only() 和嵌套的 Prefetch 构建复杂的 prefetch_related 链。",
+        "reason": "Issue 表明缺陷在嵌套预取且内层查询集也使用 only() 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "访问预取对象的非延迟字段。",
+        "target_pattern": "访问预取链中内层对象的、在外层查询集中被延迟但在内层查询集中应已加载的字段。",
+        "reason": "缺陷表现为内层对象错误地继承了外层对象的延迟字段状态。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在访问 user.profile.user.kind 前后捕获的 SQL 查询。",
+        "reason": "Issue 的核心是出现了预期之外的查询。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "user.profile.user.get_deferred_fields() 的返回值。",
+        "reason": "Issue 指出该方法返回了错误的 {'kind'}，表明延迟状态不正确。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在预取完成后，访问特定字段不会触发新的数据库查询。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或查询顺序。",
+        "reason": "Issue 的核心是查询数量，而非查询内容。使用 assertNumQueries 是直接且稳定的方式。"
+      },
+      {
+        "assertion_goal": "验证内层对象的特定字段值符合预期。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个对象的 repr 或所有字段。",
+        "reason": "在确认无额外查询后，验证字段值正确是必要的语义目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义 User 和 Profile 模型，并建立 OneToOneField 或 ForeignKey 关系。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 类，并可能继承自 Django 的 TestCase 以支持数据库和 assertNumQueries。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否也影响 ManyToManyField 或其他类型的关联关系。",
+      "嵌套 Prefetch 的深度是否影响缺陷触发。",
+      "除了 only()，使用 defer() 是否也会触发类似问题。",
+      "具体的修复代码位置和修改方式。"
+    ]
+  }
+}

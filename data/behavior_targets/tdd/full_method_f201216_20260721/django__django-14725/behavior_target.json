@@ -1,0 +1,286 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14725",
+  "issue_summary": "Model formsets 缺少一种可靠的方式来禁止创建新对象，用户试图使用 extra=0 来实现但不可靠。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Django 的 TestCase，因为它提供了数据库支持和清理。需要创建一些 Author 对象作为现有数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个 HTTP POST 请求的数据结构，包括 form-TOTAL_FORMS, form-INITIAL_FORMS 等管理字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_max_num",
+        "test_file": "tests/model_formsets/tests.py",
+        "why_relevant": "它测试了 max_num 和 extra 参数对表单集行为的影响，特别是控制表单数量和新对象创建。",
+        "reusable_parts": [
+          "使用 modelformset_factory 创建 AuthorFormSet",
+          "使用 Author 模型作为测试对象",
+          "检查 formset.forms 和 formset.extra_forms 的长度",
+          "使用 TestCase 类"
+        ],
+        "possible_gap": "该测试主要关注 max_num 对表单显示数量的限制，但没有测试通过 POST 数据绕过 extra=0 来创建新对象的情况。"
+      },
+      {
+        "test_name": "test_simple_save",
+        "test_file": "tests/model_formsets/tests.py",
+        "why_relevant": "它详细测试了模型表单集的创建、验证和保存流程，包括编辑现有对象和添加新对象。",
+        "reusable_parts": [
+          "创建 Author 对象作为现有数据",
+          "构造包含新对象数据的 POST 字典",
+          "调用 formset.is_valid() 和 formset.save()",
+          "断言保存后返回的对象列表"
+        ],
+        "possible_gap": "该测试假设 extra 参数正常工作，并允许新对象的创建。它没有测试当意图禁止创建时，表单集是否仍会错误地接受并保存新对象数据。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 modelformset_factory 创建模型表单集，设置 extra=0，然后通过 JavaScript 添加更多表单或发送额外的 POST 数据。",
+      "evidence": [
+        "Issue 描述：'We see users trying to use extra=0 to accomplish this, but that's not reliable as extra is merely meant for the extra number of forms to display. You can add more forms with Javascript (or just send additional post data).'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "即使设置 extra=0，用户仍然可以通过客户端操作（如 JavaScript）或直接发送 POST 数据来创建新的对象，导致无法实现“仅编辑”视图。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'Model formsets don't provide a way to create an \"edit only\" view of objects.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "modelformset_factory",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 是关于模型表单集（model formsets）的，这是创建模型表单集的主要工厂函数。"
+      },
+      {
+        "name": "BaseModelFormSet",
+        "kind": "class",
+        "source_path": "",
+        "reason": "模型表单集的基类，可能包含控制表单集行为（如保存、验证）的逻辑。"
+      },
+      {
+        "name": "formset.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "表单集的保存方法，是决定是否创建新对象的关键点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "BaseModelFormSet",
+        "lines": "",
+        "reason": "这是模型表单集的核心实现，可能缺少一个标志或逻辑来在保存时阻止新实例的创建。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "modelformset_factory",
+        "lines": "",
+        "reason": "工厂函数可能没有暴露一个参数来配置“禁止创建新对象”的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在 modelformset_factory 调用中设置 extra=0，并期望它阻止新表单的显示和创建。",
+        "target_pattern": "在 modelformset_factory 调用中设置 extra=0，但随后通过构造 POST 数据（模拟 JavaScript 添加）来包含新对象的数据。",
+        "reason": "Issue 指出 extra=0 不可靠，因为可以通过 POST 数据绕过。变异应模拟这种绕过行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "在 test_simple_save 中，POST 数据包含 form-INITIAL_FORMS=0 和 form-0-name 等字段，表示创建新对象。",
+        "target_pattern": "在 POST 数据中，设置 form-INITIAL_FORMS 为现有对象数量，但额外包含一个没有对应初始 ID 的表单数据（即新对象），同时设置 extra=0。",
+        "reason": "这模拟了在“仅编辑”视图中，用户尝试提交一个额外的新对象数据。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "模型表单集应提供一种配置方式（例如一个参数或标志），使得表单集在验证和保存时能可靠地禁止创建新对象，只允许编辑现有对象。",
+      "evidence": [
+        "Issue 标题：'Provide a way for model formsets to disallow new object creation'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "formset.is_valid() 的返回值，以及 formset.save() 返回的列表长度和内容。",
+        "reason": "如果缺陷存在，即使意图禁止，formset.is_valid() 可能仍为 True，并且 formset.save() 可能返回包含新创建对象的列表。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "len(formset.extra_forms) 和 formset.initial_form_count() 等属性。",
+        "reason": "观察在 extra=0 配置下，表单集如何处理额外的 POST 数据对应的表单。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当配置为禁止创建新对象时，提交包含新对象数据的 POST 请求，表单集不应创建新对象。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 输出或具体的异常消息，因为这些可能在实现修复时改变。",
+        "reason": "断言应关注核心语义：新对象是否被创建。例如，断言 formset.save() 返回的列表长度应为 0（如果没有编辑现有对象），或者数据库查询计数没有增加。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 没有指定实现‘禁止创建新对象’功能的确切 API 名称或参数（例如，可能是一个新的 can_create=False 参数，或是 max_num 的特殊用法）。",
+    "当前代码库中，模型表单集在验证和保存时，具体哪个环节决定了是否允许创建新对象，需要进一步定位。",
+    "修复后，当尝试创建新对象时，预期的行为是什么？是表单集验证失败（is_valid() 返回 False），表单被静默忽略，还是抛出异常？"
+  ],
+  "raw": {
+    "issue_summary": "Model formsets 缺少一种可靠的方式来禁止创建新对象，用户试图使用 extra=0 来实现但不可靠。",
+    "trigger_condition": {
+      "text": "使用 modelformset_factory 创建模型表单集，设置 extra=0，然后通过 JavaScript 添加更多表单或发送额外的 POST 数据。",
+      "evidence": [
+        "Issue 描述：'We see users trying to use extra=0 to accomplish this, but that's not reliable as extra is merely meant for the extra number of forms to display. You can add more forms with Javascript (or just send additional post data).'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "即使设置 extra=0，用户仍然可以通过客户端操作（如 JavaScript）或直接发送 POST 数据来创建新的对象，导致无法实现“仅编辑”视图。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'Model formsets don't provide a way to create an \"edit only\" view of objects.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "模型表单集应提供一种配置方式（例如一个参数或标志），使得表单集在验证和保存时能可靠地禁止创建新对象，只允许编辑现有对象。",
+      "evidence": [
+        "Issue 标题：'Provide a way for model formsets to disallow new object creation'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "modelformset_factory",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 是关于模型表单集（model formsets）的，这是创建模型表单集的主要工厂函数。"
+      },
+      {
+        "name": "BaseModelFormSet",
+        "kind": "class",
+        "source_path": "",
+        "reason": "模型表单集的基类，可能包含控制表单集行为（如保存、验证）的逻辑。"
+      },
+      {
+        "name": "formset.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "表单集的保存方法，是决定是否创建新对象的关键点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "BaseModelFormSet",
+        "lines": "",
+        "reason": "这是模型表单集的核心实现，可能缺少一个标志或逻辑来在保存时阻止新实例的创建。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "modelformset_factory",
+        "lines": "",
+        "reason": "工厂函数可能没有暴露一个参数来配置“禁止创建新对象”的行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_max_num",
+        "test_file": "tests/model_formsets/tests.py",
+        "why_relevant": "它测试了 max_num 和 extra 参数对表单集行为的影响，特别是控制表单数量和新对象创建。",
+        "reusable_parts": [
+          "使用 modelformset_factory 创建 AuthorFormSet",
+          "使用 Author 模型作为测试对象",
+          "检查 formset.forms 和 formset.extra_forms 的长度",
+          "使用 TestCase 类"
+        ],
+        "possible_gap": "该测试主要关注 max_num 对表单显示数量的限制，但没有测试通过 POST 数据绕过 extra=0 来创建新对象的情况。"
+      },
+      {
+        "test_name": "test_simple_save",
+        "test_file": "tests/model_formsets/tests.py",
+        "why_relevant": "它详细测试了模型表单集的创建、验证和保存流程，包括编辑现有对象和添加新对象。",
+        "reusable_parts": [
+          "创建 Author 对象作为现有数据",
+          "构造包含新对象数据的 POST 字典",
+          "调用 formset.is_valid() 和 formset.save()",
+          "断言保存后返回的对象列表"
+        ],
+        "possible_gap": "该测试假设 extra 参数正常工作，并允许新对象的创建。它没有测试当意图禁止创建时，表单集是否仍会错误地接受并保存新对象数据。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在 modelformset_factory 调用中设置 extra=0，并期望它阻止新表单的显示和创建。",
+        "target_pattern": "在 modelformset_factory 调用中设置 extra=0，但随后通过构造 POST 数据（模拟 JavaScript 添加）来包含新对象的数据。",
+        "reason": "Issue 指出 extra=0 不可靠，因为可以通过 POST 数据绕过。变异应模拟这种绕过行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "在 test_simple_save 中，POST 数据包含 form-INITIAL_FORMS=0 和 form-0-name 等字段，表示创建新对象。",
+        "target_pattern": "在 POST 数据中，设置 form-INITIAL_FORMS 为现有对象数量，但额外包含一个没有对应初始 ID 的表单数据（即新对象），同时设置 extra=0。",
+        "reason": "这模拟了在“仅编辑”视图中，用户尝试提交一个额外的新对象数据。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "formset.is_valid() 的返回值，以及 formset.save() 返回的列表长度和内容。",
+        "reason": "如果缺陷存在，即使意图禁止，formset.is_valid() 可能仍为 True，并且 formset.save() 可能返回包含新创建对象的列表。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "len(formset.extra_forms) 和 formset.initial_form_count() 等属性。",
+        "reason": "观察在 extra=0 配置下，表单集如何处理额外的 POST 数据对应的表单。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当配置为禁止创建新对象时，提交包含新对象数据的 POST 请求，表单集不应创建新对象。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 输出或具体的异常消息，因为这些可能在实现修复时改变。",
+        "reason": "断言应关注核心语义：新对象是否被创建。例如，断言 formset.save() 返回的列表长度应为 0（如果没有编辑现有对象），或者数据库查询计数没有增加。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django 的 TestCase，因为它提供了数据库支持和清理。需要创建一些 Author 对象作为现有数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个 HTTP POST 请求的数据结构，包括 form-TOTAL_FORMS, form-INITIAL_FORMS 等管理字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 没有指定实现‘禁止创建新对象’功能的确切 API 名称或参数（例如，可能是一个新的 can_create=False 参数，或是 max_num 的特殊用法）。",
+      "当前代码库中，模型表单集在验证和保存时，具体哪个环节决定了是否允许创建新对象，需要进一步定位。",
+      "修复后，当尝试创建新对象时，预期的行为是什么？是表单集验证失败（is_valid() 返回 False），表单被静默忽略，还是抛出异常？"
+    ]
+  }
+}

@@ -1,0 +1,302 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "astropy__astropy-14598",
+  "issue_summary": "FITS Card 在处理包含双单引号（''）的字符串值时，在某些长度条件下会错误地将双单引号转换为单引号。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 FitsTestCase 作为基类，因为它可能提供 _pad 等辅助函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要导入 fits 模块：from astropy.io import fits。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_string_value_card",
+        "test_file": "astropy/io/fits/tests/test_header.py",
+        "why_relevant": "它测试了 Card 构造函数对字符串值（包括空字符串 ''）的处理，并验证了 str(card) 的输出。",
+        "reusable_parts": [
+          "imports (from astropy.io import fits)",
+          "Card 构造方式",
+          "assert str(c) == _pad(...) 的断言风格",
+          "_pad 函数的使用"
+        ],
+        "possible_gap": "该测试只检查了固定短字符串（'<8 ch' 和 ''）的情况，没有测试长字符串或特定长度边界条件，也没有使用 fromstring 进行往返测试。"
+      },
+      {
+        "test_name": "test_card_from_bytes",
+        "test_file": "astropy/io/fits/tests/test_header.py",
+        "why_relevant": "它直接测试了 Card.fromstring 方法，并比较了反序列化后的 value。",
+        "reusable_parts": [
+          "fromstring 的调用方式",
+          "assert c.value == ... 的断言风格"
+        ],
+        "possible_gap": "该测试使用简单的 'abc' 值，没有涉及双引号或长度边界条件。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 fits.Card 构造函数创建一个包含双单引号（''）的字符串值，然后使用 Card.fromstring(str(card)) 进行序列化与反序列化。当字符串总长度达到特定阈值时（例如，在值末尾附加双引号时，长度为65、67、68、69等），bug 被触发。",
+      "evidence": [
+        "Issue 中的代码示例显示，当 n 为 65, 67, 68, 69 时，card1.value != card2.value。",
+        "Issue 描述：'sometimes when dealing with null strings, i.e. double single quotes (''), which sometimes are transformed into single single quotes (')'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "经过 Card.fromstring(str(card)) 处理后，原始值中的双单引号（''）被错误地转换为单引号（'），导致反序列化后的值与原始值不相等。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 输出显示：'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'' vs xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'。",
+        "Issue 中打印的 card1.value 和 card2.value 显示差异。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "fits.Card",
+        "kind": "class",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Issue 的核心是 Card 类的值处理。"
+      },
+      {
+        "name": "fits.Card.fromstring",
+        "kind": "method",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Bug 在序列化（str(card)）和反序列化（fromstring）过程中出现。"
+      },
+      {
+        "name": "Card.value",
+        "kind": "property",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Issue 比较的是 card1.value 和 card2.value。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/io/fits/card.py",
+        "object": "Card._parse_value",
+        "lines": "",
+        "reason": "value 属性最终调用 _parse_value 来解析字符串图像，双引号的处理逻辑可能在此。"
+      },
+      {
+        "path": "astropy/io/fits/card.py",
+        "object": "Card._format_value",
+        "lines": "",
+        "reason": "str(card) 会调用 _format_image 和 _format_value，值到字符串的转换可能在此出错。"
+      },
+      {
+        "path": "astropy/io/fits/card.py",
+        "object": "_value_FSC_RE 或 _value_NFSC_RE 正则表达式",
+        "lines": "",
+        "reason": "源码片段1显示用于解析值的正则表达式包含 _strg 模式，该模式用于匹配带引号的字符串，可能与双引号解析有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用简单、短的字符串值（如 'abc', '', '<8 ch'）。",
+        "target_pattern": "使用长度可变的字符串，并在末尾或中间附加双单引号（''），例如 \"x\" * n + \"''\" 或 \"x\" * n + \"''\" + \"x\"*10。",
+        "reason": "Issue 表明 bug 在特定字符串长度下触发，且与双引号的位置有关。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接构造 Card 或使用 fromstring 一次。",
+        "target_pattern": "构造 Card -> str(card) -> Card.fromstring -> 比较 value 的往返测试模式。",
+        "reason": "Bug 出现在序列化与反序列化的往返过程中。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于任何包含双单引号（''）的字符串值，通过 Card.fromstring(str(card)) 进行序列化与反序列化后，得到的值应与原始值完全一致。",
+      "evidence": [
+        "Issue 描述：'All card values should be handled properly.'",
+        "相关测试 test_string_value_card 展示了空字符串（''）的正确处理。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "card1.value 和 card2.value 的字符串内容，特别是引号部分。",
+        "reason": "Issue 的核心错误是 value 在往返后发生变化，直接比较它们可以判断 bug 是否触发。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(card1) 生成的原始卡图像字符串。",
+        "reason": "观察序列化后的字符串格式，可能发现引号是如何被编码的，有助于定位解析问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 Card.fromstring(str(card)) 反序列化后得到的卡的值（value）与原始卡的值相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的卡图像字符串（str(card)）相等，因为格式细节可能无关紧要。",
+        "reason": "Issue 关注的是值的正确性，而不是图像格式的完全一致性。使用 value 相等断言直接针对问题核心。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致 bug 的精确长度阈值和字符串模式（例如，双引号在末尾 vs 在中间）的完整规则是什么？",
+    "bug 是只发生在 FSC（固定格式）卡中，还是也发生在 NFSC（非固定格式）卡中？",
+    "除了双引号，其他特殊字符序列是否也会出现类似问题？",
+    "具体的修复位置（_format_value 还是 _parse_value 或正则表达式）需要进一步代码分析或插桩确认。"
+  ],
+  "raw": {
+    "issue_summary": "FITS Card 在处理包含双单引号（''）的字符串值时，在某些长度条件下会错误地将双单引号转换为单引号。",
+    "trigger_condition": {
+      "text": "使用 fits.Card 构造函数创建一个包含双单引号（''）的字符串值，然后使用 Card.fromstring(str(card)) 进行序列化与反序列化。当字符串总长度达到特定阈值时（例如，在值末尾附加双引号时，长度为65、67、68、69等），bug 被触发。",
+      "evidence": [
+        "Issue 中的代码示例显示，当 n 为 65, 67, 68, 69 时，card1.value != card2.value。",
+        "Issue 描述：'sometimes when dealing with null strings, i.e. double single quotes (''), which sometimes are transformed into single single quotes (')'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "经过 Card.fromstring(str(card)) 处理后，原始值中的双单引号（''）被错误地转换为单引号（'），导致反序列化后的值与原始值不相等。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 输出显示：'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'' vs xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'。",
+        "Issue 中打印的 card1.value 和 card2.value 显示差异。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于任何包含双单引号（''）的字符串值，通过 Card.fromstring(str(card)) 进行序列化与反序列化后，得到的值应与原始值完全一致。",
+      "evidence": [
+        "Issue 描述：'All card values should be handled properly.'",
+        "相关测试 test_string_value_card 展示了空字符串（''）的正确处理。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "fits.Card",
+        "kind": "class",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Issue 的核心是 Card 类的值处理。"
+      },
+      {
+        "name": "fits.Card.fromstring",
+        "kind": "method",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Bug 在序列化（str(card)）和反序列化（fromstring）过程中出现。"
+      },
+      {
+        "name": "Card.value",
+        "kind": "property",
+        "source_path": "astropy/io/fits/card.py",
+        "reason": "Issue 比较的是 card1.value 和 card2.value。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/io/fits/card.py",
+        "object": "Card._parse_value",
+        "lines": "",
+        "reason": "value 属性最终调用 _parse_value 来解析字符串图像，双引号的处理逻辑可能在此。"
+      },
+      {
+        "path": "astropy/io/fits/card.py",
+        "object": "Card._format_value",
+        "lines": "",
+        "reason": "str(card) 会调用 _format_image 和 _format_value，值到字符串的转换可能在此出错。"
+      },
+      {
+        "path": "astropy/io/fits/card.py",
+        "object": "_value_FSC_RE 或 _value_NFSC_RE 正则表达式",
+        "lines": "",
+        "reason": "源码片段1显示用于解析值的正则表达式包含 _strg 模式，该模式用于匹配带引号的字符串，可能与双引号解析有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_string_value_card",
+        "test_file": "astropy/io/fits/tests/test_header.py",
+        "why_relevant": "它测试了 Card 构造函数对字符串值（包括空字符串 ''）的处理，并验证了 str(card) 的输出。",
+        "reusable_parts": [
+          "imports (from astropy.io import fits)",
+          "Card 构造方式",
+          "assert str(c) == _pad(...) 的断言风格",
+          "_pad 函数的使用"
+        ],
+        "possible_gap": "该测试只检查了固定短字符串（'<8 ch' 和 ''）的情况，没有测试长字符串或特定长度边界条件，也没有使用 fromstring 进行往返测试。"
+      },
+      {
+        "test_name": "test_card_from_bytes",
+        "test_file": "astropy/io/fits/tests/test_header.py",
+        "why_relevant": "它直接测试了 Card.fromstring 方法，并比较了反序列化后的 value。",
+        "reusable_parts": [
+          "fromstring 的调用方式",
+          "assert c.value == ... 的断言风格"
+        ],
+        "possible_gap": "该测试使用简单的 'abc' 值，没有涉及双引号或长度边界条件。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用简单、短的字符串值（如 'abc', '', '<8 ch'）。",
+        "target_pattern": "使用长度可变的字符串，并在末尾或中间附加双单引号（''），例如 \"x\" * n + \"''\" 或 \"x\" * n + \"''\" + \"x\"*10。",
+        "reason": "Issue 表明 bug 在特定字符串长度下触发，且与双引号的位置有关。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接构造 Card 或使用 fromstring 一次。",
+        "target_pattern": "构造 Card -> str(card) -> Card.fromstring -> 比较 value 的往返测试模式。",
+        "reason": "Bug 出现在序列化与反序列化的往返过程中。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "card1.value 和 card2.value 的字符串内容，特别是引号部分。",
+        "reason": "Issue 的核心错误是 value 在往返后发生变化，直接比较它们可以判断 bug 是否触发。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(card1) 生成的原始卡图像字符串。",
+        "reason": "观察序列化后的字符串格式，可能发现引号是如何被编码的，有助于定位解析问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 Card.fromstring(str(card)) 反序列化后得到的卡的值（value）与原始卡的值相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的卡图像字符串（str(card)）相等，因为格式细节可能无关紧要。",
+        "reason": "Issue 关注的是值的正确性，而不是图像格式的完全一致性。使用 value 相等断言直接针对问题核心。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 FitsTestCase 作为基类，因为它可能提供 _pad 等辅助函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要导入 fits 模块：from astropy.io import fits。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致 bug 的精确长度阈值和字符串模式（例如，双引号在末尾 vs 在中间）的完整规则是什么？",
+      "bug 是只发生在 FSC（固定格式）卡中，还是也发生在 NFSC（非固定格式）卡中？",
+      "除了双引号，其他特殊字符序列是否也会出现类似问题？",
+      "具体的修复位置（_format_value 还是 _parse_value 或正则表达式）需要进一步代码分析或插桩确认。"
+    ]
+  }
+}

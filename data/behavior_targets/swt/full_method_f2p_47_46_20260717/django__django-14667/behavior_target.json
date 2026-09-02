@@ -1,0 +1,366 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14667",
+  "issue_summary": "QuerySet.only() 后接 .defer() 链式调用时，defer 未能正确清除已通过 only 指定的字段，导致生成的 SQL 查询选择了所有字段。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型，至少包含 id（主键）和几个其他字段（如 name, trade_number, country），用于复现 Issue 中的场景。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 和数据库 fixture（或通过 setUp 创建测试数据）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库并确保测试在事务中运行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DeferTests.test_defer_only_chaining",
+        "test_file": "tests/defer/tests.py",
+        "why_relevant": "该测试直接涉及 only 和 defer 的链式调用，并使用了 assert_delayed 来验证延迟字段的数量，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "测试类 DeferTests",
+          "使用 Primary 模型构造查询集",
+          "链式调用 .only() 和 .defer() 的模式",
+          "assert_delayed 断言风格"
+        ],
+        "possible_gap": "该测试中的链式调用组合（如 .only(\"name\", \"value\").defer(\"name\")）与 Issue 中触发问题的组合（.only(\"name\").defer(\"name\")）不完全相同。测试可能没有直接检查生成的 SQL 查询，而是检查了延迟字段的数量。"
+      },
+      {
+        "test_name": "DeferTests.test_only",
+        "test_file": "tests/defer/tests.py",
+        "why_relevant": "该测试验证了 only 方法的基本行为，包括链式调用 only，可以作为理解 only 行为的基础。",
+        "reusable_parts": [
+          "测试类 DeferTests",
+          "使用 Primary 模型",
+          "assert_delayed 断言"
+        ],
+        "possible_gap": "该测试主要关注 only 本身，没有涉及与 defer 的冲突链式调用。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 QuerySet 上链式调用 .only(\"field_name\") 后立即调用 .defer(\"field_name\")，或者 .only(\"field_name\") 后调用 .defer(\"field_name\").defer(\"other_field\")。",
+      "evidence": [
+        "Issue 描述：Company.objects.only(\"name\").defer(\"name\") 和 Company.objects.only(\"name\").defer(\"name\").defer(\"country\") 触发了问题。",
+        "Issue 描述：这些调用生成了加载所有字段的 SQL 查询。",
+        "相关源码 1 和 2 显示了 defer 和 only 方法的实现，它们通过 clone.query.add_deferred_loading 和 clone.query.add_immediate_loading 操作查询状态。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询包含了所有模型字段（例如 SELECT \"company\".\"id\", \"company\".\"name\", \"company\".\"trade_number\", \"company\".\"country\" FROM \"company\"），而不是预期的仅包含未延迟字段（例如 SELECT \"company\".\"id\" FROM \"company\"）。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 描述：Company.objects.only(\"name\").defer(\"name\") 生成了加载所有字段的 SQL 查询。",
+        "Issue 描述：Company.objects.only(\"name\").defer(\"name\").defer(\"country\") 也生成了相同的加载所有字段的 SQL 查询。",
+        "Issue 描述：Company.objects.only(\"name\", \"country\").defer(\"name\") 则行为正确，生成了 SELECT \"company\".\"id\", \"company\".\"country\" FROM \"company\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发缺陷的起始 API 调用，用于指定立即加载的字段。"
+      },
+      {
+        "name": "QuerySet.defer",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发缺陷的后续 API 调用，用于延迟加载字段，但其在与 only 链式调用时行为异常。"
+      },
+      {
+        "name": "QuerySet._chain",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "在 only 和 defer 方法中都被调用以创建查询集克隆，可能与状态传递有关。"
+      },
+      {
+        "name": "Query.add_immediate_loading",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 only 方法中被调用，用于设置立即加载的字段。"
+      },
+      {
+        "name": "Query.add_deferred_loading",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 defer 方法中被调用，用于添加延迟加载的字段。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.defer",
+        "lines": "1210-1225",
+        "reason": "defer 方法负责处理延迟加载字段的逻辑，当在 only 之后调用时，可能未能正确处理与 only 设置的立即加载字段的交互。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.only",
+        "lines": "1227-1246",
+        "reason": "only 方法设置了立即加载字段，其状态可能影响了后续 defer 调用的行为。"
+      },
+      {
+        "path": "",
+        "object": "Query 类中管理延迟/立即加载字段的内部状态（如 _deferred_loading, _immediate_loading）",
+        "lines": "",
+        "reason": "缺陷可能源于 Query 对象内部跟踪 deferred 和 immediate 字段的状态逻辑，当 only 和 defer 链式调用时，状态更新可能不正确。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中的模式：qs.only(\"name\", \"value\").defer(\"name\")",
+        "target_pattern": "Issue 中的模式：qs.only(\"name\").defer(\"name\")",
+        "reason": "Issue 表明当 only 和 defer 针对同一个字段时会出现问题，而现有测试中 only 指定了多个字段，然后 defer 其中一个，这可能避免了缺陷路径。将 only 的字段集减少到与 defer 的字段完全重合，可能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中的模式：qs.only(\"name\").defer(\"value\")",
+        "target_pattern": "Issue 中的模式：qs.only(\"name\").defer(\"name\").defer(\"country\")",
+        "reason": "现有测试中 only 和 defer 针对不同字段。变异为 defer 与 only 相同的字段后，再添加另一个 defer，以匹配 Issue 的第二个例子，可能进一步暴露问题。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当在 .only(\"field_name\") 后调用 .defer(\"field_name\") 时，该字段应被正确延迟加载，生成的 SQL 查询不应包含该字段。",
+      "evidence": [
+        "Issue 描述：在 Company.objects.only(\"name\").defer(\"name\") 的情况下，期望的 SQL 查询是 SELECT \"company\".\"id\" FROM \"company\"。",
+        "Issue 描述：Company.objects.only(\"name\", \"country\").defer(\"name\") 展示了正确的行为，只加载了 \"id\" 和 \"country\" 字段。",
+        "相关源码 2 中 only 方法的文档字符串：\"Essentially, the opposite of defer(). Only the fields passed into this method and that are not already specified as deferred are loaded immediately when the queryset is evaluated.\""
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，例如 str(qs.query) 或 connection.queries。",
+        "reason": "Issue 的核心错误现象是生成的 SQL 查询包含了不应该出现的字段。观察 SQL 是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "查询集内部 Query 对象的 deferred_loading 或 immediate_loading 相关属性状态（在调用 only 和 defer 之后，但在求值之前）。",
+        "reason": "缺陷可能源于这些内部状态设置不正确。观察状态变化有助于定位问题。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询集求值后（例如通过迭代、get、list）返回的模型实例，检查其 deferred 属性或字段访问行为。",
+        "reason": "SQL 错误会导致加载错误的字段数据，可能影响实例的字段访问或延迟行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 查询 SELECT 子句中不包含通过 .only(\"field\").defer(\"field\") 指定要延迟的字段。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串相等，因为表名、引号等可能因数据库后端而异。",
+        "reason": "Issue 的核心是 SQL 包含了不该有的字段。断言不包含特定字段名是稳定且与问题直接相关的。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 查询 SELECT 子句只包含预期的字段（例如，在 .only(\"name\").defer(\"name\") 情况下只包含主键 \"id\"）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言延迟字段的数量，因为 Issue 主要关于 SQL 生成，且延迟字段计数可能受其他因素影响。",
+        "reason": "正向断言预期的字段存在，与 expected_behavior 对齐，且比否定断言更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 QuerySet.defer 方法、Query.add_deferred_loading 方法，还是在 Query 对象内部管理 deferred/immediate 字段状态的更底层逻辑中。",
+    "除了 SQL 生成错误外，模型实例的延迟字段属性（._deferred_fields）在缺陷情况下是否也被正确设置。",
+    "是否还有其他 only 和 defer 的组合会触发类似问题（例如，only 多个字段然后 defer 其中一部分）。",
+    "修复后的正确行为下，.only(\"name\").defer(\"name\") 生成的查询是否真的只包含 \"id\"，还是也包含其他未被 only 指定的字段（根据 only 的语义，only(\"name\") 意味着只立即加载 name，其他字段默认延迟？但 Issue 期望只加载 id）。需要更精确理解 only 和 defer 交互的预期语义。"
+  ],
+  "raw": {
+    "issue_summary": "QuerySet.only() 后接 .defer() 链式调用时，defer 未能正确清除已通过 only 指定的字段，导致生成的 SQL 查询选择了所有字段。",
+    "trigger_condition": {
+      "text": "在 QuerySet 上链式调用 .only(\"field_name\") 后立即调用 .defer(\"field_name\")，或者 .only(\"field_name\") 后调用 .defer(\"field_name\").defer(\"other_field\")。",
+      "evidence": [
+        "Issue 描述：Company.objects.only(\"name\").defer(\"name\") 和 Company.objects.only(\"name\").defer(\"name\").defer(\"country\") 触发了问题。",
+        "Issue 描述：这些调用生成了加载所有字段的 SQL 查询。",
+        "相关源码 1 和 2 显示了 defer 和 only 方法的实现，它们通过 clone.query.add_deferred_loading 和 clone.query.add_immediate_loading 操作查询状态。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询包含了所有模型字段（例如 SELECT \"company\".\"id\", \"company\".\"name\", \"company\".\"trade_number\", \"company\".\"country\" FROM \"company\"），而不是预期的仅包含未延迟字段（例如 SELECT \"company\".\"id\" FROM \"company\"）。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 描述：Company.objects.only(\"name\").defer(\"name\") 生成了加载所有字段的 SQL 查询。",
+        "Issue 描述：Company.objects.only(\"name\").defer(\"name\").defer(\"country\") 也生成了相同的加载所有字段的 SQL 查询。",
+        "Issue 描述：Company.objects.only(\"name\", \"country\").defer(\"name\") 则行为正确，生成了 SELECT \"company\".\"id\", \"company\".\"country\" FROM \"company\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当在 .only(\"field_name\") 后调用 .defer(\"field_name\") 时，该字段应被正确延迟加载，生成的 SQL 查询不应包含该字段。",
+      "evidence": [
+        "Issue 描述：在 Company.objects.only(\"name\").defer(\"name\") 的情况下，期望的 SQL 查询是 SELECT \"company\".\"id\" FROM \"company\"。",
+        "Issue 描述：Company.objects.only(\"name\", \"country\").defer(\"name\") 展示了正确的行为，只加载了 \"id\" 和 \"country\" 字段。",
+        "相关源码 2 中 only 方法的文档字符串：\"Essentially, the opposite of defer(). Only the fields passed into this method and that are not already specified as deferred are loaded immediately when the queryset is evaluated.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发缺陷的起始 API 调用，用于指定立即加载的字段。"
+      },
+      {
+        "name": "QuerySet.defer",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发缺陷的后续 API 调用，用于延迟加载字段，但其在与 only 链式调用时行为异常。"
+      },
+      {
+        "name": "QuerySet._chain",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "在 only 和 defer 方法中都被调用以创建查询集克隆，可能与状态传递有关。"
+      },
+      {
+        "name": "Query.add_immediate_loading",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 only 方法中被调用，用于设置立即加载的字段。"
+      },
+      {
+        "name": "Query.add_deferred_loading",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 defer 方法中被调用，用于添加延迟加载的字段。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.defer",
+        "lines": "1210-1225",
+        "reason": "defer 方法负责处理延迟加载字段的逻辑，当在 only 之后调用时，可能未能正确处理与 only 设置的立即加载字段的交互。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.only",
+        "lines": "1227-1246",
+        "reason": "only 方法设置了立即加载字段，其状态可能影响了后续 defer 调用的行为。"
+      },
+      {
+        "path": "",
+        "object": "Query 类中管理延迟/立即加载字段的内部状态（如 _deferred_loading, _immediate_loading）",
+        "lines": "",
+        "reason": "缺陷可能源于 Query 对象内部跟踪 deferred 和 immediate 字段的状态逻辑，当 only 和 defer 链式调用时，状态更新可能不正确。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DeferTests.test_defer_only_chaining",
+        "test_file": "tests/defer/tests.py",
+        "why_relevant": "该测试直接涉及 only 和 defer 的链式调用，并使用了 assert_delayed 来验证延迟字段的数量，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "测试类 DeferTests",
+          "使用 Primary 模型构造查询集",
+          "链式调用 .only() 和 .defer() 的模式",
+          "assert_delayed 断言风格"
+        ],
+        "possible_gap": "该测试中的链式调用组合（如 .only(\"name\", \"value\").defer(\"name\")）与 Issue 中触发问题的组合（.only(\"name\").defer(\"name\")）不完全相同。测试可能没有直接检查生成的 SQL 查询，而是检查了延迟字段的数量。"
+      },
+      {
+        "test_name": "DeferTests.test_only",
+        "test_file": "tests/defer/tests.py",
+        "why_relevant": "该测试验证了 only 方法的基本行为，包括链式调用 only，可以作为理解 only 行为的基础。",
+        "reusable_parts": [
+          "测试类 DeferTests",
+          "使用 Primary 模型",
+          "assert_delayed 断言"
+        ],
+        "possible_gap": "该测试主要关注 only 本身，没有涉及与 defer 的冲突链式调用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中的模式：qs.only(\"name\", \"value\").defer(\"name\")",
+        "target_pattern": "Issue 中的模式：qs.only(\"name\").defer(\"name\")",
+        "reason": "Issue 表明当 only 和 defer 针对同一个字段时会出现问题，而现有测试中 only 指定了多个字段，然后 defer 其中一个，这可能避免了缺陷路径。将 only 的字段集减少到与 defer 的字段完全重合，可能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中的模式：qs.only(\"name\").defer(\"value\")",
+        "target_pattern": "Issue 中的模式：qs.only(\"name\").defer(\"name\").defer(\"country\")",
+        "reason": "现有测试中 only 和 defer 针对不同字段。变异为 defer 与 only 相同的字段后，再添加另一个 defer，以匹配 Issue 的第二个例子，可能进一步暴露问题。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，例如 str(qs.query) 或 connection.queries。",
+        "reason": "Issue 的核心错误现象是生成的 SQL 查询包含了不应该出现的字段。观察 SQL 是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "查询集内部 Query 对象的 deferred_loading 或 immediate_loading 相关属性状态（在调用 only 和 defer 之后，但在求值之前）。",
+        "reason": "缺陷可能源于这些内部状态设置不正确。观察状态变化有助于定位问题。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询集求值后（例如通过迭代、get、list）返回的模型实例，检查其 deferred 属性或字段访问行为。",
+        "reason": "SQL 错误会导致加载错误的字段数据，可能影响实例的字段访问或延迟行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 查询 SELECT 子句中不包含通过 .only(\"field\").defer(\"field\") 指定要延迟的字段。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串相等，因为表名、引号等可能因数据库后端而异。",
+        "reason": "Issue 的核心是 SQL 包含了不该有的字段。断言不包含特定字段名是稳定且与问题直接相关的。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 查询 SELECT 子句只包含预期的字段（例如，在 .only(\"name\").defer(\"name\") 情况下只包含主键 \"id\"）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言延迟字段的数量，因为 Issue 主要关于 SQL 生成，且延迟字段计数可能受其他因素影响。",
+        "reason": "正向断言预期的字段存在，与 expected_behavior 对齐，且比否定断言更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型，至少包含 id（主键）和几个其他字段（如 name, trade_number, country），用于复现 Issue 中的场景。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 和数据库 fixture（或通过 setUp 创建测试数据）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库并确保测试在事务中运行。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 QuerySet.defer 方法、Query.add_deferred_loading 方法，还是在 Query 对象内部管理 deferred/immediate 字段状态的更底层逻辑中。",
+      "除了 SQL 生成错误外，模型实例的延迟字段属性（._deferred_fields）在缺陷情况下是否也被正确设置。",
+      "是否还有其他 only 和 defer 的组合会触发类似问题（例如，only 多个字段然后 defer 其中一部分）。",
+      "修复后的正确行为下，.only(\"name\").defer(\"name\") 生成的查询是否真的只包含 \"id\"，还是也包含其他未被 only 指定的字段（根据 only 的语义，only(\"name\") 意味着只立即加载 name，其他字段默认延迟？但 Issue 期望只加载 id）。需要更精确理解 only 和 defer 交互的预期语义。"
+    ]
+  }
+}

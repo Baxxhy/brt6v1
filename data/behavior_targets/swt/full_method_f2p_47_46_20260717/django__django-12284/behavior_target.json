@@ -1,0 +1,314 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12284",
+  "issue_summary": "Model.get_FOO_display() 方法在继承的 choices 字段上无法正确显示新增选项的显示文本。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TransactionTestCase，因为测试涉及模型定义，但不一定需要数据库操作（取决于 get_display 的实现）。相关测试使用了 @isolate_apps 来隔离模型注册。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.db.models 和 django.test。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GetFieldDisplayTests.test_choices_and_field_display",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "它直接测试了 get_FIELD_display() 方法在各种 choices 值下的行为，包括有效值、无效值和空值，提供了基础的测试模式和断言方式。",
+        "reusable_parts": [
+          "测试类结构 (SimpleTestCase)",
+          "模型实例化方式 (Whiz(c=1))",
+          "调用 get_FIELD_display() 的语法",
+          "使用 assertEqual 进行返回值断言"
+        ],
+        "possible_gap": "该测试没有涉及模型继承和 choices 重写的场景，只测试了单个模型的静态 choices。"
+      },
+      {
+        "test_name": "AbstractInheritanceTests.test_single_parent",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "它测试了抽象模型继承和字段重写（覆盖 max_length），展示了如何构建继承自抽象基类并重写字段的子类模型。",
+        "reusable_parts": [
+          "使用 @isolate_apps 装饰器",
+          "定义抽象基类 (abstract=True)",
+          "在子类中重写字段",
+          "使用 _meta.get_field 检查字段属性"
+        ],
+        "possible_gap": "该测试关注的是字段属性（如 max_length）的继承和重写，而不是 choices 属性或 get_FIELD_display() 方法的行为。"
+      },
+      {
+        "test_name": "AbstractInheritanceTests.test_overriding_field_removed_by_concrete_model",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "它测试了更复杂的字段重写链（抽象->移除->重写），展示了 Django 模型继承中字段定义的动态性，这与 Issue 中重写 choices 的场景在概念上相关。",
+        "reusable_parts": [
+          "多层抽象和具体模型继承的结构",
+          "在继承链中重新定义字段的模式"
+        ],
+        "possible_gap": "该测试同样不涉及 choices 或 get_FIELD_display()，且场景更为特殊（字段先被设为 None）。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个继承自抽象基类的子类模型，该子类重写了基类的 choices 列表，并添加了新的选项元组。然后创建该子类的实例，为其重写后的字段设置一个新增选项的值，并调用该字段对应的 get_FOO_display() 方法。",
+      "evidence": [
+        "Issue 描述中给出了具体的模型定义示例：抽象基类 A 定义了 foo_choice 和 field_foo，子类 B 重写了 foo_choice 并添加了 ('C', 'output3')。",
+        "Issue 描述中说明了触发操作：在 B 的实例上调用 get_field_foo_display()。",
+        "相关测试 3 和 4 展示了抽象模型继承和字段重写的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于子类新增的选项值（如 'C'），get_FOO_display() 方法返回了原始的选项值（'C'），而不是预期的显示文本（'output3'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中明确指出：'for value \"C\" the method returns \"C\" and not \"output3\" which is the expected behaviour'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Model._get_FIELD_display",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 的核心是关于 get_FOO_display() 方法的行为，而该方法在 Model 类中是通过 _get_FIELD_display 实现的（源码片段 1 中列出了此方法）。"
+      },
+      {
+        "name": "models.Model",
+        "kind": "class",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 涉及的所有模型都继承自此类，且 get_FOO_display() 方法是其动态生成的方法。"
+      },
+      {
+        "name": "models.CharField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 示例中使用了带有 choices 参数的 CharField。源码片段 2 显示了 CharField 的定义，但 choices 处理逻辑可能在模型字段中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/base.py",
+        "object": "Model._get_FIELD_display",
+        "lines": "",
+        "reason": "这是实现 get_FOO_display() 功能的核心方法，Issue 表明其在处理继承并重写 choices 的场景时逻辑有误。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.flatchoices 或相关属性",
+        "lines": "",
+        "reason": "get_FIELD_display() 方法通常依赖于字段的 flatchoices 属性来映射值和显示文本。当子类重写 choices 时，该属性的生成或获取可能未正确更新。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中使用具有静态 choices 定义的单一模型（如 Whiz）。",
+        "target_pattern": "构建一个继承自抽象基类的子类模型，该子类重写基类的 choices 属性，添加新的选项元组。然后创建子类实例，并将字段值设置为新增的选项值。",
+        "reason": "Issue 明确指出 bug 发生在继承并扩展 choices 的场景下。将测试对象的状态从单一模型变为继承并重写 choices 的模型，是触发缺陷路径的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中向 get_c_display() 传入的是定义在原始 choices 中的值（如 0, 1）或无效值（9）。",
+        "target_pattern": "向 get_FIELD_display() 传入子类新增 choices 中定义的值（如 Issue 中的 'C'）。",
+        "reason": "Issue 表明对于继承后新增的选项值，方法返回错误。因此，输入值需要是子类 choices 中独有的值。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "get_FOO_display() 方法应正确返回子类模型中定义的、与字段当前值对应的显示文本，包括从父类继承并重写 choices 后新增的选项。",
+      "evidence": [
+        "Issue 描述中说明了期望行为：对于值 'C'，应返回 'output3'。",
+        "相关测试 1 展示了 get_FIELD_display() 在正常 choices 下返回正确显示文本的行为。",
+        "相关测试 2 展示了 get_FIELD_display() 可以被重写，暗示了其标准行为是返回 choices 映射的显示文本。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "instance.get_field_foo_display() 的返回值。",
+        "reason": "Issue 的核心错误是返回值不正确。直接观察该方法的输出是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "instance._meta.get_field('field_foo').flatchoices 或 instance._meta.get_field('field_foo').choices。",
+        "reason": "get_FIELD_display() 的返回值很可能基于字段的 choices 或 flatchoices 属性。观察子类实例的字段对象上存储的 choices 信息，有助于理解映射关系是否正确建立。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于子类新增的选项值，get_FIELD_display() 应返回对应的显示文本，而不是原始值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 查询或复杂的内部对象 repr。避免断言对于无效值或 None 的行为，除非明确与 Issue 相关。",
+        "reason": "Issue 明确给出了期望的输出（'output3'）。使用 equals 进行精确匹配是最直接、稳定的断言方式，与相关测试 1 的风格一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "get_FIELD_display() 方法在内部是直接访问 instance._meta.get_field(...).flatchoices，还是通过其他缓存机制？这会影响观测点的选择。",
+    "除了抽象模型继承，普通的多表继承或代理模型是否也存在同样的问题？Issue 只提到了抽象基类的例子。",
+    "当子类完全替换父类的 choices 列表（而不仅仅是追加）时，行为是否一致？"
+  ],
+  "raw": {
+    "issue_summary": "Model.get_FOO_display() 方法在继承的 choices 字段上无法正确显示新增选项的显示文本。",
+    "trigger_condition": {
+      "text": "创建一个继承自抽象基类的子类模型，该子类重写了基类的 choices 列表，并添加了新的选项元组。然后创建该子类的实例，为其重写后的字段设置一个新增选项的值，并调用该字段对应的 get_FOO_display() 方法。",
+      "evidence": [
+        "Issue 描述中给出了具体的模型定义示例：抽象基类 A 定义了 foo_choice 和 field_foo，子类 B 重写了 foo_choice 并添加了 ('C', 'output3')。",
+        "Issue 描述中说明了触发操作：在 B 的实例上调用 get_field_foo_display()。",
+        "相关测试 3 和 4 展示了抽象模型继承和字段重写的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于子类新增的选项值（如 'C'），get_FOO_display() 方法返回了原始的选项值（'C'），而不是预期的显示文本（'output3'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中明确指出：'for value \"C\" the method returns \"C\" and not \"output3\" which is the expected behaviour'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "get_FOO_display() 方法应正确返回子类模型中定义的、与字段当前值对应的显示文本，包括从父类继承并重写 choices 后新增的选项。",
+      "evidence": [
+        "Issue 描述中说明了期望行为：对于值 'C'，应返回 'output3'。",
+        "相关测试 1 展示了 get_FIELD_display() 在正常 choices 下返回正确显示文本的行为。",
+        "相关测试 2 展示了 get_FIELD_display() 可以被重写，暗示了其标准行为是返回 choices 映射的显示文本。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Model._get_FIELD_display",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 的核心是关于 get_FOO_display() 方法的行为，而该方法在 Model 类中是通过 _get_FIELD_display 实现的（源码片段 1 中列出了此方法）。"
+      },
+      {
+        "name": "models.Model",
+        "kind": "class",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 涉及的所有模型都继承自此类，且 get_FOO_display() 方法是其动态生成的方法。"
+      },
+      {
+        "name": "models.CharField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 示例中使用了带有 choices 参数的 CharField。源码片段 2 显示了 CharField 的定义，但 choices 处理逻辑可能在模型字段中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/base.py",
+        "object": "Model._get_FIELD_display",
+        "lines": "",
+        "reason": "这是实现 get_FOO_display() 功能的核心方法，Issue 表明其在处理继承并重写 choices 的场景时逻辑有误。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.flatchoices 或相关属性",
+        "lines": "",
+        "reason": "get_FIELD_display() 方法通常依赖于字段的 flatchoices 属性来映射值和显示文本。当子类重写 choices 时，该属性的生成或获取可能未正确更新。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GetFieldDisplayTests.test_choices_and_field_display",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "它直接测试了 get_FIELD_display() 方法在各种 choices 值下的行为，包括有效值、无效值和空值，提供了基础的测试模式和断言方式。",
+        "reusable_parts": [
+          "测试类结构 (SimpleTestCase)",
+          "模型实例化方式 (Whiz(c=1))",
+          "调用 get_FIELD_display() 的语法",
+          "使用 assertEqual 进行返回值断言"
+        ],
+        "possible_gap": "该测试没有涉及模型继承和 choices 重写的场景，只测试了单个模型的静态 choices。"
+      },
+      {
+        "test_name": "AbstractInheritanceTests.test_single_parent",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "它测试了抽象模型继承和字段重写（覆盖 max_length），展示了如何构建继承自抽象基类并重写字段的子类模型。",
+        "reusable_parts": [
+          "使用 @isolate_apps 装饰器",
+          "定义抽象基类 (abstract=True)",
+          "在子类中重写字段",
+          "使用 _meta.get_field 检查字段属性"
+        ],
+        "possible_gap": "该测试关注的是字段属性（如 max_length）的继承和重写，而不是 choices 属性或 get_FIELD_display() 方法的行为。"
+      },
+      {
+        "test_name": "AbstractInheritanceTests.test_overriding_field_removed_by_concrete_model",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "它测试了更复杂的字段重写链（抽象->移除->重写），展示了 Django 模型继承中字段定义的动态性，这与 Issue 中重写 choices 的场景在概念上相关。",
+        "reusable_parts": [
+          "多层抽象和具体模型继承的结构",
+          "在继承链中重新定义字段的模式"
+        ],
+        "possible_gap": "该测试同样不涉及 choices 或 get_FIELD_display()，且场景更为特殊（字段先被设为 None）。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中使用具有静态 choices 定义的单一模型（如 Whiz）。",
+        "target_pattern": "构建一个继承自抽象基类的子类模型，该子类重写基类的 choices 属性，添加新的选项元组。然后创建子类实例，并将字段值设置为新增的选项值。",
+        "reason": "Issue 明确指出 bug 发生在继承并扩展 choices 的场景下。将测试对象的状态从单一模型变为继承并重写 choices 的模型，是触发缺陷路径的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中向 get_c_display() 传入的是定义在原始 choices 中的值（如 0, 1）或无效值（9）。",
+        "target_pattern": "向 get_FIELD_display() 传入子类新增 choices 中定义的值（如 Issue 中的 'C'）。",
+        "reason": "Issue 表明对于继承后新增的选项值，方法返回错误。因此，输入值需要是子类 choices 中独有的值。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "instance.get_field_foo_display() 的返回值。",
+        "reason": "Issue 的核心错误是返回值不正确。直接观察该方法的输出是判断 bug 是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "instance._meta.get_field('field_foo').flatchoices 或 instance._meta.get_field('field_foo').choices。",
+        "reason": "get_FIELD_display() 的返回值很可能基于字段的 choices 或 flatchoices 属性。观察子类实例的字段对象上存储的 choices 信息，有助于理解映射关系是否正确建立。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于子类新增的选项值，get_FIELD_display() 应返回对应的显示文本，而不是原始值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 查询或复杂的内部对象 repr。避免断言对于无效值或 None 的行为，除非明确与 Issue 相关。",
+        "reason": "Issue 明确给出了期望的输出（'output3'）。使用 equals 进行精确匹配是最直接、稳定的断言方式，与相关测试 1 的风格一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TransactionTestCase，因为测试涉及模型定义，但不一定需要数据库操作（取决于 get_display 的实现）。相关测试使用了 @isolate_apps 来隔离模型注册。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.db.models 和 django.test。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "get_FIELD_display() 方法在内部是直接访问 instance._meta.get_field(...).flatchoices，还是通过其他缓存机制？这会影响观测点的选择。",
+      "除了抽象模型继承，普通的多表继承或代理模型是否也存在同样的问题？Issue 只提到了抽象基类的例子。",
+      "当子类完全替换父类的 choices 列表（而不仅仅是追加）时，行为是否一致？"
+    ]
+  }
+}

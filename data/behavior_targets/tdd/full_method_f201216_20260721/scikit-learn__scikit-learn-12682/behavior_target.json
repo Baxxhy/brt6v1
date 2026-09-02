@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-12682",
+  "issue_summary": "SparseCoder 在使用 lasso_cd 算法时没有暴露 Lasso 的 max_iter 参数，导致默认值 1000 可能不足并引发收敛警告。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 SparseCoder、numpy、warnings 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 np.random.RandomState 生成可重复的测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要构造一个字典（dictionary）矩阵。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_sparse_coder_estimator",
+        "test_file": "sklearn/decomposition/tests/test_dict_learning.py",
+        "why_relevant": "它直接测试了 SparseCoder 的 transform 方法，使用了 lasso_lars 算法，与触发条件类似。",
+        "reusable_parts": [
+          "SparseCoder 的构造方式",
+          "transform 方法的调用",
+          "随机数据生成",
+          "assert 风格"
+        ],
+        "possible_gap": "它使用的是 lasso_lars 算法，而非触发 bug 的 lasso_cd 算法。"
+      },
+      {
+        "test_name": "test_sparse_encode_input",
+        "test_file": "sklearn/decomposition/tests/test_dict_learning.py",
+        "why_relevant": "它测试了 sparse_encode 函数（SparseCoder 的核心），并遍历了所有算法，包括 'lasso_cd'。",
+        "reusable_parts": [
+          "算法遍历模式",
+          "数据准备",
+          "对不同算法的调用"
+        ],
+        "possible_gap": "它测试的是 sparse_encode 函数，而不是 SparseCoder 类，且没有涉及 max_iter 参数。"
+      },
+      {
+        "test_name": "test_sparse_encode_positivity",
+        "test_file": "sklearn/decomposition/tests/test_dict_learning.py",
+        "why_relevant": "它参数化测试了包括 'lasso_cd' 在内的算法，并检查了 positive 参数的效果。",
+        "reusable_parts": [
+          "参数化测试结构",
+          "对 'lasso_cd' 算法的使用",
+          "断言代码的正负性"
+        ],
+        "possible_gap": "它关注的是 positive 参数，而不是 max_iter 或收敛问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 SparseCoder 并设置 transform_algorithm='lasso_cd'，在特定数据下进行 transform 操作。",
+      "evidence": [
+        "Issue 提到 SparseCoder uses Lasso if the algorithm is set to lasso_cd.",
+        "源码片段 1 显示 transform_algorithm 参数包含 'lasso_cd' 选项。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "出现警告，抱怨估计器没有收敛。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 原文：This results in a warning in examples/decomposition/plot_sparse_coding.py complaining that the estimator has not converged."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SparseCoder",
+        "kind": "class",
+        "source_path": "sklearn/decomposition/dict_learning.py",
+        "reason": "Issue 直接报告 SparseCoder 的问题。"
+      },
+      {
+        "name": "SparseCoder.__init__",
+        "kind": "method",
+        "source_path": "sklearn/decomposition/dict_learning.py",
+        "reason": "Issue 暗示其 __init__ 方法没有提供足够的参数来控制底层估计器。"
+      },
+      {
+        "name": "SparseCoder.transform",
+        "kind": "method",
+        "source_path": "sklearn/decomposition/dict_learning.py",
+        "reason": "触发警告的操作是调用 transform 方法。"
+      },
+      {
+        "name": "Lasso",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/coordinate_descent.py",
+        "reason": "SparseCoder 在使用 lasso_cd 算法时内部使用了 Lasso 估计器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/decomposition/dict_learning.py",
+        "object": "SparseCoder.__init__",
+        "lines": "992-1000",
+        "reason": "__init__ 方法没有接收 max_iter 参数，也没有将其传递给内部估计器。"
+      },
+      {
+        "path": "sklearn/decomposition/dict_learning.py",
+        "object": "SparseCoder._set_sparse_coding_params",
+        "lines": "",
+        "reason": "该方法可能负责设置内部估计器的参数，但可能遗漏了 max_iter。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 transform_algorithm='lasso_lars' 或默认 'omp'。",
+        "target_pattern": "将 transform_algorithm 设置为 'lasso_cd'。",
+        "reason": "Issue 明确指出问题发生在使用 lasso_cd 算法时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用随机生成的数据，可能容易收敛。",
+        "target_pattern": "构造或使用更复杂、更难收敛的数据，使得默认 max_iter=1000 不足。",
+        "reason": "Issue 提到默认 max_iter 为 1000 导致未收敛警告，需要数据触发此条件。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "用户应该能够通过 SparseCoder 指定底层 Lasso 估计器的 max_iter 参数，以避免收敛警告。",
+      "evidence": [
+        "Issue 原文：I guess there should be a way for the user to specify other parameters of the estimator used in SparseCoder other than the ones provided in the SparseCoder.__init__ right now."
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 捕获的警告消息，检查是否包含 'converged' 或 'max_iter' 相关文本。",
+        "reason": "Issue 的核心错误现象是出现关于未收敛的警告。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "SparseCoder.transform 的返回值，观察其是否正常（非全零）或计算误差。",
+        "reason": "即使有警告，transform 可能仍会返回结果，但结果质量可能受影响。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用 lasso_cd 算法时，应该能够通过某种方式（如参数传递）避免出现未收敛的警告。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告消息字符串，因为消息可能因版本或环境而异。",
+        "reason": "Issue 期望用户能控制 max_iter 以避免警告，因此修复后的测试应验证警告可以被消除或控制。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "具体什么样的数据或字典会导致 Lasso 在 max_iter=1000 时无法收敛。",
+    "SparseCoder 内部是如何将参数传递给 Lasso 估计器的（例如通过 sparse_encode 函数）。",
+    "修复后，max_iter 参数会以何种形式暴露给用户（例如作为 SparseCoder 的新参数，还是通过 **kwargs 传递）。",
+    "除了 max_iter，是否还有其他 Lasso 参数（如 tol）也没有被暴露。"
+  ],
+  "raw": {
+    "issue_summary": "SparseCoder 在使用 lasso_cd 算法时没有暴露 Lasso 的 max_iter 参数，导致默认值 1000 可能不足并引发收敛警告。",
+    "trigger_condition": {
+      "text": "使用 SparseCoder 并设置 transform_algorithm='lasso_cd'，在特定数据下进行 transform 操作。",
+      "evidence": [
+        "Issue 提到 SparseCoder uses Lasso if the algorithm is set to lasso_cd.",
+        "源码片段 1 显示 transform_algorithm 参数包含 'lasso_cd' 选项。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "出现警告，抱怨估计器没有收敛。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 原文：This results in a warning in examples/decomposition/plot_sparse_coding.py complaining that the estimator has not converged."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "用户应该能够通过 SparseCoder 指定底层 Lasso 估计器的 max_iter 参数，以避免收敛警告。",
+      "evidence": [
+        "Issue 原文：I guess there should be a way for the user to specify other parameters of the estimator used in SparseCoder other than the ones provided in the SparseCoder.__init__ right now."
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "SparseCoder",
+        "kind": "class",
+        "source_path": "sklearn/decomposition/dict_learning.py",
+        "reason": "Issue 直接报告 SparseCoder 的问题。"
+      },
+      {
+        "name": "SparseCoder.__init__",
+        "kind": "method",
+        "source_path": "sklearn/decomposition/dict_learning.py",
+        "reason": "Issue 暗示其 __init__ 方法没有提供足够的参数来控制底层估计器。"
+      },
+      {
+        "name": "SparseCoder.transform",
+        "kind": "method",
+        "source_path": "sklearn/decomposition/dict_learning.py",
+        "reason": "触发警告的操作是调用 transform 方法。"
+      },
+      {
+        "name": "Lasso",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/coordinate_descent.py",
+        "reason": "SparseCoder 在使用 lasso_cd 算法时内部使用了 Lasso 估计器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/decomposition/dict_learning.py",
+        "object": "SparseCoder.__init__",
+        "lines": "992-1000",
+        "reason": "__init__ 方法没有接收 max_iter 参数，也没有将其传递给内部估计器。"
+      },
+      {
+        "path": "sklearn/decomposition/dict_learning.py",
+        "object": "SparseCoder._set_sparse_coding_params",
+        "lines": "",
+        "reason": "该方法可能负责设置内部估计器的参数，但可能遗漏了 max_iter。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_sparse_coder_estimator",
+        "test_file": "sklearn/decomposition/tests/test_dict_learning.py",
+        "why_relevant": "它直接测试了 SparseCoder 的 transform 方法，使用了 lasso_lars 算法，与触发条件类似。",
+        "reusable_parts": [
+          "SparseCoder 的构造方式",
+          "transform 方法的调用",
+          "随机数据生成",
+          "assert 风格"
+        ],
+        "possible_gap": "它使用的是 lasso_lars 算法，而非触发 bug 的 lasso_cd 算法。"
+      },
+      {
+        "test_name": "test_sparse_encode_input",
+        "test_file": "sklearn/decomposition/tests/test_dict_learning.py",
+        "why_relevant": "它测试了 sparse_encode 函数（SparseCoder 的核心），并遍历了所有算法，包括 'lasso_cd'。",
+        "reusable_parts": [
+          "算法遍历模式",
+          "数据准备",
+          "对不同算法的调用"
+        ],
+        "possible_gap": "它测试的是 sparse_encode 函数，而不是 SparseCoder 类，且没有涉及 max_iter 参数。"
+      },
+      {
+        "test_name": "test_sparse_encode_positivity",
+        "test_file": "sklearn/decomposition/tests/test_dict_learning.py",
+        "why_relevant": "它参数化测试了包括 'lasso_cd' 在内的算法，并检查了 positive 参数的效果。",
+        "reusable_parts": [
+          "参数化测试结构",
+          "对 'lasso_cd' 算法的使用",
+          "断言代码的正负性"
+        ],
+        "possible_gap": "它关注的是 positive 参数，而不是 max_iter 或收敛问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 transform_algorithm='lasso_lars' 或默认 'omp'。",
+        "target_pattern": "将 transform_algorithm 设置为 'lasso_cd'。",
+        "reason": "Issue 明确指出问题发生在使用 lasso_cd 算法时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用随机生成的数据，可能容易收敛。",
+        "target_pattern": "构造或使用更复杂、更难收敛的数据，使得默认 max_iter=1000 不足。",
+        "reason": "Issue 提到默认 max_iter 为 1000 导致未收敛警告，需要数据触发此条件。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 捕获的警告消息，检查是否包含 'converged' 或 'max_iter' 相关文本。",
+        "reason": "Issue 的核心错误现象是出现关于未收敛的警告。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "SparseCoder.transform 的返回值，观察其是否正常（非全零）或计算误差。",
+        "reason": "即使有警告，transform 可能仍会返回结果，但结果质量可能受影响。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用 lasso_cd 算法时，应该能够通过某种方式（如参数传递）避免出现未收敛的警告。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告消息字符串，因为消息可能因版本或环境而异。",
+        "reason": "Issue 期望用户能控制 max_iter 以避免警告，因此修复后的测试应验证警告可以被消除或控制。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 SparseCoder、numpy、warnings 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 np.random.RandomState 生成可重复的测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要构造一个字典（dictionary）矩阵。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "具体什么样的数据或字典会导致 Lasso 在 max_iter=1000 时无法收敛。",
+      "SparseCoder 内部是如何将参数传递给 Lasso 估计器的（例如通过 sparse_encode 函数）。",
+      "修复后，max_iter 参数会以何种形式暴露给用户（例如作为 SparseCoder 的新参数，还是通过 **kwargs 传递）。",
+      "除了 max_iter，是否还有其他 Lasso 参数（如 tol）也没有被暴露。"
+    ]
+  }
+}

@@ -1,0 +1,280 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13241",
+  "issue_summary": "KernelPCA 使用 rbf 核时，多次运行得到的结果符号不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 np.random.RandomState 生成可重复的输入数据 X。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要考虑不同的 eigen_solver 设置（'auto', 'dense', 'arpack'）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_kernel_pca",
+        "test_file": "sklearn/decomposition/tests/test_kernel_pca.py",
+        "why_relevant": "该测试覆盖了 rbf 核的 KernelPCA，并比较了 fit_transform 和 fit+transform 的结果（使用绝对值）。",
+        "reusable_parts": [
+          "随机数据生成 (rng.random_sample)",
+          "KernelPCA 对象构造 (kernel='rbf')",
+          "fit_transform 和 transform 的调用",
+          "使用 assert_array_almost_equal 和 np.abs 进行比较"
+        ],
+        "possible_gap": "该测试只比较了单次运行中两种调用方式的结果绝对值，没有测试多次独立运行 fit_transform 的符号稳定性。"
+      },
+      {
+        "test_name": "test_kernel_pca_linear_kernel",
+        "test_file": "sklearn/decomposition/tests/test_kernel_pca.py",
+        "why_relevant": "该测试明确提到了符号（方向）差异，并使用绝对值进行比较。",
+        "reusable_parts": [
+          "随机数据生成",
+          "KernelPCA 和 PCA 的比较模式",
+          "使用 np.abs 处理符号差异"
+        ],
+        "possible_gap": "该测试针对 linear 核，而 Issue 是关于 rbf 核。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 KernelPCA 的 fit_transform 方法，设置 kernel='rbf'，并多次运行。",
+      "evidence": [
+        "Issue 中 Steps/Code to Reproduce 展示了使用 rbf 核的 KernelPCA 调用。",
+        "相关测试 2 中测试了 rbf 核的 KernelPCA。",
+        "源码片段 1 中 KernelPCA 类支持 rbf 核。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "多次运行 KernelPCA.fit_transform 得到的结果数值相同但符号（正负号）不同。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 Actual Results 展示了三组结果，数值相同但符号不同。",
+        "Issue 描述 'results are different in signs'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "KernelPCA",
+        "kind": "class",
+        "source_path": "sklearn/decomposition/kernel_pca.py",
+        "reason": "Issue 直接报告了该类在使用 rbf 核时的行为问题。"
+      },
+      {
+        "name": "KernelPCA.fit_transform",
+        "kind": "method",
+        "source_path": "sklearn/decomposition/kernel_pca.py",
+        "reason": "Issue 中用于产生不一致结果的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/decomposition/kernel_pca.py",
+        "object": "KernelPCA._fit_transform",
+        "lines": "",
+        "reason": "该方法负责特征分解，特征向量的符号可能由求解器（如 arpack）的随机性导致。"
+      },
+      {
+        "path": "sklearn/decomposition/kernel_pca.py",
+        "object": "KernelPCA.fit_transform",
+        "lines": "263-283",
+        "reason": "该方法返回 X_transformed = self.alphas_ * np.sqrt(self.lambdas_)，其中 alphas_ 是特征向量，其符号可能不稳定。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常使用固定随机种子生成一次数据，然后调用一次 fit_transform。",
+        "target_pattern": "使用相同数据和配置，多次独立调用 fit_transform（例如，在循环中重新实例化 KernelPCA 并调用）。",
+        "reason": "Issue 表明符号不一致在多次运行中出现，需要变异测试以触发这种非确定性。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能未显式设置 random_state 参数。",
+        "target_pattern": "在 KernelPCA 构造器中设置 random_state 为固定值或 None，并观察对符号稳定性的影响。",
+        "reason": "源码片段 1 显示 random_state 参数用于 eigen_solver == 'arpack' 时，可能影响特征向量符号。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在相同输入和配置下，多次运行 KernelPCA.fit_transform 应得到符号一致的结果。",
+      "evidence": [
+        "Issue 中 Expected Results 为 'The same result.'。",
+        "相关测试 1 和 2 中使用 np.abs 比较结果，暗示符号差异是可接受的，但 Issue 表明用户期望符号稳定。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "多次调用 fit_transform 返回的 X_transformed 数组。",
+        "reason": "直接观察返回值的符号是否一致。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "KernelPCA 实例的 alphas_ 属性（特征向量）。",
+        "reason": "符号不一致可能源于 alphas_ 的符号变化。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在相同输入和配置下，多次运行 fit_transform 得到的结果要么完全相同，要么仅符号相反（即绝对值相等）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "直接比较浮点数的完全相等（应使用近似比较）。避免仅比较绝对值，因为 Issue 期望符号稳定。",
+        "reason": "Issue 期望相同结果，但特征向量符号可能固有地存在不确定性。断言应能捕捉到符号是否稳定，或至少确认差异仅在于符号。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "符号不一致是否只发生在特定 eigen_solver（如 arpack）下？",
+    "设置 random_state 参数是否能完全消除符号不一致？",
+    "对于 rbf 核，符号不一致是否被认为是可接受的固有行为（如线性核测试所暗示）？"
+  ],
+  "raw": {
+    "issue_summary": "KernelPCA 使用 rbf 核时，多次运行得到的结果符号不一致。",
+    "trigger_condition": {
+      "text": "使用 KernelPCA 的 fit_transform 方法，设置 kernel='rbf'，并多次运行。",
+      "evidence": [
+        "Issue 中 Steps/Code to Reproduce 展示了使用 rbf 核的 KernelPCA 调用。",
+        "相关测试 2 中测试了 rbf 核的 KernelPCA。",
+        "源码片段 1 中 KernelPCA 类支持 rbf 核。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "多次运行 KernelPCA.fit_transform 得到的结果数值相同但符号（正负号）不同。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 Actual Results 展示了三组结果，数值相同但符号不同。",
+        "Issue 描述 'results are different in signs'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在相同输入和配置下，多次运行 KernelPCA.fit_transform 应得到符号一致的结果。",
+      "evidence": [
+        "Issue 中 Expected Results 为 'The same result.'。",
+        "相关测试 1 和 2 中使用 np.abs 比较结果，暗示符号差异是可接受的，但 Issue 表明用户期望符号稳定。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "KernelPCA",
+        "kind": "class",
+        "source_path": "sklearn/decomposition/kernel_pca.py",
+        "reason": "Issue 直接报告了该类在使用 rbf 核时的行为问题。"
+      },
+      {
+        "name": "KernelPCA.fit_transform",
+        "kind": "method",
+        "source_path": "sklearn/decomposition/kernel_pca.py",
+        "reason": "Issue 中用于产生不一致结果的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/decomposition/kernel_pca.py",
+        "object": "KernelPCA._fit_transform",
+        "lines": "",
+        "reason": "该方法负责特征分解，特征向量的符号可能由求解器（如 arpack）的随机性导致。"
+      },
+      {
+        "path": "sklearn/decomposition/kernel_pca.py",
+        "object": "KernelPCA.fit_transform",
+        "lines": "263-283",
+        "reason": "该方法返回 X_transformed = self.alphas_ * np.sqrt(self.lambdas_)，其中 alphas_ 是特征向量，其符号可能不稳定。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_kernel_pca",
+        "test_file": "sklearn/decomposition/tests/test_kernel_pca.py",
+        "why_relevant": "该测试覆盖了 rbf 核的 KernelPCA，并比较了 fit_transform 和 fit+transform 的结果（使用绝对值）。",
+        "reusable_parts": [
+          "随机数据生成 (rng.random_sample)",
+          "KernelPCA 对象构造 (kernel='rbf')",
+          "fit_transform 和 transform 的调用",
+          "使用 assert_array_almost_equal 和 np.abs 进行比较"
+        ],
+        "possible_gap": "该测试只比较了单次运行中两种调用方式的结果绝对值，没有测试多次独立运行 fit_transform 的符号稳定性。"
+      },
+      {
+        "test_name": "test_kernel_pca_linear_kernel",
+        "test_file": "sklearn/decomposition/tests/test_kernel_pca.py",
+        "why_relevant": "该测试明确提到了符号（方向）差异，并使用绝对值进行比较。",
+        "reusable_parts": [
+          "随机数据生成",
+          "KernelPCA 和 PCA 的比较模式",
+          "使用 np.abs 处理符号差异"
+        ],
+        "possible_gap": "该测试针对 linear 核，而 Issue 是关于 rbf 核。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常使用固定随机种子生成一次数据，然后调用一次 fit_transform。",
+        "target_pattern": "使用相同数据和配置，多次独立调用 fit_transform（例如，在循环中重新实例化 KernelPCA 并调用）。",
+        "reason": "Issue 表明符号不一致在多次运行中出现，需要变异测试以触发这种非确定性。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能未显式设置 random_state 参数。",
+        "target_pattern": "在 KernelPCA 构造器中设置 random_state 为固定值或 None，并观察对符号稳定性的影响。",
+        "reason": "源码片段 1 显示 random_state 参数用于 eigen_solver == 'arpack' 时，可能影响特征向量符号。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "多次调用 fit_transform 返回的 X_transformed 数组。",
+        "reason": "直接观察返回值的符号是否一致。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "KernelPCA 实例的 alphas_ 属性（特征向量）。",
+        "reason": "符号不一致可能源于 alphas_ 的符号变化。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在相同输入和配置下，多次运行 fit_transform 得到的结果要么完全相同，要么仅符号相反（即绝对值相等）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "直接比较浮点数的完全相等（应使用近似比较）。避免仅比较绝对值，因为 Issue 期望符号稳定。",
+        "reason": "Issue 期望相同结果，但特征向量符号可能固有地存在不确定性。断言应能捕捉到符号是否稳定，或至少确认差异仅在于符号。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 np.random.RandomState 生成可重复的输入数据 X。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要考虑不同的 eigen_solver 设置（'auto', 'dense', 'arpack'）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "符号不一致是否只发生在特定 eigen_solver（如 arpack）下？",
+      "设置 random_state 参数是否能完全消除符号不一致？",
+      "对于 rbf 核，符号不一致是否被认为是可接受的固有行为（如线性核测试所暗示）？"
+    ]
+  }
+}

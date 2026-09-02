@@ -1,0 +1,342 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13265",
+  "issue_summary": "AlterOrderWithRespectTo 操作在 _order 字段被包含在索引中时，由于执行顺序问题导致迁移失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个测试用例类（如 OperationTestBase 的子类）来管理项目状态和数据库连接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置一个包含外键字段和 order_with_respect_to 选项的测试模型，并在其 Meta 中定义包含 '_order' 字段的索引。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 connection.schema_editor() 来执行迁移操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_alter_order_with_respect_to",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它直接测试了 AlterOrderWithRespectTo 操作，包括其 state_forwards 和 database_forwards 方法，并检查了 '_order' 列的创建。",
+        "reusable_parts": [
+          "OperationTestBase 的 set_up_test_model 方法用于建立测试模型状态",
+          "使用 connection.schema_editor() 执行数据库操作",
+          "使用 assertColumnExists/assertColumnNotExists 检查列的存在性",
+          "测试操作的前向和反向执行模式"
+        ],
+        "possible_gap": "该测试没有涉及在同一个迁移中同时使用 AlterOrderWithRespectTo 和包含 '_order' 字段的 AddIndex 操作，因此无法复现操作顺序问题。"
+      },
+      {
+        "test_name": "test_add_alter_order_with_respect_to",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "它测试了当同时添加外键和设置 order_with_respect_to 时，自动检测器是否能生成正确的操作顺序（AddField 在 AlterOrderWithRespectTo 之前）。",
+        "reusable_parts": [
+          "使用 get_changes 方法比较模型状态变化",
+          "使用 assertOperationTypes 和 assertOperationAttributes 检查生成的迁移操作及其属性",
+          "关注操作顺序的验证"
+        ],
+        "possible_gap": "该测试关注的是自动检测器生成迁移的逻辑，而不是手动编写迁移文件时可能出现的错误顺序。它也没有测试包含 '_order' 字段的索引。"
+      },
+      {
+        "test_name": "test_create_model_with_unique_after",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了 CreateModel 操作后紧跟另一个操作（AlterUniqueTogether）的场景，展示了多个操作顺序执行可能引发的问题模式。",
+        "reusable_parts": [
+          "按顺序执行多个操作（operation1, operation2, operation3）的模式",
+          "使用 project_state 和 new_state 克隆来模拟迁移状态推进",
+          "使用 assertTableExists 进行最终状态断言"
+        ],
+        "possible_gap": "它测试的是唯一约束，而不是索引，且不涉及 order_with_respect_to 或 '_order' 字段。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在模型迁移中，当使用 order_with_respect_to 选项，并且同时为包含 '_order' 字段的索引（例如 models.Index(fields=['look', '_order'])）创建了 AddIndex 操作时，如果 AlterOrderWithRespectTo 操作在 AddIndex 操作之后执行，则会触发错误。",
+      "evidence": [
+        "Issue 描述：'The problem is operation AlterOrderWithRespectTo after AddIndex of '_order' raising error because '_order' field had not been created yet.'",
+        "Issue 中提供的迁移代码片段显示 AddIndex 在 AlterOrderWithRespectTo 之前。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行迁移时引发错误，因为 AddIndex 操作试图在 '_order' 字段被 AlterOrderWithRespectTo 操作创建之前就引用它。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'raising error because '_order' field had not been created yet.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AlterOrderWithRespectTo",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是 Issue 中导致问题的核心操作类，负责创建 '_order' 字段。"
+      },
+      {
+        "name": "migrations.AddIndex",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是创建索引的操作类，当索引包含 '_order' 字段时，其执行顺序与 AlterOrderWithRespectTo 相关。"
+      },
+      {
+        "name": "models.Index",
+        "kind": "class",
+        "source_path": "django/db/models/indexes.py",
+        "reason": "用于定义索引，Issue 中索引包含了 '_order' 字段。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "AlterOrderWithRespectTo",
+        "lines": "572-632",
+        "reason": "该操作负责创建 '_order' 字段。如果其执行时机晚于引用该字段的 AddIndex 操作，则会导致错误。"
+      },
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "AddIndex",
+        "lines": "737-784",
+        "reason": "该操作在创建索引时，如果索引字段包含尚未创建的 '_order'，则会失败。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相关测试中，AlterOrderWithRespectTo 通常是单独测试，或与 AddField 按正确顺序组合。",
+        "target_pattern": "创建一个迁移操作序列，其中 AddIndex（索引包含 '_order' 字段）在 AlterOrderWithRespectTo 之前执行。",
+        "reason": "Issue 明确指出错误发生在 AlterOrderWithRespectTo 在 AddIndex 之后执行时，因为 '_order' 字段尚未创建。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试模型可能没有定义包含 '_order' 字段的索引。",
+        "target_pattern": "在模型定义中，于 Meta 的 indexes 列表中添加一个包含 '_order' 字段的 Index（例如 Index(fields=['foreign_key_field', '_order'])）。",
+        "reason": "Issue 中的模型正是这样配置的，这是触发问题的必要条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移操作应能成功执行，即当模型定义了 order_with_respect_to 并包含涉及 '_order' 字段的索引时，迁移框架应确保 '_order' 字段在索引创建之前就已存在。",
+      "evidence": [
+        "Issue 描述：'It seems to be AlterOrderWithRespectTo has to proceed before AddIndex of '_order'.'",
+        "相关测试 2 和 3 表明 Django 的自动检测器在某些情况下能正确安排操作顺序（'does things in the right order'）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行包含错误操作顺序的迁移操作序列（如先 AddIndex 后 AlterOrderWithRespectTo）时捕获的异常。",
+        "reason": "Issue 的核心现象是执行迁移时引发错误。观测异常类型和消息可以确认问题是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在执行每个迁移操作（如 AddIndex, AlterOrderWithRespectTo）前后，检查项目状态（ProjectState）中模型字段和选项的变化。",
+        "reason": "可以观察 '_order' 字段是在哪个操作后被添加到状态中的，以及 AddIndex 操作尝试引用 '_order' 时状态中该字段是否存在。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在执行 schema_editor 的相应方法（如 add_index, add_field）时生成的 SQL 语句。",
+        "reason": "可以观察 AddIndex 操作生成的 SQL 是否尝试引用不存在的 '_order' 列，从而引发数据库错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当迁移操作顺序错误（AddIndex 在 AlterOrderWithRespectTo 之前）时，执行会引发异常（如 FieldDoesNotExist 或数据库错误）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为不同数据库后端可能消息不同。",
+        "reason": "Issue 的核心是错误顺序导致失败。修复后，正确的顺序应使迁移成功。因此，在缺陷存在时，错误顺序应引发异常。"
+      },
+      {
+        "assertion_goal": "验证当迁移操作顺序正确（AlterOrderWithRespectTo 在 AddIndex 之前）时，迁移可以成功执行，且 '_order' 字段和索引都被正确创建。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言数据库中的具体列名或索引名，除非它们与模型定义严格绑定。",
+        "reason": "这对应于修复后的预期行为：正确的操作顺序允许迁移成功完成。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误的确切异常类型（如 Django 的 FieldDoesNotExist 还是数据库适配器的特定异常）在 Issue 中没有明确说明。",
+    "是否所有数据库后端（SQLite, PostgreSQL, MySQL）都会表现出相同的行为。",
+    "自动检测器（Autodetector）在遇到这种模型定义时，是否总能生成正确的操作顺序，还是只在特定情况下可以。"
+  ],
+  "raw": {
+    "issue_summary": "AlterOrderWithRespectTo 操作在 _order 字段被包含在索引中时，由于执行顺序问题导致迁移失败。",
+    "trigger_condition": {
+      "text": "在模型迁移中，当使用 order_with_respect_to 选项，并且同时为包含 '_order' 字段的索引（例如 models.Index(fields=['look', '_order'])）创建了 AddIndex 操作时，如果 AlterOrderWithRespectTo 操作在 AddIndex 操作之后执行，则会触发错误。",
+      "evidence": [
+        "Issue 描述：'The problem is operation AlterOrderWithRespectTo after AddIndex of '_order' raising error because '_order' field had not been created yet.'",
+        "Issue 中提供的迁移代码片段显示 AddIndex 在 AlterOrderWithRespectTo 之前。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行迁移时引发错误，因为 AddIndex 操作试图在 '_order' 字段被 AlterOrderWithRespectTo 操作创建之前就引用它。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'raising error because '_order' field had not been created yet.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移操作应能成功执行，即当模型定义了 order_with_respect_to 并包含涉及 '_order' 字段的索引时，迁移框架应确保 '_order' 字段在索引创建之前就已存在。",
+      "evidence": [
+        "Issue 描述：'It seems to be AlterOrderWithRespectTo has to proceed before AddIndex of '_order'.'",
+        "相关测试 2 和 3 表明 Django 的自动检测器在某些情况下能正确安排操作顺序（'does things in the right order'）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AlterOrderWithRespectTo",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是 Issue 中导致问题的核心操作类，负责创建 '_order' 字段。"
+      },
+      {
+        "name": "migrations.AddIndex",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是创建索引的操作类，当索引包含 '_order' 字段时，其执行顺序与 AlterOrderWithRespectTo 相关。"
+      },
+      {
+        "name": "models.Index",
+        "kind": "class",
+        "source_path": "django/db/models/indexes.py",
+        "reason": "用于定义索引，Issue 中索引包含了 '_order' 字段。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "AlterOrderWithRespectTo",
+        "lines": "572-632",
+        "reason": "该操作负责创建 '_order' 字段。如果其执行时机晚于引用该字段的 AddIndex 操作，则会导致错误。"
+      },
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "AddIndex",
+        "lines": "737-784",
+        "reason": "该操作在创建索引时，如果索引字段包含尚未创建的 '_order'，则会失败。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_alter_order_with_respect_to",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它直接测试了 AlterOrderWithRespectTo 操作，包括其 state_forwards 和 database_forwards 方法，并检查了 '_order' 列的创建。",
+        "reusable_parts": [
+          "OperationTestBase 的 set_up_test_model 方法用于建立测试模型状态",
+          "使用 connection.schema_editor() 执行数据库操作",
+          "使用 assertColumnExists/assertColumnNotExists 检查列的存在性",
+          "测试操作的前向和反向执行模式"
+        ],
+        "possible_gap": "该测试没有涉及在同一个迁移中同时使用 AlterOrderWithRespectTo 和包含 '_order' 字段的 AddIndex 操作，因此无法复现操作顺序问题。"
+      },
+      {
+        "test_name": "test_add_alter_order_with_respect_to",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "它测试了当同时添加外键和设置 order_with_respect_to 时，自动检测器是否能生成正确的操作顺序（AddField 在 AlterOrderWithRespectTo 之前）。",
+        "reusable_parts": [
+          "使用 get_changes 方法比较模型状态变化",
+          "使用 assertOperationTypes 和 assertOperationAttributes 检查生成的迁移操作及其属性",
+          "关注操作顺序的验证"
+        ],
+        "possible_gap": "该测试关注的是自动检测器生成迁移的逻辑，而不是手动编写迁移文件时可能出现的错误顺序。它也没有测试包含 '_order' 字段的索引。"
+      },
+      {
+        "test_name": "test_create_model_with_unique_after",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "它测试了 CreateModel 操作后紧跟另一个操作（AlterUniqueTogether）的场景，展示了多个操作顺序执行可能引发的问题模式。",
+        "reusable_parts": [
+          "按顺序执行多个操作（operation1, operation2, operation3）的模式",
+          "使用 project_state 和 new_state 克隆来模拟迁移状态推进",
+          "使用 assertTableExists 进行最终状态断言"
+        ],
+        "possible_gap": "它测试的是唯一约束，而不是索引，且不涉及 order_with_respect_to 或 '_order' 字段。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相关测试中，AlterOrderWithRespectTo 通常是单独测试，或与 AddField 按正确顺序组合。",
+        "target_pattern": "创建一个迁移操作序列，其中 AddIndex（索引包含 '_order' 字段）在 AlterOrderWithRespectTo 之前执行。",
+        "reason": "Issue 明确指出错误发生在 AlterOrderWithRespectTo 在 AddIndex 之后执行时，因为 '_order' 字段尚未创建。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试模型可能没有定义包含 '_order' 字段的索引。",
+        "target_pattern": "在模型定义中，于 Meta 的 indexes 列表中添加一个包含 '_order' 字段的 Index（例如 Index(fields=['foreign_key_field', '_order'])）。",
+        "reason": "Issue 中的模型正是这样配置的，这是触发问题的必要条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行包含错误操作顺序的迁移操作序列（如先 AddIndex 后 AlterOrderWithRespectTo）时捕获的异常。",
+        "reason": "Issue 的核心现象是执行迁移时引发错误。观测异常类型和消息可以确认问题是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在执行每个迁移操作（如 AddIndex, AlterOrderWithRespectTo）前后，检查项目状态（ProjectState）中模型字段和选项的变化。",
+        "reason": "可以观察 '_order' 字段是在哪个操作后被添加到状态中的，以及 AddIndex 操作尝试引用 '_order' 时状态中该字段是否存在。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在执行 schema_editor 的相应方法（如 add_index, add_field）时生成的 SQL 语句。",
+        "reason": "可以观察 AddIndex 操作生成的 SQL 是否尝试引用不存在的 '_order' 列，从而引发数据库错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当迁移操作顺序错误（AddIndex 在 AlterOrderWithRespectTo 之前）时，执行会引发异常（如 FieldDoesNotExist 或数据库错误）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为不同数据库后端可能消息不同。",
+        "reason": "Issue 的核心是错误顺序导致失败。修复后，正确的顺序应使迁移成功。因此，在缺陷存在时，错误顺序应引发异常。"
+      },
+      {
+        "assertion_goal": "验证当迁移操作顺序正确（AlterOrderWithRespectTo 在 AddIndex 之前）时，迁移可以成功执行，且 '_order' 字段和索引都被正确创建。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言数据库中的具体列名或索引名，除非它们与模型定义严格绑定。",
+        "reason": "这对应于修复后的预期行为：正确的操作顺序允许迁移成功完成。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个测试用例类（如 OperationTestBase 的子类）来管理项目状态和数据库连接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置一个包含外键字段和 order_with_respect_to 选项的测试模型，并在其 Meta 中定义包含 '_order' 字段的索引。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 connection.schema_editor() 来执行迁移操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "错误的确切异常类型（如 Django 的 FieldDoesNotExist 还是数据库适配器的特定异常）在 Issue 中没有明确说明。",
+      "是否所有数据库后端（SQLite, PostgreSQL, MySQL）都会表现出相同的行为。",
+      "自动检测器（Autodetector）在遇到这种模型定义时，是否总能生成正确的操作顺序，还是只在特定情况下可以。"
+    ]
+  }
+}

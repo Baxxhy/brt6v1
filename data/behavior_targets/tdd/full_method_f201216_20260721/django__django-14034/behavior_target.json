@@ -1,0 +1,370 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14034",
+  "issue_summary": "MultiValueField 在 require_all_fields=False 且 required=False 时，忽略了子字段的 required=True 约束，导致表单验证错误地通过。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 django.test.SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.forms 中的 Form, CharField, MultiValueField, MultiWidget, ValidationError。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义自定义的 MultiValueField 子类，并可能覆盖 compress 方法（如 Issue 中返回 []）。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_multivalue_optional_subfields",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试详细测试了 MultiValueField 在不同 required 和 require_all_fields 组合下的验证行为，特别是子字段 required 属性的影响。",
+        "reusable_parts": [
+          "MultiValueField 子类的定义模式（如 PhoneField）。",
+          "使用 Form 或直接测试 Field.clean 的方法。",
+          "使用 assertRaisesMessage 和 assertEqual 来验证 ValidationError 和返回值。"
+        ],
+        "possible_gap": "该测试主要直接测试 Field.clean()，而 Issue 是通过 Form.is_valid() 触发。测试中可能没有完全覆盖 Issue 中描述的特定配置（一个子字段 required=True，另一个 required=False，且父字段 required=False, require_all_fields=False）和输入（所有子字段为空字符串）。"
+      },
+      {
+        "test_name": "test_multivalue_field_validation",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "测试了包含 MultiValueField 的 Form 的验证过程，涉及 is_valid() 和 errors。",
+        "reusable_parts": [
+          "自定义 MultiValueField 和 Form 的类结构。",
+          "使用 Form(data=...) 和 form.full_clean() 的模式。",
+          "使用 assertFalse(form.is_valid()) 和检查 form.errors。"
+        ],
+        "possible_gap": "该测试中的 NameField 子字段都是 required=True（默认），没有测试子字段 required 属性混合以及父字段 required=False 的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个自定义 MultiValueField，其子字段列表包含 required=True 和 required=False 的字段，设置 MultiValueField 的 require_all_fields=False 和 required=False。然后使用该字段构建表单，并向表单传入所有子字段均为空字符串的数据。",
+      "evidence": [
+        "Issue 中给出了 MF 类的定义，其中 fields 包含 CharField(required=False) 和 CharField(required=True)，且 MultiValueField 初始化时设置了 require_all_fields=False, required=False。",
+        "Issue 中展示了触发代码：f = F({'mf_0': '', 'mf_1': ''})。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当所有子字段都传入空字符串时，form.is_valid() 返回 True，但预期应返回 False，因为其中一个子字段是 required=True。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中：assert f.is_valid() == True # I expect this should return False。",
+        "Issue 中描述了相反情况：当第一个子字段非空、第二个为空时，is_valid() 返回 False，这符合预期，突显了 bug 的不对称性。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.MultiValueField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 的核心是关于 MultiValueField 子字段 required 属性的验证逻辑。"
+      },
+      {
+        "name": "django.forms.MultiValueField.__init__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "用于构造 MultiValueField，设置 fields、require_all_fields、required 等参数。"
+      },
+      {
+        "name": "django.forms.MultiValueField.compress",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 中的自定义 MF 类覆盖了此方法，但它是 MultiValueField 的关键抽象方法。"
+      },
+      {
+        "name": "django.forms.Form",
+        "kind": "class",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 中使用了自定义 Form 类 F 来包含 MF 字段。"
+      },
+      {
+        "name": "django.forms.BaseForm.is_valid",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 中观察到的错误现象是关于 is_valid() 的返回值。"
+      },
+      {
+        "name": "django.forms.CharField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 中 MultiValueField 使用的子字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/fields.py",
+        "object": "MultiValueField.clean",
+        "lines": "",
+        "reason": "MultiValueField 的 clean 方法负责协调子字段的验证。Issue 表明在 require_all_fields=False 且 required=False 的配置下，子字段的 required 约束可能被错误地忽略。"
+      },
+      {
+        "path": "django/forms/fields.py",
+        "object": "MultiValueField.__init__",
+        "lines": "",
+        "reason": "初始化参数（require_all_fields, required）的处理可能影响了后续子字段验证的逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中，对于 optional MultiValueField with require_all_fields=False，测试了各种输入组合，包括部分字段为空。",
+        "target_pattern": "将输入设置为所有子字段都为空字符串（例如 ['', '']），对应 Issue 中的 {'mf_0': '', 'mf_1': ''}。",
+        "reason": "Issue 表明，当所有子字段都为空时，bug 被触发（验证错误地通过）。而测试中可能没有这个精确的输入组合，或者其断言预期的是引发错误（而非通过）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 中定义了 PhoneField，其子字段的 required 属性是固定的（前三个默认为 required=True，第四个 required=False）。",
+        "target_pattern": "创建一个类似的自定义 MultiValueField，但子字段列表精确为 [CharField(required=False), CharField(required=True)]，并且父字段设置 required=False, require_all_fields=False。",
+        "reason": "Issue 的 bug 依赖于这种特定的子字段 required 属性组合。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 2 主要直接调用 field.clean(data)。",
+        "target_pattern": "通过 Form 实例来触发验证，即创建 Form 类，包含该字段，然后调用 form.is_valid()。",
+        "reason": "Issue 中是通过 Form.is_valid() 观察到 bug 的，这可能会涉及不同的调用路径和上下文（如 bound form）。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使 MultiValueField 的 required=False 且 require_all_fields=False，其内部 required=True 的子字段在收到空值（如空字符串）时，也应使表单验证失败（is_valid() 返回 False）。",
+      "evidence": [
+        "Issue 描述：'I expected is_valid() returns False, because one of the sub fields is set as required.'",
+        "相关测试 2 中展示了类似逻辑：对于 required=False, require_all_fields=False 的 MultiValueField，当 required 子字段为空时，会引发 'incomplete' 错误（例如 f.clean(['+61']) 会抛出 ValidationError）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "form.is_valid() 的返回值。",
+        "reason": "Issue 的核心错误是 is_valid() 在特定条件下返回了错误的布尔值。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 form.is_valid() 或 field.clean() 过程中是否抛出 ValidationError，及其 messages。",
+        "reason": "正确的行为应该抛出关于 required 或 incomplete 字段的 ValidationError。观察错误类型和消息可以确认验证逻辑是否按预期工作。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "form.errors 字典的内容。",
+        "reason": "如果验证失败，errors 字典应包含相应的错误信息。观察其是否为空可以判断验证结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当所有子字段为空字符串时，表单验证应失败（is_valid() 为 False）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的错误消息字符串，因为消息可能本地化或格式化。避免断言不相关的字段错误。",
+        "reason": "直接断言 is_valid() 的布尔值与 Issue 描述的核心错误现象对齐，且稳定。"
+      },
+      {
+        "assertion_goal": "表单的 errors 字典应包含对应字段键的错误列表（非空）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 errors 字典完全等于某个特定结构，除非 Issue 明确给出了错误信息。",
+        "reason": "这可以更稳定地确认验证失败，而不依赖于具体的错误消息文本。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "MultiValueField.clean 方法内部处理 require_all_fields=False 和 required=False 时，具体是哪个条件分支导致忽略了子字段的 required=True。",
+    "当子字段为空字符串时，CharField 的 clean/to_python 方法是否将其视为“空值”并触发 required 验证，或者是否有其他转换。",
+    "Form.is_valid() 与直接调用 Field.clean() 在错误处理路径上是否有细微差别。"
+  ],
+  "raw": {
+    "issue_summary": "MultiValueField 在 require_all_fields=False 且 required=False 时，忽略了子字段的 required=True 约束，导致表单验证错误地通过。",
+    "trigger_condition": {
+      "text": "创建一个自定义 MultiValueField，其子字段列表包含 required=True 和 required=False 的字段，设置 MultiValueField 的 require_all_fields=False 和 required=False。然后使用该字段构建表单，并向表单传入所有子字段均为空字符串的数据。",
+      "evidence": [
+        "Issue 中给出了 MF 类的定义，其中 fields 包含 CharField(required=False) 和 CharField(required=True)，且 MultiValueField 初始化时设置了 require_all_fields=False, required=False。",
+        "Issue 中展示了触发代码：f = F({'mf_0': '', 'mf_1': ''})。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当所有子字段都传入空字符串时，form.is_valid() 返回 True，但预期应返回 False，因为其中一个子字段是 required=True。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中：assert f.is_valid() == True # I expect this should return False。",
+        "Issue 中描述了相反情况：当第一个子字段非空、第二个为空时，is_valid() 返回 False，这符合预期，突显了 bug 的不对称性。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使 MultiValueField 的 required=False 且 require_all_fields=False，其内部 required=True 的子字段在收到空值（如空字符串）时，也应使表单验证失败（is_valid() 返回 False）。",
+      "evidence": [
+        "Issue 描述：'I expected is_valid() returns False, because one of the sub fields is set as required.'",
+        "相关测试 2 中展示了类似逻辑：对于 required=False, require_all_fields=False 的 MultiValueField，当 required 子字段为空时，会引发 'incomplete' 错误（例如 f.clean(['+61']) 会抛出 ValidationError）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.MultiValueField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 的核心是关于 MultiValueField 子字段 required 属性的验证逻辑。"
+      },
+      {
+        "name": "django.forms.MultiValueField.__init__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "用于构造 MultiValueField，设置 fields、require_all_fields、required 等参数。"
+      },
+      {
+        "name": "django.forms.MultiValueField.compress",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 中的自定义 MF 类覆盖了此方法，但它是 MultiValueField 的关键抽象方法。"
+      },
+      {
+        "name": "django.forms.Form",
+        "kind": "class",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 中使用了自定义 Form 类 F 来包含 MF 字段。"
+      },
+      {
+        "name": "django.forms.BaseForm.is_valid",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 中观察到的错误现象是关于 is_valid() 的返回值。"
+      },
+      {
+        "name": "django.forms.CharField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 中 MultiValueField 使用的子字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/fields.py",
+        "object": "MultiValueField.clean",
+        "lines": "",
+        "reason": "MultiValueField 的 clean 方法负责协调子字段的验证。Issue 表明在 require_all_fields=False 且 required=False 的配置下，子字段的 required 约束可能被错误地忽略。"
+      },
+      {
+        "path": "django/forms/fields.py",
+        "object": "MultiValueField.__init__",
+        "lines": "",
+        "reason": "初始化参数（require_all_fields, required）的处理可能影响了后续子字段验证的逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_multivalue_optional_subfields",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试详细测试了 MultiValueField 在不同 required 和 require_all_fields 组合下的验证行为，特别是子字段 required 属性的影响。",
+        "reusable_parts": [
+          "MultiValueField 子类的定义模式（如 PhoneField）。",
+          "使用 Form 或直接测试 Field.clean 的方法。",
+          "使用 assertRaisesMessage 和 assertEqual 来验证 ValidationError 和返回值。"
+        ],
+        "possible_gap": "该测试主要直接测试 Field.clean()，而 Issue 是通过 Form.is_valid() 触发。测试中可能没有完全覆盖 Issue 中描述的特定配置（一个子字段 required=True，另一个 required=False，且父字段 required=False, require_all_fields=False）和输入（所有子字段为空字符串）。"
+      },
+      {
+        "test_name": "test_multivalue_field_validation",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "测试了包含 MultiValueField 的 Form 的验证过程，涉及 is_valid() 和 errors。",
+        "reusable_parts": [
+          "自定义 MultiValueField 和 Form 的类结构。",
+          "使用 Form(data=...) 和 form.full_clean() 的模式。",
+          "使用 assertFalse(form.is_valid()) 和检查 form.errors。"
+        ],
+        "possible_gap": "该测试中的 NameField 子字段都是 required=True（默认），没有测试子字段 required 属性混合以及父字段 required=False 的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中，对于 optional MultiValueField with require_all_fields=False，测试了各种输入组合，包括部分字段为空。",
+        "target_pattern": "将输入设置为所有子字段都为空字符串（例如 ['', '']），对应 Issue 中的 {'mf_0': '', 'mf_1': ''}。",
+        "reason": "Issue 表明，当所有子字段都为空时，bug 被触发（验证错误地通过）。而测试中可能没有这个精确的输入组合，或者其断言预期的是引发错误（而非通过）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 中定义了 PhoneField，其子字段的 required 属性是固定的（前三个默认为 required=True，第四个 required=False）。",
+        "target_pattern": "创建一个类似的自定义 MultiValueField，但子字段列表精确为 [CharField(required=False), CharField(required=True)]，并且父字段设置 required=False, require_all_fields=False。",
+        "reason": "Issue 的 bug 依赖于这种特定的子字段 required 属性组合。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 2 主要直接调用 field.clean(data)。",
+        "target_pattern": "通过 Form 实例来触发验证，即创建 Form 类，包含该字段，然后调用 form.is_valid()。",
+        "reason": "Issue 中是通过 Form.is_valid() 观察到 bug 的，这可能会涉及不同的调用路径和上下文（如 bound form）。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "form.is_valid() 的返回值。",
+        "reason": "Issue 的核心错误是 is_valid() 在特定条件下返回了错误的布尔值。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 form.is_valid() 或 field.clean() 过程中是否抛出 ValidationError，及其 messages。",
+        "reason": "正确的行为应该抛出关于 required 或 incomplete 字段的 ValidationError。观察错误类型和消息可以确认验证逻辑是否按预期工作。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "form.errors 字典的内容。",
+        "reason": "如果验证失败，errors 字典应包含相应的错误信息。观察其是否为空可以判断验证结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当所有子字段为空字符串时，表单验证应失败（is_valid() 为 False）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的错误消息字符串，因为消息可能本地化或格式化。避免断言不相关的字段错误。",
+        "reason": "直接断言 is_valid() 的布尔值与 Issue 描述的核心错误现象对齐，且稳定。"
+      },
+      {
+        "assertion_goal": "表单的 errors 字典应包含对应字段键的错误列表（非空）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 errors 字典完全等于某个特定结构，除非 Issue 明确给出了错误信息。",
+        "reason": "这可以更稳定地确认验证失败，而不依赖于具体的错误消息文本。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 django.test.SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.forms 中的 Form, CharField, MultiValueField, MultiWidget, ValidationError。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义自定义的 MultiValueField 子类，并可能覆盖 compress 方法（如 Issue 中返回 []）。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "MultiValueField.clean 方法内部处理 require_all_fields=False 和 required=False 时，具体是哪个条件分支导致忽略了子字段的 required=True。",
+      "当子字段为空字符串时，CharField 的 clean/to_python 方法是否将其视为“空值”并触发 required 验证，或者是否有其他转换。",
+      "Form.is_valid() 与直接调用 Field.clean() 在错误处理路径上是否有细微差别。"
+    ]
+  }
+}

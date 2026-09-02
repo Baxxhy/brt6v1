@@ -1,0 +1,310 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13584",
+  "issue_summary": "当设置 print_changed_only=True 时，使用 numpy 数组作为 Cs 参数创建 LogisticRegressionCV 并打印会引发 ValueError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sklearn, numpy, 以及 LogisticRegressionCV。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 set_config 来设置全局配置。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_changed_only",
+        "test_file": "sklearn/utils/tests/test_pprint.py",
+        "why_relevant": "该测试直接验证了 print_changed_only=True 配置下，打印估计器 repr 的行为，包括 LogisticRegression。",
+        "reusable_parts": [
+          "import sklearn; from sklearn.linear_model import LogisticRegression; sklearn.set_config(print_changed_only=True)",
+          "使用 set_config 设置配置，创建估计器对象并检查其 __repr__() 输出的模式。",
+          "assert lr.__repr__() == expected 的断言风格。"
+        ],
+        "possible_gap": "该测试使用标量值（如 C=99）作为非默认参数，而 Issue 中使用的是 numpy 数组作为 Cs 参数。测试没有覆盖数组参数的情况。"
+      },
+      {
+        "test_name": "test_LogisticRegressionCV_no_refit",
+        "test_file": "sklearn/linear_model/tests/test_logistic.py",
+        "why_relevant": "该测试创建了 LogisticRegressionCV 对象，并使用了 numpy 数组作为 Cs 和 l1_ratios 参数。",
+        "reusable_parts": [
+          "import numpy as np; from sklearn.linear_model import LogisticRegressionCV",
+          "使用 np.logspace 和 np.linspace 创建数组作为 Cs 和 l1_ratios 参数的模式。",
+          "创建和拟合 LogisticRegressionCV 对象的流程。"
+        ],
+        "possible_gap": "该测试没有设置 print_changed_only=True 配置，也没有打印（调用 __repr__）对象。它主要测试拟合后的属性形状。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 sklearn.set_config(print_changed_only=True) 后，使用 np.array([0.1, 1]) 作为 Cs 参数创建 LogisticRegressionCV 对象并打印。",
+      "evidence": [
+        "Issue 中的代码片段：sklearn.set_config(print_changed_only=True); print(LogisticRegressionCV(Cs=np.array([0.1, 1])))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中报告的异常信息：> ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.set_config",
+        "kind": "function",
+        "source_path": "sklearn/_config.py",
+        "reason": "用于设置全局配置 print_changed_only，这是触发 bug 的必要步骤。"
+      },
+      {
+        "name": "LogisticRegressionCV",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/logistic.py",
+        "reason": "Issue 中引发异常的类，其 __repr__ 方法在特定配置下处理 numpy 数组参数时出错。"
+      },
+      {
+        "name": "LogisticRegressionCV.__repr__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "打印对象时调用的方法，是错误发生的直接位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/logistic.py",
+        "object": "LogisticRegressionCV",
+        "lines": "",
+        "reason": "Issue 中异常发生在打印 LogisticRegressionCV 对象时，其 __repr__ 方法或其依赖的父类方法可能在比较参数默认值时，对 numpy 数组进行了不恰当的布尔值判断。"
+      },
+      {
+        "path": "sklearn/utils/_pprint.py",
+        "object": "",
+        "lines": "",
+        "reason": "负责实现 print_changed_only 逻辑的模块，可能包含比较参数值是否等于默认值的代码，该代码可能无法正确处理 numpy 数组。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常不设置 print_changed_only 或默认其为 False。",
+        "target_pattern": "在创建和打印 LogisticRegressionCV 对象之前，调用 set_config(print_changed_only=True)。",
+        "reason": "Issue 表明 bug 仅在 print_changed_only=True 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 test_LogisticRegressionCV_no_refit 使用 np.logspace 生成的浮点数列表作为 Cs。",
+        "target_pattern": "使用 np.array([0.1, 1]) 这样的简单 numpy 数组作为 Cs 参数。",
+        "reason": "Issue 中使用了 np.array([0.1, 1])，这可能触发了与列表不同的代码路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常创建对象后调用 fit 或检查属性，但不调用 print 或 __repr__。",
+        "target_pattern": "创建 LogisticRegressionCV 对象后，立即调用 print(obj) 或 obj.__repr__()。",
+        "reason": "异常发生在打印/repr 过程中，而不是拟合过程中。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 print_changed_only=True 配置下，即使 Cs 参数是 numpy 数组，也应该能正常打印 LogisticRegressionCV 对象的 repr，而不引发异常。",
+      "evidence": [
+        "相关测试 test_changed_only 表明，当 print_changed_only=True 时，打印设置了非默认参数的估计器（如 LogisticRegression(C=99)）应该正常工作。",
+        "源码片段 1 中 print_changed_only 参数的文档说明：\"If True, only the parameters that were set to non-default values will be printed when printing an estimator.\""
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 print(LogisticRegressionCV(Cs=np.array([0.1, 1]))) 时捕获的异常。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "LogisticRegressionCV(Cs=np.array([0.1, 1])).__repr__() 的返回值或中间生成过程。",
+        "reason": "问题出现在生成 repr 字符串的过程中，观察其输出或内部状态变化有助于定位问题。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "调用 set_config 前后，get_config()['print_changed_only'] 的值。",
+        "reason": "确认全局配置已正确设置为 True，这是触发条件的关键部分。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 print_changed_only=True 且 Cs 为 numpy 数组时，打印 LogisticRegressionCV 不会引发 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 repr 输出字符串，因为修复后的确切输出格式可能不确定。",
+        "reason": "Issue 的核心是异常，因此初始的缺陷复现测试应断言会引发异常。修复后，断言应改为不引发异常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "引发异常的确切代码行和函数（例如，是在 LogisticRegressionCV.__repr__ 中，还是在某个通用的 _pprint 函数中）。",
+    "除了 Cs 参数为 numpy 数组外，其他参数（如 l1_ratios）是否也会触发相同问题。",
+    "print_changed_only 逻辑在处理哪些类型的非标量参数时会失败（例如，列表、元组、其他数组类型）。",
+    "修复后，repr 输出的确切格式是什么（例如，Cs=array([0.1, 1. ]) 还是 Cs=[0.1, 1.]）。"
+  ],
+  "raw": {
+    "issue_summary": "当设置 print_changed_only=True 时，使用 numpy 数组作为 Cs 参数创建 LogisticRegressionCV 并打印会引发 ValueError。",
+    "trigger_condition": {
+      "text": "调用 sklearn.set_config(print_changed_only=True) 后，使用 np.array([0.1, 1]) 作为 Cs 参数创建 LogisticRegressionCV 对象并打印。",
+      "evidence": [
+        "Issue 中的代码片段：sklearn.set_config(print_changed_only=True); print(LogisticRegressionCV(Cs=np.array([0.1, 1])))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中报告的异常信息：> ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 print_changed_only=True 配置下，即使 Cs 参数是 numpy 数组，也应该能正常打印 LogisticRegressionCV 对象的 repr，而不引发异常。",
+      "evidence": [
+        "相关测试 test_changed_only 表明，当 print_changed_only=True 时，打印设置了非默认参数的估计器（如 LogisticRegression(C=99)）应该正常工作。",
+        "源码片段 1 中 print_changed_only 参数的文档说明：\"If True, only the parameters that were set to non-default values will be printed when printing an estimator.\""
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.set_config",
+        "kind": "function",
+        "source_path": "sklearn/_config.py",
+        "reason": "用于设置全局配置 print_changed_only，这是触发 bug 的必要步骤。"
+      },
+      {
+        "name": "LogisticRegressionCV",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/logistic.py",
+        "reason": "Issue 中引发异常的类，其 __repr__ 方法在特定配置下处理 numpy 数组参数时出错。"
+      },
+      {
+        "name": "LogisticRegressionCV.__repr__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "打印对象时调用的方法，是错误发生的直接位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/logistic.py",
+        "object": "LogisticRegressionCV",
+        "lines": "",
+        "reason": "Issue 中异常发生在打印 LogisticRegressionCV 对象时，其 __repr__ 方法或其依赖的父类方法可能在比较参数默认值时，对 numpy 数组进行了不恰当的布尔值判断。"
+      },
+      {
+        "path": "sklearn/utils/_pprint.py",
+        "object": "",
+        "lines": "",
+        "reason": "负责实现 print_changed_only 逻辑的模块，可能包含比较参数值是否等于默认值的代码，该代码可能无法正确处理 numpy 数组。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_changed_only",
+        "test_file": "sklearn/utils/tests/test_pprint.py",
+        "why_relevant": "该测试直接验证了 print_changed_only=True 配置下，打印估计器 repr 的行为，包括 LogisticRegression。",
+        "reusable_parts": [
+          "import sklearn; from sklearn.linear_model import LogisticRegression; sklearn.set_config(print_changed_only=True)",
+          "使用 set_config 设置配置，创建估计器对象并检查其 __repr__() 输出的模式。",
+          "assert lr.__repr__() == expected 的断言风格。"
+        ],
+        "possible_gap": "该测试使用标量值（如 C=99）作为非默认参数，而 Issue 中使用的是 numpy 数组作为 Cs 参数。测试没有覆盖数组参数的情况。"
+      },
+      {
+        "test_name": "test_LogisticRegressionCV_no_refit",
+        "test_file": "sklearn/linear_model/tests/test_logistic.py",
+        "why_relevant": "该测试创建了 LogisticRegressionCV 对象，并使用了 numpy 数组作为 Cs 和 l1_ratios 参数。",
+        "reusable_parts": [
+          "import numpy as np; from sklearn.linear_model import LogisticRegressionCV",
+          "使用 np.logspace 和 np.linspace 创建数组作为 Cs 和 l1_ratios 参数的模式。",
+          "创建和拟合 LogisticRegressionCV 对象的流程。"
+        ],
+        "possible_gap": "该测试没有设置 print_changed_only=True 配置，也没有打印（调用 __repr__）对象。它主要测试拟合后的属性形状。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常不设置 print_changed_only 或默认其为 False。",
+        "target_pattern": "在创建和打印 LogisticRegressionCV 对象之前，调用 set_config(print_changed_only=True)。",
+        "reason": "Issue 表明 bug 仅在 print_changed_only=True 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 test_LogisticRegressionCV_no_refit 使用 np.logspace 生成的浮点数列表作为 Cs。",
+        "target_pattern": "使用 np.array([0.1, 1]) 这样的简单 numpy 数组作为 Cs 参数。",
+        "reason": "Issue 中使用了 np.array([0.1, 1])，这可能触发了与列表不同的代码路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常创建对象后调用 fit 或检查属性，但不调用 print 或 __repr__。",
+        "target_pattern": "创建 LogisticRegressionCV 对象后，立即调用 print(obj) 或 obj.__repr__()。",
+        "reason": "异常发生在打印/repr 过程中，而不是拟合过程中。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 print(LogisticRegressionCV(Cs=np.array([0.1, 1]))) 时捕获的异常。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "LogisticRegressionCV(Cs=np.array([0.1, 1])).__repr__() 的返回值或中间生成过程。",
+        "reason": "问题出现在生成 repr 字符串的过程中，观察其输出或内部状态变化有助于定位问题。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "调用 set_config 前后，get_config()['print_changed_only'] 的值。",
+        "reason": "确认全局配置已正确设置为 True，这是触发条件的关键部分。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 print_changed_only=True 且 Cs 为 numpy 数组时，打印 LogisticRegressionCV 不会引发 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 repr 输出字符串，因为修复后的确切输出格式可能不确定。",
+        "reason": "Issue 的核心是异常，因此初始的缺陷复现测试应断言会引发异常。修复后，断言应改为不引发异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sklearn, numpy, 以及 LogisticRegressionCV。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 set_config 来设置全局配置。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "引发异常的确切代码行和函数（例如，是在 LogisticRegressionCV.__repr__ 中，还是在某个通用的 _pprint 函数中）。",
+      "除了 Cs 参数为 numpy 数组外，其他参数（如 l1_ratios）是否也会触发相同问题。",
+      "print_changed_only 逻辑在处理哪些类型的非标量参数时会失败（例如，列表、元组、其他数组类型）。",
+      "修复后，repr 输出的确切格式是什么（例如，Cs=array([0.1, 1. ]) 还是 Cs=[0.1, 1.]）。"
+    ]
+  }
+}

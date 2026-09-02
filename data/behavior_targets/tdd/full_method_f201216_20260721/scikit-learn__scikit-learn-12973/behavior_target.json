@@ -1,0 +1,270 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-12973",
+  "issue_summary": "LassoLarsIC 类的 copy_X 参数在 __init__ 和 fit 方法中重复定义，导致用户在初始化时设置的值可能被 fit 方法的默认值静默覆盖。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sklearn.linear_model 和 numpy，并准备合适的测试数据（如 diabetes 数据集）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要一个可变的 numpy 数组作为输入 X，以便观察 copy_X 的影响。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lasso_lars_ic",
+        "test_file": "sklearn/linear_model/tests/test_least_angle.py",
+        "why_relevant": "该测试直接实例化并调用 LassoLarsIC 的 fit 方法，是测试 LassoLarsIC 行为的起点。",
+        "reusable_parts": [
+          "imports (linear_model, np)",
+          "数据准备 (diabetes.data, diabetes.target)",
+          "对象构造 (linear_model.LassoLarsIC('bic'))",
+          "fit 调用 (lars_bic.fit(X, y))",
+          "assert 风格 (assert_greater, assert_less)"
+        ],
+        "possible_gap": "该测试没有显式设置 copy_X 参数，因此无法复现初始化时设置 copy_X=False 但被 fit 默认值覆盖的问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 LassoLarsIC(copy_X=False) 初始化对象，然后调用 fit(X, y) 而不显式传递 copy_X 参数。",
+      "evidence": [
+        "Issue 中描述：'Let's assume that I'd like it to be False, and have set it to False in the initialization, `my_lasso = LassoLarsIC(copy_X=False)`. I then call ```my_lasso.fit(X, y)``` and my choice will be silently overwritten.'",
+        "源码片段 1 显示 __init__ 有 copy_X 参数，默认 True。",
+        "源码片段 2 显示 fit 方法有 copy_X 参数，默认 True。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "用户通过构造函数设置的 copy_X=False 被忽略，fit 方法内部使用了其默认值 copy_X=True，导致 X 被复制，这可能与用户期望的原地操作行为不符。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中描述：'my choice will be silently overwritten.'",
+        "源码片段 2 中 fit 方法签名 def fit(self, X, y, copy_X=True): 和内部调用 lars_path(..., copy_X=copy_X, ...) 表明使用了传入的 copy_X 参数，而非 self.copy_X。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LassoLarsIC",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/least_angle.py",
+        "reason": "Issue 报告的问题所在类。"
+      },
+      {
+        "name": "LassoLarsIC.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/least_angle.py",
+        "reason": "问题涉及的方法，其 copy_X 参数与类初始化参数冲突。"
+      },
+      {
+        "name": "lars_path",
+        "kind": "function",
+        "source_path": "",
+        "reason": "fit 方法内部调用了 lars_path，并将 copy_X 参数传递给它，是 copy_X 参数最终生效的地方。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/least_angle.py",
+        "object": "LassoLarsIC.fit",
+        "lines": "1482-1546",
+        "reason": "fit 方法签名中定义了 copy_X 参数，默认值为 True，这覆盖了类初始化时设置的 self.copy_X 属性。方法内部将 copy_X 参数（而非 self.copy_X）传递给 lars_path 函数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，LassoLarsIC 的初始化通常只传递 criterion 等参数，不传递 copy_X，fit 调用也不传递 copy_X。",
+        "target_pattern": "在初始化 LassoLarsIC 时显式设置 copy_X=False，然后在调用 fit 时不传递 copy_X 参数。",
+        "reason": "Issue 指出，当初始化 copy_X=False 而 fit 使用默认 copy_X=True 时，用户设置被静默覆盖。这种变异能触发该路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试中可能依赖默认的 normalize=True 等配置。",
+        "target_pattern": "确保测试中使用的数据 X 是可变的（例如 numpy array），以便观察 copy_X 参数是否影响原始数据。",
+        "reason": "copy_X 参数控制是否复制输入数据 X。如果 X 被修改，可以间接观察 copy_X 的行为。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当用户在初始化时设置 copy_X 参数后，调用 fit 方法时，除非用户显式传递 copy_X 参数，否则应使用初始化时设置的值。",
+      "evidence": [
+        "Issue 中提议：'Therefore I propose that ```fit``` takes a default value of `None` and only overwrites the existing value if the user has explicitly passed it as an argument to ```fit```.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在调用 fit 前后，检查输入数据 X 的 id() 或通过 np.may_share_memory 检查是否与内部使用的数据共享内存。",
+        "reason": "如果 copy_X=False 生效，fit 内部可能直接使用（并可能修改）传入的 X 数据；如果 copy_X=True 生效，则会使用副本，原始 X 应保持不变。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "在 fit 方法内部，观察传递给 lars_path 函数的 copy_X 参数的实际值。",
+        "reason": "缺陷的核心是传递给 lars_path 的 copy_X 值不是用户期望的 self.copy_X，而是 fit 方法参数的默认值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 LassoLarsIC(copy_X=False) 初始化后调用 fit(X, y) 时，传递给内部 lars_path 函数的 copy_X 参数值应为 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的模型输出（如 coef_）的精确值，因为这可能受随机性或其他参数影响。",
+        "reason": "该断言直接验证 Issue 的核心：用户设置的 copy_X 值应被正确传递和使用。"
+      },
+      {
+        "assertion_goal": "当 copy_X=False 时，fit 内部使用的数据应与传入的 X 共享内存（或 id 相同）；当 copy_X=True 时，应不共享内存。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言输入数据 X 的完整内容在 fit 后完全不变，因为算法可能原地修改数据（当 copy_X=False 时）。",
+        "reason": "这验证了 copy_X 参数的实际效果，与 Issue 描述的行为一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "LassoLarsIC 的父类 LassoLars 是否也存在相同的 copy_X 参数重复问题？Issue 只提到了 LassoLarsIC。",
+    "除了 copy_X，LassoLarsIC 的 fit 方法是否还有其他参数与 __init__ 重复？Issue 只提到了 copy_X。",
+    "在当前的 buggy 版本中，self.copy_X 属性是否被正确设置？还是说 fit 方法完全忽略了它？"
+  ],
+  "raw": {
+    "issue_summary": "LassoLarsIC 类的 copy_X 参数在 __init__ 和 fit 方法中重复定义，导致用户在初始化时设置的值可能被 fit 方法的默认值静默覆盖。",
+    "trigger_condition": {
+      "text": "使用 LassoLarsIC(copy_X=False) 初始化对象，然后调用 fit(X, y) 而不显式传递 copy_X 参数。",
+      "evidence": [
+        "Issue 中描述：'Let's assume that I'd like it to be False, and have set it to False in the initialization, `my_lasso = LassoLarsIC(copy_X=False)`. I then call ```my_lasso.fit(X, y)``` and my choice will be silently overwritten.'",
+        "源码片段 1 显示 __init__ 有 copy_X 参数，默认 True。",
+        "源码片段 2 显示 fit 方法有 copy_X 参数，默认 True。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "用户通过构造函数设置的 copy_X=False 被忽略，fit 方法内部使用了其默认值 copy_X=True，导致 X 被复制，这可能与用户期望的原地操作行为不符。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中描述：'my choice will be silently overwritten.'",
+        "源码片段 2 中 fit 方法签名 def fit(self, X, y, copy_X=True): 和内部调用 lars_path(..., copy_X=copy_X, ...) 表明使用了传入的 copy_X 参数，而非 self.copy_X。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当用户在初始化时设置 copy_X 参数后，调用 fit 方法时，除非用户显式传递 copy_X 参数，否则应使用初始化时设置的值。",
+      "evidence": [
+        "Issue 中提议：'Therefore I propose that ```fit``` takes a default value of `None` and only overwrites the existing value if the user has explicitly passed it as an argument to ```fit```.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LassoLarsIC",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/least_angle.py",
+        "reason": "Issue 报告的问题所在类。"
+      },
+      {
+        "name": "LassoLarsIC.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/least_angle.py",
+        "reason": "问题涉及的方法，其 copy_X 参数与类初始化参数冲突。"
+      },
+      {
+        "name": "lars_path",
+        "kind": "function",
+        "source_path": "",
+        "reason": "fit 方法内部调用了 lars_path，并将 copy_X 参数传递给它，是 copy_X 参数最终生效的地方。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/least_angle.py",
+        "object": "LassoLarsIC.fit",
+        "lines": "1482-1546",
+        "reason": "fit 方法签名中定义了 copy_X 参数，默认值为 True，这覆盖了类初始化时设置的 self.copy_X 属性。方法内部将 copy_X 参数（而非 self.copy_X）传递给 lars_path 函数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lasso_lars_ic",
+        "test_file": "sklearn/linear_model/tests/test_least_angle.py",
+        "why_relevant": "该测试直接实例化并调用 LassoLarsIC 的 fit 方法，是测试 LassoLarsIC 行为的起点。",
+        "reusable_parts": [
+          "imports (linear_model, np)",
+          "数据准备 (diabetes.data, diabetes.target)",
+          "对象构造 (linear_model.LassoLarsIC('bic'))",
+          "fit 调用 (lars_bic.fit(X, y))",
+          "assert 风格 (assert_greater, assert_less)"
+        ],
+        "possible_gap": "该测试没有显式设置 copy_X 参数，因此无法复现初始化时设置 copy_X=False 但被 fit 默认值覆盖的问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，LassoLarsIC 的初始化通常只传递 criterion 等参数，不传递 copy_X，fit 调用也不传递 copy_X。",
+        "target_pattern": "在初始化 LassoLarsIC 时显式设置 copy_X=False，然后在调用 fit 时不传递 copy_X 参数。",
+        "reason": "Issue 指出，当初始化 copy_X=False 而 fit 使用默认 copy_X=True 时，用户设置被静默覆盖。这种变异能触发该路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试中可能依赖默认的 normalize=True 等配置。",
+        "target_pattern": "确保测试中使用的数据 X 是可变的（例如 numpy array），以便观察 copy_X 参数是否影响原始数据。",
+        "reason": "copy_X 参数控制是否复制输入数据 X。如果 X 被修改，可以间接观察 copy_X 的行为。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在调用 fit 前后，检查输入数据 X 的 id() 或通过 np.may_share_memory 检查是否与内部使用的数据共享内存。",
+        "reason": "如果 copy_X=False 生效，fit 内部可能直接使用（并可能修改）传入的 X 数据；如果 copy_X=True 生效，则会使用副本，原始 X 应保持不变。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "在 fit 方法内部，观察传递给 lars_path 函数的 copy_X 参数的实际值。",
+        "reason": "缺陷的核心是传递给 lars_path 的 copy_X 值不是用户期望的 self.copy_X，而是 fit 方法参数的默认值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 LassoLarsIC(copy_X=False) 初始化后调用 fit(X, y) 时，传递给内部 lars_path 函数的 copy_X 参数值应为 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的模型输出（如 coef_）的精确值，因为这可能受随机性或其他参数影响。",
+        "reason": "该断言直接验证 Issue 的核心：用户设置的 copy_X 值应被正确传递和使用。"
+      },
+      {
+        "assertion_goal": "当 copy_X=False 时，fit 内部使用的数据应与传入的 X 共享内存（或 id 相同）；当 copy_X=True 时，应不共享内存。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言输入数据 X 的完整内容在 fit 后完全不变，因为算法可能原地修改数据（当 copy_X=False 时）。",
+        "reason": "这验证了 copy_X 参数的实际效果，与 Issue 描述的行为一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sklearn.linear_model 和 numpy，并准备合适的测试数据（如 diabetes 数据集）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要一个可变的 numpy 数组作为输入 X，以便观察 copy_X 的影响。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "LassoLarsIC 的父类 LassoLars 是否也存在相同的 copy_X 参数重复问题？Issue 只提到了 LassoLarsIC。",
+      "除了 copy_X，LassoLarsIC 的 fit 方法是否还有其他参数与 __init__ 重复？Issue 只提到了 copy_X。",
+      "在当前的 buggy 版本中，self.copy_X 属性是否被正确设置？还是说 fit 方法完全忽略了它？"
+    ]
+  }
+}

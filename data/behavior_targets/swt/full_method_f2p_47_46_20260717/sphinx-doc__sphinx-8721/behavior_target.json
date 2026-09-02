@@ -1,0 +1,252 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sphinx-doc__sphinx-8721",
+  "issue_summary": "viewcode 扩展在 `make html epub` 命令中，即使配置了 `viewcode_enable_epub=False`，仍然会为 epub 格式生成模块页面。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `@pytest.mark.sphinx` 装饰器，并可能通过 `confoverrides` 参数设置 `viewcode_enable_epub=False` 和启用 `sphinx.ext.viewcode` 扩展。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个包含可导入模块的测试项目根目录（testroot），以便 viewcode 有内容可生成。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_build_epub",
+        "test_file": "tests/test_build_epub.py",
+        "why_relevant": "该测试使用 `@pytest.mark.sphinx('epub', ...)` 装饰器，专门测试 epub 构建过程，与 Issue 的构建场景（`make html epub`）直接相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('epub', ...) 装饰器",
+          "app 夹具的使用",
+          "app.build() 调用",
+          "对输出目录 (app.outdir) 文件存在性和内容的断言风格"
+        ],
+        "possible_gap": "该测试未启用 viewcode 扩展，也未配置 `viewcode_enable_epub` 选项，因此无法复现与 viewcode 相关的缺陷。"
+      },
+      {
+        "test_name": "test_viewcode",
+        "test_file": "tests/test_ext_viewcode.py",
+        "why_relevant": "该测试专门测试 viewcode 扩展的功能，使用了 `testroot='ext-viewcode'`，并检查生成的 HTML 链接。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx 装饰器",
+          "app.builder.build_all() 调用",
+          "对生成文件（如 index.html, _modules/...）内容进行断言（包含 href 链接）的模式"
+        ],
+        "possible_gap": "该测试默认构建的是 HTML 格式（`@pytest.mark.sphinx` 未指定 builder），没有测试 epub 构建器，也没有涉及 `viewcode_enable_epub` 配置。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 `make html epub` 命令构建文档，并且配置了 `viewcode_enable_epub=False`。",
+      "evidence": [
+        "Issue 描述：'viewcode creates pages for epub even if `viewcode_enable_epub=False` on `make html epub`'",
+        "Issue 重现步骤：'$ make html epub'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "为 epub 格式生成了本不应生成的模块页面（module pages）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'viewcode creates pages for epub even if `viewcode_enable_epub=False`'",
+        "Issue 期望行为：'module pages should not be created for epub by default.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.ext.viewcode",
+        "kind": "module",
+        "source_path": "sphinx/ext/viewcode.py",
+        "reason": "Issue 直接涉及 viewcode 扩展的行为，并且相关源码文件被检索到。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/ext/viewcode.py",
+        "object": "viewcode",
+        "lines": "",
+        "reason": "Issue 直接指向 viewcode 扩展，且该文件被 iCoRe 检索为相关源码。缺陷可能在于该扩展在构建 epub 时未正确检查 `viewcode_enable_epub` 配置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中未明确设置 `viewcode_enable_epub` 配置。",
+        "target_pattern": "在测试配置中显式设置 `viewcode_enable_epub=False`。",
+        "reason": "Issue 表明当此配置为 False 时，bug 被触发。需要在测试中模拟此配置状态。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常调用 `app.build()` 或 `app.builder.build_all()` 进行构建。",
+        "target_pattern": "需要确保构建命令同时涉及 'html' 和 'epub' 两种构建器，类似于 `make html epub`。",
+        "reason": "Issue 明确指出 bug 发生在 `make html epub` 命令中，可能涉及构建器的顺序或交互。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 `viewcode_enable_epub=False` 时，执行 `make html epub` 命令不应为 epub 输出生成模块页面。",
+      "evidence": [
+        "Issue 期望行为：'module pages should not be created for epub by default.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "检查 `app.outdir` 中是否生成了与 viewcode 相关的文件（例如 `_modules/` 目录下的 `.xhtml` 文件）。",
+        "reason": "Issue 的核心症状是为 epub 生成了多余的模块页面，直接检查输出文件的存在性是最直接的证据。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "观察 `app.config.viewcode_enable_epub` 在构建过程中的值。",
+        "reason": "需要确认配置是否正确加载并传递给 viewcode 扩展的逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 `viewcode_enable_epub=False` 且构建 epub 时，输出目录中不存在 viewcode 生成的模块页面文件。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的文件路径字符串或完整的文件内容，因为具体的文件名可能因项目而异。",
+        "reason": "Issue 关注的是“页面不被创建”，因此断言特定文件或目录不存在是稳定且直接的方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`make html epub` 命令在底层是依次调用两个独立的构建过程，还是有一个特殊的组合构建模式？这可能会影响配置的加载和构建上下文。",
+    "`viewcode_enable_epub` 配置项的确切默认值是什么？Issue 提到 'by default'，但未明确说明配置已显式设置为 False。",
+    "缺陷的确切位置是在 viewcode 扩展的哪个函数或方法中？是条件判断错误，还是配置读取时机问题？"
+  ],
+  "raw": {
+    "issue_summary": "viewcode 扩展在 `make html epub` 命令中，即使配置了 `viewcode_enable_epub=False`，仍然会为 epub 格式生成模块页面。",
+    "trigger_condition": {
+      "text": "使用 `make html epub` 命令构建文档，并且配置了 `viewcode_enable_epub=False`。",
+      "evidence": [
+        "Issue 描述：'viewcode creates pages for epub even if `viewcode_enable_epub=False` on `make html epub`'",
+        "Issue 重现步骤：'$ make html epub'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "为 epub 格式生成了本不应生成的模块页面（module pages）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'viewcode creates pages for epub even if `viewcode_enable_epub=False`'",
+        "Issue 期望行为：'module pages should not be created for epub by default.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 `viewcode_enable_epub=False` 时，执行 `make html epub` 命令不应为 epub 输出生成模块页面。",
+      "evidence": [
+        "Issue 期望行为：'module pages should not be created for epub by default.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sphinx.ext.viewcode",
+        "kind": "module",
+        "source_path": "sphinx/ext/viewcode.py",
+        "reason": "Issue 直接涉及 viewcode 扩展的行为，并且相关源码文件被检索到。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sphinx/ext/viewcode.py",
+        "object": "viewcode",
+        "lines": "",
+        "reason": "Issue 直接指向 viewcode 扩展，且该文件被 iCoRe 检索为相关源码。缺陷可能在于该扩展在构建 epub 时未正确检查 `viewcode_enable_epub` 配置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_build_epub",
+        "test_file": "tests/test_build_epub.py",
+        "why_relevant": "该测试使用 `@pytest.mark.sphinx('epub', ...)` 装饰器，专门测试 epub 构建过程，与 Issue 的构建场景（`make html epub`）直接相关。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx('epub', ...) 装饰器",
+          "app 夹具的使用",
+          "app.build() 调用",
+          "对输出目录 (app.outdir) 文件存在性和内容的断言风格"
+        ],
+        "possible_gap": "该测试未启用 viewcode 扩展，也未配置 `viewcode_enable_epub` 选项，因此无法复现与 viewcode 相关的缺陷。"
+      },
+      {
+        "test_name": "test_viewcode",
+        "test_file": "tests/test_ext_viewcode.py",
+        "why_relevant": "该测试专门测试 viewcode 扩展的功能，使用了 `testroot='ext-viewcode'`，并检查生成的 HTML 链接。",
+        "reusable_parts": [
+          "@pytest.mark.sphinx 装饰器",
+          "app.builder.build_all() 调用",
+          "对生成文件（如 index.html, _modules/...）内容进行断言（包含 href 链接）的模式"
+        ],
+        "possible_gap": "该测试默认构建的是 HTML 格式（`@pytest.mark.sphinx` 未指定 builder），没有测试 epub 构建器，也没有涉及 `viewcode_enable_epub` 配置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中未明确设置 `viewcode_enable_epub` 配置。",
+        "target_pattern": "在测试配置中显式设置 `viewcode_enable_epub=False`。",
+        "reason": "Issue 表明当此配置为 False 时，bug 被触发。需要在测试中模拟此配置状态。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常调用 `app.build()` 或 `app.builder.build_all()` 进行构建。",
+        "target_pattern": "需要确保构建命令同时涉及 'html' 和 'epub' 两种构建器，类似于 `make html epub`。",
+        "reason": "Issue 明确指出 bug 发生在 `make html epub` 命令中，可能涉及构建器的顺序或交互。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "检查 `app.outdir` 中是否生成了与 viewcode 相关的文件（例如 `_modules/` 目录下的 `.xhtml` 文件）。",
+        "reason": "Issue 的核心症状是为 epub 生成了多余的模块页面，直接检查输出文件的存在性是最直接的证据。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "观察 `app.config.viewcode_enable_epub` 在构建过程中的值。",
+        "reason": "需要确认配置是否正确加载并传递给 viewcode 扩展的逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在 `viewcode_enable_epub=False` 且构建 epub 时，输出目录中不存在 viewcode 生成的模块页面文件。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的文件路径字符串或完整的文件内容，因为具体的文件名可能因项目而异。",
+        "reason": "Issue 关注的是“页面不被创建”，因此断言特定文件或目录不存在是稳定且直接的方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `@pytest.mark.sphinx` 装饰器，并可能通过 `confoverrides` 参数设置 `viewcode_enable_epub=False` 和启用 `sphinx.ext.viewcode` 扩展。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个包含可导入模块的测试项目根目录（testroot），以便 viewcode 有内容可生成。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "`make html epub` 命令在底层是依次调用两个独立的构建过程，还是有一个特殊的组合构建模式？这可能会影响配置的加载和构建上下文。",
+      "`viewcode_enable_epub` 配置项的确切默认值是什么？Issue 提到 'by default'，但未明确说明配置已显式设置为 False。",
+      "缺陷的确切位置是在 viewcode 扩展的哪个函数或方法中？是条件判断错误，还是配置读取时机问题？"
+    ]
+  }
+}

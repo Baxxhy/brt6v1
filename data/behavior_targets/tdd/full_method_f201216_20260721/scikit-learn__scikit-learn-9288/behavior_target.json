@@ -1,0 +1,314 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-9288",
+  "issue_summary": "KMeans 聚类算法在 n_jobs=1 和 n_jobs>1 时得到略微不同的 inertia 结果。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 pytest.mark.parametrize 对 n_jobs 的不同取值（如 [1, 2]）进行参数化测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用固定的 random_state 确保数据生成和 KMeans 初始化的可重现性。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要装饰器（如 @if_safe_multiprocessing_with_blas）来处理多进程环境的安全问题。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_kmeans_results",
+        "test_file": "sklearn/cluster/tests/test_k_means.py",
+        "why_relevant": "该测试验证了 KMeans 在给定输入、初始中心和样本权重下的预期结果（包括 inertia_），展示了如何构造测试数据、调用 fit 并断言结果。",
+        "reusable_parts": [
+          "KMeans 对象的构造和 fit 调用模式",
+          "使用 assert_almost_equal 比较 inertia_",
+          "使用固定随机种子或初始中心确保可重现性"
+        ],
+        "possible_gap": "该测试没有涉及 n_jobs 参数，也没有测试并行与串行计算的一致性。"
+      },
+      {
+        "test_name": "test_k_means_plus_plus_init_2_jobs",
+        "test_file": "sklearn/cluster/tests/test_k_means.py",
+        "why_relevant": "该测试直接使用了 n_jobs=2 参数，并检查模型是否正常拟合，表明存在测试并行执行的模式。",
+        "reusable_parts": [
+          "在 KMeans 构造器中设置 n_jobs 参数",
+          "使用装饰器 @if_safe_multiprocessing_with_blas"
+        ],
+        "possible_gap": "该测试没有比较 n_jobs=1 和 n_jobs>1 的结果，只是检查了模型是否成功拟合。"
+      },
+      {
+        "test_name": "test_multi_class_n_jobs",
+        "test_file": "sklearn/gaussian_process/tests/test_gpc.py",
+        "why_relevant": "该测试直接验证了 n_jobs 参数不应影响模型结果（使用 assert_almost_equal），这与当前 Issue 的预期行为高度一致。",
+        "reusable_parts": [
+          "比较 n_jobs=1（默认）和 n_jobs>1 时模型输出的模式",
+          "使用 assert_almost_equal 进行数值比较"
+        ],
+        "possible_gap": "该测试针对的是 GaussianProcessClassifier，而非 KMeans，但逻辑模式可借鉴。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 KMeans 对生成的数据进行拟合，设置 random_state 为固定值，并比较 n_jobs=1 与 n_jobs>1（如 2,3,4）时的结果。",
+      "evidence": [
+        "Issue 中提供了代码：`KMeans(n_clusters=10, random_state=2, n_jobs=n_jobs).fit(X)`，其中 X 由 `make_blobs(n_samples=10000, centers=10, n_features=2, random_state=2)` 生成。",
+        "源码片段 2 显示 fit 方法将 n_jobs 参数传递给底层的 k_means 函数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 n_jobs=1 时，计算得到的 inertia_ 值（17815.004991244623）与 n_jobs>1 时（17815.060435554242）不同。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 的 Actual Results 部分展示了不同的 inertia 输出。",
+        "源码片段 1 中 KMeans 类的文档说明 inertia_ 是样本到其最近聚类中心的平方距离之和。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.cluster.KMeans",
+        "kind": "class",
+        "source_path": "sklearn/cluster/k_means_.py",
+        "reason": "Issue 直接报告了 KMeans 类在使用不同 n_jobs 参数时的行为不一致。"
+      },
+      {
+        "name": "KMeans.fit",
+        "kind": "method",
+        "source_path": "sklearn/cluster/k_means_.py",
+        "reason": "Issue 中通过调用 fit 方法触发问题，该方法内部调用 k_means 函数并传递 n_jobs 参数。"
+      },
+      {
+        "name": "sklearn.datasets.make_blobs",
+        "kind": "function",
+        "source_path": "sklearn/datasets/samples_generator.py",
+        "reason": "Issue 中用于生成测试数据的函数，确保输入数据可重现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/cluster/k_means_.py",
+        "object": "k_means",
+        "lines": "",
+        "reason": "KMeans.fit 方法将 n_jobs 参数传递给 k_means 函数，该函数内部可能根据 n_jobs 进行并行计算，并行与串行实现可能存在数值差异。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常使用默认 n_jobs（None 或 1）或固定为 2。",
+        "target_pattern": "在同一个测试中，使用相同的随机种子和输入数据，分别用 n_jobs=1 和 n_jobs=2（或更大）运行 KMeans.fit。",
+        "reason": "Issue 表明，仅改变 n_jobs 参数（其他条件不变）就会导致结果差异，这是触发缺陷的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 使用小型、手工构造的固定数据集。",
+        "target_pattern": "使用 make_blobs 生成更大规模（如 n_samples=10000）的随机但可重现的数据集，并设置 random_state。",
+        "reason": "Issue 中使用的数据规模和随机性可能放大了并行与串行计算之间的数值差异，使用可重现的随机数据有助于稳定复现。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于相同的随机种子和输入数据，无论 n_jobs 设置为 1 还是大于 1，KMeans 拟合后得到的 inertia_ 值应该相同。",
+      "evidence": [
+        "Issue 的 Expected Results 部分明确说明 \"Should expect the clustering result (e.g. the inertia) to be the same regardless of how many jobs are run in parallel.\"",
+        "相关测试 4 验证了 n_jobs 不应影响结果：`assert_almost_equal(y_prob, y_prob_2)`。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "kmeans.inertia_",
+        "reason": "Issue 中观察到的直接差异就是 inertia_ 属性的值。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "kmeans.cluster_centers_",
+        "reason": "inertia 的差异可能源于聚类中心分配的微小差异，观察中心点可能有助于定位问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "kmeans.labels_",
+        "reason": "样本标签的分配差异是导致 inertia 不同的根本原因之一。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "n_jobs=1 和 n_jobs>1 时，KMeans 拟合后得到的 inertia_ 值在数值上应该几乎相等（考虑到可能的浮点误差）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 inertia_ 值等于某个硬编码的 magic number，因为该值依赖于随机生成的数据。",
+        "reason": "Issue 的核心是不同 n_jobs 配置下结果的一致性，而不是结果的绝对值。应比较两次运行的结果。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 k_means 函数内部，还是在某个与并行计算相关的子函数（如距离计算、标签分配）中。",
+    "导致差异的精确条件是什么（例如，是否与数据规模、特征数、聚类数、算法类型（'full' vs 'elkan'）有关）。",
+    "浮点误差的允许范围是多少，即 assert_almost_equal 应该使用多大的公差（rtol/atol）。"
+  ],
+  "raw": {
+    "issue_summary": "KMeans 聚类算法在 n_jobs=1 和 n_jobs>1 时得到略微不同的 inertia 结果。",
+    "trigger_condition": {
+      "text": "使用 KMeans 对生成的数据进行拟合，设置 random_state 为固定值，并比较 n_jobs=1 与 n_jobs>1（如 2,3,4）时的结果。",
+      "evidence": [
+        "Issue 中提供了代码：`KMeans(n_clusters=10, random_state=2, n_jobs=n_jobs).fit(X)`，其中 X 由 `make_blobs(n_samples=10000, centers=10, n_features=2, random_state=2)` 生成。",
+        "源码片段 2 显示 fit 方法将 n_jobs 参数传递给底层的 k_means 函数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 n_jobs=1 时，计算得到的 inertia_ 值（17815.004991244623）与 n_jobs>1 时（17815.060435554242）不同。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 的 Actual Results 部分展示了不同的 inertia 输出。",
+        "源码片段 1 中 KMeans 类的文档说明 inertia_ 是样本到其最近聚类中心的平方距离之和。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于相同的随机种子和输入数据，无论 n_jobs 设置为 1 还是大于 1，KMeans 拟合后得到的 inertia_ 值应该相同。",
+      "evidence": [
+        "Issue 的 Expected Results 部分明确说明 \"Should expect the clustering result (e.g. the inertia) to be the same regardless of how many jobs are run in parallel.\"",
+        "相关测试 4 验证了 n_jobs 不应影响结果：`assert_almost_equal(y_prob, y_prob_2)`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.cluster.KMeans",
+        "kind": "class",
+        "source_path": "sklearn/cluster/k_means_.py",
+        "reason": "Issue 直接报告了 KMeans 类在使用不同 n_jobs 参数时的行为不一致。"
+      },
+      {
+        "name": "KMeans.fit",
+        "kind": "method",
+        "source_path": "sklearn/cluster/k_means_.py",
+        "reason": "Issue 中通过调用 fit 方法触发问题，该方法内部调用 k_means 函数并传递 n_jobs 参数。"
+      },
+      {
+        "name": "sklearn.datasets.make_blobs",
+        "kind": "function",
+        "source_path": "sklearn/datasets/samples_generator.py",
+        "reason": "Issue 中用于生成测试数据的函数，确保输入数据可重现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/cluster/k_means_.py",
+        "object": "k_means",
+        "lines": "",
+        "reason": "KMeans.fit 方法将 n_jobs 参数传递给 k_means 函数，该函数内部可能根据 n_jobs 进行并行计算，并行与串行实现可能存在数值差异。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_kmeans_results",
+        "test_file": "sklearn/cluster/tests/test_k_means.py",
+        "why_relevant": "该测试验证了 KMeans 在给定输入、初始中心和样本权重下的预期结果（包括 inertia_），展示了如何构造测试数据、调用 fit 并断言结果。",
+        "reusable_parts": [
+          "KMeans 对象的构造和 fit 调用模式",
+          "使用 assert_almost_equal 比较 inertia_",
+          "使用固定随机种子或初始中心确保可重现性"
+        ],
+        "possible_gap": "该测试没有涉及 n_jobs 参数，也没有测试并行与串行计算的一致性。"
+      },
+      {
+        "test_name": "test_k_means_plus_plus_init_2_jobs",
+        "test_file": "sklearn/cluster/tests/test_k_means.py",
+        "why_relevant": "该测试直接使用了 n_jobs=2 参数，并检查模型是否正常拟合，表明存在测试并行执行的模式。",
+        "reusable_parts": [
+          "在 KMeans 构造器中设置 n_jobs 参数",
+          "使用装饰器 @if_safe_multiprocessing_with_blas"
+        ],
+        "possible_gap": "该测试没有比较 n_jobs=1 和 n_jobs>1 的结果，只是检查了模型是否成功拟合。"
+      },
+      {
+        "test_name": "test_multi_class_n_jobs",
+        "test_file": "sklearn/gaussian_process/tests/test_gpc.py",
+        "why_relevant": "该测试直接验证了 n_jobs 参数不应影响模型结果（使用 assert_almost_equal），这与当前 Issue 的预期行为高度一致。",
+        "reusable_parts": [
+          "比较 n_jobs=1（默认）和 n_jobs>1 时模型输出的模式",
+          "使用 assert_almost_equal 进行数值比较"
+        ],
+        "possible_gap": "该测试针对的是 GaussianProcessClassifier，而非 KMeans，但逻辑模式可借鉴。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中通常使用默认 n_jobs（None 或 1）或固定为 2。",
+        "target_pattern": "在同一个测试中，使用相同的随机种子和输入数据，分别用 n_jobs=1 和 n_jobs=2（或更大）运行 KMeans.fit。",
+        "reason": "Issue 表明，仅改变 n_jobs 参数（其他条件不变）就会导致结果差异，这是触发缺陷的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 使用小型、手工构造的固定数据集。",
+        "target_pattern": "使用 make_blobs 生成更大规模（如 n_samples=10000）的随机但可重现的数据集，并设置 random_state。",
+        "reason": "Issue 中使用的数据规模和随机性可能放大了并行与串行计算之间的数值差异，使用可重现的随机数据有助于稳定复现。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "kmeans.inertia_",
+        "reason": "Issue 中观察到的直接差异就是 inertia_ 属性的值。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "kmeans.cluster_centers_",
+        "reason": "inertia 的差异可能源于聚类中心分配的微小差异，观察中心点可能有助于定位问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "kmeans.labels_",
+        "reason": "样本标签的分配差异是导致 inertia 不同的根本原因之一。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "n_jobs=1 和 n_jobs>1 时，KMeans 拟合后得到的 inertia_ 值在数值上应该几乎相等（考虑到可能的浮点误差）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 inertia_ 值等于某个硬编码的 magic number，因为该值依赖于随机生成的数据。",
+        "reason": "Issue 的核心是不同 n_jobs 配置下结果的一致性，而不是结果的绝对值。应比较两次运行的结果。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytest.mark.parametrize 对 n_jobs 的不同取值（如 [1, 2]）进行参数化测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用固定的 random_state 确保数据生成和 KMeans 初始化的可重现性。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要装饰器（如 @if_safe_multiprocessing_with_blas）来处理多进程环境的安全问题。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 k_means 函数内部，还是在某个与并行计算相关的子函数（如距离计算、标签分配）中。",
+      "导致差异的精确条件是什么（例如，是否与数据规模、特征数、聚类数、算法类型（'full' vs 'elkan'）有关）。",
+      "浮点误差的允许范围是多少，即 assert_almost_equal 应该使用多大的公差（rtol/atol）。"
+    ]
+  }
+}

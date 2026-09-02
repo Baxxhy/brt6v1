@@ -1,0 +1,342 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13401",
+  "issue_summary": "从抽象基类继承的字段在不同子类中比较相等，导致集合去重时丢失字段。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用@isolate_apps来隔离模型定义，避免应用注册表冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "应继承自SimpleTestCase，因为测试不涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义抽象基类和至少两个具体子类。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_single_parent",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "该测试涉及抽象基类继承和字段获取（_meta.get_field），与Issue场景高度相关。",
+        "reusable_parts": [
+          "@isolate_apps装饰器",
+          "SimpleTestCase",
+          "定义抽象基类和子类的模式",
+          "使用_meta.get_field获取字段",
+          "使用assertEqual进行断言"
+        ],
+        "possible_gap": "该测试只检查字段属性（如max_length），没有检查不同子类字段实例的相等性或哈希值。"
+      },
+      {
+        "test_name": "test_multiple_inheritance_cannot_shadow_concrete_inherited_field",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "涉及多个模型继承和字段获取，使用了_meta.get_field。",
+        "reusable_parts": [
+          "定义多个继承层次模型的模式",
+          "使用assertIsInstance检查字段类型"
+        ],
+        "possible_gap": "焦点是字段冲突检查，而非字段实例的相等性比较。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义抽象基类A，包含一个字段myfield；定义两个子类B和C继承自A；分别获取B和C的myfield字段实例，放入集合或比较相等性。",
+      "evidence": [
+        "Issue中给出了示例代码：class A(abstract=True), class B(A), class C(A)，以及len({B._meta.get_field('myfield'), C._meta.get_field('myfield')}) == 1和B._meta.get_field('myfield') == C._meta.get_field('myfield')。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "从不同子类（B和C）获取的、继承自同一抽象基类的字段实例，在集合中被视为重复元素（len(...)==1），并且使用==比较返回True。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue中明确说明：len({B._meta.get_field('myfield'), C._meta.get_field('myfield')}) == 1 和 B._meta.get_field('myfield') == C._meta.get_field('myfield') 返回True。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Field.__eq__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue明确指出需要调整字段的__eq__方法，使其考虑field.model。"
+      },
+      {
+        "name": "django.db.models.Field.__hash__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue建议调整__hash__以匹配__eq__的行为。"
+      },
+      {
+        "name": "django.db.models.Field.__lt__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue建议调整__lt__以保持一致的排序，可能先按creation_counter排序。"
+      },
+      {
+        "name": "django.db.models.options.Options.get_field",
+        "kind": "method",
+        "source_path": "django/db/models/options.py",
+        "reason": "Issue示例中使用_meta.get_field('myfield')来获取字段实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.__eq__",
+        "lines": "",
+        "reason": "Issue指出字段比较相等时只考虑了self.creation_counter，没有考虑field.model。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.__hash__",
+        "lines": "",
+        "reason": "Issue建议调整__hash__以匹配新的__eq__逻辑。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.__lt__",
+        "lines": "522-526",
+        "reason": "检索出的源码片段显示__lt__仅比较creation_counter；Issue建议调整它以匹配新的相等性逻辑，可能先按creation_counter排序。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，获取字段后通常检查其属性（如max_length、类型）。",
+        "target_pattern": "获取两个不同子类的字段实例，将它们放入集合或直接比较相等性。",
+        "reason": "Issue的核心是字段实例的相等性判断逻辑有缺陷，需要构造触发此逻辑的测试场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常直接调用_meta.get_field并断言其属性。",
+        "target_pattern": "调用_meta.get_field获取字段后，进一步调用内置操作如`==`比较、`hash()`或放入`set()`。",
+        "reason": "触发缺陷需要调用字段的__eq__、__hash__方法，这些在现有测试中未被显式测试。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "从不同具体模型（B和C）获取的、继承自同一抽象基类的字段实例，应该比较为不相等，并且在集合中应被视为两个不同的元素。",
+      "evidence": [
+        "Issue中建议：'We should adjust __eq__ so that if the field.model is different, they will compare unequal.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "B._meta.get_field('myfield') == C._meta.get_field('myfield') 的结果",
+        "reason": "Issue明确指出此比较当前返回True，但期望返回False。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "len({B._meta.get_field('myfield'), C._meta.get_field('myfield')})",
+        "reason": "Issue明确指出此长度当前为1，但期望为2。"
+      },
+      {
+        "kind": "hash",
+        "expression_hint": "hash(B._meta.get_field('myfield')) 和 hash(C._meta.get_field('myfield')) 的值",
+        "reason": "Issue建议调整__hash__，观察哈希值是否不同以支持集合去重。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "从不同子类获取的同名字段实例应不相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的字段repr字符串相等或检查所有属性相等。",
+        "reason": "Issue的核心语义是不同模型的字段实例应被视为不同对象，断言`==`返回False直接对应此目标。"
+      },
+      {
+        "assertion_goal": "包含两个不同子类字段实例的集合应有两个元素。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言集合的字符串表示或元素顺序。",
+        "reason": "集合大小直接反映了去重行为，是Issue中描述问题的直接表现。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Field类中__eq__、__hash__和__lt__方法的具体实现位置和当前完整逻辑（检索出的源码片段不完整）。",
+    "字段的`model`属性是否在抽象继承场景下正确指向具体子类。",
+    "调整__lt__时，按`model`排序和按`creation_counter`排序的具体优先级和实现细节。",
+    "除了抽象继承，此缺陷是否也影响其他继承场景（如多表继承）。"
+  ],
+  "raw": {
+    "issue_summary": "从抽象基类继承的字段在不同子类中比较相等，导致集合去重时丢失字段。",
+    "trigger_condition": {
+      "text": "定义抽象基类A，包含一个字段myfield；定义两个子类B和C继承自A；分别获取B和C的myfield字段实例，放入集合或比较相等性。",
+      "evidence": [
+        "Issue中给出了示例代码：class A(abstract=True), class B(A), class C(A)，以及len({B._meta.get_field('myfield'), C._meta.get_field('myfield')}) == 1和B._meta.get_field('myfield') == C._meta.get_field('myfield')。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "从不同子类（B和C）获取的、继承自同一抽象基类的字段实例，在集合中被视为重复元素（len(...)==1），并且使用==比较返回True。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue中明确说明：len({B._meta.get_field('myfield'), C._meta.get_field('myfield')}) == 1 和 B._meta.get_field('myfield') == C._meta.get_field('myfield') 返回True。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "从不同具体模型（B和C）获取的、继承自同一抽象基类的字段实例，应该比较为不相等，并且在集合中应被视为两个不同的元素。",
+      "evidence": [
+        "Issue中建议：'We should adjust __eq__ so that if the field.model is different, they will compare unequal.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.Field.__eq__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue明确指出需要调整字段的__eq__方法，使其考虑field.model。"
+      },
+      {
+        "name": "django.db.models.Field.__hash__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue建议调整__hash__以匹配__eq__的行为。"
+      },
+      {
+        "name": "django.db.models.Field.__lt__",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue建议调整__lt__以保持一致的排序，可能先按creation_counter排序。"
+      },
+      {
+        "name": "django.db.models.options.Options.get_field",
+        "kind": "method",
+        "source_path": "django/db/models/options.py",
+        "reason": "Issue示例中使用_meta.get_field('myfield')来获取字段实例。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.__eq__",
+        "lines": "",
+        "reason": "Issue指出字段比较相等时只考虑了self.creation_counter，没有考虑field.model。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.__hash__",
+        "lines": "",
+        "reason": "Issue建议调整__hash__以匹配新的__eq__逻辑。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.__lt__",
+        "lines": "522-526",
+        "reason": "检索出的源码片段显示__lt__仅比较creation_counter；Issue建议调整它以匹配新的相等性逻辑，可能先按creation_counter排序。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_single_parent",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "该测试涉及抽象基类继承和字段获取（_meta.get_field），与Issue场景高度相关。",
+        "reusable_parts": [
+          "@isolate_apps装饰器",
+          "SimpleTestCase",
+          "定义抽象基类和子类的模式",
+          "使用_meta.get_field获取字段",
+          "使用assertEqual进行断言"
+        ],
+        "possible_gap": "该测试只检查字段属性（如max_length），没有检查不同子类字段实例的相等性或哈希值。"
+      },
+      {
+        "test_name": "test_multiple_inheritance_cannot_shadow_concrete_inherited_field",
+        "test_file": "tests/model_inheritance/test_abstract_inheritance.py",
+        "why_relevant": "涉及多个模型继承和字段获取，使用了_meta.get_field。",
+        "reusable_parts": [
+          "定义多个继承层次模型的模式",
+          "使用assertIsInstance检查字段类型"
+        ],
+        "possible_gap": "焦点是字段冲突检查，而非字段实例的相等性比较。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，获取字段后通常检查其属性（如max_length、类型）。",
+        "target_pattern": "获取两个不同子类的字段实例，将它们放入集合或直接比较相等性。",
+        "reason": "Issue的核心是字段实例的相等性判断逻辑有缺陷，需要构造触发此逻辑的测试场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常直接调用_meta.get_field并断言其属性。",
+        "target_pattern": "调用_meta.get_field获取字段后，进一步调用内置操作如`==`比较、`hash()`或放入`set()`。",
+        "reason": "触发缺陷需要调用字段的__eq__、__hash__方法，这些在现有测试中未被显式测试。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "B._meta.get_field('myfield') == C._meta.get_field('myfield') 的结果",
+        "reason": "Issue明确指出此比较当前返回True，但期望返回False。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "len({B._meta.get_field('myfield'), C._meta.get_field('myfield')})",
+        "reason": "Issue明确指出此长度当前为1，但期望为2。"
+      },
+      {
+        "kind": "hash",
+        "expression_hint": "hash(B._meta.get_field('myfield')) 和 hash(C._meta.get_field('myfield')) 的值",
+        "reason": "Issue建议调整__hash__，观察哈希值是否不同以支持集合去重。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "从不同子类获取的同名字段实例应不相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的字段repr字符串相等或检查所有属性相等。",
+        "reason": "Issue的核心语义是不同模型的字段实例应被视为不同对象，断言`==`返回False直接对应此目标。"
+      },
+      {
+        "assertion_goal": "包含两个不同子类字段实例的集合应有两个元素。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言集合的字符串表示或元素顺序。",
+        "reason": "集合大小直接反映了去重行为，是Issue中描述问题的直接表现。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用@isolate_apps来隔离模型定义，避免应用注册表冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "应继承自SimpleTestCase，因为测试不涉及数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义抽象基类和至少两个具体子类。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Field类中__eq__、__hash__和__lt__方法的具体实现位置和当前完整逻辑（检索出的源码片段不完整）。",
+      "字段的`model`属性是否在抽象继承场景下正确指向具体子类。",
+      "调整__lt__时，按`model`排序和按`creation_counter`排序的具体优先级和实现细节。",
+      "除了抽象继承，此缺陷是否也影响其他继承场景（如多表继承）。"
+    ]
+  }
+}

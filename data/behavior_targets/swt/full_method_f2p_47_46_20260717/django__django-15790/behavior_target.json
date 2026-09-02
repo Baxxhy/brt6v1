@@ -1,0 +1,248 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15790",
+  "issue_summary": "当在 TEMPLATES['OPTIONS']['libraries'] 中添加模板标签库时，check_for_template_tags_with_the_same_name 检查可能错误地报告重复名称。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 并利用 override_settings 或 self.settings 来配置 TEMPLATES 和 INSTALLED_APPS。可能需要创建测试用的 Django 应用和 templatetags 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试配置需要确保 TEMPLATES['OPTIONS']['libraries'] 中定义的库名，其模块路径与通过 INSTALLED_APPS 自动发现的某个模板标签模块路径完全一致。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_template_tags_with_same_library_name",
+        "test_file": "tests/check_framework/test_templates.py",
+        "why_relevant": "该测试直接通过 TEMPLATES 设置配置库，并验证 check_for_template_tags_with_the_same_name 的行为，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "使用 self.settings 临时覆盖 TEMPLATES 配置",
+          "使用 self.get_settings 构造模板配置",
+          "调用 check_for_template_tags_with_the_same_name(None)",
+          "使用 Error 和 E003.msg 进行断言"
+        ],
+        "possible_gap": "该测试配置了两个不同应用但同名的库，触发的是真正的重复库名错误。而 Issue 描述的场景可能涉及同一模块路径被多次添加（例如通过 TEMPLATES 和 INSTALLED_APPS），导致误报。"
+      },
+      {
+        "test_name": "test_template_tags_with_same_library_name_and_module_name",
+        "test_file": "tests/check_framework/test_templates.py",
+        "why_relevant": "该测试混合了 INSTALLED_APPS 和 TEMPLATES 配置，并检查重复库名，与 Issue 中提到的配置组合类似。",
+        "reusable_parts": [
+          "使用 @override_settings 和 self.settings",
+          "组合 INSTALLED_APPS 和 TEMPLATES 配置",
+          "断言错误信息的格式"
+        ],
+        "possible_gap": "该测试中 TEMPLATES 配置的库指向一个模块（different_tags_app.templatetags.different_tags），而 INSTALLED_APPS 中的库指向另一个同名但不同路径的模块（same_tags_app_1.templatetags.same_tags）。Issue 描述的错误可能涉及指向完全相同模块路径的重复条目。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 配置的 TEMPLATES['OPTIONS']['libraries'] 字典中，添加一个或多个模板标签库，其库名可能与通过 get_template_tag_modules() 发现的库名相同。",
+      "evidence": [
+        "Issue 描述提到 'when you add a template tag library into TEMPLATES['OPTIONS']['libraries']'",
+        "源码片段 1 显示函数会合并来自 settings.TEMPLATES 的 custom_libraries 和来自 get_template_tag_modules() 的库"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行系统检查时，错误地报告一个库名被多个模板标签模块使用，即使这些模块路径可能指向同一个实际模块。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中给出的错误信息：'(templates.E003) 'my_tags' is used for multiple template tag modules: 'someapp.templatetags.my_tags', 'someapp.templatetags.my_tags''"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "check_for_template_tags_with_the_same_name",
+        "kind": "function",
+        "source_path": "django/core/checks/templates.py",
+        "reason": "这是 Issue 直接讨论的检查函数，也是相关测试的核心目标。"
+      },
+      {
+        "name": "django.conf.settings.TEMPLATES",
+        "kind": "module",
+        "source_path": "django/conf/__init__.py",
+        "reason": "Issue 的触发条件涉及修改此配置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/checks/templates.py",
+        "object": "check_for_template_tags_with_the_same_name",
+        "lines": "51-75",
+        "reason": "该函数合并来自 TEMPLATES['OPTIONS']['libraries'] 和 get_template_tag_modules() 的库名列表，可能未对重复的模块路径进行去重或正确处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，TEMPLATES['OPTIONS']['libraries'] 配置的库指向一个模块路径，而 INSTALLED_APPS 中的模板标签模块指向另一个不同的模块路径（但库名相同）。",
+        "target_pattern": "TEMPLATES['OPTIONS']['libraries'] 配置的库指向的模块路径，与通过 INSTALLED_APPS 自动发现的模板标签模块路径完全相同。",
+        "reason": "Issue 描述的错误信息显示两个模块路径字符串完全相同（'someapp.templatetags.my_tags', 'someapp.templatetags.my_tags'），这可能是因为同一模块被以两种方式（显式配置和自动发现）添加到了检查列表中。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "系统检查应能正确处理 TEMPLATES['OPTIONS']['libraries'] 中配置的库，当同一个模块路径被以不同方式引用时，不应错误地报告重复名称冲突。",
+      "evidence": [
+        "Issue 暗示当前行为是意外的，且相关测试表明该检查旨在检测真正的重复库名，而非同一模块的重复引用"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "check_for_template_tags_with_the_same_name(None) 的返回值，特别是 errors 列表中 Error 对象的 .msg 属性。",
+        "reason": "Issue 的核心错误表现为该函数返回了一个 E003 错误。观察其返回的错误列表及错误信息内容，可以判断是否误报了重复。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 check_for_template_tags_with_the_same_name 函数内部，合并后 libraries 字典的内容，特别是每个库名对应的 items 列表。",
+        "reason": "观察合并后的库名到模块路径列表的映射，可以确认是否存在指向同一模块路径的重复条目，这是判断缺陷是否触发的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 TEMPLATES['OPTIONS']['libraries'] 中配置的库与自动发现的库指向同一模块时，check_for_template_tags_with_the_same_name 不应报告 E003 错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误信息字符串相等，因为模块路径可能因测试设置而异。",
+        "reason": "修复后，对于指向同一模块的重复引用，应视为同一实体，不产生冲突警告。断言错误列表为空或错误信息中不包含特定库名，更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 报告者未提供完整的、可运行的复现案例。不确定 TEMPLATES['OPTIONS']['libraries'] 中配置的模块路径格式是否与 get_template_tag_modules() 返回的格式完全一致（例如，是否包含应用标签前缀）。",
+    "不确定错误是否仅在库名和模块路径都完全相同时发生，还是部分匹配就会触发。",
+    "不清楚这是 check_for_template_tags_with_the_same_name 函数的逻辑缺陷，还是调用者/配置方式的问题。"
+  ],
+  "raw": {
+    "issue_summary": "当在 TEMPLATES['OPTIONS']['libraries'] 中添加模板标签库时，check_for_template_tags_with_the_same_name 检查可能错误地报告重复名称。",
+    "trigger_condition": {
+      "text": "在 Django 配置的 TEMPLATES['OPTIONS']['libraries'] 字典中，添加一个或多个模板标签库，其库名可能与通过 get_template_tag_modules() 发现的库名相同。",
+      "evidence": [
+        "Issue 描述提到 'when you add a template tag library into TEMPLATES['OPTIONS']['libraries']'",
+        "源码片段 1 显示函数会合并来自 settings.TEMPLATES 的 custom_libraries 和来自 get_template_tag_modules() 的库"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行系统检查时，错误地报告一个库名被多个模板标签模块使用，即使这些模块路径可能指向同一个实际模块。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中给出的错误信息：'(templates.E003) 'my_tags' is used for multiple template tag modules: 'someapp.templatetags.my_tags', 'someapp.templatetags.my_tags''"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "系统检查应能正确处理 TEMPLATES['OPTIONS']['libraries'] 中配置的库，当同一个模块路径被以不同方式引用时，不应错误地报告重复名称冲突。",
+      "evidence": [
+        "Issue 暗示当前行为是意外的，且相关测试表明该检查旨在检测真正的重复库名，而非同一模块的重复引用"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "check_for_template_tags_with_the_same_name",
+        "kind": "function",
+        "source_path": "django/core/checks/templates.py",
+        "reason": "这是 Issue 直接讨论的检查函数，也是相关测试的核心目标。"
+      },
+      {
+        "name": "django.conf.settings.TEMPLATES",
+        "kind": "module",
+        "source_path": "django/conf/__init__.py",
+        "reason": "Issue 的触发条件涉及修改此配置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/checks/templates.py",
+        "object": "check_for_template_tags_with_the_same_name",
+        "lines": "51-75",
+        "reason": "该函数合并来自 TEMPLATES['OPTIONS']['libraries'] 和 get_template_tag_modules() 的库名列表，可能未对重复的模块路径进行去重或正确处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_template_tags_with_same_library_name",
+        "test_file": "tests/check_framework/test_templates.py",
+        "why_relevant": "该测试直接通过 TEMPLATES 设置配置库，并验证 check_for_template_tags_with_the_same_name 的行为，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "使用 self.settings 临时覆盖 TEMPLATES 配置",
+          "使用 self.get_settings 构造模板配置",
+          "调用 check_for_template_tags_with_the_same_name(None)",
+          "使用 Error 和 E003.msg 进行断言"
+        ],
+        "possible_gap": "该测试配置了两个不同应用但同名的库，触发的是真正的重复库名错误。而 Issue 描述的场景可能涉及同一模块路径被多次添加（例如通过 TEMPLATES 和 INSTALLED_APPS），导致误报。"
+      },
+      {
+        "test_name": "test_template_tags_with_same_library_name_and_module_name",
+        "test_file": "tests/check_framework/test_templates.py",
+        "why_relevant": "该测试混合了 INSTALLED_APPS 和 TEMPLATES 配置，并检查重复库名，与 Issue 中提到的配置组合类似。",
+        "reusable_parts": [
+          "使用 @override_settings 和 self.settings",
+          "组合 INSTALLED_APPS 和 TEMPLATES 配置",
+          "断言错误信息的格式"
+        ],
+        "possible_gap": "该测试中 TEMPLATES 配置的库指向一个模块（different_tags_app.templatetags.different_tags），而 INSTALLED_APPS 中的库指向另一个同名但不同路径的模块（same_tags_app_1.templatetags.same_tags）。Issue 描述的错误可能涉及指向完全相同模块路径的重复条目。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，TEMPLATES['OPTIONS']['libraries'] 配置的库指向一个模块路径，而 INSTALLED_APPS 中的模板标签模块指向另一个不同的模块路径（但库名相同）。",
+        "target_pattern": "TEMPLATES['OPTIONS']['libraries'] 配置的库指向的模块路径，与通过 INSTALLED_APPS 自动发现的模板标签模块路径完全相同。",
+        "reason": "Issue 描述的错误信息显示两个模块路径字符串完全相同（'someapp.templatetags.my_tags', 'someapp.templatetags.my_tags'），这可能是因为同一模块被以两种方式（显式配置和自动发现）添加到了检查列表中。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "check_for_template_tags_with_the_same_name(None) 的返回值，特别是 errors 列表中 Error 对象的 .msg 属性。",
+        "reason": "Issue 的核心错误表现为该函数返回了一个 E003 错误。观察其返回的错误列表及错误信息内容，可以判断是否误报了重复。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 check_for_template_tags_with_the_same_name 函数内部，合并后 libraries 字典的内容，特别是每个库名对应的 items 列表。",
+        "reason": "观察合并后的库名到模块路径列表的映射，可以确认是否存在指向同一模块路径的重复条目，这是判断缺陷是否触发的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 TEMPLATES['OPTIONS']['libraries'] 中配置的库与自动发现的库指向同一模块时，check_for_template_tags_with_the_same_name 不应报告 E003 错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误信息字符串相等，因为模块路径可能因测试设置而异。",
+        "reason": "修复后，对于指向同一模块的重复引用，应视为同一实体，不产生冲突警告。断言错误列表为空或错误信息中不包含特定库名，更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 并利用 override_settings 或 self.settings 来配置 TEMPLATES 和 INSTALLED_APPS。可能需要创建测试用的 Django 应用和 templatetags 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试配置需要确保 TEMPLATES['OPTIONS']['libraries'] 中定义的库名，其模块路径与通过 INSTALLED_APPS 自动发现的某个模板标签模块路径完全一致。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Issue 报告者未提供完整的、可运行的复现案例。不确定 TEMPLATES['OPTIONS']['libraries'] 中配置的模块路径格式是否与 get_template_tag_modules() 返回的格式完全一致（例如，是否包含应用标签前缀）。",
+      "不确定错误是否仅在库名和模块路径都完全相同时发生，还是部分匹配就会触发。",
+      "不清楚这是 check_for_template_tags_with_the_same_name 函数的逻辑缺陷，还是调用者/配置方式的问题。"
+    ]
+  }
+}

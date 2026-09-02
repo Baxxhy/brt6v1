@@ -1,0 +1,326 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-17630",
+  "issue_summary": "BlockMatrix 包含 ZeroMatrix 块时，连续 block-multiply 两次会抛出 AttributeError: 'Zero' object has no attribute 'cols' 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 MatrixSymbol, ZeroMatrix, BlockMatrix, block_collapse。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个简单的函数中运行，无需复杂的 fixture 或外部资源。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_BlockMatrix",
+        "test_file": "sympy/matrices/expressions/tests/test_blockmatrix.py",
+        "why_relevant": "它测试了 BlockMatrix 的基本操作，包括 `_blockmul`、`block_collapse` 和包含 MatrixSymbol 的乘法，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "imports (MatrixSymbol, BlockMatrix, block_collapse)",
+          "对象构造模式 (BlockMatrix([[A, B], [C, D]]))",
+          "使用 `block_collapse` 和 `_blockmul` 的 API 调用",
+          "使用 `assert` 验证形状和结果。"
+        ],
+        "possible_gap": "现有测试可能没有专门测试包含 ZeroMatrix 块的 BlockMatrix 的连续乘法，或者没有检查乘法结果中零元素的类型。"
+      },
+      {
+        "test_name": "test_block_collapse_explicit_matrices",
+        "test_file": "sympy/matrices/expressions/tests/test_blockmatrix.py",
+        "why_relevant": "它测试了 `block_collapse` 对包含显式矩阵的 BlockMatrix 的处理，展示了化简功能。",
+        "reusable_parts": [
+          "使用 `block_collapse` 的断言风格",
+          "对 BlockMatrix 包含单个矩阵的简单场景测试。"
+        ],
+        "possible_gap": "测试使用的是普通数值矩阵，而不是包含 ZeroMatrix 符号矩阵的复杂块结构，也未涉及连续乘法。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个包含 ZeroMatrix 块的 BlockMatrix，然后连续调用 block_collapse 或 _blockmul 进行两次或更多次块矩阵乘法。",
+      "evidence": [
+        "Issue 中：`b = BlockMatrix([[a, z], [z, z]])`，然后 `block_collapse(b * b * b)` 或 `b._blockmul(b)._blockmul(b)` 触发异常。",
+        "Issue 中：`b._blockmul(b)` 中的零元素类型从 `ZeroMatrix` 变成了 `Zero`。",
+        "源码片段 2：`_blockmul` 方法在满足条件时返回 `BlockMatrix(self.blocks*other.blocks)`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 `block_collapse(b * b * b)` 或 `b._blockmul(b)._blockmul(b)` 时抛出 AttributeError: 'Zero' object has no attribute 'cols'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中完整的异常堆栈跟踪显示错误发生在 `blockmatrix.py` 第 80 行的 `colblocksizes` 属性中。",
+        "Issue 中：`AttributeError: 'Zero' object has no attribute 'cols'`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BlockMatrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 的核心是关于 BlockMatrix 类的行为，特别是其乘法操作。"
+      },
+      {
+        "name": "BlockMatrix._blockmul",
+        "kind": "method",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 中直接调用了此方法并触发了异常，它是块矩阵乘法的内部实现。"
+      },
+      {
+        "name": "block_collapse",
+        "kind": "function",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 中通过 `block_collapse(b * b * b)` 触发了异常，它是处理块矩阵表达式化简的函数。"
+      },
+      {
+        "name": "ZeroMatrix",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中缺陷的触发与 ZeroMatrix 块在乘法后类型变化有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/expressions/blockmatrix.py",
+        "object": "BlockMatrix._blockmul",
+        "lines": "164-169",
+        "reason": "Issue 显示 `b._blockmul(b)` 返回的矩阵中零元素类型从 `ZeroMatrix` 变成了 `Zero`。`_blockmul` 方法中的 `self.blocks*other.blocks` 操作可能导致类型信息丢失。"
+      },
+      {
+        "path": "sympy/matrices/expressions/blockmatrix.py",
+        "object": "BlockMatrix.colblocksizes",
+        "lines": "154-155",
+        "reason": "异常直接发生在此属性中，因为它假设 `self.blocks[0, i]` 有 `.cols` 属性，但遇到了 `Zero` 对象。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，BlockMatrix 的块是 MatrixSymbol (如 A, B, C, D)。",
+        "target_pattern": "将 BlockMatrix 的某些块替换为 ZeroMatrix。",
+        "reason": "Issue 表明缺陷仅在块中包含 ZeroMatrix 时触发，且乘法后零元素类型发生变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，通常只进行一次乘法或化简操作 (如 `block_collapse(X*Y)`)。",
+        "target_pattern": "对同一个 BlockMatrix 对象连续进行两次或更多次 `_blockmul` 或 `block_collapse` 乘法。",
+        "reason": "Issue 中第一次乘法成功，第二次乘法才失败，表明缺陷与操作链的深度或中间结果的类型有关。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "包含 ZeroMatrix 块的 BlockMatrix 应能正确进行多次块矩阵乘法，不抛出 AttributeError，并返回正确的结果矩阵（其中零元素应保持为矩阵类型或正确处理）。",
+      "evidence": [
+        "Issue 中：`block_collapse(b * b)` 和 `b._blockmul(b)` 第一次乘法成功，返回 `Matrix([[a**2, 0], [0, 0]])`。",
+        "相关测试 1：`test_BlockMatrix` 展示了 BlockMatrix 与 MatrixSymbol 混合乘法的正常行为。",
+        "源码片段 1：BlockMatrix 类的文档字符串展示了包含 ZeroMatrix 的块矩阵乘法示例。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "`b._blockmul(b).blocks[0, 1]` 或中间结果块中零元素的类型。",
+        "reason": "Issue 明确指出第一次乘法后零元素从 `ZeroMatrix` 变成了 `Zero`，这是触发后续异常的关键。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 `block_collapse(b * b * b)` 或 `b._blockmul(b)._blockmul(b)` 时是否抛出 AttributeError。",
+        "reason": "这是 Issue 报告的直接错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`b._blockmul(b)` 返回的矩阵结构，特别是零元素的位置和表示。",
+        "reason": "需要确认第一次乘法的结果是否正确，以及其内部表示是否为后续失败埋下伏笔。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "包含 ZeroMatrix 块的 BlockMatrix 连续乘法不应抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的、具体的矩阵字符串表示，因为 Issue 未给出 `b * b * b` 的确切预期结果。",
+        "reason": "Issue 的核心是异常，因此首要断言是操作不会引发特定异常。修复后，可进一步断言返回结果的类型或结构。"
+      },
+      {
+        "assertion_goal": "BlockMatrix 乘法后，结果矩阵中的零元素应保持为矩阵类型（或具有 `.cols` 属性），以便后续操作。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 `Zero` 对象的具体属性值，因为修复可能改变内部表示。",
+        "reason": "Issue 的根源是 `Zero` 对象缺少 `.cols` 属性，因此修复后应确保块元素具有必要的矩阵属性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`self.blocks*other.blocks` 内部乘法的具体语义以及它为何将 ZeroMatrix 转换为 Zero。",
+    "修复后，`b * b * b` 的确切预期结果矩阵是什么（除了不抛异常外）。",
+    "除了 `Zero` 类型问题，是否还有其他边界情况会导致类似异常。"
+  ],
+  "raw": {
+    "issue_summary": "BlockMatrix 包含 ZeroMatrix 块时，连续 block-multiply 两次会抛出 AttributeError: 'Zero' object has no attribute 'cols' 异常。",
+    "trigger_condition": {
+      "text": "创建一个包含 ZeroMatrix 块的 BlockMatrix，然后连续调用 block_collapse 或 _blockmul 进行两次或更多次块矩阵乘法。",
+      "evidence": [
+        "Issue 中：`b = BlockMatrix([[a, z], [z, z]])`，然后 `block_collapse(b * b * b)` 或 `b._blockmul(b)._blockmul(b)` 触发异常。",
+        "Issue 中：`b._blockmul(b)` 中的零元素类型从 `ZeroMatrix` 变成了 `Zero`。",
+        "源码片段 2：`_blockmul` 方法在满足条件时返回 `BlockMatrix(self.blocks*other.blocks)`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行 `block_collapse(b * b * b)` 或 `b._blockmul(b)._blockmul(b)` 时抛出 AttributeError: 'Zero' object has no attribute 'cols'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中完整的异常堆栈跟踪显示错误发生在 `blockmatrix.py` 第 80 行的 `colblocksizes` 属性中。",
+        "Issue 中：`AttributeError: 'Zero' object has no attribute 'cols'`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "包含 ZeroMatrix 块的 BlockMatrix 应能正确进行多次块矩阵乘法，不抛出 AttributeError，并返回正确的结果矩阵（其中零元素应保持为矩阵类型或正确处理）。",
+      "evidence": [
+        "Issue 中：`block_collapse(b * b)` 和 `b._blockmul(b)` 第一次乘法成功，返回 `Matrix([[a**2, 0], [0, 0]])`。",
+        "相关测试 1：`test_BlockMatrix` 展示了 BlockMatrix 与 MatrixSymbol 混合乘法的正常行为。",
+        "源码片段 1：BlockMatrix 类的文档字符串展示了包含 ZeroMatrix 的块矩阵乘法示例。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BlockMatrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 的核心是关于 BlockMatrix 类的行为，特别是其乘法操作。"
+      },
+      {
+        "name": "BlockMatrix._blockmul",
+        "kind": "method",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 中直接调用了此方法并触发了异常，它是块矩阵乘法的内部实现。"
+      },
+      {
+        "name": "block_collapse",
+        "kind": "function",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 中通过 `block_collapse(b * b * b)` 触发了异常，它是处理块矩阵表达式化简的函数。"
+      },
+      {
+        "name": "ZeroMatrix",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中缺陷的触发与 ZeroMatrix 块在乘法后类型变化有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/expressions/blockmatrix.py",
+        "object": "BlockMatrix._blockmul",
+        "lines": "164-169",
+        "reason": "Issue 显示 `b._blockmul(b)` 返回的矩阵中零元素类型从 `ZeroMatrix` 变成了 `Zero`。`_blockmul` 方法中的 `self.blocks*other.blocks` 操作可能导致类型信息丢失。"
+      },
+      {
+        "path": "sympy/matrices/expressions/blockmatrix.py",
+        "object": "BlockMatrix.colblocksizes",
+        "lines": "154-155",
+        "reason": "异常直接发生在此属性中，因为它假设 `self.blocks[0, i]` 有 `.cols` 属性，但遇到了 `Zero` 对象。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_BlockMatrix",
+        "test_file": "sympy/matrices/expressions/tests/test_blockmatrix.py",
+        "why_relevant": "它测试了 BlockMatrix 的基本操作，包括 `_blockmul`、`block_collapse` 和包含 MatrixSymbol 的乘法，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "imports (MatrixSymbol, BlockMatrix, block_collapse)",
+          "对象构造模式 (BlockMatrix([[A, B], [C, D]]))",
+          "使用 `block_collapse` 和 `_blockmul` 的 API 调用",
+          "使用 `assert` 验证形状和结果。"
+        ],
+        "possible_gap": "现有测试可能没有专门测试包含 ZeroMatrix 块的 BlockMatrix 的连续乘法，或者没有检查乘法结果中零元素的类型。"
+      },
+      {
+        "test_name": "test_block_collapse_explicit_matrices",
+        "test_file": "sympy/matrices/expressions/tests/test_blockmatrix.py",
+        "why_relevant": "它测试了 `block_collapse` 对包含显式矩阵的 BlockMatrix 的处理，展示了化简功能。",
+        "reusable_parts": [
+          "使用 `block_collapse` 的断言风格",
+          "对 BlockMatrix 包含单个矩阵的简单场景测试。"
+        ],
+        "possible_gap": "测试使用的是普通数值矩阵，而不是包含 ZeroMatrix 符号矩阵的复杂块结构，也未涉及连续乘法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，BlockMatrix 的块是 MatrixSymbol (如 A, B, C, D)。",
+        "target_pattern": "将 BlockMatrix 的某些块替换为 ZeroMatrix。",
+        "reason": "Issue 表明缺陷仅在块中包含 ZeroMatrix 时触发，且乘法后零元素类型发生变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，通常只进行一次乘法或化简操作 (如 `block_collapse(X*Y)`)。",
+        "target_pattern": "对同一个 BlockMatrix 对象连续进行两次或更多次 `_blockmul` 或 `block_collapse` 乘法。",
+        "reason": "Issue 中第一次乘法成功，第二次乘法才失败，表明缺陷与操作链的深度或中间结果的类型有关。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "`b._blockmul(b).blocks[0, 1]` 或中间结果块中零元素的类型。",
+        "reason": "Issue 明确指出第一次乘法后零元素从 `ZeroMatrix` 变成了 `Zero`，这是触发后续异常的关键。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 `block_collapse(b * b * b)` 或 `b._blockmul(b)._blockmul(b)` 时是否抛出 AttributeError。",
+        "reason": "这是 Issue 报告的直接错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`b._blockmul(b)` 返回的矩阵结构，特别是零元素的位置和表示。",
+        "reason": "需要确认第一次乘法的结果是否正确，以及其内部表示是否为后续失败埋下伏笔。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "包含 ZeroMatrix 块的 BlockMatrix 连续乘法不应抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的、具体的矩阵字符串表示，因为 Issue 未给出 `b * b * b` 的确切预期结果。",
+        "reason": "Issue 的核心是异常，因此首要断言是操作不会引发特定异常。修复后，可进一步断言返回结果的类型或结构。"
+      },
+      {
+        "assertion_goal": "BlockMatrix 乘法后，结果矩阵中的零元素应保持为矩阵类型（或具有 `.cols` 属性），以便后续操作。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 `Zero` 对象的具体属性值，因为修复可能改变内部表示。",
+        "reason": "Issue 的根源是 `Zero` 对象缺少 `.cols` 属性，因此修复后应确保块元素具有必要的矩阵属性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 MatrixSymbol, ZeroMatrix, BlockMatrix, block_collapse。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个简单的函数中运行，无需复杂的 fixture 或外部资源。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`self.blocks*other.blocks` 内部乘法的具体语义以及它为何将 ZeroMatrix 转换为 Zero。",
+      "修复后，`b * b * b` 的确切预期结果矩阵是什么（除了不抛异常外）。",
+      "除了 `Zero` 类型问题，是否还有其他边界情况会导致类似异常。"
+    ]
+  }
+}

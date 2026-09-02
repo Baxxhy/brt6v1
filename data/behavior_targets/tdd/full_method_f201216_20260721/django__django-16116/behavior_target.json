@@ -1,0 +1,334 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16116",
+  "issue_summary": "makemigrations --check 在检查到需要迁移时仍然生成迁移文件，与其他命令的 --check 行为不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 MigrationTestBase 和其 temporary_migration_module 方法来创建临时的、需要生成迁移的测试应用模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 io.StringIO 来捕获命令输出，特别是当 verbosity > 0 时。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试环境应确保数据库或特定应用配置（MIGRATION_MODULES）指向临时模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_check",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它直接测试了 makemigrations --check 的行为，是测试该命令的起点。",
+        "reusable_parts": [
+          "class MakeMigrationsTests(MigrationTestBase)",
+          "self.temporary_migration_module()",
+          "call_command(\"makemigrations\", \"--check\", ...)",
+          "assertRaises(SystemExit) 用于检查非零退出"
+        ],
+        "possible_gap": "该测试只验证了命令的退出状态，但没有验证在需要迁移时是否实际创建了文件。它可能假设了当前有缺陷的行为（即创建文件）是正常的。"
+      },
+      {
+        "test_name": "OptimizeMigrationTests.test_optimizemigration_check",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它展示了另一个命令（optimizemigration）的 --check 行为，可以作为期望行为的参考。",
+        "reusable_parts": [
+          "@override_settings",
+          "call_command(\"optimizemigration\", \"--check\", ...)",
+          "assertRaises(SystemExit)"
+        ],
+        "possible_gap": "它测试的是不同的命令，需要将测试逻辑适配到 makemigrations 命令上。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_dry_run",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它测试了 makemigrations 的 --dry-run 选项，该选项与 --check 在“不实际写入”方面有相似目标。",
+        "reusable_parts": [
+          "io.StringIO() 捕获输出",
+          "call_command(\"makemigrations\", ..., dry_run=True, ...)",
+          "检查 stdout 输出内容"
+        ],
+        "possible_gap": "--dry-run 是关于输出预览，而 --check 是关于退出状态，它们的内部逻辑可能不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "运行 makemigrations 命令时使用 --check 选项，且存在需要生成的迁移。",
+      "evidence": [
+        "Issue 描述：'makemigrations --check generating migrations is inconsistent with other uses of --check'",
+        "相关测试 1：test_makemigrations_check 测试了 --check 选项"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 --check 选项时，makemigrations 命令仍然生成了迁移文件，而不是仅检查并退出。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'makemigrations --check should just exit without making migrations.'",
+        "Issue 描述：'The choice to write the migrations anyway was not discussed'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "所有相关测试都使用 call_command 来调用管理命令。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 的核心是关于 makemigrations 命令的行为。"
+      },
+      {
+        "name": "optimizemigration",
+        "kind": "command",
+        "source_path": "django/core/management/commands/optimizemigration.py",
+        "reason": "Issue 中将其作为 --check 行为一致的对比命令。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/makemigrations.py",
+        "object": "makemigrations",
+        "lines": "",
+        "reason": "这是 makemigrations 命令的实现文件，其 --check 选项的逻辑可能在此处决定是否写入文件。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中，call_command 使用了 --check 参数，但测试焦点在退出状态。",
+        "target_pattern": "在调用 call_command 后，增加对迁移目录的检查，验证没有新文件被创建。",
+        "reason": "Issue 的核心矛盾是 --check 模式下是否写入文件。当前测试没有验证这一点，变异后可以捕获缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 使用 temporary_migration_module 创建一个需要迁移的临时环境。",
+        "target_pattern": "确保临时环境在测试前没有目标迁移文件，并在调用命令后检查文件是否被创建。",
+        "reason": "为了观察 --check 是否错误地创建了文件，需要控制测试前后的文件系统状态。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "makemigrations --check 应该仅检查是否存在需要生成的迁移，并相应地退出（非零状态表示需要迁移），而不实际创建任何迁移文件。",
+      "evidence": [
+        "Issue 描述：'makemigrations --check should just exit without making migrations.'",
+        "Issue 描述：'inconsistent with migrate --check and optimizemigration --check, which just exit'",
+        "相关测试 2：test_optimizemigration_check 展示了 optimizemigration --check 仅检查并退出的行为"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "迁移目录（如 migration_dir）中的文件列表（os.listdir）在 call_command 前后的变化。",
+        "reason": "Issue 的关键是文件是否被创建。观察文件列表的变化可以直接证明缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "call_command 的返回值或引发的 SystemExit 异常。",
+        "reason": "--check 命令通过退出状态码（非零表示需要迁移）来指示结果，这是其设计行为的一部分。"
+      },
+      {
+        "kind": "stdout",
+        "expression_hint": "命令的标准输出（如果 verbosity > 0），可能包含计划创建的迁移文件信息。",
+        "reason": "输出可能提示命令是否打算或已经执行了文件写入操作。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用 --check 选项且需要迁移时，迁移目录中不应创建新的迁移文件。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的文件列表字符串相等，因为可能包含其他无关文件。",
+        "reason": "断言文件系统状态在命令执行前后没有变化（对于新迁移文件），这直接对应 Issue 的期望行为。"
+      },
+      {
+        "assertion_goal": "当使用 --check 选项且需要迁移时，命令应以非零状态退出（引发 SystemExit）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的退出码值，除非文档明确指定。",
+        "reason": "现有测试已经验证了这一点，这是 --check 功能的核心部分，需要保持。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "makemigrations --check 在内部是调用了与 --dry-run 相同的逻辑，还是完全独立的路径？",
+    "修复后，--check 和 --dry-run 的组合使用是否还有必要？Issue 暗示可能不需要了。",
+    "除了文件创建，--check 是否还有其他副作用（如更新内部状态）需要验证？"
+  ],
+  "raw": {
+    "issue_summary": "makemigrations --check 在检查到需要迁移时仍然生成迁移文件，与其他命令的 --check 行为不一致。",
+    "trigger_condition": {
+      "text": "运行 makemigrations 命令时使用 --check 选项，且存在需要生成的迁移。",
+      "evidence": [
+        "Issue 描述：'makemigrations --check generating migrations is inconsistent with other uses of --check'",
+        "相关测试 1：test_makemigrations_check 测试了 --check 选项"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 --check 选项时，makemigrations 命令仍然生成了迁移文件，而不是仅检查并退出。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'makemigrations --check should just exit without making migrations.'",
+        "Issue 描述：'The choice to write the migrations anyway was not discussed'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "makemigrations --check 应该仅检查是否存在需要生成的迁移，并相应地退出（非零状态表示需要迁移），而不实际创建任何迁移文件。",
+      "evidence": [
+        "Issue 描述：'makemigrations --check should just exit without making migrations.'",
+        "Issue 描述：'inconsistent with migrate --check and optimizemigration --check, which just exit'",
+        "相关测试 2：test_optimizemigration_check 展示了 optimizemigration --check 仅检查并退出的行为"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "所有相关测试都使用 call_command 来调用管理命令。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 的核心是关于 makemigrations 命令的行为。"
+      },
+      {
+        "name": "optimizemigration",
+        "kind": "command",
+        "source_path": "django/core/management/commands/optimizemigration.py",
+        "reason": "Issue 中将其作为 --check 行为一致的对比命令。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/makemigrations.py",
+        "object": "makemigrations",
+        "lines": "",
+        "reason": "这是 makemigrations 命令的实现文件，其 --check 选项的逻辑可能在此处决定是否写入文件。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_check",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它直接测试了 makemigrations --check 的行为，是测试该命令的起点。",
+        "reusable_parts": [
+          "class MakeMigrationsTests(MigrationTestBase)",
+          "self.temporary_migration_module()",
+          "call_command(\"makemigrations\", \"--check\", ...)",
+          "assertRaises(SystemExit) 用于检查非零退出"
+        ],
+        "possible_gap": "该测试只验证了命令的退出状态，但没有验证在需要迁移时是否实际创建了文件。它可能假设了当前有缺陷的行为（即创建文件）是正常的。"
+      },
+      {
+        "test_name": "OptimizeMigrationTests.test_optimizemigration_check",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它展示了另一个命令（optimizemigration）的 --check 行为，可以作为期望行为的参考。",
+        "reusable_parts": [
+          "@override_settings",
+          "call_command(\"optimizemigration\", \"--check\", ...)",
+          "assertRaises(SystemExit)"
+        ],
+        "possible_gap": "它测试的是不同的命令，需要将测试逻辑适配到 makemigrations 命令上。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_dry_run",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它测试了 makemigrations 的 --dry-run 选项，该选项与 --check 在“不实际写入”方面有相似目标。",
+        "reusable_parts": [
+          "io.StringIO() 捕获输出",
+          "call_command(\"makemigrations\", ..., dry_run=True, ...)",
+          "检查 stdout 输出内容"
+        ],
+        "possible_gap": "--dry-run 是关于输出预览，而 --check 是关于退出状态，它们的内部逻辑可能不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中，call_command 使用了 --check 参数，但测试焦点在退出状态。",
+        "target_pattern": "在调用 call_command 后，增加对迁移目录的检查，验证没有新文件被创建。",
+        "reason": "Issue 的核心矛盾是 --check 模式下是否写入文件。当前测试没有验证这一点，变异后可以捕获缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 使用 temporary_migration_module 创建一个需要迁移的临时环境。",
+        "target_pattern": "确保临时环境在测试前没有目标迁移文件，并在调用命令后检查文件是否被创建。",
+        "reason": "为了观察 --check 是否错误地创建了文件，需要控制测试前后的文件系统状态。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "迁移目录（如 migration_dir）中的文件列表（os.listdir）在 call_command 前后的变化。",
+        "reason": "Issue 的关键是文件是否被创建。观察文件列表的变化可以直接证明缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "call_command 的返回值或引发的 SystemExit 异常。",
+        "reason": "--check 命令通过退出状态码（非零表示需要迁移）来指示结果，这是其设计行为的一部分。"
+      },
+      {
+        "kind": "stdout",
+        "expression_hint": "命令的标准输出（如果 verbosity > 0），可能包含计划创建的迁移文件信息。",
+        "reason": "输出可能提示命令是否打算或已经执行了文件写入操作。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用 --check 选项且需要迁移时，迁移目录中不应创建新的迁移文件。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的文件列表字符串相等，因为可能包含其他无关文件。",
+        "reason": "断言文件系统状态在命令执行前后没有变化（对于新迁移文件），这直接对应 Issue 的期望行为。"
+      },
+      {
+        "assertion_goal": "当使用 --check 选项且需要迁移时，命令应以非零状态退出（引发 SystemExit）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的退出码值，除非文档明确指定。",
+        "reason": "现有测试已经验证了这一点，这是 --check 功能的核心部分，需要保持。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 MigrationTestBase 和其 temporary_migration_module 方法来创建临时的、需要生成迁移的测试应用模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 io.StringIO 来捕获命令输出，特别是当 verbosity > 0 时。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试环境应确保数据库或特定应用配置（MIGRATION_MODULES）指向临时模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "makemigrations --check 在内部是调用了与 --dry-run 相同的逻辑，还是完全独立的路径？",
+      "修复后，--check 和 --dry-run 的组合使用是否还有必要？Issue 暗示可能不需要了。",
+      "除了文件创建，--check 是否还有其他副作用（如更新内部状态）需要验证？"
+    ]
+  }
+}

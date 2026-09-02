@@ -1,0 +1,288 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-14087",
+  "issue_summary": "当 LogisticRegressionCV 的 refit=False 时，在计算平均系数时发生 IndexError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 pytest 框架，可能需导入 sklearn.linear_model、numpy 和相关的测试工具（如 make_classification）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "设置随机种子以确保数据生成的可重复性，如 Issue 中使用了 np.random.seed(29)。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_LogisticRegressionCV_no_refit",
+        "test_file": "sklearn/linear_model/tests/test_logistic.py",
+        "why_relevant": "该测试专门测试了 refit=False 时 LogisticRegressionCV 的属性形状，是测试 refit=False 场景的起点。",
+        "reusable_parts": [
+          "测试导入和设置（如 make_classification）",
+          "LogisticRegressionCV 的构造和拟合调用模式",
+          "对 coef_ 等属性形状的断言风格"
+        ],
+        "possible_gap": "该测试使用了多分类（n_classes=3）和弹性网络惩罚，可能没有覆盖触发错误的特定条件（如二分类、特定求解器或 coefs_paths 数组形状的差异）。"
+      },
+      {
+        "test_name": "test_logistic_cv",
+        "test_file": "sklearn/linear_model/tests/test_logistic.py",
+        "why_relevant": "测试了 LogisticRegressionCV 的基本功能，包括 coefs_paths_ 的形状，有助于理解正常的数据流。",
+        "reusable_parts": [
+          "使用随机数据生成",
+          "基本的拟合和断言模式"
+        ],
+        "possible_gap": "该测试默认 refit=True，且使用 'liblinear' 求解器和 'ovr' 多分类策略，与 Issue 场景不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 LogisticRegressionCV 进行拟合，设置 refit=False，并使用特定的求解器（如 'saga' 或 'liblinear'）。",
+      "evidence": [
+        "Issue 中的代码示例：LogisticRegressionCV(cv=5, solver='saga', tol=1e-2, refit=False).fit(X, y)",
+        "Issue 描述：错误在尝试通过交叉验证估计正则化参数且不重新拟合时抛出。",
+        "相关测试 1 也测试了 refit=False 的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 IndexError: too many indices for array 异常，发生在 logistic.py 文件第 2193-2194 行附近。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪指向 logistic.py 的第 2193-2194 行：w = np.mean([coefs_paths[:, i, best_indices[i], :] for i in range(len(folds))], axis=0)",
+        "错误信息：IndexError: too many indices for array"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LogisticRegressionCV",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/logistic.py",
+        "reason": "Issue 直接报告了该类在特定配置下的缺陷。"
+      },
+      {
+        "name": "LogisticRegressionCV.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/logistic.py",
+        "reason": "错误发生在调用 fit 方法的过程中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/logistic.py",
+        "object": "LogisticRegressionCV.fit",
+        "lines": "2190-2200",
+        "reason": "错误堆栈跟踪指向此区域，特别是当 refit=False 且 multi_class='multinomial' 时，计算平均系数的列表推导式可能错误地索引了 coefs_paths 数组。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中设置了 multi_class 参数（'ovr' 或 'multinomial'）、penalty='elasticnet'、l1_ratios 非空。",
+        "target_pattern": "根据 Issue，可能需要使用二分类数据（y 为符号函数结果）、solver='saga' 或 'liblinear'、refit=False，并且可能涉及 penalty='l2'（默认）或 'elasticnet' 但 l1_ratios=None（默认）。",
+        "reason": "Issue 的触发代码使用了二分类数据和特定求解器，而相关测试 1 使用了多分类和弹性网络。数组形状的差异可能导致索引错误。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 使用 make_classification 生成多分类数据。",
+        "target_pattern": "使用 Issue 中的代码生成二分类数据：X 来自正态分布，y = np.sign(intercept + X @ beta)。",
+        "reason": "二分类与多分类在内部处理（如 n_classes 设置、coefs_paths 形状）上可能不同，这可能影响缺陷路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 refit=False 时，LogisticRegressionCV 应能正常完成拟合，不抛出 IndexError 异常，并正确计算平均系数和其他属性。",
+      "evidence": [
+        "Issue 的 'Expected Results' 部分：'No error is thrown.'",
+        "相关测试 1 验证了 refit=False 时属性形状的正确性，暗示了正常行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 fit 方法时捕获 IndexError 异常。",
+        "reason": "Issue 的核心现象是抛出 IndexError，直接观测此异常可确认缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "拟合后检查 coefs_paths_ 字典中值的形状（例如，对于每个类别的数组维度）。",
+        "reason": "错误与 coefs_paths 数组的索引有关，观察其形状有助于理解缺陷条件。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "拟合前和拟合后检查 multi_class、n_classes_、coefs_paths_.shape 等属性。",
+        "reason": "这些属性影响内部路径选择（ovr vs multinomial）和数组形状，是缺陷的关键上下文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 refit=False 时，LogisticRegressionCV.fit 应正常完成，不抛出 IndexError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串或精确的行号，因为这些可能在修复后改变。",
+        "reason": "Issue 的期望结果是“No error is thrown.”，因此断言不应引发特定异常。但为了复现，可以先断言会引发异常（在修复前），修复后则应断言不引发异常。"
+      },
+      {
+        "assertion_goal": "拟合后，coef_ 等属性应具有正确的形状（与类别数、特征数一致）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言系数的精确数值，因为随机性可能导致变化。",
+        "reason": "相关测试 1 已经验证了属性形状，这是 refit=False 场景下的一个稳定断言目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只发生在二分类场景，还是多分类的某些配置下也会发生？",
+    "coefs_paths 数组在 multi_class='multinomial' 和 multi_class='ovr' 下的确切形状差异，以及这如何导致索引错误？",
+    "除了 solver='saga' 和 'liblinear'，其他求解器是否受影响？",
+    "penalty 和 l1_ratios 参数在触发缺陷中的作用是什么？"
+  ],
+  "raw": {
+    "issue_summary": "当 LogisticRegressionCV 的 refit=False 时，在计算平均系数时发生 IndexError 异常。",
+    "trigger_condition": {
+      "text": "使用 LogisticRegressionCV 进行拟合，设置 refit=False，并使用特定的求解器（如 'saga' 或 'liblinear'）。",
+      "evidence": [
+        "Issue 中的代码示例：LogisticRegressionCV(cv=5, solver='saga', tol=1e-2, refit=False).fit(X, y)",
+        "Issue 描述：错误在尝试通过交叉验证估计正则化参数且不重新拟合时抛出。",
+        "相关测试 1 也测试了 refit=False 的场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 IndexError: too many indices for array 异常，发生在 logistic.py 文件第 2193-2194 行附近。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪指向 logistic.py 的第 2193-2194 行：w = np.mean([coefs_paths[:, i, best_indices[i], :] for i in range(len(folds))], axis=0)",
+        "错误信息：IndexError: too many indices for array"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 refit=False 时，LogisticRegressionCV 应能正常完成拟合，不抛出 IndexError 异常，并正确计算平均系数和其他属性。",
+      "evidence": [
+        "Issue 的 'Expected Results' 部分：'No error is thrown.'",
+        "相关测试 1 验证了 refit=False 时属性形状的正确性，暗示了正常行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LogisticRegressionCV",
+        "kind": "class",
+        "source_path": "sklearn/linear_model/logistic.py",
+        "reason": "Issue 直接报告了该类在特定配置下的缺陷。"
+      },
+      {
+        "name": "LogisticRegressionCV.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/logistic.py",
+        "reason": "错误发生在调用 fit 方法的过程中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/logistic.py",
+        "object": "LogisticRegressionCV.fit",
+        "lines": "2190-2200",
+        "reason": "错误堆栈跟踪指向此区域，特别是当 refit=False 且 multi_class='multinomial' 时，计算平均系数的列表推导式可能错误地索引了 coefs_paths 数组。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_LogisticRegressionCV_no_refit",
+        "test_file": "sklearn/linear_model/tests/test_logistic.py",
+        "why_relevant": "该测试专门测试了 refit=False 时 LogisticRegressionCV 的属性形状，是测试 refit=False 场景的起点。",
+        "reusable_parts": [
+          "测试导入和设置（如 make_classification）",
+          "LogisticRegressionCV 的构造和拟合调用模式",
+          "对 coef_ 等属性形状的断言风格"
+        ],
+        "possible_gap": "该测试使用了多分类（n_classes=3）和弹性网络惩罚，可能没有覆盖触发错误的特定条件（如二分类、特定求解器或 coefs_paths 数组形状的差异）。"
+      },
+      {
+        "test_name": "test_logistic_cv",
+        "test_file": "sklearn/linear_model/tests/test_logistic.py",
+        "why_relevant": "测试了 LogisticRegressionCV 的基本功能，包括 coefs_paths_ 的形状，有助于理解正常的数据流。",
+        "reusable_parts": [
+          "使用随机数据生成",
+          "基本的拟合和断言模式"
+        ],
+        "possible_gap": "该测试默认 refit=True，且使用 'liblinear' 求解器和 'ovr' 多分类策略，与 Issue 场景不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中设置了 multi_class 参数（'ovr' 或 'multinomial'）、penalty='elasticnet'、l1_ratios 非空。",
+        "target_pattern": "根据 Issue，可能需要使用二分类数据（y 为符号函数结果）、solver='saga' 或 'liblinear'、refit=False，并且可能涉及 penalty='l2'（默认）或 'elasticnet' 但 l1_ratios=None（默认）。",
+        "reason": "Issue 的触发代码使用了二分类数据和特定求解器，而相关测试 1 使用了多分类和弹性网络。数组形状的差异可能导致索引错误。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 使用 make_classification 生成多分类数据。",
+        "target_pattern": "使用 Issue 中的代码生成二分类数据：X 来自正态分布，y = np.sign(intercept + X @ beta)。",
+        "reason": "二分类与多分类在内部处理（如 n_classes 设置、coefs_paths 形状）上可能不同，这可能影响缺陷路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 fit 方法时捕获 IndexError 异常。",
+        "reason": "Issue 的核心现象是抛出 IndexError，直接观测此异常可确认缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "拟合后检查 coefs_paths_ 字典中值的形状（例如，对于每个类别的数组维度）。",
+        "reason": "错误与 coefs_paths 数组的索引有关，观察其形状有助于理解缺陷条件。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "拟合前和拟合后检查 multi_class、n_classes_、coefs_paths_.shape 等属性。",
+        "reason": "这些属性影响内部路径选择（ovr vs multinomial）和数组形状，是缺陷的关键上下文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 refit=False 时，LogisticRegressionCV.fit 应正常完成，不抛出 IndexError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串或精确的行号，因为这些可能在修复后改变。",
+        "reason": "Issue 的期望结果是“No error is thrown.”，因此断言不应引发特定异常。但为了复现，可以先断言会引发异常（在修复前），修复后则应断言不引发异常。"
+      },
+      {
+        "assertion_goal": "拟合后，coef_ 等属性应具有正确的形状（与类别数、特征数一致）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言系数的精确数值，因为随机性可能导致变化。",
+        "reason": "相关测试 1 已经验证了属性形状，这是 refit=False 场景下的一个稳定断言目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytest 框架，可能需导入 sklearn.linear_model、numpy 和相关的测试工具（如 make_classification）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "设置随机种子以确保数据生成的可重复性，如 Issue 中使用了 np.random.seed(29)。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只发生在二分类场景，还是多分类的某些配置下也会发生？",
+      "coefs_paths 数组在 multi_class='multinomial' 和 multi_class='ovr' 下的确切形状差异，以及这如何导致索引错误？",
+      "除了 solver='saga' 和 'liblinear'，其他求解器是否受影响？",
+      "penalty 和 l1_ratios 参数在触发缺陷中的作用是什么？"
+    ]
+  }
+}

@@ -1,0 +1,308 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13128",
+  "issue_summary": "在 Django 的 annotate 中，对 DateTimeField 进行减法运算后加上一个 DurationField 类型的 Value 时，会抛出 FieldError 异常，提示混合类型问题。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用支持时间减法（supports_temporal_subtraction）的数据库后端。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 datetime 模块以使用 timedelta。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建 Experiment 模型的测试数据，包含 start 和 end 字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FTimeDeltaTests.test_datetime_subtraction",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试直接涉及 DateTimeField 的减法运算（F('end') - F('start')），并使用 ExpressionWrapper 来指定 output_field。",
+        "reusable_parts": [
+          "imports",
+          "Experiment 模型",
+          "F 表达式",
+          "减法运算符",
+          "DurationField",
+          "skipUnlessDBFeature('supports_temporal_subtraction') 装饰器",
+          "使用 annotate 的测试结构"
+        ],
+        "possible_gap": "该测试使用了 ExpressionWrapper 来包裹整个表达式以指定 output_field，而 Issue 中的场景是尝试不使用 ExpressionWrapper。"
+      },
+      {
+        "test_name": "FTimeDeltaTests.test_datetime_subtraction_microseconds",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试使用了与 Issue 中几乎相同的表达式 F('end') - F('start')，并计算 delta，但同样包裹在 ExpressionWrapper 中。",
+        "reusable_parts": [
+          "Experiment 模型",
+          "F('end') - F('start') 表达式",
+          "DurationField",
+          "annotate 用法",
+          "assert 风格（比较 e.delta 与预期值）"
+        ],
+        "possible_gap": "该测试也使用了 ExpressionWrapper，没有测试不加包装直接进行加法运算（加上一个 Value）的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 Experiment.objects.annotate(delta=F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField())) 进行查询。",
+      "evidence": [
+        "Issue 中提供的代码示例：Experiment.objects.annotate(delta=F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField()))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.core.exceptions.FieldError: Expression contains mixed types: DateTimeField, DurationField. You must set output_field.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：django.core.exceptions.FieldError: Expression contains mixed types: DateTimeField, DurationField. You must set output_field."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Experiment.objects.annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发错误的 API 调用。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于引用模型字段的表达式。"
+      },
+      {
+        "name": "Value",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于包装 timedelta 值的表达式，并指定了 output_field。"
+      },
+      {
+        "name": "DurationField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中作为 Value 的 output_field 使用，也是期望的返回字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "涉及 F 表达式、Value 表达式以及加减法运算（Combinable 相关逻辑）的代码区域",
+        "lines": "",
+        "reason": "Issue 涉及表达式组合（F - F + Value）时的类型推断或 output_field 处理逻辑。错误信息提示混合类型问题，表明在表达式求值或类型检查环节可能存在缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相似测试中，减法运算被包裹在 ExpressionWrapper(..., output_field=DurationField()) 中。",
+        "target_pattern": "尝试不使用 ExpressionWrapper，直接在 annotate 中使用 F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField())。",
+        "reason": "Issue 明确指出目标是让时间减法运算在没有 ExpressionWrapper 的情况下工作，因此移除 ExpressionWrapper 是触发缺陷的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中主要使用减法运算符（F('end') - F('start')）。",
+        "target_pattern": "在减法结果后使用加法运算符（+）连接一个 Value(datetime.timedelta(), output_field=DurationField())。",
+        "reason": "Issue 中的表达式包含了加法运算，这可能导致表达式树的结构或类型推断逻辑与纯减法不同，从而触发混合类型错误。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "该表达式应该能够正常执行，计算出时间差并加上一个零时长的 timedelta，返回一个 DurationField 类型的结果，而不抛出 FieldError 异常。",
+      "evidence": [
+        "Issue 标题 'make temporal subtraction work without ExpressionWrapper' 暗示期望在没有 ExpressionWrapper 的情况下，时间减法运算能正常工作。",
+        "相关测试代码中，类似的减法运算（如 F('end') - F('start')）在 ExpressionWrapper 的包裹下可以正常工作。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 queryset = Experiment.objects.annotate(...) 时捕获的异常。",
+        "reason": "Issue 的核心错误现象是抛出 FieldError 异常，观测此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "观察 F('end') - F('start') 这个子表达式的推断 output_field 类型，以及整个组合表达式的 output_field。",
+        "reason": "错误信息提示混合类型问题，观测表达式中各部分的类型有助于理解类型推断失败的原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 annotate 操作能够成功执行，不抛出 FieldError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的 SQL 查询字符串或完整的 repr 输出。",
+        "reason": "当前缺陷表现为异常，因此初始复现测试应断言会抛出特定异常。修复后，测试应改为断言不抛出异常或能正常获取结果。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "在不使用 ExpressionWrapper 的情况下，F('end') - F('start') 这个子表达式本身是否会被正确推断为 DurationField 类型？",
+    "加法运算符（+）与 Value 的组合在表达式树中是如何影响最终 output_field 推断的？",
+    "除了抛出异常，是否还有其他潜在的错误行为（如错误的 SQL 生成）？",
+    "修复后，该表达式的确切返回值（delta）应该是什么？是 F('end') - F('start') 的结果，还是加上零时长 timedelta 后的结果？"
+  ],
+  "raw": {
+    "issue_summary": "在 Django 的 annotate 中，对 DateTimeField 进行减法运算后加上一个 DurationField 类型的 Value 时，会抛出 FieldError 异常，提示混合类型问题。",
+    "trigger_condition": {
+      "text": "使用 Experiment.objects.annotate(delta=F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField())) 进行查询。",
+      "evidence": [
+        "Issue 中提供的代码示例：Experiment.objects.annotate(delta=F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField()))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.core.exceptions.FieldError: Expression contains mixed types: DateTimeField, DurationField. You must set output_field.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：django.core.exceptions.FieldError: Expression contains mixed types: DateTimeField, DurationField. You must set output_field."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "该表达式应该能够正常执行，计算出时间差并加上一个零时长的 timedelta，返回一个 DurationField 类型的结果，而不抛出 FieldError 异常。",
+      "evidence": [
+        "Issue 标题 'make temporal subtraction work without ExpressionWrapper' 暗示期望在没有 ExpressionWrapper 的情况下，时间减法运算能正常工作。",
+        "相关测试代码中，类似的减法运算（如 F('end') - F('start')）在 ExpressionWrapper 的包裹下可以正常工作。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Experiment.objects.annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发错误的 API 调用。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于引用模型字段的表达式。"
+      },
+      {
+        "name": "Value",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于包装 timedelta 值的表达式，并指定了 output_field。"
+      },
+      {
+        "name": "DurationField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中作为 Value 的 output_field 使用，也是期望的返回字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "涉及 F 表达式、Value 表达式以及加减法运算（Combinable 相关逻辑）的代码区域",
+        "lines": "",
+        "reason": "Issue 涉及表达式组合（F - F + Value）时的类型推断或 output_field 处理逻辑。错误信息提示混合类型问题，表明在表达式求值或类型检查环节可能存在缺陷。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FTimeDeltaTests.test_datetime_subtraction",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试直接涉及 DateTimeField 的减法运算（F('end') - F('start')），并使用 ExpressionWrapper 来指定 output_field。",
+        "reusable_parts": [
+          "imports",
+          "Experiment 模型",
+          "F 表达式",
+          "减法运算符",
+          "DurationField",
+          "skipUnlessDBFeature('supports_temporal_subtraction') 装饰器",
+          "使用 annotate 的测试结构"
+        ],
+        "possible_gap": "该测试使用了 ExpressionWrapper 来包裹整个表达式以指定 output_field，而 Issue 中的场景是尝试不使用 ExpressionWrapper。"
+      },
+      {
+        "test_name": "FTimeDeltaTests.test_datetime_subtraction_microseconds",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试使用了与 Issue 中几乎相同的表达式 F('end') - F('start')，并计算 delta，但同样包裹在 ExpressionWrapper 中。",
+        "reusable_parts": [
+          "Experiment 模型",
+          "F('end') - F('start') 表达式",
+          "DurationField",
+          "annotate 用法",
+          "assert 风格（比较 e.delta 与预期值）"
+        ],
+        "possible_gap": "该测试也使用了 ExpressionWrapper，没有测试不加包装直接进行加法运算（加上一个 Value）的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相似测试中，减法运算被包裹在 ExpressionWrapper(..., output_field=DurationField()) 中。",
+        "target_pattern": "尝试不使用 ExpressionWrapper，直接在 annotate 中使用 F('end') - F('start') + Value(datetime.timedelta(), output_field=DurationField())。",
+        "reason": "Issue 明确指出目标是让时间减法运算在没有 ExpressionWrapper 的情况下工作，因此移除 ExpressionWrapper 是触发缺陷的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中主要使用减法运算符（F('end') - F('start')）。",
+        "target_pattern": "在减法结果后使用加法运算符（+）连接一个 Value(datetime.timedelta(), output_field=DurationField())。",
+        "reason": "Issue 中的表达式包含了加法运算，这可能导致表达式树的结构或类型推断逻辑与纯减法不同，从而触发混合类型错误。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 queryset = Experiment.objects.annotate(...) 时捕获的异常。",
+        "reason": "Issue 的核心错误现象是抛出 FieldError 异常，观测此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "观察 F('end') - F('start') 这个子表达式的推断 output_field 类型，以及整个组合表达式的 output_field。",
+        "reason": "错误信息提示混合类型问题，观测表达式中各部分的类型有助于理解类型推断失败的原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 annotate 操作能够成功执行，不抛出 FieldError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的 SQL 查询字符串或完整的 repr 输出。",
+        "reason": "当前缺陷表现为异常，因此初始复现测试应断言会抛出特定异常。修复后，测试应改为断言不抛出异常或能正常获取结果。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用支持时间减法（supports_temporal_subtraction）的数据库后端。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 datetime 模块以使用 timedelta。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建 Experiment 模型的测试数据，包含 start 和 end 字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "在不使用 ExpressionWrapper 的情况下，F('end') - F('start') 这个子表达式本身是否会被正确推断为 DurationField 类型？",
+      "加法运算符（+）与 Value 的组合在表达式树中是如何影响最终 output_field 推断的？",
+      "除了抛出异常，是否还有其他潜在的错误行为（如错误的 SQL 生成）？",
+      "修复后，该表达式的确切返回值（delta）应该是什么？是 F('end') - F('start') 的结果，还是加上零时长 timedelta 后的结果？"
+    ]
+  }
+}

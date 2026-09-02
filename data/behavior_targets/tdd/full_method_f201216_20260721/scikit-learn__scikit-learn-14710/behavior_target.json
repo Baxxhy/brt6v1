@@ -1,0 +1,310 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-14710",
+  "issue_summary": "HistGradientBoostingClassifier 在启用早停时，当目标变量为字符串类型时，内部评分器会因 y_true 为整数而 y_pred 为字符串导致类型错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 sklearn.experimental 导入 enable_hist_gradient_boosting 以启用实验性功能。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 numpy 生成随机特征 X 和字符串目标 y。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试框架（如 pytest）和相关的参数化装饰器可用于组织测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_early_stopping_classification",
+        "test_file": "sklearn/ensemble/_hist_gradient_boosting/tests/test_gradient_boosting.py",
+        "why_relevant": "此测试专门针对 HistGradientBoostingClassifier 的早停功能，涵盖了不同的 scoring 参数和 validation_fraction 设置。",
+        "reusable_parts": [
+          "HistGradientBoostingClassifier 的导入和构造",
+          "使用 make_classification 生成数值型 X 和整数型 y",
+          "调用 fit 方法并验证 n_iter_",
+          "早停相关参数（scoring, validation_fraction, n_iter_no_change, tol）的配置模式。"
+        ],
+        "possible_gap": "此测试使用 make_classification 生成的整数目标 y，而 Issue 中的 bug 需要字符串类型的目标变量。测试没有覆盖字符串标签的分类场景。"
+      },
+      {
+        "test_name": "test_early_stopping_regression",
+        "test_file": "sklearn/ensemble/_hist_gradient_boosting/tests/test_gradient_boosting.py",
+        "why_relevant": "此测试针对 HistGradientBoostingRegressor 的早停功能，展示了类似的测试结构和参数化模式，可用于理解早停测试的通用模式。",
+        "reusable_parts": [
+          "测试结构（参数化装饰器、模型构造、fit 调用、n_iter_ 断言）",
+          "早停参数的组合测试方法。"
+        ],
+        "possible_gap": "这是回归测试，不涉及分类问题，因此不直接测试分类器的字符串标签处理。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 HistGradientBoostingClassifier 拟合字符串类型的目标变量 y，并设置 n_iter_no_change 以启用早停。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分：`y = np.array(['x'] * 50 + ['y'] * 50, dtype=object)` 和 `gbrt = HistGradientBoostingClassifier(n_iter_no_change=10)`",
+        "源码片段 2 显示当 n_iter_no_change 不为 None 时会进入早停逻辑，并调用 _check_early_stopping_scorer。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 fit 方法时抛出 TypeError: '<' not supported between instances of 'str' and 'float'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 Actual Results 部分显示了完整的异常堆栈跟踪，最终错误在 numpy 的 union1d 排序操作中，因为 y_true 和 y_pred 类型不一致。",
+        "堆栈跟踪显示错误源自 _check_early_stopping_scorer 调用 scorer_，最终在 accuracy_score 内部调用 _check_targets 时发生。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "HistGradientBoostingClassifier.fit",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "reason": "Issue 的复现代码直接调用此方法，并且堆栈跟踪显示错误发生在 fit 过程中。"
+      },
+      {
+        "name": "BaseHistGradientBoosting._check_early_stopping_scorer",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "reason": "源码片段 3 显示此方法直接调用了 scorer_，而 Issue 描述指出问题在于此方法内部 y_true 和 y_pred 类型不匹配。"
+      },
+      {
+        "name": "BaseHistGradientBoosting._get_small_trainset",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "reason": "源码片段 4 显示此方法用于获取用于早停评分的小训练集，其返回的 y_small_train 被传递给 _check_early_stopping_scorer。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "object": "BaseHistGradientBoosting._check_early_stopping_scorer",
+        "lines": "423-439",
+        "reason": "Issue 的堆栈跟踪和描述都指向此方法。它直接使用从 _get_small_trainset 获得的 y_small_train 和 y_val（这些可能是整数编码的）调用 scorer_，而 scorer_ 内部可能使用原始的字符串类进行预测，导致类型冲突。"
+      },
+      {
+        "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "object": "BaseHistGradientBoosting.fit",
+        "lines": "83-392",
+        "reason": "fit 方法包含了早停逻辑的初始化和调用 _check_early_stopping_scorer 的代码路径。它负责设置 scorer_ 并决定是否进入早停分支。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用 make_classification 生成的整数数组作为目标变量 y。",
+        "target_pattern": "使用字符串数组（如 ['a', 'b']）作为目标变量 y。",
+        "reason": "Issue 明确指出当目标变量为字符串且早停启用时触发 bug。将 y 从整数改为字符串是触发缺陷路径的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中可能设置 scoring='accuracy' 或 scoring=None（使用默认分类器评分器）。",
+        "target_pattern": "保持 scoring 为 None 或 'accuracy'，但确保 n_iter_no_change 不为 None 以启用早停。",
+        "reason": "Issue 的复现代码使用了默认评分器（即 accuracy），并且设置了 n_iter_no_change。早停启用是触发 _check_early_stopping_scorer 的必要条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "HistGradientBoostingClassifier 应能正确处理字符串目标变量，并在启用早停时正常完成拟合，不抛出类型错误。",
+      "evidence": [
+        "Issue 的 Expected Results 部分：\"No error is thrown\"。",
+        "Issue 的 Description 部分指出需要将 y_true 编码以匹配 y_pred 的类型。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 gb.fit(X, y) 时是否抛出 TypeError，特别是关于 '<' not supported between instances of 'str' and 'float' 的消息。",
+        "reason": "Issue 中观察到的直接错误现象就是此异常。捕获此异常是判断 bug 是否被触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 _check_early_stopping_scorer 内部，观察传入的 y_small_train 和 y_val 的类型，以及 self.classes_ 的存在和内容。",
+        "reason": "Issue 描述指出 y_true 是整数而 y_pred 是原始字符串类。观测这些变量的类型有助于理解缺陷发生的具体上下文。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "gb.fit(X, y) 是否成功返回且 gb.n_iter_ 被正确设置。",
+        "reason": "修复后的预期行为是 fit 成功完成并更新模型属性，没有异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用字符串目标变量和启用早停时，HistGradientBoostingClassifier.fit 应正常完成，不抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体行号或环境可能变化。",
+        "reason": "Issue 的核心是特定条件下会抛出异常，修复后应不再抛出。使用 pytest.raises 或 assert not raises 来验证此行为变化是直接且稳定的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "是否所有字符串标签类型（如非 ASCII 字符、混合类型）都会触发此问题，还是仅限特定情况。",
+    "除了 accuracy scorer 之外，其他 scoring 参数（如 'f1'）是否也会触发相同或类似的问题。",
+    "在 _check_early_stopping_scorer 中，y_small_train 和 y_val 具体在何时被转换为整数编码（可能在 fit 的更早阶段），以及 self.classes_ 属性何时被设置。",
+    "Issue 中建议的补丁（在 _check_early_stopping_scorer 中检查 self.classes_ 并转换 y）是否是唯一或最佳的修复方案。"
+  ],
+  "raw": {
+    "issue_summary": "HistGradientBoostingClassifier 在启用早停时，当目标变量为字符串类型时，内部评分器会因 y_true 为整数而 y_pred 为字符串导致类型错误。",
+    "trigger_condition": {
+      "text": "使用 HistGradientBoostingClassifier 拟合字符串类型的目标变量 y，并设置 n_iter_no_change 以启用早停。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分：`y = np.array(['x'] * 50 + ['y'] * 50, dtype=object)` 和 `gbrt = HistGradientBoostingClassifier(n_iter_no_change=10)`",
+        "源码片段 2 显示当 n_iter_no_change 不为 None 时会进入早停逻辑，并调用 _check_early_stopping_scorer。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 fit 方法时抛出 TypeError: '<' not supported between instances of 'str' and 'float'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 Actual Results 部分显示了完整的异常堆栈跟踪，最终错误在 numpy 的 union1d 排序操作中，因为 y_true 和 y_pred 类型不一致。",
+        "堆栈跟踪显示错误源自 _check_early_stopping_scorer 调用 scorer_，最终在 accuracy_score 内部调用 _check_targets 时发生。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "HistGradientBoostingClassifier 应能正确处理字符串目标变量，并在启用早停时正常完成拟合，不抛出类型错误。",
+      "evidence": [
+        "Issue 的 Expected Results 部分：\"No error is thrown\"。",
+        "Issue 的 Description 部分指出需要将 y_true 编码以匹配 y_pred 的类型。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "HistGradientBoostingClassifier.fit",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "reason": "Issue 的复现代码直接调用此方法，并且堆栈跟踪显示错误发生在 fit 过程中。"
+      },
+      {
+        "name": "BaseHistGradientBoosting._check_early_stopping_scorer",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "reason": "源码片段 3 显示此方法直接调用了 scorer_，而 Issue 描述指出问题在于此方法内部 y_true 和 y_pred 类型不匹配。"
+      },
+      {
+        "name": "BaseHistGradientBoosting._get_small_trainset",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "reason": "源码片段 4 显示此方法用于获取用于早停评分的小训练集，其返回的 y_small_train 被传递给 _check_early_stopping_scorer。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "object": "BaseHistGradientBoosting._check_early_stopping_scorer",
+        "lines": "423-439",
+        "reason": "Issue 的堆栈跟踪和描述都指向此方法。它直接使用从 _get_small_trainset 获得的 y_small_train 和 y_val（这些可能是整数编码的）调用 scorer_，而 scorer_ 内部可能使用原始的字符串类进行预测，导致类型冲突。"
+      },
+      {
+        "path": "sklearn/ensemble/_hist_gradient_boosting/gradient_boosting.py",
+        "object": "BaseHistGradientBoosting.fit",
+        "lines": "83-392",
+        "reason": "fit 方法包含了早停逻辑的初始化和调用 _check_early_stopping_scorer 的代码路径。它负责设置 scorer_ 并决定是否进入早停分支。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_early_stopping_classification",
+        "test_file": "sklearn/ensemble/_hist_gradient_boosting/tests/test_gradient_boosting.py",
+        "why_relevant": "此测试专门针对 HistGradientBoostingClassifier 的早停功能，涵盖了不同的 scoring 参数和 validation_fraction 设置。",
+        "reusable_parts": [
+          "HistGradientBoostingClassifier 的导入和构造",
+          "使用 make_classification 生成数值型 X 和整数型 y",
+          "调用 fit 方法并验证 n_iter_",
+          "早停相关参数（scoring, validation_fraction, n_iter_no_change, tol）的配置模式。"
+        ],
+        "possible_gap": "此测试使用 make_classification 生成的整数目标 y，而 Issue 中的 bug 需要字符串类型的目标变量。测试没有覆盖字符串标签的分类场景。"
+      },
+      {
+        "test_name": "test_early_stopping_regression",
+        "test_file": "sklearn/ensemble/_hist_gradient_boosting/tests/test_gradient_boosting.py",
+        "why_relevant": "此测试针对 HistGradientBoostingRegressor 的早停功能，展示了类似的测试结构和参数化模式，可用于理解早停测试的通用模式。",
+        "reusable_parts": [
+          "测试结构（参数化装饰器、模型构造、fit 调用、n_iter_ 断言）",
+          "早停参数的组合测试方法。"
+        ],
+        "possible_gap": "这是回归测试，不涉及分类问题，因此不直接测试分类器的字符串标签处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用 make_classification 生成的整数数组作为目标变量 y。",
+        "target_pattern": "使用字符串数组（如 ['a', 'b']）作为目标变量 y。",
+        "reason": "Issue 明确指出当目标变量为字符串且早停启用时触发 bug。将 y 从整数改为字符串是触发缺陷路径的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中可能设置 scoring='accuracy' 或 scoring=None（使用默认分类器评分器）。",
+        "target_pattern": "保持 scoring 为 None 或 'accuracy'，但确保 n_iter_no_change 不为 None 以启用早停。",
+        "reason": "Issue 的复现代码使用了默认评分器（即 accuracy），并且设置了 n_iter_no_change。早停启用是触发 _check_early_stopping_scorer 的必要条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 gb.fit(X, y) 时是否抛出 TypeError，特别是关于 '<' not supported between instances of 'str' and 'float' 的消息。",
+        "reason": "Issue 中观察到的直接错误现象就是此异常。捕获此异常是判断 bug 是否被触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 _check_early_stopping_scorer 内部，观察传入的 y_small_train 和 y_val 的类型，以及 self.classes_ 的存在和内容。",
+        "reason": "Issue 描述指出 y_true 是整数而 y_pred 是原始字符串类。观测这些变量的类型有助于理解缺陷发生的具体上下文。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "gb.fit(X, y) 是否成功返回且 gb.n_iter_ 被正确设置。",
+        "reason": "修复后的预期行为是 fit 成功完成并更新模型属性，没有异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当使用字符串目标变量和启用早停时，HistGradientBoostingClassifier.fit 应正常完成，不抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体行号或环境可能变化。",
+        "reason": "Issue 的核心是特定条件下会抛出异常，修复后应不再抛出。使用 pytest.raises 或 assert not raises 来验证此行为变化是直接且稳定的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sklearn.experimental 导入 enable_hist_gradient_boosting 以启用实验性功能。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 numpy 生成随机特征 X 和字符串目标 y。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试框架（如 pytest）和相关的参数化装饰器可用于组织测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "是否所有字符串标签类型（如非 ASCII 字符、混合类型）都会触发此问题，还是仅限特定情况。",
+      "除了 accuracy scorer 之外，其他 scoring 参数（如 'f1'）是否也会触发相同或类似的问题。",
+      "在 _check_early_stopping_scorer 中，y_small_train 和 y_val 具体在何时被转换为整数编码（可能在 fit 的更早阶段），以及 self.classes_ 属性何时被设置。",
+      "Issue 中建议的补丁（在 _check_early_stopping_scorer 中检查 self.classes_ 并转换 y）是否是唯一或最佳的修复方案。"
+    ]
+  }
+}

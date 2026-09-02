@@ -1,0 +1,274 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "astropy__astropy-7336",
+  "issue_summary": "当构造函数使用 @units.quantity_input 装饰器并带有返回类型提示 -> None 时，装饰器错误地尝试对 None 调用 .to() 方法，导致 AttributeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 astropy.units 作为 u。可能需要 pytest 来组织测试和捕获异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义一个简单的类，其 __init__ 方法用 @u.quantity_input 装饰并带有 -> None 提示。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_args_None_kwarg",
+        "test_file": "astropy/units/tests/test_quantity_decorator.py",
+        "why_relevant": "该测试涉及 @quantity_input 装饰器处理参数为 None 的情况，展示了装饰器对 None 参数的处理逻辑。",
+        "reusable_parts": [
+          "import astropy.units as u",
+          "@u.quantity_input 装饰器的使用模式",
+          "使用 u.Quantity 参数调用装饰函数",
+          "assert y is None 的断言风格"
+        ],
+        "possible_gap": "该测试关注的是输入参数为 None，而 Issue 是关于返回类型提示为 None 和返回值 None 的处理。"
+      },
+      {
+        "test_name": "test_args_None",
+        "test_file": "astropy/units/tests/test_quantity_decorator.py",
+        "why_relevant": "该测试也涉及 @quantity_input 装饰器处理 None 值，展示了装饰器参数列表中允许 None 的配置。",
+        "reusable_parts": [
+          "@u.quantity_input(x=[x_target, None], ...) 的装饰器参数配置",
+          "assert x is None 或 assert y is None 的断言"
+        ],
+        "possible_gap": "同样，它测试的是输入参数，而非返回类型或返回值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 @u.quantity_input 装饰一个构造函数（__init__），该构造函数的返回类型提示为 -> None，并用一个带单位的 Quantity 参数（例如 1.*u.V）调用该构造函数。",
+      "evidence": [
+        "Issue 中的 Reproducer 代码展示了装饰的 __init__ 方法和调用 PoC(1.*u.V)。",
+        "Issue 中的错误信息显示在 decorators.py 的 wrapper 函数中尝试对 return_ 调用 .to(wrapped_signature.return_annotation)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用装饰后的构造函数时抛出 AttributeError: 'NoneType' object has no attribute 'to'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示 AttributeError 发生在 astropy/units/decorators.py 第 225 行。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "units.quantity_input",
+        "kind": "function",
+        "source_path": "astropy/units/decorators.py",
+        "reason": "这是 Issue 中导致问题的装饰器。"
+      },
+      {
+        "name": "QuantityInput",
+        "kind": "class",
+        "source_path": "astropy/units/decorators.py",
+        "reason": "quantity_input 装饰器是 QuantityInput.as_decorator（根据源码片段1）。"
+      },
+      {
+        "name": "__init__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中的问题发生在被装饰的类构造函数上。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/units/decorators.py",
+        "object": "wrapper 函数（在 quantity_input 装饰器内部）",
+        "lines": "225-225",
+        "reason": "错误堆栈指向第 225 行，该行尝试对返回值调用 .to() 方法，当返回值为 None 时失败。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试装饰普通函数，参数是 Quantity 或 None。",
+        "target_pattern": "装饰一个类的 __init__ 方法，并为其添加 -> None 返回类型提示。",
+        "reason": "Issue 表明问题特定于装饰构造函数并带有返回类型提示 -> None 的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用装饰后的函数。",
+        "target_pattern": "实例化一个被装饰了 __init__ 的类。",
+        "reason": "触发缺陷需要构造对象，这会调用装饰后的 __init__ 方法。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当装饰的函数（包括构造函数）返回 None 时，@quantity_input 装饰器应正确处理，不尝试对 None 进行单位转换，并允许函数正常执行。",
+      "evidence": [
+        "Issue 的 Possible fix 部分提到装饰器可以检查是否返回 None 并省略单位检查。",
+        "Issue 的 Summary 和 Workaround 暗示添加 -> None 类型提示应该是被允许的。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 PoC(1.*u.V) 时捕获的 AttributeError 及其消息。",
+        "reason": "Issue 的核心错误是 AttributeError，观测此异常可直接确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "装饰器内部 wrapper 函数的 return_ 变量的值和类型。",
+        "reason": "缺陷发生在尝试对 return_（应为 None）调用 .to() 方法，观测其值可理解上下文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用带有 -> None 返回类型提示的 @quantity_input 装饰构造函数后，能够成功创建对象而不抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的内部属性或完整的错误消息字符串，因为它们可能在修复后改变。",
+        "reason": "修复后，调用应不再引发 AttributeError。使用 pytest.raises 的否定形式（即不引发异常）或简单的对象创建成功断言更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "@quantity_input 装饰器内部处理返回值的完整逻辑，特别是 wrapper 函数中 return_ 的来源和 wrapped_signature.return_annotation 的提取过程。",
+    "除了 -> None 之外，其他返回类型提示（如 -> int）是否也会导致类似问题。",
+    "装饰器是否应该对任何非 Quantity 返回值（包括 None）跳过 .to() 调用，还是仅针对 None。"
+  ],
+  "raw": {
+    "issue_summary": "当构造函数使用 @units.quantity_input 装饰器并带有返回类型提示 -> None 时，装饰器错误地尝试对 None 调用 .to() 方法，导致 AttributeError。",
+    "trigger_condition": {
+      "text": "使用 @u.quantity_input 装饰一个构造函数（__init__），该构造函数的返回类型提示为 -> None，并用一个带单位的 Quantity 参数（例如 1.*u.V）调用该构造函数。",
+      "evidence": [
+        "Issue 中的 Reproducer 代码展示了装饰的 __init__ 方法和调用 PoC(1.*u.V)。",
+        "Issue 中的错误信息显示在 decorators.py 的 wrapper 函数中尝试对 return_ 调用 .to(wrapped_signature.return_annotation)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用装饰后的构造函数时抛出 AttributeError: 'NoneType' object has no attribute 'to'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示 AttributeError 发生在 astropy/units/decorators.py 第 225 行。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当装饰的函数（包括构造函数）返回 None 时，@quantity_input 装饰器应正确处理，不尝试对 None 进行单位转换，并允许函数正常执行。",
+      "evidence": [
+        "Issue 的 Possible fix 部分提到装饰器可以检查是否返回 None 并省略单位检查。",
+        "Issue 的 Summary 和 Workaround 暗示添加 -> None 类型提示应该是被允许的。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "units.quantity_input",
+        "kind": "function",
+        "source_path": "astropy/units/decorators.py",
+        "reason": "这是 Issue 中导致问题的装饰器。"
+      },
+      {
+        "name": "QuantityInput",
+        "kind": "class",
+        "source_path": "astropy/units/decorators.py",
+        "reason": "quantity_input 装饰器是 QuantityInput.as_decorator（根据源码片段1）。"
+      },
+      {
+        "name": "__init__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中的问题发生在被装饰的类构造函数上。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/units/decorators.py",
+        "object": "wrapper 函数（在 quantity_input 装饰器内部）",
+        "lines": "225-225",
+        "reason": "错误堆栈指向第 225 行，该行尝试对返回值调用 .to() 方法，当返回值为 None 时失败。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_args_None_kwarg",
+        "test_file": "astropy/units/tests/test_quantity_decorator.py",
+        "why_relevant": "该测试涉及 @quantity_input 装饰器处理参数为 None 的情况，展示了装饰器对 None 参数的处理逻辑。",
+        "reusable_parts": [
+          "import astropy.units as u",
+          "@u.quantity_input 装饰器的使用模式",
+          "使用 u.Quantity 参数调用装饰函数",
+          "assert y is None 的断言风格"
+        ],
+        "possible_gap": "该测试关注的是输入参数为 None，而 Issue 是关于返回类型提示为 None 和返回值 None 的处理。"
+      },
+      {
+        "test_name": "test_args_None",
+        "test_file": "astropy/units/tests/test_quantity_decorator.py",
+        "why_relevant": "该测试也涉及 @quantity_input 装饰器处理 None 值，展示了装饰器参数列表中允许 None 的配置。",
+        "reusable_parts": [
+          "@u.quantity_input(x=[x_target, None], ...) 的装饰器参数配置",
+          "assert x is None 或 assert y is None 的断言"
+        ],
+        "possible_gap": "同样，它测试的是输入参数，而非返回类型或返回值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试装饰普通函数，参数是 Quantity 或 None。",
+        "target_pattern": "装饰一个类的 __init__ 方法，并为其添加 -> None 返回类型提示。",
+        "reason": "Issue 表明问题特定于装饰构造函数并带有返回类型提示 -> None 的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用装饰后的函数。",
+        "target_pattern": "实例化一个被装饰了 __init__ 的类。",
+        "reason": "触发缺陷需要构造对象，这会调用装饰后的 __init__ 方法。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 PoC(1.*u.V) 时捕获的 AttributeError 及其消息。",
+        "reason": "Issue 的核心错误是 AttributeError，观测此异常可直接确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "装饰器内部 wrapper 函数的 return_ 变量的值和类型。",
+        "reason": "缺陷发生在尝试对 return_（应为 None）调用 .to() 方法，观测其值可理解上下文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用带有 -> None 返回类型提示的 @quantity_input 装饰构造函数后，能够成功创建对象而不抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的内部属性或完整的错误消息字符串，因为它们可能在修复后改变。",
+        "reason": "修复后，调用应不再引发 AttributeError。使用 pytest.raises 的否定形式（即不引发异常）或简单的对象创建成功断言更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 astropy.units 作为 u。可能需要 pytest 来组织测试和捕获异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义一个简单的类，其 __init__ 方法用 @u.quantity_input 装饰并带有 -> None 提示。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "@quantity_input 装饰器内部处理返回值的完整逻辑，特别是 wrapper 函数中 return_ 的来源和 wrapped_signature.return_annotation 的提取过程。",
+      "除了 -> None 之外，其他返回类型提示（如 -> int）是否也会导致类似问题。",
+      "装饰器是否应该对任何非 Quantity 返回值（包括 None）跳过 .to() 调用，还是仅针对 None。"
+    ]
+  }
+}

@@ -1,0 +1,278 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15902",
+  "issue_summary": "ManagementForm 在生成隐藏输入时触发了不应出现的模板弃用警告。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能配置 FORM_RENDERER 设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 isolate_lru_cache 和 settings 上下文管理器来隔离渲染器缓存和配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 formset_factory、Choice（或一个简单的 Form 类）来构建测试用例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_warning",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "它直接测试了在特定配置下渲染表单集时触发模板弃用警告的行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "imports (isolate_lru_cache, get_default_renderer)",
+          "settings 配置 (FORM_RENDERER)",
+          "使用 formset_factory 和 str(formset)",
+          "使用 assertRaisesMessage 捕获 RemovedInDjango50Warning"
+        ],
+        "possible_gap": "该测试断言警告会被触发，而 Issue 期望的是警告不应被触发（对于 ManagementForm）。需要变异测试逻辑以验证警告的缺失或特定条件。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 formset_factory 创建表单集，并渲染或转换为字符串，同时配置了 FORM_RENDERER=\"django.forms.renderers.DjangoTemplates\"。",
+      "evidence": [
+        "Issue 提到“formset management form production”会触发警告。",
+        "相关测试 1 展示了通过 formset_factory 创建 ChoiceFormSet 并调用 str(formset) 来触发警告。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在渲染管理表单（ManagementForm）时，即使没有使用 {{ form }} 表达式，也会触发关于默认模板的弃用警告（RemovedInDjango50Warning）。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 描述“I'm still getting the new template deprecation warning because of the formset management form production”。",
+        "相关测试 1 使用 assertRaisesMessage 来捕获 RemovedInDjango50Warning。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "formset_factory",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于创建表单集，是触发管理表单生成和相关警告的入口点。"
+      },
+      {
+        "name": "ManagementForm",
+        "kind": "class",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 明确指出问题与 ManagementForm 的生成有关。"
+      },
+      {
+        "name": "str",
+        "kind": "function",
+        "source_path": "",
+        "reason": "将表单集转换为字符串是触发渲染和警告的操作，如相关测试所示。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/formsets.py",
+        "object": "ManagementForm",
+        "lines": "28-49",
+        "reason": "这是管理表单的定义类，其渲染过程可能调用了会触发弃用警告的模板路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中配置 FORM_RENDERER=\"django.forms.renderers.DjangoTemplates\" 以触发警告。",
+        "target_pattern": "保持相同配置，但变异测试逻辑以检查在管理表单生成时警告是否被（错误地）触发。",
+        "reason": "Issue 表明在此配置下，即使没有使用 {{ form }}，管理表单生成也会触发警告，这可能是缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通过 str(formset) 触发整个表单集的渲染和警告。",
+        "target_pattern": "可能需要更精细地触发仅管理表单的渲染（例如，直接访问 formset.management_form 并渲染它），以隔离问题。",
+        "reason": "Issue 强调问题源于管理表单生产（management form production），而非整个表单集。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "管理表单（ManagementForm）的生成不应触发关于默认模板的弃用警告，因为其渲染不依赖于被弃用的模板路径。",
+      "evidence": [
+        "Issue 提问“Is it worth special-casing this and avoid producing the warning for the management forms?”，暗示期望避免此警告。",
+        "相关测试 1 的存在表明当前行为会触发警告，预期修复后该测试可能不再触发警告或行为改变。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 记录的警告列表，特别是 RemovedInDjango50Warning 及其消息内容。",
+        "reason": "Issue 的核心是关于一个不应出现的弃用警告。观测警告是否出现及其消息是判断缺陷的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "str(formset) 或 formset.management_form.as_p() 的输出字符串。",
+        "reason": "检查输出是否包含正确的隐藏输入字段（如 TOTAL_FORMS），以确认功能正常，同时观测警告行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在渲染管理表单时，没有触发关于默认模板的弃用警告（RemovedInDjango50Warning）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告消息字符串相等，因为消息可能微调；避免断言与问题无关的输出片段。",
+        "reason": "Issue 期望避免此警告。断言警告不存在更稳定，且与预期行为一致。"
+      },
+      {
+        "assertion_goal": "验证管理表单的渲染输出仍然包含必要的隐藏输入字段（如 TOTAL_FORMS）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 HTML 字符串，因为输出可能因版本变化。",
+        "reason": "确保修复警告的同时，管理表单的核心功能（生成隐藏输入）保持正常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发警告的确切代码路径在 ManagementForm 渲染中的哪个位置。",
+    "修复后，是否所有管理表单的渲染场景都不会触发警告，还是仅特定场景。",
+    "除了 FORM_RENDERER 配置，是否还有其他配置或状态会影响警告的触发。"
+  ],
+  "raw": {
+    "issue_summary": "ManagementForm 在生成隐藏输入时触发了不应出现的模板弃用警告。",
+    "trigger_condition": {
+      "text": "使用 formset_factory 创建表单集，并渲染或转换为字符串，同时配置了 FORM_RENDERER=\"django.forms.renderers.DjangoTemplates\"。",
+      "evidence": [
+        "Issue 提到“formset management form production”会触发警告。",
+        "相关测试 1 展示了通过 formset_factory 创建 ChoiceFormSet 并调用 str(formset) 来触发警告。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在渲染管理表单（ManagementForm）时，即使没有使用 {{ form }} 表达式，也会触发关于默认模板的弃用警告（RemovedInDjango50Warning）。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 描述“I'm still getting the new template deprecation warning because of the formset management form production”。",
+        "相关测试 1 使用 assertRaisesMessage 来捕获 RemovedInDjango50Warning。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "管理表单（ManagementForm）的生成不应触发关于默认模板的弃用警告，因为其渲染不依赖于被弃用的模板路径。",
+      "evidence": [
+        "Issue 提问“Is it worth special-casing this and avoid producing the warning for the management forms?”，暗示期望避免此警告。",
+        "相关测试 1 的存在表明当前行为会触发警告，预期修复后该测试可能不再触发警告或行为改变。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "formset_factory",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于创建表单集，是触发管理表单生成和相关警告的入口点。"
+      },
+      {
+        "name": "ManagementForm",
+        "kind": "class",
+        "source_path": "django/forms/formsets.py",
+        "reason": "Issue 明确指出问题与 ManagementForm 的生成有关。"
+      },
+      {
+        "name": "str",
+        "kind": "function",
+        "source_path": "",
+        "reason": "将表单集转换为字符串是触发渲染和警告的操作，如相关测试所示。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/formsets.py",
+        "object": "ManagementForm",
+        "lines": "28-49",
+        "reason": "这是管理表单的定义类，其渲染过程可能调用了会触发弃用警告的模板路径。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_warning",
+        "test_file": "tests/forms_tests/tests/test_formsets.py",
+        "why_relevant": "它直接测试了在特定配置下渲染表单集时触发模板弃用警告的行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "imports (isolate_lru_cache, get_default_renderer)",
+          "settings 配置 (FORM_RENDERER)",
+          "使用 formset_factory 和 str(formset)",
+          "使用 assertRaisesMessage 捕获 RemovedInDjango50Warning"
+        ],
+        "possible_gap": "该测试断言警告会被触发，而 Issue 期望的是警告不应被触发（对于 ManagementForm）。需要变异测试逻辑以验证警告的缺失或特定条件。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中配置 FORM_RENDERER=\"django.forms.renderers.DjangoTemplates\" 以触发警告。",
+        "target_pattern": "保持相同配置，但变异测试逻辑以检查在管理表单生成时警告是否被（错误地）触发。",
+        "reason": "Issue 表明在此配置下，即使没有使用 {{ form }}，管理表单生成也会触发警告，这可能是缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通过 str(formset) 触发整个表单集的渲染和警告。",
+        "target_pattern": "可能需要更精细地触发仅管理表单的渲染（例如，直接访问 formset.management_form 并渲染它），以隔离问题。",
+        "reason": "Issue 强调问题源于管理表单生产（management form production），而非整个表单集。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings 记录的警告列表，特别是 RemovedInDjango50Warning 及其消息内容。",
+        "reason": "Issue 的核心是关于一个不应出现的弃用警告。观测警告是否出现及其消息是判断缺陷的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "str(formset) 或 formset.management_form.as_p() 的输出字符串。",
+        "reason": "检查输出是否包含正确的隐藏输入字段（如 TOTAL_FORMS），以确认功能正常，同时观测警告行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在渲染管理表单时，没有触发关于默认模板的弃用警告（RemovedInDjango50Warning）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告消息字符串相等，因为消息可能微调；避免断言与问题无关的输出片段。",
+        "reason": "Issue 期望避免此警告。断言警告不存在更稳定，且与预期行为一致。"
+      },
+      {
+        "assertion_goal": "验证管理表单的渲染输出仍然包含必要的隐藏输入字段（如 TOTAL_FORMS）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 HTML 字符串，因为输出可能因版本变化。",
+        "reason": "确保修复警告的同时，管理表单的核心功能（生成隐藏输入）保持正常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能配置 FORM_RENDERER 设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 isolate_lru_cache 和 settings 上下文管理器来隔离渲染器缓存和配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 formset_factory、Choice（或一个简单的 Form 类）来构建测试用例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发警告的确切代码路径在 ManagementForm 渲染中的哪个位置。",
+      "修复后，是否所有管理表单的渲染场景都不会触发警告，还是仅特定场景。",
+      "除了 FORM_RENDERER 配置，是否还有其他配置或状态会影响警告的触发。"
+    ]
+  }
+}

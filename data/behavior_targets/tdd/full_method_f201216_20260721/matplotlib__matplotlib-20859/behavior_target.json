@@ -1,0 +1,358 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-20859",
+  "issue_summary": "在 SubFigure 上调用 legend() 方法会抛出 TypeError，因为 Legend 构造函数要求父对象是 Axes 或 Figure，而 SubFigure 是 FigureBase 的子类。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 和 numpy（用于生成测试数据）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在非交互式后端下运行，以避免弹出图形窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以使用 plt.figure() 创建顶级 Figure，然后调用 subfigures() 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_subfigure",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "它创建了 SubFigure 并调用了其上的方法（如 subplots, colorbar, suptitle），但没有测试 legend 方法。",
+        "reusable_parts": [
+          "import matplotlib.pyplot as plt",
+          "fig = plt.figure(constrained_layout=True)",
+          "sub = fig.subfigures(1, 2)",
+          "axs = sub[0].subplots(2, 2)",
+          "使用 np.random 生成数据并绘图"
+        ],
+        "possible_gap": "该测试没有在 SubFigure 上调用 legend() 方法，因此没有触发缺陷。"
+      },
+      {
+        "test_name": "test_subfigure_ss",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "它通过 add_subfigure 创建 SubFigure，并调用了 colorbar 和 suptitle 方法，展示了 SubFigure 的 API 使用。",
+        "reusable_parts": [
+          "fig = plt.figure(constrained_layout=True)",
+          "sub = fig.add_subfigure(gs[0], facecolor='pink')",
+          "axs = sub.subplots(2, 2)",
+          "sub.colorbar(pc, ax=axs)"
+        ],
+        "possible_gap": "没有测试 legend 方法。"
+      },
+      {
+        "test_name": "test_constrained_layout10",
+        "test_file": "lib/matplotlib/tests/test_constrainedlayout.py",
+        "why_relevant": "它测试了在坐标轴上创建图例（ax.legend），展示了图例创建的基本模式。",
+        "reusable_parts": [
+          "ax.plot(np.arange(12), label='This is a label')",
+          "ax.legend(loc='center left', bbox_to_anchor=(0.8, 0.5))"
+        ],
+        "possible_gap": "它是在 Axes 上调用 legend，而不是在 SubFigure 上。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在一个 SubFigure 对象上调用 legend() 方法，且该 SubFigure 包含带有 label 的绘图。",
+      "evidence": [
+        "Issue 中的代码片段：subfig = plt.figure().subfigures(); ax = subfig.subplots(); ax.plot([0, 1, 2], [0, 1, 2], label=\"test\"); subfig.legend()",
+        "源码片段 5 显示 FigureBase.legend 方法会调用 mlegend.Legend 构造函数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: Legend needs either Axes or Figure as parent。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示错误来自 legend.py 第 441 行。",
+        "源码片段 6 的 __init__ 方法签名表明它接受一个 parent 参数。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "FigureBase.subfigures",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "用于创建 SubFigure 对象。"
+      },
+      {
+        "name": "SubFigure.subplots",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "在 SubFigure 上创建坐标轴。"
+      },
+      {
+        "name": "Axes.plot",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_axes.py",
+        "reason": "用于创建带有 label 的绘图，这是生成图例句柄所必需的。"
+      },
+      {
+        "name": "FigureBase.legend",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "触发缺陷的 API 调用。"
+      },
+      {
+        "name": "Legend.__init__",
+        "kind": "method",
+        "source_path": "lib/matplotlib/legend.py",
+        "reason": "抛出异常的位置，是缺陷的核心。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/legend.py",
+        "object": "Legend.__init__",
+        "lines": "433-442",
+        "reason": "Issue 明确指出第 437 行附近的类型检查是问题根源，它没有将 FigureBase 视为有效的父类。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 Figure 或 Axes 上调用 legend() 方法（如 test_constrained_layout10）。",
+        "target_pattern": "在 SubFigure 对象上调用 legend() 方法。",
+        "reason": "缺陷的触发条件是在 SubFigure（FigureBase 子类）上调用 legend，而不是在 Figure 或 Axes 上。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中创建了 SubFigure 但没有为其添加带 label 的绘图并调用 legend。",
+        "target_pattern": "在 SubFigure 内创建一个带有 label 的绘图，然后在 SubFigure 对象上调用 legend()。",
+        "reason": "图例需要从带有 label 的绘图艺术家（handles）中生成，这是 legend() 方法自动检测所必需的。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 SubFigure 上调用 legend() 方法应该成功创建一个图例，而不抛出异常。",
+      "evidence": [
+        "Issue 中用户期望：\"I'd expect this to work and produce a legend.\"",
+        "Issue 中提到将 legend.py 第 437 行的检查改为 FigureBase 可以修复此问题。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 subfig.legend() 时是否抛出 TypeError，以及异常消息是否包含 'Legend needs either Axes or Figure as parent'。",
+        "reason": "这是 Issue 中直接观察到的错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果调用成功，subfig.legend() 的返回值类型应为 matplotlib.legend.Legend。",
+        "reason": "修复后，方法应返回一个 Legend 实例，而不是抛出异常。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "subfig 的类型（应为 matplotlib.figure.SubFigure）以及其父类关系。",
+        "reason": "核心问题是 Legend 构造函数对父类类型的检查。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 SubFigure 上调用 legend() 不应抛出 TypeError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能会变。",
+        "reason": "Issue 的核心是异常被抛出，修复后应不再抛出。使用 raises 断言可以捕获这个变化。"
+      },
+      {
+        "assertion_goal": "在 SubFigure 上成功调用 legend() 后，应返回一个 Legend 对象。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 Legend 对象的完整属性或精确位置。",
+        "reason": "修复后，方法应正常返回一个 Legend 实例，这是功能正确的标志。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后，Legend 构造函数内部对 parent 参数的具体类型检查逻辑会如何变化（例如，是检查 isinstance(parent, FigureBase) 还是其他）。",
+    "除了 legend() 方法，SubFigure 的其他方法（如 colorbar, suptitle）是否也存在类似的父类类型检查问题。",
+    "在更复杂的场景下（如嵌套 SubFigure、多个坐标轴）图例的创建和行为是否完全符合预期。"
+  ],
+  "raw": {
+    "issue_summary": "在 SubFigure 上调用 legend() 方法会抛出 TypeError，因为 Legend 构造函数要求父对象是 Axes 或 Figure，而 SubFigure 是 FigureBase 的子类。",
+    "trigger_condition": {
+      "text": "在一个 SubFigure 对象上调用 legend() 方法，且该 SubFigure 包含带有 label 的绘图。",
+      "evidence": [
+        "Issue 中的代码片段：subfig = plt.figure().subfigures(); ax = subfig.subplots(); ax.plot([0, 1, 2], [0, 1, 2], label=\"test\"); subfig.legend()",
+        "源码片段 5 显示 FigureBase.legend 方法会调用 mlegend.Legend 构造函数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: Legend needs either Axes or Figure as parent。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示错误来自 legend.py 第 441 行。",
+        "源码片段 6 的 __init__ 方法签名表明它接受一个 parent 参数。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 SubFigure 上调用 legend() 方法应该成功创建一个图例，而不抛出异常。",
+      "evidence": [
+        "Issue 中用户期望：\"I'd expect this to work and produce a legend.\"",
+        "Issue 中提到将 legend.py 第 437 行的检查改为 FigureBase 可以修复此问题。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "FigureBase.subfigures",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "用于创建 SubFigure 对象。"
+      },
+      {
+        "name": "SubFigure.subplots",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "在 SubFigure 上创建坐标轴。"
+      },
+      {
+        "name": "Axes.plot",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_axes.py",
+        "reason": "用于创建带有 label 的绘图，这是生成图例句柄所必需的。"
+      },
+      {
+        "name": "FigureBase.legend",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "触发缺陷的 API 调用。"
+      },
+      {
+        "name": "Legend.__init__",
+        "kind": "method",
+        "source_path": "lib/matplotlib/legend.py",
+        "reason": "抛出异常的位置，是缺陷的核心。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/legend.py",
+        "object": "Legend.__init__",
+        "lines": "433-442",
+        "reason": "Issue 明确指出第 437 行附近的类型检查是问题根源，它没有将 FigureBase 视为有效的父类。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_subfigure",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "它创建了 SubFigure 并调用了其上的方法（如 subplots, colorbar, suptitle），但没有测试 legend 方法。",
+        "reusable_parts": [
+          "import matplotlib.pyplot as plt",
+          "fig = plt.figure(constrained_layout=True)",
+          "sub = fig.subfigures(1, 2)",
+          "axs = sub[0].subplots(2, 2)",
+          "使用 np.random 生成数据并绘图"
+        ],
+        "possible_gap": "该测试没有在 SubFigure 上调用 legend() 方法，因此没有触发缺陷。"
+      },
+      {
+        "test_name": "test_subfigure_ss",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "它通过 add_subfigure 创建 SubFigure，并调用了 colorbar 和 suptitle 方法，展示了 SubFigure 的 API 使用。",
+        "reusable_parts": [
+          "fig = plt.figure(constrained_layout=True)",
+          "sub = fig.add_subfigure(gs[0], facecolor='pink')",
+          "axs = sub.subplots(2, 2)",
+          "sub.colorbar(pc, ax=axs)"
+        ],
+        "possible_gap": "没有测试 legend 方法。"
+      },
+      {
+        "test_name": "test_constrained_layout10",
+        "test_file": "lib/matplotlib/tests/test_constrainedlayout.py",
+        "why_relevant": "它测试了在坐标轴上创建图例（ax.legend），展示了图例创建的基本模式。",
+        "reusable_parts": [
+          "ax.plot(np.arange(12), label='This is a label')",
+          "ax.legend(loc='center left', bbox_to_anchor=(0.8, 0.5))"
+        ],
+        "possible_gap": "它是在 Axes 上调用 legend，而不是在 SubFigure 上。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 Figure 或 Axes 上调用 legend() 方法（如 test_constrained_layout10）。",
+        "target_pattern": "在 SubFigure 对象上调用 legend() 方法。",
+        "reason": "缺陷的触发条件是在 SubFigure（FigureBase 子类）上调用 legend，而不是在 Figure 或 Axes 上。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中创建了 SubFigure 但没有为其添加带 label 的绘图并调用 legend。",
+        "target_pattern": "在 SubFigure 内创建一个带有 label 的绘图，然后在 SubFigure 对象上调用 legend()。",
+        "reason": "图例需要从带有 label 的绘图艺术家（handles）中生成，这是 legend() 方法自动检测所必需的。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 subfig.legend() 时是否抛出 TypeError，以及异常消息是否包含 'Legend needs either Axes or Figure as parent'。",
+        "reason": "这是 Issue 中直接观察到的错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果调用成功，subfig.legend() 的返回值类型应为 matplotlib.legend.Legend。",
+        "reason": "修复后，方法应返回一个 Legend 实例，而不是抛出异常。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "subfig 的类型（应为 matplotlib.figure.SubFigure）以及其父类关系。",
+        "reason": "核心问题是 Legend 构造函数对父类类型的检查。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 SubFigure 上调用 legend() 不应抛出 TypeError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能会变。",
+        "reason": "Issue 的核心是异常被抛出，修复后应不再抛出。使用 raises 断言可以捕获这个变化。"
+      },
+      {
+        "assertion_goal": "在 SubFigure 上成功调用 legend() 后，应返回一个 Legend 对象。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 Legend 对象的完整属性或精确位置。",
+        "reason": "修复后，方法应正常返回一个 Legend 实例，这是功能正确的标志。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 和 numpy（用于生成测试数据）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在非交互式后端下运行，以避免弹出图形窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以使用 plt.figure() 创建顶级 Figure，然后调用 subfigures() 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后，Legend 构造函数内部对 parent 参数的具体类型检查逻辑会如何变化（例如，是检查 isinstance(parent, FigureBase) 还是其他）。",
+      "除了 legend() 方法，SubFigure 的其他方法（如 colorbar, suptitle）是否也存在类似的父类类型检查问题。",
+      "在更复杂的场景下（如嵌套 SubFigure、多个坐标轴）图例的创建和行为是否完全符合预期。"
+    ]
+  }
+}

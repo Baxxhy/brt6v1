@@ -1,0 +1,296 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-19040",
+  "issue_summary": "factor 函数在 extension 参数为 True 或指定扩展域时错误地丢弃了多项式因子。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 symbols、expand、factor 和 I。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在多项式上下文中运行，无需特殊 fixture。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_factor",
+        "test_file": "sympy/polys/tests/test_polytools.py",
+        "why_relevant": "它测试了 factor 函数，包括 extension 参数的使用。",
+        "reusable_parts": [
+          "imports (如 from sympy import ...)",
+          "factor 和 expand 的调用模式",
+          "使用 extension 参数的断言风格"
+        ],
+        "possible_gap": "现有测试用例可能未覆盖 (x-1)*(y-1) 这种多变量多项式在 extension 下的行为。"
+      },
+      {
+        "test_name": "test_issue_5786",
+        "test_file": "sympy/polys/tests/test_polytools.py",
+        "why_relevant": "它标记为 XFAIL 并测试了 extension=[I] 下的因式分解，可能与当前 Issue 相关。",
+        "reusable_parts": [
+          "使用 extension=[I] 的测试结构",
+          "expand 和 factor 的组合调用"
+        ],
+        "possible_gap": "它是 XFAIL 测试，可能本身就有问题，且输入是 (x - I*y)*(z - I*t)，与当前 Issue 的多变量多项式不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对多项式 (x-1)*(y-1) 展开后，调用 factor(z, extension=[I]) 或 factor(z, extension=True)。",
+      "evidence": [
+        "Issue 中展示了输入 z = expand((x-1)*(y-1)) 和调用 factor(z, extension=[I])。",
+        "相关测试 1 中包含了 factor(f, extension=I) 和 factor(f, extension=sqrt(2)) 的用例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "factor(z, extension=[I]) 返回了 x - 1，丢弃了因子 (y-1)。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 Out[12]: x - 1，而期望返回 (x - 1)*(y - 1)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "factor",
+        "kind": "function",
+        "source_path": "sympy/core/expr.py",
+        "reason": "Issue 中直接调用的函数，用于多项式因式分解。"
+      },
+      {
+        "name": "expand",
+        "kind": "function",
+        "source_path": "sympy/core/expr.py",
+        "reason": "Issue 中用于生成输入多项式的函数。"
+      },
+      {
+        "name": "I",
+        "kind": "global_var",
+        "source_path": "sympy/core/numbers.py",
+        "reason": "Issue 中作为 extension 参数使用的虚数单位。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/polys/polytools.py",
+        "object": "factor",
+        "lines": "",
+        "reason": "factor 函数的核心实现在 polys 模块，extension 参数的处理逻辑可能在此。"
+      },
+      {
+        "path": "sympy/polys/factortools.py",
+        "object": "factor",
+        "lines": "",
+        "reason": "因式分解的具体算法可能在此模块，extension 参数可能影响域扩展和因子提取。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "factor(x**4 + 1, extension=I)",
+        "target_pattern": "factor(expand((x-1)*(y-1)), extension=[I])",
+        "reason": "将单变量多项式替换为多变量多项式 (x-1)*(y-1)，可能触发因子丢弃的缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "extension=I",
+        "target_pattern": "extension=[I]",
+        "reason": "Issue 中使用列表形式，可能影响参数解析或域扩展逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "factor(z, extension=[I]) 应返回完整的因式分解 (x - 1)*(y - 1)。",
+      "evidence": [
+        "Issue 中展示了 factor(z) 正确返回 (x - 1)*(y - 1)。",
+        "相关测试 1 中 factor(f, extension=I) 返回了正确的因式分解 (x**2 - I)*(x**2 + I)。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "factor_result = factor(expr, extension=[I])",
+        "reason": "直接观察返回值是否丢失因子 (y-1)。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "str(factor_result)",
+        "reason": "检查返回表达式的字符串表示是否包含 'y' 或 '(y - 1)'。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "factor(expand((x-1)*(y-1)), extension=[I]) 应等于 (x - 1)*(y - 1)。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的字符串表示，因为符号顺序可能变化。",
+        "reason": "直接比较表达式对象可确保因式分解的数学等价性。"
+      },
+      {
+        "assertion_goal": "返回的表达式应包含因子 (y - 1)。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言具体的内部结构或未公开的属性。",
+        "reason": "检查因子是否存在比完整字符串匹配更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "extension=True 和 extension=[I] 是否都会触发此缺陷？",
+    "缺陷是否只影响特定类型的多变量多项式？",
+    "factor 函数内部处理 extension 参数的具体错误位置在哪里？"
+  ],
+  "raw": {
+    "issue_summary": "factor 函数在 extension 参数为 True 或指定扩展域时错误地丢弃了多项式因子。",
+    "trigger_condition": {
+      "text": "对多项式 (x-1)*(y-1) 展开后，调用 factor(z, extension=[I]) 或 factor(z, extension=True)。",
+      "evidence": [
+        "Issue 中展示了输入 z = expand((x-1)*(y-1)) 和调用 factor(z, extension=[I])。",
+        "相关测试 1 中包含了 factor(f, extension=I) 和 factor(f, extension=sqrt(2)) 的用例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "factor(z, extension=[I]) 返回了 x - 1，丢弃了因子 (y-1)。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 Out[12]: x - 1，而期望返回 (x - 1)*(y - 1)。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "factor(z, extension=[I]) 应返回完整的因式分解 (x - 1)*(y - 1)。",
+      "evidence": [
+        "Issue 中展示了 factor(z) 正确返回 (x - 1)*(y - 1)。",
+        "相关测试 1 中 factor(f, extension=I) 返回了正确的因式分解 (x**2 - I)*(x**2 + I)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "factor",
+        "kind": "function",
+        "source_path": "sympy/core/expr.py",
+        "reason": "Issue 中直接调用的函数，用于多项式因式分解。"
+      },
+      {
+        "name": "expand",
+        "kind": "function",
+        "source_path": "sympy/core/expr.py",
+        "reason": "Issue 中用于生成输入多项式的函数。"
+      },
+      {
+        "name": "I",
+        "kind": "global_var",
+        "source_path": "sympy/core/numbers.py",
+        "reason": "Issue 中作为 extension 参数使用的虚数单位。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/polys/polytools.py",
+        "object": "factor",
+        "lines": "",
+        "reason": "factor 函数的核心实现在 polys 模块，extension 参数的处理逻辑可能在此。"
+      },
+      {
+        "path": "sympy/polys/factortools.py",
+        "object": "factor",
+        "lines": "",
+        "reason": "因式分解的具体算法可能在此模块，extension 参数可能影响域扩展和因子提取。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_factor",
+        "test_file": "sympy/polys/tests/test_polytools.py",
+        "why_relevant": "它测试了 factor 函数，包括 extension 参数的使用。",
+        "reusable_parts": [
+          "imports (如 from sympy import ...)",
+          "factor 和 expand 的调用模式",
+          "使用 extension 参数的断言风格"
+        ],
+        "possible_gap": "现有测试用例可能未覆盖 (x-1)*(y-1) 这种多变量多项式在 extension 下的行为。"
+      },
+      {
+        "test_name": "test_issue_5786",
+        "test_file": "sympy/polys/tests/test_polytools.py",
+        "why_relevant": "它标记为 XFAIL 并测试了 extension=[I] 下的因式分解，可能与当前 Issue 相关。",
+        "reusable_parts": [
+          "使用 extension=[I] 的测试结构",
+          "expand 和 factor 的组合调用"
+        ],
+        "possible_gap": "它是 XFAIL 测试，可能本身就有问题，且输入是 (x - I*y)*(z - I*t)，与当前 Issue 的多变量多项式不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "factor(x**4 + 1, extension=I)",
+        "target_pattern": "factor(expand((x-1)*(y-1)), extension=[I])",
+        "reason": "将单变量多项式替换为多变量多项式 (x-1)*(y-1)，可能触发因子丢弃的缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "extension=I",
+        "target_pattern": "extension=[I]",
+        "reason": "Issue 中使用列表形式，可能影响参数解析或域扩展逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "factor_result = factor(expr, extension=[I])",
+        "reason": "直接观察返回值是否丢失因子 (y-1)。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "str(factor_result)",
+        "reason": "检查返回表达式的字符串表示是否包含 'y' 或 '(y - 1)'。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "factor(expand((x-1)*(y-1)), extension=[I]) 应等于 (x - 1)*(y - 1)。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的字符串表示，因为符号顺序可能变化。",
+        "reason": "直接比较表达式对象可确保因式分解的数学等价性。"
+      },
+      {
+        "assertion_goal": "返回的表达式应包含因子 (y - 1)。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言具体的内部结构或未公开的属性。",
+        "reason": "检查因子是否存在比完整字符串匹配更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 symbols、expand、factor 和 I。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在多项式上下文中运行，无需特殊 fixture。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "extension=True 和 extension=[I] 是否都会触发此缺陷？",
+      "缺陷是否只影响特定类型的多变量多项式？",
+      "factor 函数内部处理 extension 参数的具体错误位置在哪里？"
+    ]
+  }
+}

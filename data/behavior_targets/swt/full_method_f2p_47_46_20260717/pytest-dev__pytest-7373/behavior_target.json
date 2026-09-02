@@ -1,0 +1,356 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-7373",
+  "issue_summary": "pytest 对 skipif/xfail 字符串条件的缓存未考虑不同测试模块的全局变量差异，导致条件评估错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture 创建临时测试文件和运行 pytest。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建两个独立的 .py 测试模块文件。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试函数应使用 @pytest.mark.skipif 装饰器并传入字符串条件。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_xfail_skipif_with_globals",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试直接验证了 skipif 和 xfail 装饰器对全局变量（x == 3）的评估，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试模块的模式",
+          "使用 @pytest.mark.skipif(\"x == 3\") 和 @pytest.mark.xfail(\"x == 3\")",
+          "使用 result.stdout.fnmatch_lines 进行输出断言"
+        ],
+        "possible_gap": "该测试只在一个模块内定义了全局变量 x=3，没有测试多个模块中相同表达式但不同全局变量的场景，因此无法触发缓存缺陷。"
+      },
+      {
+        "test_name": "TestSkipif.test_skipif_conditional",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试验证了 skipif 字符串条件（\"hasattr(os, 'sep')\"）的评估，并检查了跳过的异常消息。",
+        "reusable_parts": [
+          "使用 testdir.getitem 获取测试项",
+          "使用 pytest.raises 捕获跳过异常",
+          "对异常消息进行断言"
+        ],
+        "possible_gap": "该测试只涉及单个测试项，没有涉及跨模块的缓存交互。"
+      },
+      {
+        "test_name": "TestXFail.test_xfail_not_run_xfail_reporting",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试验证了 xfail 字符串条件（\"True\" 和 \"False\"）的评估，并检查了相应的报告输出。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建包含多个测试函数的模块",
+          "使用 @pytest.mark.xfail 与字符串条件",
+          "使用 result.stdout.fnmatch_lines 进行输出断言"
+        ],
+        "possible_gap": "该测试的所有条件都在同一个模块中评估，没有涉及跨模块的全局变量冲突。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用相同的字符串条件表达式（例如 \"skip\"）但依赖不同模块全局变量（例如 skip=True 或 skip=False）的多个 @pytest.mark.skipif 或 @pytest.mark.xfail 装饰器，在同一个 pytest 运行会话中执行。",
+      "evidence": [
+        "Issue 中提供了两个测试模块，分别定义了不同的 skip 变量值，并使用相同的字符串条件 \"skip\"。",
+        "Issue 描述指出缓存键仅为字符串本身，未考虑 item 的 globals。",
+        "源码片段 1 显示 cached_eval 使用表达式字符串作为缓存键。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "所有使用相同字符串条件的测试都获得了相同的跳过/失败评估结果，而不是根据各自模块的全局变量进行独立评估。具体表现为本应跳过的测试跳过了，但本不应跳过的测试也被错误地跳过了。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中描述：Expected: `test_should_skip` is skipped, `test_should_not_skip` is not skipped. Actual: both are skipped。",
+        "Issue 标题指出是 \"Incorrect caching of skipif/xfail string condition evaluation\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "cached_eval",
+        "kind": "function",
+        "source_path": "src/_pytest/mark/evaluate.py",
+        "reason": "该函数负责缓存字符串条件的评估结果，其缓存机制是缺陷的核心。"
+      },
+      {
+        "name": "MarkEvaluator._istrue",
+        "kind": "method",
+        "source_path": "src/_pytest/mark/evaluate.py",
+        "reason": "该方法调用 cached_eval 来评估条件，并获取全局变量字典。"
+      },
+      {
+        "name": "pytest.mark.skipif",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接涉及此装饰器的行为。"
+      },
+      {
+        "name": "pytest.mark.xfail",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 标题和描述表明 xfail 也存在相同问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/mark/evaluate.py",
+        "object": "cached_eval",
+        "lines": "21-31",
+        "reason": "该函数仅以表达式字符串为键进行缓存，未将调用者提供的全局变量字典纳入缓存键，导致不同上下文的相同表达式返回错误的缓存结果。"
+      },
+      {
+        "path": "src/_pytest/mark/evaluate.py",
+        "object": "MarkEvaluator._istrue",
+        "lines": "82-121",
+        "reason": "该方法调用 cached_eval 并传入通过 self._getglobals() 获得的字典，但缓存函数未使用该字典作为键的一部分。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 在一个模块内定义全局变量 x=3，并对两个装饰器使用相同的条件表达式 \"x == 3\"。",
+        "target_pattern": "创建两个独立的测试模块，每个模块定义同名但值不同的全局变量（如 skip），并对测试函数使用相同的字符串条件表达式 \"skip\"。",
+        "reason": "Issue 表明缺陷在跨模块使用相同表达式时触发，因为缓存未隔离。将测试拆分为两个模块可以模拟此场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常在一个 pytest 运行中执行单个测试模块或通过 testdir.getitem 获取单个项目。",
+        "target_pattern": "在一个 pytest 运行会话中连续执行两个包含冲突全局变量的测试模块（如 Issue 中的运行命令）。",
+        "reason": "缓存是在 config 级别（跨整个运行会话）维护的。连续运行两个模块才能让第二个模块的评估错误地使用第一个模块的缓存结果。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "每个测试函数对 skipif/xfail 字符串条件的评估应基于其自身模块的全局变量环境独立进行，不受其他模块中相同字符串条件评估结果的缓存影响。",
+      "evidence": [
+        "Issue 中 Expected 部分明确说明了两个测试应得到不同的跳过结果。",
+        "Issue 描述提到 \"the evaluation also depends on the item's globals\"，暗示了正确的行为应依赖 item 的 globals。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "cache",
+        "expression_hint": "cached_eval 函数内的 evalcache 字典内容，特别是键（表达式字符串）和对应的缓存值。",
+        "reason": "观察缓存是否被跨模块重用，以及缓存值是否与当前模块的全局变量评估结果一致。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "cached_eval 的返回值，以及 MarkEvaluator._istrue 中 result 变量的值。",
+        "reason": "观察条件评估结果是否正确反映了当前测试模块的全局变量状态。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "每个测试函数运行前，其模块的全局命名空间（通过 self._getglobals() 获得）中相关变量的值。",
+        "reason": "确认不同模块的全局变量确实不同，这是预期行为差异的根源。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 运行后的标准输出，特别是测试结果摘要行（如 \"skipped\"、\"passed\"）。",
+        "reason": "Issue 的核心错误现象是测试的跳过状态错误，这会在最终输出中体现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在同一个 pytest 运行中，定义 skip=True 的模块中的测试被跳过，而定义 skip=False 的模块中的测试未被跳过（通过）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的输出字符串或行顺序，因为 pytest 输出格式可能变化。",
+        "reason": "Issue 明确给出了期望结果。断言输出中包含特定测试的跳过/通过状态片段是稳定且与问题直接相关的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "除了 skipif 和 xfail，其他使用 cached_eval 的标记是否也存在相同问题？",
+    "缓存是在 Config 实例级别，那么不同的测试会话（例如通过不同的 testdir.runpytest 调用）是否会共享缓存？",
+    "如果字符串条件表达式相同但全局变量字典的键不同（例如一个模块有额外变量），缓存行为会如何？",
+    "Issue 建议的修复（移除缓存）是否会影响性能，或者是否存在其他更复杂的修复方案（如将全局变量字典纳入缓存键）？"
+  ],
+  "raw": {
+    "issue_summary": "pytest 对 skipif/xfail 字符串条件的缓存未考虑不同测试模块的全局变量差异，导致条件评估错误。",
+    "trigger_condition": {
+      "text": "使用相同的字符串条件表达式（例如 \"skip\"）但依赖不同模块全局变量（例如 skip=True 或 skip=False）的多个 @pytest.mark.skipif 或 @pytest.mark.xfail 装饰器，在同一个 pytest 运行会话中执行。",
+      "evidence": [
+        "Issue 中提供了两个测试模块，分别定义了不同的 skip 变量值，并使用相同的字符串条件 \"skip\"。",
+        "Issue 描述指出缓存键仅为字符串本身，未考虑 item 的 globals。",
+        "源码片段 1 显示 cached_eval 使用表达式字符串作为缓存键。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "所有使用相同字符串条件的测试都获得了相同的跳过/失败评估结果，而不是根据各自模块的全局变量进行独立评估。具体表现为本应跳过的测试跳过了，但本不应跳过的测试也被错误地跳过了。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中描述：Expected: `test_should_skip` is skipped, `test_should_not_skip` is not skipped. Actual: both are skipped。",
+        "Issue 标题指出是 \"Incorrect caching of skipif/xfail string condition evaluation\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "每个测试函数对 skipif/xfail 字符串条件的评估应基于其自身模块的全局变量环境独立进行，不受其他模块中相同字符串条件评估结果的缓存影响。",
+      "evidence": [
+        "Issue 中 Expected 部分明确说明了两个测试应得到不同的跳过结果。",
+        "Issue 描述提到 \"the evaluation also depends on the item's globals\"，暗示了正确的行为应依赖 item 的 globals。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "cached_eval",
+        "kind": "function",
+        "source_path": "src/_pytest/mark/evaluate.py",
+        "reason": "该函数负责缓存字符串条件的评估结果，其缓存机制是缺陷的核心。"
+      },
+      {
+        "name": "MarkEvaluator._istrue",
+        "kind": "method",
+        "source_path": "src/_pytest/mark/evaluate.py",
+        "reason": "该方法调用 cached_eval 来评估条件，并获取全局变量字典。"
+      },
+      {
+        "name": "pytest.mark.skipif",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接涉及此装饰器的行为。"
+      },
+      {
+        "name": "pytest.mark.xfail",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 标题和描述表明 xfail 也存在相同问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/mark/evaluate.py",
+        "object": "cached_eval",
+        "lines": "21-31",
+        "reason": "该函数仅以表达式字符串为键进行缓存，未将调用者提供的全局变量字典纳入缓存键，导致不同上下文的相同表达式返回错误的缓存结果。"
+      },
+      {
+        "path": "src/_pytest/mark/evaluate.py",
+        "object": "MarkEvaluator._istrue",
+        "lines": "82-121",
+        "reason": "该方法调用 cached_eval 并传入通过 self._getglobals() 获得的字典，但缓存函数未使用该字典作为键的一部分。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_xfail_skipif_with_globals",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试直接验证了 skipif 和 xfail 装饰器对全局变量（x == 3）的评估，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试模块的模式",
+          "使用 @pytest.mark.skipif(\"x == 3\") 和 @pytest.mark.xfail(\"x == 3\")",
+          "使用 result.stdout.fnmatch_lines 进行输出断言"
+        ],
+        "possible_gap": "该测试只在一个模块内定义了全局变量 x=3，没有测试多个模块中相同表达式但不同全局变量的场景，因此无法触发缓存缺陷。"
+      },
+      {
+        "test_name": "TestSkipif.test_skipif_conditional",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试验证了 skipif 字符串条件（\"hasattr(os, 'sep')\"）的评估，并检查了跳过的异常消息。",
+        "reusable_parts": [
+          "使用 testdir.getitem 获取测试项",
+          "使用 pytest.raises 捕获跳过异常",
+          "对异常消息进行断言"
+        ],
+        "possible_gap": "该测试只涉及单个测试项，没有涉及跨模块的缓存交互。"
+      },
+      {
+        "test_name": "TestXFail.test_xfail_not_run_xfail_reporting",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试验证了 xfail 字符串条件（\"True\" 和 \"False\"）的评估，并检查了相应的报告输出。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建包含多个测试函数的模块",
+          "使用 @pytest.mark.xfail 与字符串条件",
+          "使用 result.stdout.fnmatch_lines 进行输出断言"
+        ],
+        "possible_gap": "该测试的所有条件都在同一个模块中评估，没有涉及跨模块的全局变量冲突。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 在一个模块内定义全局变量 x=3，并对两个装饰器使用相同的条件表达式 \"x == 3\"。",
+        "target_pattern": "创建两个独立的测试模块，每个模块定义同名但值不同的全局变量（如 skip），并对测试函数使用相同的字符串条件表达式 \"skip\"。",
+        "reason": "Issue 表明缺陷在跨模块使用相同表达式时触发，因为缓存未隔离。将测试拆分为两个模块可以模拟此场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常在一个 pytest 运行中执行单个测试模块或通过 testdir.getitem 获取单个项目。",
+        "target_pattern": "在一个 pytest 运行会话中连续执行两个包含冲突全局变量的测试模块（如 Issue 中的运行命令）。",
+        "reason": "缓存是在 config 级别（跨整个运行会话）维护的。连续运行两个模块才能让第二个模块的评估错误地使用第一个模块的缓存结果。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "cache",
+        "expression_hint": "cached_eval 函数内的 evalcache 字典内容，特别是键（表达式字符串）和对应的缓存值。",
+        "reason": "观察缓存是否被跨模块重用，以及缓存值是否与当前模块的全局变量评估结果一致。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "cached_eval 的返回值，以及 MarkEvaluator._istrue 中 result 变量的值。",
+        "reason": "观察条件评估结果是否正确反映了当前测试模块的全局变量状态。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "每个测试函数运行前，其模块的全局命名空间（通过 self._getglobals() 获得）中相关变量的值。",
+        "reason": "确认不同模块的全局变量确实不同，这是预期行为差异的根源。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 运行后的标准输出，特别是测试结果摘要行（如 \"skipped\"、\"passed\"）。",
+        "reason": "Issue 的核心错误现象是测试的跳过状态错误，这会在最终输出中体现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在同一个 pytest 运行中，定义 skip=True 的模块中的测试被跳过，而定义 skip=False 的模块中的测试未被跳过（通过）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的输出字符串或行顺序，因为 pytest 输出格式可能变化。",
+        "reason": "Issue 明确给出了期望结果。断言输出中包含特定测试的跳过/通过状态片段是稳定且与问题直接相关的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture 创建临时测试文件和运行 pytest。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建两个独立的 .py 测试模块文件。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试函数应使用 @pytest.mark.skipif 装饰器并传入字符串条件。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 skipif 和 xfail，其他使用 cached_eval 的标记是否也存在相同问题？",
+      "缓存是在 Config 实例级别，那么不同的测试会话（例如通过不同的 testdir.runpytest 调用）是否会共享缓存？",
+      "如果字符串条件表达式相同但全局变量字典的键不同（例如一个模块有额外变量），缓存行为会如何？",
+      "Issue 建议的修复（移除缓存）是否会影响性能，或者是否存在其他更复杂的修复方案（如将全局变量字典纳入缓存键）？"
+    ]
+  }
+}

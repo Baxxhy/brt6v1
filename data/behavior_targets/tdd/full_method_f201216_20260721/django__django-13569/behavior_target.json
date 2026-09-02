@@ -1,0 +1,352 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13569",
+  "issue_summary": "使用 order_by('?') 时，QuerySet 的聚合分组被意外破坏，导致 COUNT 结果不正确。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Django 测试数据库和简单的模型（如 Thing 和 Related），并创建测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 类并继承自 django.test.TestCase 以访问数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_aggregation_order_by_not_selected_annotation_values",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了带 order_by 的聚合查询，涉及 annotate、order_by 和 values 的组合。",
+        "reusable_parts": [
+          "AggregateTestCase 类结构",
+          "使用 annotate 和 order_by 的模式",
+          "使用 values_list 获取结果",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试使用确定的字段（如 F('min_related_age')）进行排序，而非 order_by('?')，且未检查 GROUP BY SQL。"
+      },
+      {
+        "test_name": "test_non_grouped_annotation_not_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了 GROUP BY 子句的生成逻辑，特别是注解和 values 的交互。",
+        "reusable_parts": [
+          "使用 annotate、filter、values、annotate(Count) 的链式调用",
+          "检查最终查询结果",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试未涉及 order_by，且关注的是注解是否在 GROUP BY 中，而非 order_by 表达式的影响。"
+      },
+      {
+        "test_name": "test_order_by_rawsql",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了使用 RawSQL 进行 order_by，展示了 order_by 可以接受非字段表达式。",
+        "reusable_parts": [
+          "使用 order_by 与复杂表达式",
+          "使用 values 和 assertSequenceEqual",
+          "Queries1Tests 类结构"
+        ],
+        "possible_gap": "它使用 RawSQL 而非 '?'，且不涉及聚合。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对包含 annotate(Count(...)) 的 QuerySet 调用 order_by('?') 和 values('id', 'rc')。",
+      "evidence": [
+        "Issue 中描述了 Thing.objects.annotate(rc=Count('related')).order_by('?').values('id', 'rc') 触发了问题。",
+        "Issue 中打印的 SQL 显示 GROUP BY 子句中包含了 RANDOM()。",
+        "相关源码片段 5 显示 get_group_by 方法会将 order_by 中的表达式添加到 group by 子句中。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "聚合查询返回了错误的行数和计数结果（预期是 1 行，计数为 2；实际是 2 行，每行计数为 1）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中显示查询结果：<QuerySet [{'id': 1, 'rc': 1}, {'id': 1, 'rc': 1}]>，而预期是 [{'id': 1, 'rc': 2}]。",
+        "Issue 中打印的 SQL 显示 GROUP BY \"thing\".\"id\", RANDOM()，这导致分组被破坏。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于添加聚合注释（如 Count）。"
+      },
+      {
+        "name": "QuerySet.order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于对查询结果排序，'?' 参数触发随机排序。"
+      },
+      {
+        "name": "QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于指定返回的字段，影响 SELECT 和潜在的 GROUP BY 子句。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "使用的聚合函数。"
+      },
+      {
+        "name": "SQLCompiler.get_group_by",
+        "kind": "method",
+        "source_path": "django/db/models/sql/compiler.py",
+        "reason": "Issue 中明确指出问题可能出在此方法中，它负责构建 GROUP BY 子句。"
+      },
+      {
+        "name": "Random",
+        "kind": "class",
+        "source_path": "django/db/models/functions/math.py",
+        "reason": "order_by('?') 对应的函数类，Issue 中补丁专门处理了它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/compiler.py",
+        "object": "SQLCompiler.get_group_by",
+        "lines": "63-147",
+        "reason": "Issue 中作者指出问题在此方法内，并提供了补丁。该方法将 order_by 表达式添加到 group by 子句中，但未正确处理 Random 表达式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用确定的字段或 F 表达式进行 order_by（例如 order_by('rating'), order_by(F('min_related_age'))）。",
+        "target_pattern": "将 order_by 参数改为 '?' 或 Random()。",
+        "reason": "Issue 表明 order_by('?') 是触发缺陷的关键输入。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中可能缺少 .values('id', 'rc') 在 .annotate(Count(...)).order_by(...) 之后。",
+        "target_pattern": "确保调用链为 .annotate(rc=Count(...)).order_by('?').values('id', 'rc')。",
+        "reason": "Issue 中的触发条件包含这个特定的链式调用顺序。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用 order_by('?') 不应影响聚合分组，查询应返回正确的聚合计数（即按 'id' 分组，计数为 2）。",
+      "evidence": [
+        "Issue 作者认为随机函数调用与聚合无关，不应破坏分组。",
+        "Issue 中展示了 order_by('rc') 和 order_by('related') 的行为作为对比，暗示 order_by('?') 也应保持分组。",
+        "Issue 中作者提供的补丁旨在从 group by 表达式中排除 Random 类型。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 GROUP BY 子句。",
+        "reason": "Issue 中通过打印 query 发现 GROUP BY 子句中包含了 RANDOM()，这是错误的核心。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询结果集（QuerySet）的内容，特别是行数和 'rc' 字段的值。",
+        "reason": "Issue 中观察到的错误现象是返回了错误的行数和计数。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 的 GROUP BY 子句中不应包含 RANDOM() 或类似随机函数。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为表名、别名可能变化。",
+        "reason": "这直接对应 Issue 中发现的错误 SQL 模式。"
+      },
+      {
+        "assertion_goal": "查询结果应只包含一行，且该行的 'rc' 计数等于相关对象的数量（例如 2）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言结果集的完整 repr 或顺序，因为 order_by('?') 会使顺序随机。",
+        "reason": "这验证了聚合分组未被破坏，是 Issue 期望的正确行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "是否所有数据库后端（SQLite, PostgreSQL, MySQL, Oracle）都表现出相同的行为？",
+    "除了 order_by('?')，其他非确定性函数或复杂表达式是否也会导致类似问题？",
+    "get_group_by 方法中处理 is_ref 的逻辑是否与 Random 表达式有交互？"
+  ],
+  "raw": {
+    "issue_summary": "使用 order_by('?') 时，QuerySet 的聚合分组被意外破坏，导致 COUNT 结果不正确。",
+    "trigger_condition": {
+      "text": "对包含 annotate(Count(...)) 的 QuerySet 调用 order_by('?') 和 values('id', 'rc')。",
+      "evidence": [
+        "Issue 中描述了 Thing.objects.annotate(rc=Count('related')).order_by('?').values('id', 'rc') 触发了问题。",
+        "Issue 中打印的 SQL 显示 GROUP BY 子句中包含了 RANDOM()。",
+        "相关源码片段 5 显示 get_group_by 方法会将 order_by 中的表达式添加到 group by 子句中。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "聚合查询返回了错误的行数和计数结果（预期是 1 行，计数为 2；实际是 2 行，每行计数为 1）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中显示查询结果：<QuerySet [{'id': 1, 'rc': 1}, {'id': 1, 'rc': 1}]>，而预期是 [{'id': 1, 'rc': 2}]。",
+        "Issue 中打印的 SQL 显示 GROUP BY \"thing\".\"id\", RANDOM()，这导致分组被破坏。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 order_by('?') 不应影响聚合分组，查询应返回正确的聚合计数（即按 'id' 分组，计数为 2）。",
+      "evidence": [
+        "Issue 作者认为随机函数调用与聚合无关，不应破坏分组。",
+        "Issue 中展示了 order_by('rc') 和 order_by('related') 的行为作为对比，暗示 order_by('?') 也应保持分组。",
+        "Issue 中作者提供的补丁旨在从 group by 表达式中排除 Random 类型。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于添加聚合注释（如 Count）。"
+      },
+      {
+        "name": "QuerySet.order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于对查询结果排序，'?' 参数触发随机排序。"
+      },
+      {
+        "name": "QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于指定返回的字段，影响 SELECT 和潜在的 GROUP BY 子句。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "使用的聚合函数。"
+      },
+      {
+        "name": "SQLCompiler.get_group_by",
+        "kind": "method",
+        "source_path": "django/db/models/sql/compiler.py",
+        "reason": "Issue 中明确指出问题可能出在此方法中，它负责构建 GROUP BY 子句。"
+      },
+      {
+        "name": "Random",
+        "kind": "class",
+        "source_path": "django/db/models/functions/math.py",
+        "reason": "order_by('?') 对应的函数类，Issue 中补丁专门处理了它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/compiler.py",
+        "object": "SQLCompiler.get_group_by",
+        "lines": "63-147",
+        "reason": "Issue 中作者指出问题在此方法内，并提供了补丁。该方法将 order_by 表达式添加到 group by 子句中，但未正确处理 Random 表达式。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_aggregation_order_by_not_selected_annotation_values",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了带 order_by 的聚合查询，涉及 annotate、order_by 和 values 的组合。",
+        "reusable_parts": [
+          "AggregateTestCase 类结构",
+          "使用 annotate 和 order_by 的模式",
+          "使用 values_list 获取结果",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试使用确定的字段（如 F('min_related_age')）进行排序，而非 order_by('?')，且未检查 GROUP BY SQL。"
+      },
+      {
+        "test_name": "test_non_grouped_annotation_not_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了 GROUP BY 子句的生成逻辑，特别是注解和 values 的交互。",
+        "reusable_parts": [
+          "使用 annotate、filter、values、annotate(Count) 的链式调用",
+          "检查最终查询结果",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试未涉及 order_by，且关注的是注解是否在 GROUP BY 中，而非 order_by 表达式的影响。"
+      },
+      {
+        "test_name": "test_order_by_rawsql",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了使用 RawSQL 进行 order_by，展示了 order_by 可以接受非字段表达式。",
+        "reusable_parts": [
+          "使用 order_by 与复杂表达式",
+          "使用 values 和 assertSequenceEqual",
+          "Queries1Tests 类结构"
+        ],
+        "possible_gap": "它使用 RawSQL 而非 '?'，且不涉及聚合。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用确定的字段或 F 表达式进行 order_by（例如 order_by('rating'), order_by(F('min_related_age'))）。",
+        "target_pattern": "将 order_by 参数改为 '?' 或 Random()。",
+        "reason": "Issue 表明 order_by('?') 是触发缺陷的关键输入。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中可能缺少 .values('id', 'rc') 在 .annotate(Count(...)).order_by(...) 之后。",
+        "target_pattern": "确保调用链为 .annotate(rc=Count(...)).order_by('?').values('id', 'rc')。",
+        "reason": "Issue 中的触发条件包含这个特定的链式调用顺序。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 GROUP BY 子句。",
+        "reason": "Issue 中通过打印 query 发现 GROUP BY 子句中包含了 RANDOM()，这是错误的核心。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询结果集（QuerySet）的内容，特别是行数和 'rc' 字段的值。",
+        "reason": "Issue 中观察到的错误现象是返回了错误的行数和计数。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 的 GROUP BY 子句中不应包含 RANDOM() 或类似随机函数。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为表名、别名可能变化。",
+        "reason": "这直接对应 Issue 中发现的错误 SQL 模式。"
+      },
+      {
+        "assertion_goal": "查询结果应只包含一行，且该行的 'rc' 计数等于相关对象的数量（例如 2）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言结果集的完整 repr 或顺序，因为 order_by('?') 会使顺序随机。",
+        "reason": "这验证了聚合分组未被破坏，是 Issue 期望的正确行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django 测试数据库和简单的模型（如 Thing 和 Related），并创建测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 类并继承自 django.test.TestCase 以访问数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "是否所有数据库后端（SQLite, PostgreSQL, MySQL, Oracle）都表现出相同的行为？",
+      "除了 order_by('?')，其他非确定性函数或复杂表达式是否也会导致类似问题？",
+      "get_group_by 方法中处理 is_ref 的逻辑是否与 Random 表达式有交互？"
+    ]
+  }
+}

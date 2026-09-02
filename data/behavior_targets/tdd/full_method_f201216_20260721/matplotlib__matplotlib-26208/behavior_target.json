@@ -1,0 +1,368 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-26208",
+  "issue_summary": "在使用 twinx 创建双 y 轴图表时，如果第一个轴是 stackplot，第二个轴是 plot，则第一个轴的数据限制 (dataLims) 会被错误地替换为 ±inf。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 plt.subplots 创建图形和轴。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 numpy 来生成测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在非交互式后端下运行以确保可重复性。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_twinx_knows_limits",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试涉及 twinx 轴的视图限制 (viewLim)，与数据限制 (dataLims) 相关，且使用了 twinx 和 plot。",
+        "reusable_parts": [
+          "import matplotlib.pyplot as plt",
+          "fig, ax = plt.subplots()",
+          "xtwin = ax.twinx()",
+          "xtwin.plot(...)",
+          "assert_array_equal 用于比较限制。"
+        ],
+        "possible_gap": "该测试检查的是 viewLim.intervalx，而非 dataLim.intervaly，并且没有使用 stackplot。"
+      },
+      {
+        "test_name": "test_stackplot",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试专门测试 stackplot 功能，并设置了 xlim 和 ylim。",
+        "reusable_parts": [
+          "import numpy as np",
+          "fig = plt.figure()",
+          "ax = fig.add_subplot(1, 1, 1)",
+          "ax.stackplot(...)",
+          "ax.set_xlim/ylim。"
+        ],
+        "possible_gap": "该测试没有涉及 twinx 轴，因此无法复现跨轴交互导致的 bug。"
+      },
+      {
+        "test_name": "test_twinx_axis_scales",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试创建了 twinx 轴并在两个轴上绘图，检查自动缩放行为。",
+        "reusable_parts": [
+          "fig = plt.figure()",
+          "ax = fig.add_axes(...)",
+          "ax2 = plt.twinx(ax)",
+          "ax.plot(...)",
+          "ax2.plot(...)"
+        ],
+        "possible_gap": "该测试使用 image_comparison，没有直接检查 dataLims 的数值，且没有使用 stackplot。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个包含 stackplot 的轴 (ax1)，然后通过 twinx 创建第二个轴 (ax2)，并在 ax2 上调用 plot。",
+      "evidence": [
+        "Issue 中的代码示例：先创建 ax1 并调用 stackplot，然后创建 ax2 = ax1.twinx()，最后在 ax2 上调用 plot。",
+        "Issue 描述：'when using twin x-axis (two-y-axis charts), the data limits (dataLims) of the first axis (ax1) get changed to ±inf when plotting a stackplot on the second axis (ax2)'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ax1 的 dataLim.intervaly 在 ax2 调用 plot 后变为 [inf, -inf]，而预期应保持不变。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的实际输出显示 ax1 的 dataLim 从 [-22.71770833 26.585] 变为 [inf -inf]。",
+        "Issue 描述：'It caught me off guard that the ax1 dataLims get changed to ±inf'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.subplots",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "用于创建初始图形和轴 (ax1)。"
+      },
+      {
+        "name": "Axes.stackplot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 ax1 上调用，是触发条件的一部分。"
+      },
+      {
+        "name": "Axes.twinx",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于创建共享 x 轴的第二个轴 (ax2)。"
+      },
+      {
+        "name": "Axes.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 ax2 上调用，是触发条件的一部分。"
+      },
+      {
+        "name": "BboxBase.intervaly",
+        "kind": "property",
+        "source_path": "lib/matplotlib/transforms.py",
+        "reason": "用于观察 dataLims 的 y 坐标范围，是错误现象的直接体现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_axes.py",
+        "object": "Axes",
+        "lines": "",
+        "reason": "stackplot 和 plot 方法以及 twinx 相关的数据限制计算逻辑可能在此类中。"
+      },
+      {
+        "path": "lib/matplotlib/transforms.py",
+        "object": "BboxBase",
+        "lines": "",
+        "reason": "dataLim 属性（如 intervaly）在此定义，其值被错误地设置为 inf。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常在一个轴上绘图，然后在 twinx 轴上绘图（都是 plot）。",
+        "target_pattern": "先在第一个轴 (ax1) 上调用 stackplot，然后在 twinx 轴 (ax2) 上调用 plot。",
+        "reason": "Issue 明确指出，只有当 ax1 是 stackplot 且 ax2 是 plot 时才会触发 dataLims 变为 inf 的问题。交换顺序则不会。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常检查 viewLim 或图像输出。",
+        "target_pattern": "在关键步骤后检查 ax1.dataLim.intervaly 的数值。",
+        "reason": "错误现象直接体现在 ax1.dataLim.intervaly 的值上，需要观测其变化。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ax1 的 dataLims 在创建 twinx 轴并在其上绘图后应保持不变，与 Matplotlib 3.4.0 之前版本的行为一致。",
+      "evidence": [
+        "Issue 中的预期结果：'To not change ax1 dataLims, since I made no changes to it, like with matplotlib versions prior to 3.4.0'。",
+        "Issue 提到交换绘图顺序（ax1 用 plot，ax2 用 stackplot）不会导致此问题，表明 ax1 的 dataLims 在正常情况下应保持稳定。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "ax1.dataLim.intervaly",
+        "reason": "这是 Issue 中报告的直接错误现象：该值在 ax2.plot 调用后不应改变，但错误地变成了 [inf, -inf]。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "ax2.dataLim.intervaly",
+        "reason": "需要确认 ax2 的数据限制是否正确设置，以理解跨轴交互。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 ax2.plot 调用后，ax1.dataLim.intervaly 应保持与调用前相同的值（非 inf）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的图像像素或与特定无关的图形属性。",
+        "reason": "Issue 的核心是 dataLims 的数值被错误覆盖，直接比较其前后值是最稳定的断言。"
+      },
+      {
+        "assertion_goal": "ax1.dataLim.intervaly 不应包含 inf 或 -inf。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言 dataLims 的精确浮点数值，除非是已知的预期范围。",
+        "reason": "错误现象是值变为 inf，因此断言不包含 inf 可以捕捉到该问题，且对浮点误差不敏感。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致 dataLims 被错误设置为 inf 的具体代码路径和逻辑尚不明确。",
+    "是否只有 stackplot 和 plot 的特定组合才会触发此问题，还是其他绘图类型也有影响。",
+    "dataLims 的计算在 twinx 轴创建和绘图时是如何被共享或覆盖的。"
+  ],
+  "raw": {
+    "issue_summary": "在使用 twinx 创建双 y 轴图表时，如果第一个轴是 stackplot，第二个轴是 plot，则第一个轴的数据限制 (dataLims) 会被错误地替换为 ±inf。",
+    "trigger_condition": {
+      "text": "创建一个包含 stackplot 的轴 (ax1)，然后通过 twinx 创建第二个轴 (ax2)，并在 ax2 上调用 plot。",
+      "evidence": [
+        "Issue 中的代码示例：先创建 ax1 并调用 stackplot，然后创建 ax2 = ax1.twinx()，最后在 ax2 上调用 plot。",
+        "Issue 描述：'when using twin x-axis (two-y-axis charts), the data limits (dataLims) of the first axis (ax1) get changed to ±inf when plotting a stackplot on the second axis (ax2)'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ax1 的 dataLim.intervaly 在 ax2 调用 plot 后变为 [inf, -inf]，而预期应保持不变。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的实际输出显示 ax1 的 dataLim 从 [-22.71770833 26.585] 变为 [inf -inf]。",
+        "Issue 描述：'It caught me off guard that the ax1 dataLims get changed to ±inf'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ax1 的 dataLims 在创建 twinx 轴并在其上绘图后应保持不变，与 Matplotlib 3.4.0 之前版本的行为一致。",
+      "evidence": [
+        "Issue 中的预期结果：'To not change ax1 dataLims, since I made no changes to it, like with matplotlib versions prior to 3.4.0'。",
+        "Issue 提到交换绘图顺序（ax1 用 plot，ax2 用 stackplot）不会导致此问题，表明 ax1 的 dataLims 在正常情况下应保持稳定。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.subplots",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "用于创建初始图形和轴 (ax1)。"
+      },
+      {
+        "name": "Axes.stackplot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 ax1 上调用，是触发条件的一部分。"
+      },
+      {
+        "name": "Axes.twinx",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于创建共享 x 轴的第二个轴 (ax2)。"
+      },
+      {
+        "name": "Axes.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "在 ax2 上调用，是触发条件的一部分。"
+      },
+      {
+        "name": "BboxBase.intervaly",
+        "kind": "property",
+        "source_path": "lib/matplotlib/transforms.py",
+        "reason": "用于观察 dataLims 的 y 坐标范围，是错误现象的直接体现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_axes.py",
+        "object": "Axes",
+        "lines": "",
+        "reason": "stackplot 和 plot 方法以及 twinx 相关的数据限制计算逻辑可能在此类中。"
+      },
+      {
+        "path": "lib/matplotlib/transforms.py",
+        "object": "BboxBase",
+        "lines": "",
+        "reason": "dataLim 属性（如 intervaly）在此定义，其值被错误地设置为 inf。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_twinx_knows_limits",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试涉及 twinx 轴的视图限制 (viewLim)，与数据限制 (dataLims) 相关，且使用了 twinx 和 plot。",
+        "reusable_parts": [
+          "import matplotlib.pyplot as plt",
+          "fig, ax = plt.subplots()",
+          "xtwin = ax.twinx()",
+          "xtwin.plot(...)",
+          "assert_array_equal 用于比较限制。"
+        ],
+        "possible_gap": "该测试检查的是 viewLim.intervalx，而非 dataLim.intervaly，并且没有使用 stackplot。"
+      },
+      {
+        "test_name": "test_stackplot",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试专门测试 stackplot 功能，并设置了 xlim 和 ylim。",
+        "reusable_parts": [
+          "import numpy as np",
+          "fig = plt.figure()",
+          "ax = fig.add_subplot(1, 1, 1)",
+          "ax.stackplot(...)",
+          "ax.set_xlim/ylim。"
+        ],
+        "possible_gap": "该测试没有涉及 twinx 轴，因此无法复现跨轴交互导致的 bug。"
+      },
+      {
+        "test_name": "test_twinx_axis_scales",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试创建了 twinx 轴并在两个轴上绘图，检查自动缩放行为。",
+        "reusable_parts": [
+          "fig = plt.figure()",
+          "ax = fig.add_axes(...)",
+          "ax2 = plt.twinx(ax)",
+          "ax.plot(...)",
+          "ax2.plot(...)"
+        ],
+        "possible_gap": "该测试使用 image_comparison，没有直接检查 dataLims 的数值，且没有使用 stackplot。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通常在一个轴上绘图，然后在 twinx 轴上绘图（都是 plot）。",
+        "target_pattern": "先在第一个轴 (ax1) 上调用 stackplot，然后在 twinx 轴 (ax2) 上调用 plot。",
+        "reason": "Issue 明确指出，只有当 ax1 是 stackplot 且 ax2 是 plot 时才会触发 dataLims 变为 inf 的问题。交换顺序则不会。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常检查 viewLim 或图像输出。",
+        "target_pattern": "在关键步骤后检查 ax1.dataLim.intervaly 的数值。",
+        "reason": "错误现象直接体现在 ax1.dataLim.intervaly 的值上，需要观测其变化。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "ax1.dataLim.intervaly",
+        "reason": "这是 Issue 中报告的直接错误现象：该值在 ax2.plot 调用后不应改变，但错误地变成了 [inf, -inf]。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "ax2.dataLim.intervaly",
+        "reason": "需要确认 ax2 的数据限制是否正确设置，以理解跨轴交互。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 ax2.plot 调用后，ax1.dataLim.intervaly 应保持与调用前相同的值（非 inf）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的图像像素或与特定无关的图形属性。",
+        "reason": "Issue 的核心是 dataLims 的数值被错误覆盖，直接比较其前后值是最稳定的断言。"
+      },
+      {
+        "assertion_goal": "ax1.dataLim.intervaly 不应包含 inf 或 -inf。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言 dataLims 的精确浮点数值，除非是已知的预期范围。",
+        "reason": "错误现象是值变为 inf，因此断言不包含 inf 可以捕捉到该问题，且对浮点误差不敏感。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 plt.subplots 创建图形和轴。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 numpy 来生成测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在非交互式后端下运行以确保可重复性。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致 dataLims 被错误设置为 inf 的具体代码路径和逻辑尚不明确。",
+      "是否只有 stackplot 和 plot 的特定组合才会触发此问题，还是其他绘图类型也有影响。",
+      "dataLims 的计算在 twinx 轴创建和绘图时是如何被共享或覆盖的。"
+    ]
+  }
+}

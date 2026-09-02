@@ -1,0 +1,368 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-23562",
+  "issue_summary": "调用 Poly3DCollection.get_facecolors() 方法时抛出 AttributeError，提示缺少 '_facecolors2d' 属性。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 matplotlib 的 3D 投影支持，使用 `projection='3d'` 创建 Axes3D 对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在非交互式后端下运行，例如 'Agg'，以避免弹出图形窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 numpy 生成网格数据作为 plot_surface 的输入。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_surface3d",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "该测试调用了 ax.plot_surface，与 Issue 触发条件高度相似，并成功生成了图像。",
+        "reusable_parts": [
+          "imports (plt, np, cm)",
+          "fig 和 ax 的创建方式",
+          "plot_surface 的基本调用模式",
+          "mpl3d_image_comparison 装饰器"
+        ],
+        "possible_gap": "该测试没有对返回的 Poly3DCollection 对象调用 get_facecolors() 方法。"
+      },
+      {
+        "test_name": "test_surface3d_shaded",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "同样调用了 ax.plot_surface，并使用了颜色参数。",
+        "reusable_parts": [
+          "imports",
+          "fig 和 ax 的创建",
+          "plot_surface 的调用",
+          "设置 zlim"
+        ],
+        "possible_gap": "没有调用 get_facecolors() 来触发 bug。"
+      },
+      {
+        "test_name": "test_poly3dcollection_closed",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "直接创建和操作 Poly3DCollection 对象，与抛出异常的对象类型相同。",
+        "reusable_parts": [
+          "art3d.Poly3DCollection 的构造方式",
+          "add_collection3d 的调用"
+        ],
+        "possible_gap": "该测试手动创建 Poly3DCollection 并设置了 facecolor，可能绕过了 plot_surface 中导致属性缺失的路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 Axes3D.plot_surface 创建 3D 曲面图，然后对返回的 Poly3DCollection 对象调用 get_facecolors() 方法。",
+      "evidence": [
+        "Issue 中的代码示例：`r = ax.plot_surface(x,y,z2, cmap='hot'); r.get_facecolors()`",
+        "相关测试 2 和 5 展示了 plot_surface 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "AttributeError: 'Poly3DCollection' object has no attribute '_facecolors2d'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示错误发生在 art3d.py 文件的 get_facecolors 方法中，该方法尝试返回 self._facecolors2d。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Axes3D.plot_surface",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+        "reason": "Issue 中触发 bug 的调用链起点，返回有问题的 Poly3DCollection 对象。"
+      },
+      {
+        "name": "Poly3DCollection.get_facecolors",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "Issue 中直接抛出异常的方法。"
+      },
+      {
+        "name": "Poly3DCollection",
+        "kind": "class",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "抛出异常的对象类型，其继承关系和属性初始化是关键。"
+      },
+      {
+        "name": "art3d.Poly3DCollection",
+        "kind": "class",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "相关测试中用于构造 3D 多边形集合的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Poly3DCollection.get_facecolors",
+        "lines": "",
+        "reason": "Issue 的 traceback 指向该方法，它试图访问不存在的属性 '_facecolors2d'。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Poly3DCollection.__init__ 或 set_3d_properties",
+        "lines": "",
+        "reason": "可能未正确初始化继承的属性或未创建 '_facecolors2d' 属性。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+        "object": "Axes3D.plot_surface",
+        "lines": "",
+        "reason": "该方法创建并返回 Poly3DCollection 对象，可能未正确配置其属性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，调用 plot_surface 后通常不进一步操作返回的对象，或仅用于图像比较。",
+        "target_pattern": "在调用 plot_surface 后，立即对返回的 Poly3DCollection 对象调用 get_facecolors() 方法。",
+        "reason": "Issue 表明 bug 在调用 get_facecolors() 时触发，而现有测试未执行此操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中创建的 Poly3DCollection 可能通过 plot_surface 的内部逻辑或手动构造处于某种“正常”状态。",
+        "target_pattern": "Poly3DCollection 对象在调用 get_facecolors() 时，其内部状态缺少 '_facecolors2d' 属性。",
+        "reason": "异常信息明确指出缺少该属性，表明对象状态不完整。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Poly3DCollection.get_facecolors() 方法应能成功返回颜色数组，而不抛出 AttributeError。",
+      "evidence": [
+        "Issue 中用户期望调用 get_facecolors() 能正常工作。",
+        "源码片段 1 中 Poly3DCollection 继承自 PolyCollection，而 PolyCollection 应有 get_facecolors 方法。",
+        "相关测试 2 和 5 成功调用了 plot_surface 并生成了图像，暗示正常情况下应能获取颜色信息。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 surf.get_facecolors() 时是否抛出 AttributeError 及其消息。",
+        "reason": "这是 Issue 的核心错误现象，直接观测此调用即可判断 bug 是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果 get_facecolors() 成功调用，观察其返回值的类型（如 ndarray）和形状。",
+        "reason": "用于验证修复后方法能正常工作并返回预期的颜色数据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "ax.plot_surface 返回的对象类型是否为 Poly3DCollection。",
+        "reason": "确认触发对象与 Issue 中一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 Poly3DCollection.get_facecolors() 不应抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能变化。",
+        "reason": "Issue 的核心是异常，断言不抛出特定异常是稳定且目标明确的。"
+      },
+      {
+        "assertion_goal": "get_facecolors() 应返回一个表示颜色的数组。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回数组的精确值，因为颜色值可能因输入、色彩映射或随机性而变化。",
+        "reason": "修复后方法应返回有效数据，类型断言是稳定的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Poly3DCollection._facecolors2d 属性应该在何时、由哪个方法（如 __init__, set_3d_properties, set_facecolors）创建或初始化。",
+    "bug 是否只在使用特定参数（如 cmap）调用 plot_surface 时触发，还是普遍存在。",
+    "Poly3DCollection 从父类 PolyCollection 继承的 get_facecolors 方法的具体实现和预期行为。"
+  ],
+  "raw": {
+    "issue_summary": "调用 Poly3DCollection.get_facecolors() 方法时抛出 AttributeError，提示缺少 '_facecolors2d' 属性。",
+    "trigger_condition": {
+      "text": "使用 Axes3D.plot_surface 创建 3D 曲面图，然后对返回的 Poly3DCollection 对象调用 get_facecolors() 方法。",
+      "evidence": [
+        "Issue 中的代码示例：`r = ax.plot_surface(x,y,z2, cmap='hot'); r.get_facecolors()`",
+        "相关测试 2 和 5 展示了 plot_surface 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "AttributeError: 'Poly3DCollection' object has no attribute '_facecolors2d'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示错误发生在 art3d.py 文件的 get_facecolors 方法中，该方法尝试返回 self._facecolors2d。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Poly3DCollection.get_facecolors() 方法应能成功返回颜色数组，而不抛出 AttributeError。",
+      "evidence": [
+        "Issue 中用户期望调用 get_facecolors() 能正常工作。",
+        "源码片段 1 中 Poly3DCollection 继承自 PolyCollection，而 PolyCollection 应有 get_facecolors 方法。",
+        "相关测试 2 和 5 成功调用了 plot_surface 并生成了图像，暗示正常情况下应能获取颜色信息。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Axes3D.plot_surface",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+        "reason": "Issue 中触发 bug 的调用链起点，返回有问题的 Poly3DCollection 对象。"
+      },
+      {
+        "name": "Poly3DCollection.get_facecolors",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "Issue 中直接抛出异常的方法。"
+      },
+      {
+        "name": "Poly3DCollection",
+        "kind": "class",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "抛出异常的对象类型，其继承关系和属性初始化是关键。"
+      },
+      {
+        "name": "art3d.Poly3DCollection",
+        "kind": "class",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "相关测试中用于构造 3D 多边形集合的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Poly3DCollection.get_facecolors",
+        "lines": "",
+        "reason": "Issue 的 traceback 指向该方法，它试图访问不存在的属性 '_facecolors2d'。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Poly3DCollection.__init__ 或 set_3d_properties",
+        "lines": "",
+        "reason": "可能未正确初始化继承的属性或未创建 '_facecolors2d' 属性。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/axes3d.py",
+        "object": "Axes3D.plot_surface",
+        "lines": "",
+        "reason": "该方法创建并返回 Poly3DCollection 对象，可能未正确配置其属性。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_surface3d",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "该测试调用了 ax.plot_surface，与 Issue 触发条件高度相似，并成功生成了图像。",
+        "reusable_parts": [
+          "imports (plt, np, cm)",
+          "fig 和 ax 的创建方式",
+          "plot_surface 的基本调用模式",
+          "mpl3d_image_comparison 装饰器"
+        ],
+        "possible_gap": "该测试没有对返回的 Poly3DCollection 对象调用 get_facecolors() 方法。"
+      },
+      {
+        "test_name": "test_surface3d_shaded",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "同样调用了 ax.plot_surface，并使用了颜色参数。",
+        "reusable_parts": [
+          "imports",
+          "fig 和 ax 的创建",
+          "plot_surface 的调用",
+          "设置 zlim"
+        ],
+        "possible_gap": "没有调用 get_facecolors() 来触发 bug。"
+      },
+      {
+        "test_name": "test_poly3dcollection_closed",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "直接创建和操作 Poly3DCollection 对象，与抛出异常的对象类型相同。",
+        "reusable_parts": [
+          "art3d.Poly3DCollection 的构造方式",
+          "add_collection3d 的调用"
+        ],
+        "possible_gap": "该测试手动创建 Poly3DCollection 并设置了 facecolor，可能绕过了 plot_surface 中导致属性缺失的路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，调用 plot_surface 后通常不进一步操作返回的对象，或仅用于图像比较。",
+        "target_pattern": "在调用 plot_surface 后，立即对返回的 Poly3DCollection 对象调用 get_facecolors() 方法。",
+        "reason": "Issue 表明 bug 在调用 get_facecolors() 时触发，而现有测试未执行此操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中创建的 Poly3DCollection 可能通过 plot_surface 的内部逻辑或手动构造处于某种“正常”状态。",
+        "target_pattern": "Poly3DCollection 对象在调用 get_facecolors() 时，其内部状态缺少 '_facecolors2d' 属性。",
+        "reason": "异常信息明确指出缺少该属性，表明对象状态不完整。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 surf.get_facecolors() 时是否抛出 AttributeError 及其消息。",
+        "reason": "这是 Issue 的核心错误现象，直接观测此调用即可判断 bug 是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果 get_facecolors() 成功调用，观察其返回值的类型（如 ndarray）和形状。",
+        "reason": "用于验证修复后方法能正常工作并返回预期的颜色数据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "ax.plot_surface 返回的对象类型是否为 Poly3DCollection。",
+        "reason": "确认触发对象与 Issue 中一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 Poly3DCollection.get_facecolors() 不应抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能变化。",
+        "reason": "Issue 的核心是异常，断言不抛出特定异常是稳定且目标明确的。"
+      },
+      {
+        "assertion_goal": "get_facecolors() 应返回一个表示颜色的数组。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回数组的精确值，因为颜色值可能因输入、色彩映射或随机性而变化。",
+        "reason": "修复后方法应返回有效数据，类型断言是稳定的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 matplotlib 的 3D 投影支持，使用 `projection='3d'` 创建 Axes3D 对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在非交互式后端下运行，例如 'Agg'，以避免弹出图形窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 numpy 生成网格数据作为 plot_surface 的输入。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Poly3DCollection._facecolors2d 属性应该在何时、由哪个方法（如 __init__, set_3d_properties, set_facecolors）创建或初始化。",
+      "bug 是否只在使用特定参数（如 cmap）调用 plot_surface 时触发，还是普遍存在。",
+      "Poly3DCollection 从父类 PolyCollection 继承的 get_facecolors 方法的具体实现和预期行为。"
+    ]
+  }
+}

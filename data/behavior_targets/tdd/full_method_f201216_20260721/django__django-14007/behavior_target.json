@@ -1,0 +1,352 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14007",
+  "issue_summary": "自定义 AutoField 子类的 from_db_value 方法在 insert 操作（如 create 和 bulk_create）后未被调用，导致返回的 ID 值类型错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义自定义的 AutoField 子类（如 MyAutoField）和一个使用它作为主键的模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以使用数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "对于 bulk_create 测试，可能需要检查数据库是否支持返回行（can_return_rows_from_bulk_insert）。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_simple_load",
+        "test_file": "tests/from_db_value/tests.py",
+        "why_relevant": "它测试了从数据库加载对象时 from_db_value 被调用，与 Issue 中查询路径工作正常的情况一致。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "自定义字段（如 Cash）和模型（如 CashModel）的导入和定义模式",
+          "使用 objects.get() 获取对象",
+          "使用 assertIsInstance 检查类型"
+        ],
+        "possible_gap": "它测试的是查询（SELECT）路径，而不是插入（INSERT）路径。"
+      },
+      {
+        "test_name": "test_bulk_insert_nullable_fields",
+        "test_file": "tests/bulk_create/tests.py",
+        "why_relevant": "它测试了 bulk_create 方法，这是 Issue 中提到的触发方法之一。",
+        "reusable_parts": [
+          "BulkCreateTests 测试类",
+          "使用 bulk_create 的调用模式",
+          "数据库特性检查（skipUnlessDBFeature）",
+          "使用 subTest"
+        ],
+        "possible_gap": "它测试的是可为空字段的插入，没有使用自定义的 AutoField 子类，也没有检查返回值的类型转换。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用自定义的 AutoField 子类（如 MyAutoField）作为主键，并调用 QuerySet.create() 或支持返回主键值的 bulk_create() 方法插入新记录。",
+      "evidence": [
+        "Issue 中描述了使用 MyAutoField 子类，并调用 create() 和 bulk_create() 方法。",
+        "源码片段 4 显示了 QuerySet.create 方法。",
+        "源码片段 5 显示了 bulk_create 方法，其中包含设置返回字段值的逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "通过 create() 或 bulk_create() 插入的对象，其主键字段的值是原始整数类型（如 int），而不是自定义的包装类（如 MyIntWrapper）。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 中示例显示：am2.id 返回 2（int），而不是 <MyIntWrapper: 1>。",
+        "Issue 中 bulk_create 示例显示 ams[0].id 返回 2（int）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中明确提到此方法插入时未调用 from_db_value。"
+      },
+      {
+        "name": "QuerySet.bulk_create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中明确提到此方法在支持返回主键时也未调用 from_db_value。"
+      },
+      {
+        "name": "Field.from_db_value",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "这是 Issue 中提到的未被调用的关键转换方法。"
+      },
+      {
+        "name": "BigAutoField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中自定义字段的父类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_create",
+        "lines": "463-525",
+        "reason": "该方法中通过 setattr 直接设置返回的字段值（如 result），可能未经过字段的 from_db_value 转换。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.create",
+        "lines": "446-454",
+        "reason": "该方法调用 obj.save，可能在其后的某个环节（如处理返回字段时）未调用 from_db_value。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field",
+        "lines": "",
+        "reason": "可能存在处理数据库返回值并调用 from_db_value 的通用逻辑，但在插入路径中被绕过。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试使用标准字段（如 Cash、可为空字段）和模型。",
+        "target_pattern": "使用自定义的 AutoField 子类（如 MyAutoField）作为模型的主键字段。",
+        "reason": "Issue 的核心是自定义 AutoField 子类的行为异常，需要构造此类字段和模型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通过 get() 查询或 bulk_create 插入但不关注返回值类型。",
+        "target_pattern": "在调用 create() 或 bulk_create() 后，立即检查新创建对象主键字段的类型和值。",
+        "reason": "Issue 的症状出现在插入操作后对返回字段值的直接访问上。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "通过 create() 或 bulk_create() 插入的对象，其主键字段的值应经过自定义字段的 from_db_value 方法转换，返回正确的包装类型。",
+      "evidence": [
+        "Issue 中描述了查询时（如 first()）id 是包装类：<MyIntWrapper: 1>。",
+        "源码片段 1 展示了 from_db_value 方法用于转换数据库返回值。",
+        "相关测试 1-3 展示了 from_db_value 在查询时被调用的预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(created_instance.id) 或 isinstance(created_instance.id, MyIntWrapper)",
+        "reason": "Issue 的核心是返回值的类型错误，观察插入后主键字段的类型是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "created_instance.id 的值（repr 或 str）",
+        "reason": "可以对比返回的整数值和包装类对象的表示，以确认转换是否发生。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 bulk_create 中设置 obj_without_pk 属性前后的字段值（通过调试或插桩）",
+        "reason": "可以观察 bulk_create 内部 setattr 设置的值是原始数据库返回值还是经过转换的值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "通过 create() 创建的对象，其主键字段的值类型应为自定义包装类（如 MyIntWrapper）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串或精确的整数值，因为包装类可能改变表示。",
+        "reason": "Issue 关注的是类型，isinstance 检查稳定且直接对应预期行为。"
+      },
+      {
+        "assertion_goal": "通过 bulk_create() 创建的对象，其主键字段的值类型也应为自定义包装类。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "仅断言对象被创建成功（如 count），不检查内部状态。",
+        "reason": "需要确保 bulk_create 路径也应用了相同的类型转换逻辑。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "from_db_value 未被调用的确切代码位置（是在 save()、_batched_insert 还是其他地方）。",
+    "除了 create 和 bulk_create，是否还有其他插入 API（如 save(force_insert=True)）存在同样问题。",
+    "数据库后端（如 PostgreSQL、Oracle）对返回值处理的具体差异如何影响缺陷触发。"
+  ],
+  "raw": {
+    "issue_summary": "自定义 AutoField 子类的 from_db_value 方法在 insert 操作（如 create 和 bulk_create）后未被调用，导致返回的 ID 值类型错误。",
+    "trigger_condition": {
+      "text": "使用自定义的 AutoField 子类（如 MyAutoField）作为主键，并调用 QuerySet.create() 或支持返回主键值的 bulk_create() 方法插入新记录。",
+      "evidence": [
+        "Issue 中描述了使用 MyAutoField 子类，并调用 create() 和 bulk_create() 方法。",
+        "源码片段 4 显示了 QuerySet.create 方法。",
+        "源码片段 5 显示了 bulk_create 方法，其中包含设置返回字段值的逻辑。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "通过 create() 或 bulk_create() 插入的对象，其主键字段的值是原始整数类型（如 int），而不是自定义的包装类（如 MyIntWrapper）。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 中示例显示：am2.id 返回 2（int），而不是 <MyIntWrapper: 1>。",
+        "Issue 中 bulk_create 示例显示 ams[0].id 返回 2（int）。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "通过 create() 或 bulk_create() 插入的对象，其主键字段的值应经过自定义字段的 from_db_value 方法转换，返回正确的包装类型。",
+      "evidence": [
+        "Issue 中描述了查询时（如 first()）id 是包装类：<MyIntWrapper: 1>。",
+        "源码片段 1 展示了 from_db_value 方法用于转换数据库返回值。",
+        "相关测试 1-3 展示了 from_db_value 在查询时被调用的预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中明确提到此方法插入时未调用 from_db_value。"
+      },
+      {
+        "name": "QuerySet.bulk_create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中明确提到此方法在支持返回主键时也未调用 from_db_value。"
+      },
+      {
+        "name": "Field.from_db_value",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "这是 Issue 中提到的未被调用的关键转换方法。"
+      },
+      {
+        "name": "BigAutoField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中自定义字段的父类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_create",
+        "lines": "463-525",
+        "reason": "该方法中通过 setattr 直接设置返回的字段值（如 result），可能未经过字段的 from_db_value 转换。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.create",
+        "lines": "446-454",
+        "reason": "该方法调用 obj.save，可能在其后的某个环节（如处理返回字段时）未调用 from_db_value。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field",
+        "lines": "",
+        "reason": "可能存在处理数据库返回值并调用 from_db_value 的通用逻辑，但在插入路径中被绕过。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_simple_load",
+        "test_file": "tests/from_db_value/tests.py",
+        "why_relevant": "它测试了从数据库加载对象时 from_db_value 被调用，与 Issue 中查询路径工作正常的情况一致。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "自定义字段（如 Cash）和模型（如 CashModel）的导入和定义模式",
+          "使用 objects.get() 获取对象",
+          "使用 assertIsInstance 检查类型"
+        ],
+        "possible_gap": "它测试的是查询（SELECT）路径，而不是插入（INSERT）路径。"
+      },
+      {
+        "test_name": "test_bulk_insert_nullable_fields",
+        "test_file": "tests/bulk_create/tests.py",
+        "why_relevant": "它测试了 bulk_create 方法，这是 Issue 中提到的触发方法之一。",
+        "reusable_parts": [
+          "BulkCreateTests 测试类",
+          "使用 bulk_create 的调用模式",
+          "数据库特性检查（skipUnlessDBFeature）",
+          "使用 subTest"
+        ],
+        "possible_gap": "它测试的是可为空字段的插入，没有使用自定义的 AutoField 子类，也没有检查返回值的类型转换。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试使用标准字段（如 Cash、可为空字段）和模型。",
+        "target_pattern": "使用自定义的 AutoField 子类（如 MyAutoField）作为模型的主键字段。",
+        "reason": "Issue 的核心是自定义 AutoField 子类的行为异常，需要构造此类字段和模型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通过 get() 查询或 bulk_create 插入但不关注返回值类型。",
+        "target_pattern": "在调用 create() 或 bulk_create() 后，立即检查新创建对象主键字段的类型和值。",
+        "reason": "Issue 的症状出现在插入操作后对返回字段值的直接访问上。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(created_instance.id) 或 isinstance(created_instance.id, MyIntWrapper)",
+        "reason": "Issue 的核心是返回值的类型错误，观察插入后主键字段的类型是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "created_instance.id 的值（repr 或 str）",
+        "reason": "可以对比返回的整数值和包装类对象的表示，以确认转换是否发生。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 bulk_create 中设置 obj_without_pk 属性前后的字段值（通过调试或插桩）",
+        "reason": "可以观察 bulk_create 内部 setattr 设置的值是原始数据库返回值还是经过转换的值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "通过 create() 创建的对象，其主键字段的值类型应为自定义包装类（如 MyIntWrapper）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串或精确的整数值，因为包装类可能改变表示。",
+        "reason": "Issue 关注的是类型，isinstance 检查稳定且直接对应预期行为。"
+      },
+      {
+        "assertion_goal": "通过 bulk_create() 创建的对象，其主键字段的值类型也应为自定义包装类。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "仅断言对象被创建成功（如 count），不检查内部状态。",
+        "reason": "需要确保 bulk_create 路径也应用了相同的类型转换逻辑。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义自定义的 AutoField 子类（如 MyAutoField）和一个使用它作为主键的模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以使用数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "对于 bulk_create 测试，可能需要检查数据库是否支持返回行（can_return_rows_from_bulk_insert）。",
+        "source": "retrieved_source",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "from_db_value 未被调用的确切代码位置（是在 save()、_batched_insert 还是其他地方）。",
+      "除了 create 和 bulk_create，是否还有其他插入 API（如 save(force_insert=True)）存在同样问题。",
+      "数据库后端（如 PostgreSQL、Oracle）对返回值处理的具体差异如何影响缺陷触发。"
+    ]
+  }
+}

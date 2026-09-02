@@ -1,0 +1,372 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-5840",
+  "issue_summary": "在 Windows 上，pytest 5.1.2 加载 conftest.py 时因路径大小写转换导致 ImportError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture 创建临时目录结构，并可能使用 monkeypatch 来修改 os.getcwd 或模拟 Windows 环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个不区分大小写但保留大小写的文件系统（如 Windows），相关测试使用了 @pytest.mark.skipif 进行条件判断。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "创建 conftest.py 文件，可能为空或包含简单定义。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_conftest_badcase",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "该测试专门检查当目录大小写错误时 conftest.py 的加载情况，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "testdir fixture 的使用",
+          "创建嵌套目录和 conftest.py 文件",
+          "使用 runpytest 并检查退出码",
+          "skipif 条件用于不区分大小写的文件系统"
+        ],
+        "possible_gap": "该测试创建的是 'JenkinsRoot' 和 'jenkinsroot' 的目录大小写差异，而 Issue 涉及的是完整路径（包含驱动器号和多个目录层级）的大小写转换。测试可能未覆盖路径字符串在内部被转换为全小写的场景。"
+      },
+      {
+        "test_name": "test_conftest_global_import",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "它直接测试了 PytestPluginManager._importconftest 方法，这是加载 conftest 的核心。",
+        "reusable_parts": [
+          "PytestPluginManager 的导入和实例化",
+          "_importconftest 方法的调用",
+          "断言导入的模块属性"
+        ],
+        "possible_gap": "该测试在单个临时目录中操作，未模拟 Windows 上完整路径的大小写问题，也未触发 ImportError。"
+      },
+      {
+        "test_name": "test_conftest_symlink",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "测试涉及符号链接和路径解析，可能触及与路径规范化相关的底层逻辑。",
+        "reusable_parts": [
+          "使用 mksymlinkto 创建符号链接",
+          "在符号链接目录中运行 runpytest",
+          "检查 stdout 输出和退出码"
+        ],
+        "possible_gap": "焦点是符号链接，而非纯大小写问题。路径大小写转换可能发生在符号链接解析之前或之后的不同阶段。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Windows（不区分大小写的文件系统）上，从包含大写字母的目录路径（如 'C:\\Azure\\KMS\\ComponentTest\\Python'）运行 pytest，并指定一个子目录（如 '.\\PIsys'）进行测试收集。",
+      "evidence": [
+        "Issue 描述：'after upgrade to 5.1.2, the path was converted to lower case'",
+        "Issue 中命令：'pytest --collect-only .\\PIsys -m smoke'",
+        "相关测试 1 的 skipif 条件：'only relevant for case insensitive file systems'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "加载 conftest.py 时抛出 ImportError，并伴随 ModuleNotFoundError: No module named 'python'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 错误信息：\"ImportError while loading conftest 'c:\\azure\\kms\\componenttest\\python\\pisys\\conftest.py'.\\nModuleNotFoundError: No module named 'python'\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PytestPluginManager._importconftest",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 2 中直接调用了此方法来导入 conftest 模块，这是加载 conftest.py 的核心 API。"
+      },
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中通过命令行调用 pytest，最终会调用此入口函数。"
+      },
+      {
+        "name": "conftest_setinitial",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 3 中用于初始化插件管理器并加载多个 conftest 路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/pytest.py",
+        "object": "",
+        "lines": "",
+        "reason": "iCoRe 检索出的相关源码指向此文件，它可能是 pytest 的主入口或配置加载逻辑所在。"
+      },
+      {
+        "path": "_pytest/config.py",
+        "object": "PytestPluginManager",
+        "lines": "",
+        "reason": "相关测试 2 和 3 都涉及 PytestPluginManager，它负责管理插件和 conftest 加载。"
+      },
+      {
+        "path": "_pytest/pathlib.py 或相关路径处理模块",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 核心是路径大小写处理问题，路径规范化或解析逻辑可能存在缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试（如 test_conftest_badcase）中，通过 testdir.tmpdir 在临时目录中创建具有特定大小写模式的目录结构。",
+        "target_pattern": "设置一个包含大写字母的初始工作目录（如 'C:\\Test\\MyProject'），然后从该目录或其子目录运行 pytest。",
+        "reason": "Issue 表明问题出现在从真实、非临时的、包含大写字母的路径运行时。临时目录路径通常不包含大写，可能绕过缺陷。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接调用 testdir.runpytest() 或 conf._importconftest(py.path.local(...))。",
+        "target_pattern": "模拟 pytest 命令行调用，并确保传入的路径参数（如 '.\\PIsys'）相对于一个大小写混合的当前工作目录。",
+        "reason": "缺陷可能发生在命令行参数解析、工作目录获取或路径组合的早期阶段，而不是在直接的 API 调用中。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在默认配置下运行。",
+        "target_pattern": "可能需要确保没有配置或环境变量导致路径被规范化（如转换为小写）。",
+        "reason": "Issue 显示路径在 5.1.2 中被转换为小写，这可能与内部的路径规范化配置有关。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "pytest 应能正确加载 conftest.py 文件，即使运行时的目录路径大小写与文件系统实际大小写不一致。",
+      "evidence": [
+        "Issue 提到 '5.1.1 works fine'，表明 5.1.1 版本行为正常。",
+        "相关测试 1 的目标是检查 'conftest.py loading when directory casing is wrong'，并期望测试收集成功（ExitCode.NO_TESTS_COLLECTED）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 pytest.main 或 _importconftest 时捕获的 ImportError 及其 __cause__ (ModuleNotFoundError)。",
+        "reason": "Issue 明确报告了这些异常，它们是缺陷触发的直接信号。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 输出的错误信息字符串，特别是其中提到的路径（如 'c:\\azure\\kms\\componenttest\\python\\pisys\\conftest.py'）。",
+        "reason": "可以观察路径在错误信息中是否被错误地转换为小写。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "PytestPluginManager._conftestpath2mod 字典中存储的路径键（py.path.local 对象）及其字符串表示。",
+        "reason": "可以检查内部存储的路径是否保持了原始大小写，或者是否被规范化了。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "pytest 能够成功加载 conftest.py 并执行测试收集，不抛出 ImportError。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误信息字符串相等。",
+        "reason": "修复后，错误信息不应出现。断言输出中不包含 'ImportError while loading conftest' 或 'ModuleNotFoundError: No module named' 等片段更稳定。"
+      },
+      {
+        "assertion_goal": "pytest 的退出码表明测试收集成功（如 ExitCode.OK 或 ExitCode.NO_TESTS_COLLECTED）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言收集到的测试数量（可能为0）。",
+        "reason": "退出码是运行结果的稳定摘要，不依赖于具体的测试数量。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷触发的精确代码位置（具体是哪个函数将路径转换为小写）。",
+    "是否只有特定版本的 Windows 或特定文件系统配置会触发此问题。",
+    "除了 conftest.py 加载，是否还有其他插件加载或模块导入会受此路径大小写问题影响。",
+    "修复后，路径在内部是应该保持原始大小写，还是应该被规范化为与实际文件系统匹配的大小写。"
+  ],
+  "raw": {
+    "issue_summary": "在 Windows 上，pytest 5.1.2 加载 conftest.py 时因路径大小写转换导致 ImportError。",
+    "trigger_condition": {
+      "text": "在 Windows（不区分大小写的文件系统）上，从包含大写字母的目录路径（如 'C:\\Azure\\KMS\\ComponentTest\\Python'）运行 pytest，并指定一个子目录（如 '.\\PIsys'）进行测试收集。",
+      "evidence": [
+        "Issue 描述：'after upgrade to 5.1.2, the path was converted to lower case'",
+        "Issue 中命令：'pytest --collect-only .\\PIsys -m smoke'",
+        "相关测试 1 的 skipif 条件：'only relevant for case insensitive file systems'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "加载 conftest.py 时抛出 ImportError，并伴随 ModuleNotFoundError: No module named 'python'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 错误信息：\"ImportError while loading conftest 'c:\\azure\\kms\\componenttest\\python\\pisys\\conftest.py'.\\nModuleNotFoundError: No module named 'python'\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pytest 应能正确加载 conftest.py 文件，即使运行时的目录路径大小写与文件系统实际大小写不一致。",
+      "evidence": [
+        "Issue 提到 '5.1.1 works fine'，表明 5.1.1 版本行为正常。",
+        "相关测试 1 的目标是检查 'conftest.py loading when directory casing is wrong'，并期望测试收集成功（ExitCode.NO_TESTS_COLLECTED）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PytestPluginManager._importconftest",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 2 中直接调用了此方法来导入 conftest 模块，这是加载 conftest.py 的核心 API。"
+      },
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中通过命令行调用 pytest，最终会调用此入口函数。"
+      },
+      {
+        "name": "conftest_setinitial",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 3 中用于初始化插件管理器并加载多个 conftest 路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/pytest.py",
+        "object": "",
+        "lines": "",
+        "reason": "iCoRe 检索出的相关源码指向此文件，它可能是 pytest 的主入口或配置加载逻辑所在。"
+      },
+      {
+        "path": "_pytest/config.py",
+        "object": "PytestPluginManager",
+        "lines": "",
+        "reason": "相关测试 2 和 3 都涉及 PytestPluginManager，它负责管理插件和 conftest 加载。"
+      },
+      {
+        "path": "_pytest/pathlib.py 或相关路径处理模块",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 核心是路径大小写处理问题，路径规范化或解析逻辑可能存在缺陷。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_conftest_badcase",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "该测试专门检查当目录大小写错误时 conftest.py 的加载情况，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "testdir fixture 的使用",
+          "创建嵌套目录和 conftest.py 文件",
+          "使用 runpytest 并检查退出码",
+          "skipif 条件用于不区分大小写的文件系统"
+        ],
+        "possible_gap": "该测试创建的是 'JenkinsRoot' 和 'jenkinsroot' 的目录大小写差异，而 Issue 涉及的是完整路径（包含驱动器号和多个目录层级）的大小写转换。测试可能未覆盖路径字符串在内部被转换为全小写的场景。"
+      },
+      {
+        "test_name": "test_conftest_global_import",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "它直接测试了 PytestPluginManager._importconftest 方法，这是加载 conftest 的核心。",
+        "reusable_parts": [
+          "PytestPluginManager 的导入和实例化",
+          "_importconftest 方法的调用",
+          "断言导入的模块属性"
+        ],
+        "possible_gap": "该测试在单个临时目录中操作，未模拟 Windows 上完整路径的大小写问题，也未触发 ImportError。"
+      },
+      {
+        "test_name": "test_conftest_symlink",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "测试涉及符号链接和路径解析，可能触及与路径规范化相关的底层逻辑。",
+        "reusable_parts": [
+          "使用 mksymlinkto 创建符号链接",
+          "在符号链接目录中运行 runpytest",
+          "检查 stdout 输出和退出码"
+        ],
+        "possible_gap": "焦点是符号链接，而非纯大小写问题。路径大小写转换可能发生在符号链接解析之前或之后的不同阶段。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试（如 test_conftest_badcase）中，通过 testdir.tmpdir 在临时目录中创建具有特定大小写模式的目录结构。",
+        "target_pattern": "设置一个包含大写字母的初始工作目录（如 'C:\\Test\\MyProject'），然后从该目录或其子目录运行 pytest。",
+        "reason": "Issue 表明问题出现在从真实、非临时的、包含大写字母的路径运行时。临时目录路径通常不包含大写，可能绕过缺陷。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接调用 testdir.runpytest() 或 conf._importconftest(py.path.local(...))。",
+        "target_pattern": "模拟 pytest 命令行调用，并确保传入的路径参数（如 '.\\PIsys'）相对于一个大小写混合的当前工作目录。",
+        "reason": "缺陷可能发生在命令行参数解析、工作目录获取或路径组合的早期阶段，而不是在直接的 API 调用中。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在默认配置下运行。",
+        "target_pattern": "可能需要确保没有配置或环境变量导致路径被规范化（如转换为小写）。",
+        "reason": "Issue 显示路径在 5.1.2 中被转换为小写，这可能与内部的路径规范化配置有关。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 pytest.main 或 _importconftest 时捕获的 ImportError 及其 __cause__ (ModuleNotFoundError)。",
+        "reason": "Issue 明确报告了这些异常，它们是缺陷触发的直接信号。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 输出的错误信息字符串，特别是其中提到的路径（如 'c:\\azure\\kms\\componenttest\\python\\pisys\\conftest.py'）。",
+        "reason": "可以观察路径在错误信息中是否被错误地转换为小写。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "PytestPluginManager._conftestpath2mod 字典中存储的路径键（py.path.local 对象）及其字符串表示。",
+        "reason": "可以检查内部存储的路径是否保持了原始大小写，或者是否被规范化了。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "pytest 能够成功加载 conftest.py 并执行测试收集，不抛出 ImportError。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误信息字符串相等。",
+        "reason": "修复后，错误信息不应出现。断言输出中不包含 'ImportError while loading conftest' 或 'ModuleNotFoundError: No module named' 等片段更稳定。"
+      },
+      {
+        "assertion_goal": "pytest 的退出码表明测试收集成功（如 ExitCode.OK 或 ExitCode.NO_TESTS_COLLECTED）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言收集到的测试数量（可能为0）。",
+        "reason": "退出码是运行结果的稳定摘要，不依赖于具体的测试数量。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture 创建临时目录结构，并可能使用 monkeypatch 来修改 os.getcwd 或模拟 Windows 环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个不区分大小写但保留大小写的文件系统（如 Windows），相关测试使用了 @pytest.mark.skipif 进行条件判断。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "创建 conftest.py 文件，可能为空或包含简单定义。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷触发的精确代码位置（具体是哪个函数将路径转换为小写）。",
+      "是否只有特定版本的 Windows 或特定文件系统配置会触发此问题。",
+      "除了 conftest.py 加载，是否还有其他插件加载或模块导入会受此路径大小写问题影响。",
+      "修复后，路径在内部是应该保持原始大小写，还是应该被规范化为与实际文件系统匹配的大小写。"
+    ]
+  }
+}

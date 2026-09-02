@@ -1,0 +1,294 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-24066",
+  "issue_summary": "SI._collect_factor_and_dimension() 在处理指数函数 exp 的参数时，未能正确识别其参数为无量纲量，导致错误地抛出维度不匹配异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy.physics.units 导入相关单位（second, ohm, farad）和 SI 系统，从 sympy 导入 exp 函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊的 fixture 或 mock，直接使用预定义的物理单位和 SI 系统即可。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_issue_20288",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "该测试直接测试了 _collect_factor_and_dimension 处理包含 exp 函数且参数为无量纲量（能量/能量）的表达式，与当前 Issue 场景高度相似。",
+        "reusable_parts": [
+          "导入相关模块（如 exp, E, Quantity）",
+          "使用 SI.set_quantity_dimension 和 set_global_relative_scale_factor 设置自定义量纲和缩放因子",
+          "调用 SI._collect_factor_and_dimension 并断言其返回值"
+        ],
+        "possible_gap": "该测试中 exp 的参数是自定义量纲（能量）的幂运算组合，而 Issue 中的参数是预定义基本单位（second, ohm, farad）的组合。函数在处理预定义单位组合的维度推导路径上可能存在缺陷。"
+      },
+      {
+        "test_name": "test_factor_and_dimension",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "这是 _collect_factor_and_dimension 的主要测试，包含了对各种表达式（包括 Add, Mul, Pow, Function）的处理测试，提供了丰富的调用模式和断言风格参考。",
+        "reusable_parts": [
+          "测试函数的基本结构和导入",
+          "使用预定义单位（meter, second, km, hour）",
+          "使用 symbols 创建符号变量",
+          "对函数返回值的断言模式（如 `assert (..., ...) == SI._collect_factor_and_dimension(...)`）"
+        ],
+        "possible_gap": "该测试中虽然包含了对 exp(pH) 的测试（pH 是 -log(cH)），但其参数 pH 的维度设置是明确的（volume/amount_of_substance）。它没有覆盖 Issue 中由基本单位运算组合形成无量纲参数，再传入 exp 的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 SI._collect_factor_and_dimension() 处理一个包含 exp 函数的表达式，且该 exp 函数的参数是一个无量纲的物理量组合（例如 second/(ohm*farad)）。",
+      "evidence": [
+        "Issue 中的代码示例：`buggy_expr = 100 + exp(expr)`，其中 `expr = units.second / (units.ohm * units.farad)` 被验证为无量纲。",
+        "相关测试 2 (test_issue_20288) 显示，当 exp 的参数是能量/能量（即无量纲）时，函数能正确处理。",
+        "源码片段 1 显示 _collect_factor_and_dimension 在处理 Function 类型时，会递归处理其参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError 异常，提示维度不匹配，认为 exp(second/(farad*ohm)) 的维度是 Dimension(time/(capacitance*impedance))，而不是预期的 Dimension(1)。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：`ValueError: Dimension of \"exp(second/(farad*ohm))\" is Dimension(time/(capacitance*impedance)), but it should be Dimension(1)`。",
+        "相关测试 4 (test_check_unit_consistency) 表明，当表达式维度不一致时，_collect_factor_and_dimension 会抛出 ValueError。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SI._collect_factor_and_dimension",
+        "kind": "method",
+        "source_path": "sympy/physics/units/unitsystem.py",
+        "reason": "这是 Issue 中直接触发错误的函数，也是缺陷复现测试的核心调用目标。"
+      },
+      {
+        "name": "SI.get_dimension_system",
+        "kind": "method",
+        "source_path": "sympy/physics/units/unitsystem.py",
+        "reason": "用于验证维度是否为无量纲，在 Issue 和源码中都有使用。"
+      },
+      {
+        "name": "exp",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/exponential.py",
+        "reason": "Issue 中导致错误的表达式包含 exp 函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/physics/units/unitsystem.py",
+        "object": "UnitSystem._collect_factor_and_dimension",
+        "lines": "152-200",
+        "reason": "该函数负责处理包含 Function（如 exp）的表达式。Issue 中的错误表明它在处理 exp 时，未能正确传播或计算其参数的维度信息，导致最终返回了错误的维度。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中，exp 的参数是自定义量纲的幂运算组合（u**2/v**2），且 u 和 v 被设置为相同的能量维度。",
+        "target_pattern": "将 exp 的参数改为由预定义基本单位（second, ohm, farad）通过乘除运算组合而成的无量纲表达式（second/(ohm*farad)）。",
+        "reason": "Issue 表明，当参数是预定义单位的组合时，函数的维度推导可能出错。从自定义量纲切换到预定义单位组合，可能触发不同的代码路径或维度计算逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 2 中，表达式是 `1 + exp(u**2/v**2)`，直接传递给 _collect_factor_and_dimension。",
+        "target_pattern": "按照 Issue 步骤，先单独计算并验证参数表达式 `expr = second/(ohm*farad)` 为无量纲，再构造 `100 + exp(expr)` 传递给 _collect_factor_and_dimension。",
+        "reason": "Issue 的复现步骤明确展示了先验证参数无量纲，再构造包含该参数的复合表达式。这有助于隔离问题，并可能触发函数在处理嵌套表达式时的特定错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "SI._collect_factor_and_dimension() 应能正确识别 exp 函数的参数为无量纲量，并返回正确的缩放因子和 Dimension(1)，而不抛出异常。",
+      "evidence": [
+        "Issue 中的断言 `assert SI.get_dimension_system().is_dimensionless(dim)` 表明 `expr` 本身被验证为无量纲。",
+        "相关测试 2 (test_issue_20288) 展示了当 exp 的参数为无量纲量（u**2/v**2，两者维度相同）时，函数能正确返回 (1 + E, Dimension(1))。",
+        "数学上，exp 函数的参数应为无量纲量。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `SI._collect_factor_and_dimension(buggy_expr)` 时是否抛出 ValueError 异常及其消息。",
+        "reason": "Issue 的核心错误现象就是抛出特定的 ValueError 异常。观测异常是否发生是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`SI._collect_factor_and_dimension(expr)` 的返回值，特别是其第二个元素（维度部分），以及 `SI.get_dimension_system().is_dimensionless(dim)` 的结果。",
+        "reason": "需要确认参数表达式 `expr` 本身是否被正确识别为无量纲（Dimension(1)），这是后续错误的前提。观测返回值可以验证维度计算的中间状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于表达式 `second/(ohm*farad)`，`SI._collect_factor_and_dimension` 应返回维度为 `Dimension(1)`，且 `is_dimensionless` 返回 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能包含内部表示的维度对象字符串相等。",
+        "reason": "这是 Issue 中明确验证的前提条件，也是后续错误的基础。使用 equals 风格断言返回值元组的第二个元素是 Dimension(1) 是稳定且直接的。"
+      },
+      {
+        "assertion_goal": "对于表达式 `100 + exp(second/(ohm*farad))`，调用 `SI._collect_factor_and_dimension` 不应抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言异常消息的完整字符串，因为消息格式可能变化。",
+        "reason": "Issue 的核心是函数错误地抛出了异常。在修复后，该调用应正常执行。但在生成复现测试时，我们预期它会抛出异常，因此使用 `raises(ValueError, ...)` 来捕获当前缺陷行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`second/(ohm*farad)` 这个组合是否在所有情况下都被维度系统（DimensionSystem）识别为真正的无量纲？还是说其维度依赖关系在某些配置下不为空？",
+    "`_collect_factor_and_dimension` 在处理 `Function` 类型时，具体是如何组合其参数的维度信息的？源码中 `return (expr.func(*(f[0] for f in fds)), *(d[1] for d in fds))` 这行代码的意图和实际效果需要进一步确认。",
+    "除了 exp，其他数学函数（如 sin, log）是否也存在类似问题？"
+  ],
+  "raw": {
+    "issue_summary": "SI._collect_factor_and_dimension() 在处理指数函数 exp 的参数时，未能正确识别其参数为无量纲量，导致错误地抛出维度不匹配异常。",
+    "trigger_condition": {
+      "text": "调用 SI._collect_factor_and_dimension() 处理一个包含 exp 函数的表达式，且该 exp 函数的参数是一个无量纲的物理量组合（例如 second/(ohm*farad)）。",
+      "evidence": [
+        "Issue 中的代码示例：`buggy_expr = 100 + exp(expr)`，其中 `expr = units.second / (units.ohm * units.farad)` 被验证为无量纲。",
+        "相关测试 2 (test_issue_20288) 显示，当 exp 的参数是能量/能量（即无量纲）时，函数能正确处理。",
+        "源码片段 1 显示 _collect_factor_and_dimension 在处理 Function 类型时，会递归处理其参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError 异常，提示维度不匹配，认为 exp(second/(farad*ohm)) 的维度是 Dimension(time/(capacitance*impedance))，而不是预期的 Dimension(1)。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：`ValueError: Dimension of \"exp(second/(farad*ohm))\" is Dimension(time/(capacitance*impedance)), but it should be Dimension(1)`。",
+        "相关测试 4 (test_check_unit_consistency) 表明，当表达式维度不一致时，_collect_factor_and_dimension 会抛出 ValueError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "SI._collect_factor_and_dimension() 应能正确识别 exp 函数的参数为无量纲量，并返回正确的缩放因子和 Dimension(1)，而不抛出异常。",
+      "evidence": [
+        "Issue 中的断言 `assert SI.get_dimension_system().is_dimensionless(dim)` 表明 `expr` 本身被验证为无量纲。",
+        "相关测试 2 (test_issue_20288) 展示了当 exp 的参数为无量纲量（u**2/v**2，两者维度相同）时，函数能正确返回 (1 + E, Dimension(1))。",
+        "数学上，exp 函数的参数应为无量纲量。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SI._collect_factor_and_dimension",
+        "kind": "method",
+        "source_path": "sympy/physics/units/unitsystem.py",
+        "reason": "这是 Issue 中直接触发错误的函数，也是缺陷复现测试的核心调用目标。"
+      },
+      {
+        "name": "SI.get_dimension_system",
+        "kind": "method",
+        "source_path": "sympy/physics/units/unitsystem.py",
+        "reason": "用于验证维度是否为无量纲，在 Issue 和源码中都有使用。"
+      },
+      {
+        "name": "exp",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/exponential.py",
+        "reason": "Issue 中导致错误的表达式包含 exp 函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/physics/units/unitsystem.py",
+        "object": "UnitSystem._collect_factor_and_dimension",
+        "lines": "152-200",
+        "reason": "该函数负责处理包含 Function（如 exp）的表达式。Issue 中的错误表明它在处理 exp 时，未能正确传播或计算其参数的维度信息，导致最终返回了错误的维度。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_issue_20288",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "该测试直接测试了 _collect_factor_and_dimension 处理包含 exp 函数且参数为无量纲量（能量/能量）的表达式，与当前 Issue 场景高度相似。",
+        "reusable_parts": [
+          "导入相关模块（如 exp, E, Quantity）",
+          "使用 SI.set_quantity_dimension 和 set_global_relative_scale_factor 设置自定义量纲和缩放因子",
+          "调用 SI._collect_factor_and_dimension 并断言其返回值"
+        ],
+        "possible_gap": "该测试中 exp 的参数是自定义量纲（能量）的幂运算组合，而 Issue 中的参数是预定义基本单位（second, ohm, farad）的组合。函数在处理预定义单位组合的维度推导路径上可能存在缺陷。"
+      },
+      {
+        "test_name": "test_factor_and_dimension",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "这是 _collect_factor_and_dimension 的主要测试，包含了对各种表达式（包括 Add, Mul, Pow, Function）的处理测试，提供了丰富的调用模式和断言风格参考。",
+        "reusable_parts": [
+          "测试函数的基本结构和导入",
+          "使用预定义单位（meter, second, km, hour）",
+          "使用 symbols 创建符号变量",
+          "对函数返回值的断言模式（如 `assert (..., ...) == SI._collect_factor_and_dimension(...)`）"
+        ],
+        "possible_gap": "该测试中虽然包含了对 exp(pH) 的测试（pH 是 -log(cH)），但其参数 pH 的维度设置是明确的（volume/amount_of_substance）。它没有覆盖 Issue 中由基本单位运算组合形成无量纲参数，再传入 exp 的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中，exp 的参数是自定义量纲的幂运算组合（u**2/v**2），且 u 和 v 被设置为相同的能量维度。",
+        "target_pattern": "将 exp 的参数改为由预定义基本单位（second, ohm, farad）通过乘除运算组合而成的无量纲表达式（second/(ohm*farad)）。",
+        "reason": "Issue 表明，当参数是预定义单位的组合时，函数的维度推导可能出错。从自定义量纲切换到预定义单位组合，可能触发不同的代码路径或维度计算逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 2 中，表达式是 `1 + exp(u**2/v**2)`，直接传递给 _collect_factor_and_dimension。",
+        "target_pattern": "按照 Issue 步骤，先单独计算并验证参数表达式 `expr = second/(ohm*farad)` 为无量纲，再构造 `100 + exp(expr)` 传递给 _collect_factor_and_dimension。",
+        "reason": "Issue 的复现步骤明确展示了先验证参数无量纲，再构造包含该参数的复合表达式。这有助于隔离问题，并可能触发函数在处理嵌套表达式时的特定错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `SI._collect_factor_and_dimension(buggy_expr)` 时是否抛出 ValueError 异常及其消息。",
+        "reason": "Issue 的核心错误现象就是抛出特定的 ValueError 异常。观测异常是否发生是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`SI._collect_factor_and_dimension(expr)` 的返回值，特别是其第二个元素（维度部分），以及 `SI.get_dimension_system().is_dimensionless(dim)` 的结果。",
+        "reason": "需要确认参数表达式 `expr` 本身是否被正确识别为无量纲（Dimension(1)），这是后续错误的前提。观测返回值可以验证维度计算的中间状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于表达式 `second/(ohm*farad)`，`SI._collect_factor_and_dimension` 应返回维度为 `Dimension(1)`，且 `is_dimensionless` 返回 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能包含内部表示的维度对象字符串相等。",
+        "reason": "这是 Issue 中明确验证的前提条件，也是后续错误的基础。使用 equals 风格断言返回值元组的第二个元素是 Dimension(1) 是稳定且直接的。"
+      },
+      {
+        "assertion_goal": "对于表达式 `100 + exp(second/(ohm*farad))`，调用 `SI._collect_factor_and_dimension` 不应抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言异常消息的完整字符串，因为消息格式可能变化。",
+        "reason": "Issue 的核心是函数错误地抛出了异常。在修复后，该调用应正常执行。但在生成复现测试时，我们预期它会抛出异常，因此使用 `raises(ValueError, ...)` 来捕获当前缺陷行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy.physics.units 导入相关单位（second, ohm, farad）和 SI 系统，从 sympy 导入 exp 函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊的 fixture 或 mock，直接使用预定义的物理单位和 SI 系统即可。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`second/(ohm*farad)` 这个组合是否在所有情况下都被维度系统（DimensionSystem）识别为真正的无量纲？还是说其维度依赖关系在某些配置下不为空？",
+      "`_collect_factor_and_dimension` 在处理 `Function` 类型时，具体是如何组合其参数的维度信息的？源码中 `return (expr.func(*(f[0] for f in fds)), *(d[1] for d in fds))` 这行代码的意图和实际效果需要进一步确认。",
+      "除了 exp，其他数学函数（如 sin, log）是否也存在类似问题？"
+    ]
+  }
+}

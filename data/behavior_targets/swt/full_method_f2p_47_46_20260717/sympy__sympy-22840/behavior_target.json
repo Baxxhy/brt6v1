@@ -1,0 +1,348 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-22840",
+  "issue_summary": "cse() 在处理 MatrixSymbol 索引时产生冗余的中间变量赋值，导致生成的代码包含不必要的矩阵复制。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 及相关模块：sympy, sympy.simplify.cse (或 from sympy import cse), sympy.MatrixSymbol, sympy.Matrix, sympy.symbols, sympy.printing.ccode。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造测试表达式时，可能需要使用 Matrix 和 lambda 函数来创建符号矩阵，然后替换为 MatrixSymbol，如 Issue 示例中的 sub_in_matrixsymbols 函数所示。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在标准 Python 环境下运行，无需特殊 fixture 或外部依赖。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_cse_MatrixExpr",
+        "test_file": "sympy/simplify/tests/test_cse.py",
+        "why_relevant": "该测试直接调用了 cse() 函数并传入包含 MatrixSymbol 的表达式，验证了 cse() 的基本功能。",
+        "reusable_parts": [
+          "导入：from sympy import MatrixSymbol, cse",
+          "对象构造：A = MatrixSymbol('A', 3, 3)",
+          "API 调用：replacements, reduced_exprs = cse([expr1, expr2])",
+          "assert 风格：assert len(replacements) > 0"
+        ],
+        "possible_gap": "该测试使用的表达式（如 (A.T*A).I * A * y）不涉及 MatrixSymbol 的显式索引（如 A[i,j]），因此未能触发 Issue 中描述的索引相关缺陷。"
+      },
+      {
+        "test_name": "test_cse_MatrixSymbol",
+        "test_file": "sympy/simplify/tests/test_cse.py",
+        "why_relevant": "该测试专门测试 cse() 对纯 MatrixSymbol 的处理，确认了 cse(MatrixSymbol) 返回空列表。",
+        "reusable_parts": [
+          "导入和对象构造",
+          "API 调用：assert cse(A) == ([], [A])"
+        ],
+        "possible_gap": "该测试只测试了 MatrixSymbol 本身，没有测试包含索引的 MatrixSymbol 表达式（如 A[0,0] + A[1,1]），因此未能覆盖缺陷场景。"
+      },
+      {
+        "test_name": "test_indexing",
+        "test_file": "sympy/matrices/expressions/tests/test_matexpr.py",
+        "why_relevant": "该测试验证了 MatrixSymbol 索引操作的基本语法和功能。",
+        "reusable_parts": [
+          "对象构造：A = MatrixSymbol('A', n, m)",
+          "索引操作：A[1, 2]"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及 cse() 或更复杂的表达式处理。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对包含 MatrixSymbol 索引的矩阵表达式（例如两个 4x4 MatrixSymbol 的乘积）调用 sp.cse() 函数。",
+      "evidence": [
+        "Issue 中的示例代码：e2 = sub_in_matrixsymbols(e, [sp.MatrixSymbol('a', 4, 4), sp.MatrixSymbol('b', 4, 4)]); cse_subs, cse_reduced = sp.cse(e2)"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "cse() 的输出包含冗余的中间变量，例如 (x0, a) 和 (x2, b)，这些变量只是原始 MatrixSymbol 的副本，并且后续的索引操作（如 x0[0, 0]）被提取为单独的中间变量，导致生成的 C 代码包含不必要的数组复制赋值（如 x0[0] = a[0];）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的输出显示：([(x0, a), (x1, x0[0, 0]), (x2, b), (x3, x2[0, 0]), ...], ...) 和生成的 C 代码包含大量 x0[i] = a[i]; 和 x2[i] = b[i]; 的赋值语句。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.simplify.cse_main.cse",
+        "kind": "function",
+        "source_path": "sympy/simplify/cse_main.py",
+        "reason": "Issue 中直接调用的函数，负责公共子表达式消除。"
+      },
+      {
+        "name": "sympy.codegen.ast.CodeBlock.cse",
+        "kind": "method",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "检索到的相关源码片段显示 CodeBlock 有自己的 cse 方法，可能调用底层的 cse 函数。"
+      },
+      {
+        "name": "sympy.printing.ccode",
+        "kind": "function",
+        "source_path": "sympy/printing/codeprinter.py",
+        "reason": "Issue 中用于将 cse 结果转换为 C 代码，展示了缺陷的最终影响。"
+      },
+      {
+        "name": "sympy.matrices.expressions.matexpr.MatrixSymbol",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/matexpr.py",
+        "reason": "缺陷涉及的核心对象，其索引行为是触发问题的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/simplify/cse_main.py",
+        "object": "cse",
+        "lines": "",
+        "reason": "cse() 函数是处理公共子表达式消除的核心，可能未能正确处理 MatrixSymbol 索引节点的遍历和识别。"
+      },
+      {
+        "path": "sympy/matrices/expressions/matexpr.py",
+        "object": "MatrixSymbol._entry",
+        "lines": "",
+        "reason": "MatrixSymbol 的索引操作（如 a[0,0]）可能产生特殊的表达式节点，cse() 可能未将其视为原子或未正确处理其与父 MatrixSymbol 的关系。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_cse_MatrixExpr 使用不包含显式索引的 MatrixSymbol 表达式（如 A.T*A）。",
+        "target_pattern": "构造包含 MatrixSymbol 显式索引的表达式，例如两个 MatrixSymbol 的乘积，其中乘法运算会隐式或显式地涉及索引访问。",
+        "reason": "Issue 表明当表达式涉及 MatrixSymbol 的索引（即使是隐式通过矩阵乘法）时，cse() 会产生冗余的中间变量。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用小尺寸（如 3x3）或符号尺寸的 MatrixSymbol。",
+        "target_pattern": "使用具体尺寸（如 4x4）的 MatrixSymbol，并构造一个会产生多个索引项的表达式（如矩阵乘法）。",
+        "reason": "Issue 示例使用 4x4 矩阵，产生的输出显示了大量索引项被提取为子表达式。固定尺寸可能使索引模式更可预测。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "cse() 应该能够识别 MatrixSymbol 索引（如 a[0,0]）是原子操作，不应将 MatrixSymbol 本身（如 a）或其索引元素提取为不必要的公共子表达式，从而生成更简洁、高效的中间表示和代码。",
+      "evidence": [
+        "Issue 描述暗示期望 cse() 有更智能的行为，避免产生冗余的矩阵复制。相关测试 test_cse_MatrixSymbol 表明 cse() 可以处理 MatrixSymbol 本身（返回 ([], [A])），但未测试包含索引的复杂表达式。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "cse_subs（替换列表）的内容，特别是检查是否包含 (x0, a) 这种将整个 MatrixSymbol 赋值给中间变量的条目，以及是否包含大量形如 (x1, x0[0,0]) 的条目。",
+        "reason": "Issue 的核心错误现象是 cse() 返回了这些冗余的替换。观察这个输出可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "对 cse() 结果应用 sympy.printing.ccode 后生成的 C 代码字符串，检查是否包含不必要的数组复制赋值（如 x0[0] = a[0];）。",
+        "reason": "这是缺陷的最终表现，也是 Issue 中展示的主要问题。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "cse() 处理过程中识别出的子表达式的类型，特别是 MatrixSymbol 索引节点（如 a[0,0]）的类型。",
+        "reason": "有助于理解 cse() 为何将这些索引视为可提取的公共子表达式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 cse() 返回的替换列表中，不应包含将整个 MatrixSymbol 简单复制给中间变量的条目（如 (x0, a)）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的替换列表等于某个特定值，因为具体的中间变量名（x0, x1...）可能变化。",
+        "reason": "这是 Issue 描述的核心冗余问题。断言不应包含此类条目，比断言具体输出更稳定。"
+      },
+      {
+        "assertion_goal": "验证 cse() 返回的替换列表中，MatrixSymbol 的索引元素（如 a[0,0]）不应被过度提取为独立的中间变量，或者其提取应是合理的（例如，同一个 a[0,0] 在表达式中多次出现时才被提取）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "精确计数索引提取的数量，因为优化程度可能因算法而异。",
+        "reason": "Issue 暗示了索引被不必要地提取。需要比较原始表达式中的索引出现次数和 cse 提取的索引相关替换的数量关系。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "cse() 内部处理 MatrixSymbol 索引的确切逻辑和为何会将其视为可提取的子表达式。",
+    "除了矩阵乘法，是否还有其他类型的 MatrixSymbol 表达式会触发此问题。",
+    "修复后的预期精确输出（cse_subs 列表）应该是什么样子。",
+    "这是 cse() 算法的设计限制还是一个明确的缺陷。"
+  ],
+  "raw": {
+    "issue_summary": "cse() 在处理 MatrixSymbol 索引时产生冗余的中间变量赋值，导致生成的代码包含不必要的矩阵复制。",
+    "trigger_condition": {
+      "text": "对包含 MatrixSymbol 索引的矩阵表达式（例如两个 4x4 MatrixSymbol 的乘积）调用 sp.cse() 函数。",
+      "evidence": [
+        "Issue 中的示例代码：e2 = sub_in_matrixsymbols(e, [sp.MatrixSymbol('a', 4, 4), sp.MatrixSymbol('b', 4, 4)]); cse_subs, cse_reduced = sp.cse(e2)"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "cse() 的输出包含冗余的中间变量，例如 (x0, a) 和 (x2, b)，这些变量只是原始 MatrixSymbol 的副本，并且后续的索引操作（如 x0[0, 0]）被提取为单独的中间变量，导致生成的 C 代码包含不必要的数组复制赋值（如 x0[0] = a[0];）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的输出显示：([(x0, a), (x1, x0[0, 0]), (x2, b), (x3, x2[0, 0]), ...], ...) 和生成的 C 代码包含大量 x0[i] = a[i]; 和 x2[i] = b[i]; 的赋值语句。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "cse() 应该能够识别 MatrixSymbol 索引（如 a[0,0]）是原子操作，不应将 MatrixSymbol 本身（如 a）或其索引元素提取为不必要的公共子表达式，从而生成更简洁、高效的中间表示和代码。",
+      "evidence": [
+        "Issue 描述暗示期望 cse() 有更智能的行为，避免产生冗余的矩阵复制。相关测试 test_cse_MatrixSymbol 表明 cse() 可以处理 MatrixSymbol 本身（返回 ([], [A])），但未测试包含索引的复杂表达式。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.simplify.cse_main.cse",
+        "kind": "function",
+        "source_path": "sympy/simplify/cse_main.py",
+        "reason": "Issue 中直接调用的函数，负责公共子表达式消除。"
+      },
+      {
+        "name": "sympy.codegen.ast.CodeBlock.cse",
+        "kind": "method",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "检索到的相关源码片段显示 CodeBlock 有自己的 cse 方法，可能调用底层的 cse 函数。"
+      },
+      {
+        "name": "sympy.printing.ccode",
+        "kind": "function",
+        "source_path": "sympy/printing/codeprinter.py",
+        "reason": "Issue 中用于将 cse 结果转换为 C 代码，展示了缺陷的最终影响。"
+      },
+      {
+        "name": "sympy.matrices.expressions.matexpr.MatrixSymbol",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/matexpr.py",
+        "reason": "缺陷涉及的核心对象，其索引行为是触发问题的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/simplify/cse_main.py",
+        "object": "cse",
+        "lines": "",
+        "reason": "cse() 函数是处理公共子表达式消除的核心，可能未能正确处理 MatrixSymbol 索引节点的遍历和识别。"
+      },
+      {
+        "path": "sympy/matrices/expressions/matexpr.py",
+        "object": "MatrixSymbol._entry",
+        "lines": "",
+        "reason": "MatrixSymbol 的索引操作（如 a[0,0]）可能产生特殊的表达式节点，cse() 可能未将其视为原子或未正确处理其与父 MatrixSymbol 的关系。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_cse_MatrixExpr",
+        "test_file": "sympy/simplify/tests/test_cse.py",
+        "why_relevant": "该测试直接调用了 cse() 函数并传入包含 MatrixSymbol 的表达式，验证了 cse() 的基本功能。",
+        "reusable_parts": [
+          "导入：from sympy import MatrixSymbol, cse",
+          "对象构造：A = MatrixSymbol('A', 3, 3)",
+          "API 调用：replacements, reduced_exprs = cse([expr1, expr2])",
+          "assert 风格：assert len(replacements) > 0"
+        ],
+        "possible_gap": "该测试使用的表达式（如 (A.T*A).I * A * y）不涉及 MatrixSymbol 的显式索引（如 A[i,j]），因此未能触发 Issue 中描述的索引相关缺陷。"
+      },
+      {
+        "test_name": "test_cse_MatrixSymbol",
+        "test_file": "sympy/simplify/tests/test_cse.py",
+        "why_relevant": "该测试专门测试 cse() 对纯 MatrixSymbol 的处理，确认了 cse(MatrixSymbol) 返回空列表。",
+        "reusable_parts": [
+          "导入和对象构造",
+          "API 调用：assert cse(A) == ([], [A])"
+        ],
+        "possible_gap": "该测试只测试了 MatrixSymbol 本身，没有测试包含索引的 MatrixSymbol 表达式（如 A[0,0] + A[1,1]），因此未能覆盖缺陷场景。"
+      },
+      {
+        "test_name": "test_indexing",
+        "test_file": "sympy/matrices/expressions/tests/test_matexpr.py",
+        "why_relevant": "该测试验证了 MatrixSymbol 索引操作的基本语法和功能。",
+        "reusable_parts": [
+          "对象构造：A = MatrixSymbol('A', n, m)",
+          "索引操作：A[1, 2]"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及 cse() 或更复杂的表达式处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_cse_MatrixExpr 使用不包含显式索引的 MatrixSymbol 表达式（如 A.T*A）。",
+        "target_pattern": "构造包含 MatrixSymbol 显式索引的表达式，例如两个 MatrixSymbol 的乘积，其中乘法运算会隐式或显式地涉及索引访问。",
+        "reason": "Issue 表明当表达式涉及 MatrixSymbol 的索引（即使是隐式通过矩阵乘法）时，cse() 会产生冗余的中间变量。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用小尺寸（如 3x3）或符号尺寸的 MatrixSymbol。",
+        "target_pattern": "使用具体尺寸（如 4x4）的 MatrixSymbol，并构造一个会产生多个索引项的表达式（如矩阵乘法）。",
+        "reason": "Issue 示例使用 4x4 矩阵，产生的输出显示了大量索引项被提取为子表达式。固定尺寸可能使索引模式更可预测。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "cse_subs（替换列表）的内容，特别是检查是否包含 (x0, a) 这种将整个 MatrixSymbol 赋值给中间变量的条目，以及是否包含大量形如 (x1, x0[0,0]) 的条目。",
+        "reason": "Issue 的核心错误现象是 cse() 返回了这些冗余的替换。观察这个输出可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "对 cse() 结果应用 sympy.printing.ccode 后生成的 C 代码字符串，检查是否包含不必要的数组复制赋值（如 x0[0] = a[0];）。",
+        "reason": "这是缺陷的最终表现，也是 Issue 中展示的主要问题。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "cse() 处理过程中识别出的子表达式的类型，特别是 MatrixSymbol 索引节点（如 a[0,0]）的类型。",
+        "reason": "有助于理解 cse() 为何将这些索引视为可提取的公共子表达式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 cse() 返回的替换列表中，不应包含将整个 MatrixSymbol 简单复制给中间变量的条目（如 (x0, a)）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的替换列表等于某个特定值，因为具体的中间变量名（x0, x1...）可能变化。",
+        "reason": "这是 Issue 描述的核心冗余问题。断言不应包含此类条目，比断言具体输出更稳定。"
+      },
+      {
+        "assertion_goal": "验证 cse() 返回的替换列表中，MatrixSymbol 的索引元素（如 a[0,0]）不应被过度提取为独立的中间变量，或者其提取应是合理的（例如，同一个 a[0,0] 在表达式中多次出现时才被提取）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "精确计数索引提取的数量，因为优化程度可能因算法而异。",
+        "reason": "Issue 暗示了索引被不必要地提取。需要比较原始表达式中的索引出现次数和 cse 提取的索引相关替换的数量关系。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 及相关模块：sympy, sympy.simplify.cse (或 from sympy import cse), sympy.MatrixSymbol, sympy.Matrix, sympy.symbols, sympy.printing.ccode。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造测试表达式时，可能需要使用 Matrix 和 lambda 函数来创建符号矩阵，然后替换为 MatrixSymbol，如 Issue 示例中的 sub_in_matrixsymbols 函数所示。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在标准 Python 环境下运行，无需特殊 fixture 或外部依赖。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "cse() 内部处理 MatrixSymbol 索引的确切逻辑和为何会将其视为可提取的子表达式。",
+      "除了矩阵乘法，是否还有其他类型的 MatrixSymbol 表达式会触发此问题。",
+      "修复后的预期精确输出（cse_subs 列表）应该是什么样子。",
+      "这是 cse() 算法的设计限制还是一个明确的缺陷。"
+    ]
+  }
+}

@@ -1,0 +1,304 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-22456",
+  "issue_summary": "String 类不支持 expr.func(*expr.args) == expr 的参数不变性。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 String 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_String",
+        "test_file": "sympy/codegen/tests/test_ast.py",
+        "why_relevant": "这是针对 String 类的现有测试，包含了构造、相等性检查和 func(**kwargs) 不变性测试。",
+        "reusable_parts": [
+          "from sympy.codegen.ast import String",
+          "st = String('foobar')",
+          "assert st.func(**st.kwargs()) == st",
+          "assert st.is_Atom"
+        ],
+        "possible_gap": "该测试只验证了 func(**kwargs) 不变性，没有验证 func(*args) 不变性，这正是 Issue 指出的问题。"
+      },
+      {
+        "test_name": "test_Type",
+        "test_file": "sympy/codegen/tests/test_ast.py",
+        "why_relevant": "该测试验证了 Type 类的 func(*args) 不变性（assert t.func(*t.args) == t），展示了正确的测试模式。",
+        "reusable_parts": [
+          "assert t.func(*t.args) == t 的断言模式",
+          "对象构造和相等性比较"
+        ],
+        "possible_gap": "测试的是 Type 类而非 String 类，String 的 args 属性可能不同。"
+      },
+      {
+        "test_name": "test_FunctionPrototype_and_FunctionDefinition",
+        "test_file": "sympy/codegen/tests/test_ast.py",
+        "why_relevant": "该测试也验证了 func(*args) 不变性（assert fp1.func(*fp1.args) == fp1），提供了另一个相似测试模式。",
+        "reusable_parts": [
+          "assert fp1.func(*fp1.args) == fp1 的断言模式"
+        ],
+        "possible_gap": "测试的是 FunctionPrototype 类，其 args 属性可能比 String 更复杂。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对 String 实例调用 func 方法并传入其 args 属性作为位置参数。",
+      "evidence": [
+        "Issue 提到 'expr.func(*expr.args) == expr' 应该对任何 Basic 子类成立，而 String 是 Basic 子类。",
+        "相关测试 1 中使用了 st.func(**st.kwargs()) == st，但未测试 *args 版本。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "expr.func(*expr.args) == expr 不成立，导致相等性检查失败。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确指出 'The former should hold for any `Basic` subclass, which `String` is.'，暗示当前不成立。",
+        "相关测试 3 和 5 中对其他类（如 Type、FunctionPrototype）测试了 func(*args) 不变性，但相关测试 1 对 String 只测试了 func(**kwargs) 不变性。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "String",
+        "kind": "class",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "Issue 直接针对 String 类，需要构造其实例并测试其行为。"
+      },
+      {
+        "name": "String.func",
+        "kind": "method",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "不变性测试的核心是调用 func 方法并传入 args。"
+      },
+      {
+        "name": "String.args",
+        "kind": "property",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "需要获取实例的 args 以传递给 func。"
+      },
+      {
+        "name": "String.kwargs",
+        "kind": "method",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "现有测试使用了 kwargs() 方法，Issue 暗示 args 和 kwargs 的行为可能不一致。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/codegen/ast.py",
+        "object": "String",
+        "lines": "872-908",
+        "reason": "Issue 直接指向 String 类，其 __slots__ 和 not_in_args 属性可能影响 args 的生成。"
+      },
+      {
+        "path": "sympy/codegen/ast.py",
+        "object": "Token.kwargs",
+        "lines": "320-336",
+        "reason": "kwargs 方法定义了如何从 __slots__ 生成参数字典，但 args 的生成逻辑可能与此不同或缺失。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_String 中，调用 func 时使用关键字参数展开：st.func(**st.kwargs())",
+        "target_pattern": "调用 func 时使用位置参数展开：st.func(*st.args)",
+        "reason": "Issue 指出当前不支持位置参数不变性，将调用方式从 **kwargs 变为 *args 可能触发缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "String 实例应满足 expr.func(*expr.args) == expr 的不变性。",
+      "evidence": [
+        "Issue 明确说明 'The former should hold for any `Basic` subclass, which `String` is.'",
+        "相关测试 3 和 5 展示了其他 Basic 子类（Type、FunctionPrototype）支持此不变性，可作为预期行为的参考。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "st.func(*st.args) 的返回值与 st 的比较结果",
+        "reason": "Issue 的核心是相等性不成立，直接观察比较结果能判断缺陷是否触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "st.args 的值",
+        "reason": "需要确认 String 实例的 args 属性是什么，以理解为什么 func(*args) 可能失败。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(st.args)",
+        "reason": "args 的类型（如 tuple）可能影响 func 的调用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 String 实例满足 expr.func(*expr.args) == expr。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串相等，因为实现细节可能变化。",
+        "reason": "Issue 明确要求此相等性成立，直接比较对象是最稳定的断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "String.args 的确切内容是什么？它是否包含 'text' 属性？",
+    "String 的 __slots__ 和 not_in_args 属性如何影响 args 的生成？",
+    "直接调用 st.func(*st.args) 是否会引发异常，还是仅仅返回一个不相等的对象？"
+  ],
+  "raw": {
+    "issue_summary": "String 类不支持 expr.func(*expr.args) == expr 的参数不变性。",
+    "trigger_condition": {
+      "text": "对 String 实例调用 func 方法并传入其 args 属性作为位置参数。",
+      "evidence": [
+        "Issue 提到 'expr.func(*expr.args) == expr' 应该对任何 Basic 子类成立，而 String 是 Basic 子类。",
+        "相关测试 1 中使用了 st.func(**st.kwargs()) == st，但未测试 *args 版本。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "expr.func(*expr.args) == expr 不成立，导致相等性检查失败。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确指出 'The former should hold for any `Basic` subclass, which `String` is.'，暗示当前不成立。",
+        "相关测试 3 和 5 中对其他类（如 Type、FunctionPrototype）测试了 func(*args) 不变性，但相关测试 1 对 String 只测试了 func(**kwargs) 不变性。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "String 实例应满足 expr.func(*expr.args) == expr 的不变性。",
+      "evidence": [
+        "Issue 明确说明 'The former should hold for any `Basic` subclass, which `String` is.'",
+        "相关测试 3 和 5 展示了其他 Basic 子类（Type、FunctionPrototype）支持此不变性，可作为预期行为的参考。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "String",
+        "kind": "class",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "Issue 直接针对 String 类，需要构造其实例并测试其行为。"
+      },
+      {
+        "name": "String.func",
+        "kind": "method",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "不变性测试的核心是调用 func 方法并传入 args。"
+      },
+      {
+        "name": "String.args",
+        "kind": "property",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "需要获取实例的 args 以传递给 func。"
+      },
+      {
+        "name": "String.kwargs",
+        "kind": "method",
+        "source_path": "sympy/codegen/ast.py",
+        "reason": "现有测试使用了 kwargs() 方法，Issue 暗示 args 和 kwargs 的行为可能不一致。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/codegen/ast.py",
+        "object": "String",
+        "lines": "872-908",
+        "reason": "Issue 直接指向 String 类，其 __slots__ 和 not_in_args 属性可能影响 args 的生成。"
+      },
+      {
+        "path": "sympy/codegen/ast.py",
+        "object": "Token.kwargs",
+        "lines": "320-336",
+        "reason": "kwargs 方法定义了如何从 __slots__ 生成参数字典，但 args 的生成逻辑可能与此不同或缺失。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_String",
+        "test_file": "sympy/codegen/tests/test_ast.py",
+        "why_relevant": "这是针对 String 类的现有测试，包含了构造、相等性检查和 func(**kwargs) 不变性测试。",
+        "reusable_parts": [
+          "from sympy.codegen.ast import String",
+          "st = String('foobar')",
+          "assert st.func(**st.kwargs()) == st",
+          "assert st.is_Atom"
+        ],
+        "possible_gap": "该测试只验证了 func(**kwargs) 不变性，没有验证 func(*args) 不变性，这正是 Issue 指出的问题。"
+      },
+      {
+        "test_name": "test_Type",
+        "test_file": "sympy/codegen/tests/test_ast.py",
+        "why_relevant": "该测试验证了 Type 类的 func(*args) 不变性（assert t.func(*t.args) == t），展示了正确的测试模式。",
+        "reusable_parts": [
+          "assert t.func(*t.args) == t 的断言模式",
+          "对象构造和相等性比较"
+        ],
+        "possible_gap": "测试的是 Type 类而非 String 类，String 的 args 属性可能不同。"
+      },
+      {
+        "test_name": "test_FunctionPrototype_and_FunctionDefinition",
+        "test_file": "sympy/codegen/tests/test_ast.py",
+        "why_relevant": "该测试也验证了 func(*args) 不变性（assert fp1.func(*fp1.args) == fp1），提供了另一个相似测试模式。",
+        "reusable_parts": [
+          "assert fp1.func(*fp1.args) == fp1 的断言模式"
+        ],
+        "possible_gap": "测试的是 FunctionPrototype 类，其 args 属性可能比 String 更复杂。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_String 中，调用 func 时使用关键字参数展开：st.func(**st.kwargs())",
+        "target_pattern": "调用 func 时使用位置参数展开：st.func(*st.args)",
+        "reason": "Issue 指出当前不支持位置参数不变性，将调用方式从 **kwargs 变为 *args 可能触发缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "st.func(*st.args) 的返回值与 st 的比较结果",
+        "reason": "Issue 的核心是相等性不成立，直接观察比较结果能判断缺陷是否触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "st.args 的值",
+        "reason": "需要确认 String 实例的 args 属性是什么，以理解为什么 func(*args) 可能失败。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(st.args)",
+        "reason": "args 的类型（如 tuple）可能影响 func 的调用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 String 实例满足 expr.func(*expr.args) == expr。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串相等，因为实现细节可能变化。",
+        "reason": "Issue 明确要求此相等性成立，直接比较对象是最稳定的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 String 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "String.args 的确切内容是什么？它是否包含 'text' 属性？",
+      "String 的 __slots__ 和 not_in_args 属性如何影响 args 的生成？",
+      "直接调用 st.func(*st.args) 是否会引发异常，还是仅仅返回一个不相等的对象？"
+    ]
+  }
+}

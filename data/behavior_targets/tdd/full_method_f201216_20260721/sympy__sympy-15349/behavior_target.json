@@ -1,0 +1,220 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-15349",
+  "issue_summary": "Quaternion.to_rotation_matrix() 返回的旋转矩阵中一个 sin(x) 项的符号错误，应为负号。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 Quaternion, symbols, trigsimp, cos, sin, Matrix。使用符号变量 x。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_quaternion_conversions",
+        "test_file": "sympy/algebras/tests/test_quaternion.py",
+        "why_relevant": "该测试直接测试了 to_rotation_matrix 方法，包括使用 trigsimp 化简旋转矩阵的断言。",
+        "reusable_parts": [
+          "imports (Quaternion, symbols, trigsimp, cos, sin, Matrix)",
+          "使用 symbols('theta', real=True) 构造符号变量",
+          "构造 Quaternion(cos(theta/2), 0, 0, sin(theta/2))",
+          "调用 trigsimp(q.to_rotation_matrix()) 并与预期矩阵比较的断言模式"
+        ],
+        "possible_gap": "现有测试用例是绕 z 轴旋转 (b=0, c=0, d=sin(theta/2))，而 Issue 中的用例是绕 x 轴旋转 (b=sin(x/2), c=0, d=0)。现有测试可能未覆盖导致符号错误的特定轴/参数组合。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Quaternion(cos(x/2), sin(x/2), 0, 0).to_rotation_matrix() 并应用 trigsimp 化简。",
+      "evidence": [
+        "Issue 中提供的示例代码：q = Quaternion(cos(x/2), sin(x/2), 0, 0); trigsimp(q.to_rotation_matrix())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "旋转矩阵中一个 sin(x) 项的符号为正，但应为负。具体来说，矩阵的 (1,2) 或 (2,1) 位置的 sin(x) 符号错误。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'One of the `sin(x)` functions should be negative.'",
+        "Issue 中输出的矩阵显示所有 sin(x) 项均为正。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Quaternion.to_rotation_matrix",
+        "kind": "method",
+        "source_path": "sympy/algebras/quaternion.py",
+        "reason": "Issue 直接报告此方法返回错误结果。"
+      },
+      {
+        "name": "trigsimp",
+        "kind": "function",
+        "source_path": "sympy/simplify/trigsimp.py",
+        "reason": "Issue 示例中用于化简矩阵表达式以观察错误。"
+      },
+      {
+        "name": "Quaternion",
+        "kind": "class",
+        "source_path": "sympy/algebras/quaternion.py",
+        "reason": "需要构造四元数对象来调用 to_rotation_matrix。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/algebras/quaternion.py",
+        "object": "Quaternion.to_rotation_matrix",
+        "lines": "489-551",
+        "reason": "Issue 链接指向此方法，且该方法负责计算旋转矩阵。矩阵元素 m01, m10, m12, m21 等公式中的符号可能错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Quaternion(cos(theta/2), 0, 0, sin(theta/2))",
+        "target_pattern": "Quaternion(cos(x/2), sin(x/2), 0, 0)",
+        "reason": "Issue 中的触发输入是绕 x 轴旋转的四元数，而现有测试是绕 z 轴旋转。改变旋转轴可能暴露公式中的符号错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "旋转矩阵应正确表示绕 x 轴的旋转，即矩阵中应包含一个负的 sin(x) 项，使得矩阵为正交矩阵且行列式为 1。",
+      "evidence": [
+        "相关测试 1 中，对于 Quaternion(cos(theta/2), 0, 0, sin(theta/2))，其旋转矩阵为 [[cos(theta), -sin(theta), 0], [sin(theta), cos(theta), 0], [0, 0, 1]]，其中包含负的 sin(theta) 项。",
+        "源码片段 2 的 docstring 示例也展示了包含负 sin(x) 的旋转矩阵。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "trigsimp(q.to_rotation_matrix()) 或 q.to_rotation_matrix() 的矩阵元素，特别是涉及 sin(x) 的项。",
+        "reason": "Issue 的错误现象直接体现在返回的旋转矩阵元素符号上。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证旋转矩阵中 sin(x) 项的符号正确（一个为正，一个为负），且矩阵是正交的（例如，矩阵与其转置的乘积为单位矩阵）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经化简的矩阵字符串相等，因为符号表达式可能以不同形式出现。",
+        "reason": "Issue 明确指出符号错误，且相关测试使用 equals 来比较化简后的矩阵。正交性检查是旋转矩阵的固有属性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "具体是矩阵中哪个位置的 sin(x) 符号错误（例如 (1,2) 还是 (2,1)）？",
+    "bug 是否也影响其他旋转轴（如绕 y 轴）或其他参数组合？",
+    "to_rotation_matrix 方法中具体哪一行代码导致了符号错误？"
+  ],
+  "raw": {
+    "issue_summary": "Quaternion.to_rotation_matrix() 返回的旋转矩阵中一个 sin(x) 项的符号错误，应为负号。",
+    "trigger_condition": {
+      "text": "调用 Quaternion(cos(x/2), sin(x/2), 0, 0).to_rotation_matrix() 并应用 trigsimp 化简。",
+      "evidence": [
+        "Issue 中提供的示例代码：q = Quaternion(cos(x/2), sin(x/2), 0, 0); trigsimp(q.to_rotation_matrix())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "旋转矩阵中一个 sin(x) 项的符号为正，但应为负。具体来说，矩阵的 (1,2) 或 (2,1) 位置的 sin(x) 符号错误。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'One of the `sin(x)` functions should be negative.'",
+        "Issue 中输出的矩阵显示所有 sin(x) 项均为正。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "旋转矩阵应正确表示绕 x 轴的旋转，即矩阵中应包含一个负的 sin(x) 项，使得矩阵为正交矩阵且行列式为 1。",
+      "evidence": [
+        "相关测试 1 中，对于 Quaternion(cos(theta/2), 0, 0, sin(theta/2))，其旋转矩阵为 [[cos(theta), -sin(theta), 0], [sin(theta), cos(theta), 0], [0, 0, 1]]，其中包含负的 sin(theta) 项。",
+        "源码片段 2 的 docstring 示例也展示了包含负 sin(x) 的旋转矩阵。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Quaternion.to_rotation_matrix",
+        "kind": "method",
+        "source_path": "sympy/algebras/quaternion.py",
+        "reason": "Issue 直接报告此方法返回错误结果。"
+      },
+      {
+        "name": "trigsimp",
+        "kind": "function",
+        "source_path": "sympy/simplify/trigsimp.py",
+        "reason": "Issue 示例中用于化简矩阵表达式以观察错误。"
+      },
+      {
+        "name": "Quaternion",
+        "kind": "class",
+        "source_path": "sympy/algebras/quaternion.py",
+        "reason": "需要构造四元数对象来调用 to_rotation_matrix。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/algebras/quaternion.py",
+        "object": "Quaternion.to_rotation_matrix",
+        "lines": "489-551",
+        "reason": "Issue 链接指向此方法，且该方法负责计算旋转矩阵。矩阵元素 m01, m10, m12, m21 等公式中的符号可能错误。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_quaternion_conversions",
+        "test_file": "sympy/algebras/tests/test_quaternion.py",
+        "why_relevant": "该测试直接测试了 to_rotation_matrix 方法，包括使用 trigsimp 化简旋转矩阵的断言。",
+        "reusable_parts": [
+          "imports (Quaternion, symbols, trigsimp, cos, sin, Matrix)",
+          "使用 symbols('theta', real=True) 构造符号变量",
+          "构造 Quaternion(cos(theta/2), 0, 0, sin(theta/2))",
+          "调用 trigsimp(q.to_rotation_matrix()) 并与预期矩阵比较的断言模式"
+        ],
+        "possible_gap": "现有测试用例是绕 z 轴旋转 (b=0, c=0, d=sin(theta/2))，而 Issue 中的用例是绕 x 轴旋转 (b=sin(x/2), c=0, d=0)。现有测试可能未覆盖导致符号错误的特定轴/参数组合。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Quaternion(cos(theta/2), 0, 0, sin(theta/2))",
+        "target_pattern": "Quaternion(cos(x/2), sin(x/2), 0, 0)",
+        "reason": "Issue 中的触发输入是绕 x 轴旋转的四元数，而现有测试是绕 z 轴旋转。改变旋转轴可能暴露公式中的符号错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "trigsimp(q.to_rotation_matrix()) 或 q.to_rotation_matrix() 的矩阵元素，特别是涉及 sin(x) 的项。",
+        "reason": "Issue 的错误现象直接体现在返回的旋转矩阵元素符号上。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证旋转矩阵中 sin(x) 项的符号正确（一个为正，一个为负），且矩阵是正交的（例如，矩阵与其转置的乘积为单位矩阵）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经化简的矩阵字符串相等，因为符号表达式可能以不同形式出现。",
+        "reason": "Issue 明确指出符号错误，且相关测试使用 equals 来比较化简后的矩阵。正交性检查是旋转矩阵的固有属性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 Quaternion, symbols, trigsimp, cos, sin, Matrix。使用符号变量 x。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "具体是矩阵中哪个位置的 sin(x) 符号错误（例如 (1,2) 还是 (2,1)）？",
+      "bug 是否也影响其他旋转轴（如绕 y 轴）或其他参数组合？",
+      "to_rotation_matrix 方法中具体哪一行代码导致了符号错误？"
+    ]
+  }
+}

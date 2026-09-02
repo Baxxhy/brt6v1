@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-25433",
+  "issue_summary": "在 RangeSlider 的 on_changed 回调中调用 clf 和 draw 会阻塞所有 widget 的输入，而 Button 的 on_clicked 回调中相同操作则正常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用交互式后端（如 TkAgg 或 QtAgg）来模拟图形界面和鼠标事件。可能需要使用 pytest 的 backend 标记。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要模拟鼠标事件来触发滑块移动和按钮点击。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要管理图形窗口的生命周期，避免测试间干扰。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_range_slider",
+        "test_file": "lib/matplotlib/tests/test_widgets.py",
+        "why_relevant": "该测试直接构造了 RangeSlider 对象，并测试了其基本功能（如 set_val, reset），可以作为构建测试的起点。",
+        "reusable_parts": [
+          "widgets.RangeSlider 的导入和构造方式",
+          "使用 plt.subplots() 创建图形和坐标轴",
+          "assert_allclose 断言风格"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及图形界面的交互（如鼠标事件），也不测试在回调函数中清除和重绘图形。"
+      },
+      {
+        "test_name": "test_never_update",
+        "test_file": "lib/matplotlib/tests/test_backend_tk.py",
+        "why_relevant": "该测试使用了 TkAgg 后端（与 Issue 中部分环境一致），并涉及 plt.draw() 和图形显示，可能提供与图形更新和事件循环相关的测试上下文。",
+        "reusable_parts": [
+          "@pytest.mark.backend('TkAgg', ...) 装饰器",
+          "使用 plt.figure() 和 plt.show(block=False)",
+          "plt.draw() 的调用"
+        ],
+        "possible_gap": "该测试主要关注后端特定行为（Tkinter 的 update 方法），不涉及 widgets 或回调函数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 RangeSlider 的 on_changed 回调函数中，调用 pyplot.clf() 清除当前图形，然后添加新的 widgets，最后调用 pyplot.draw() 重绘图形。",
+      "evidence": [
+        "Issue 中的代码示例展示了在 onchanged 函数中调用 pyplot.clf(), addElements(), pyplot.draw()。",
+        "Issue 描述明确指出问题发生在 RangeSlider 的 on_changed 回调中。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "图形中的所有 widgets 无法接收鼠标点击输入，界面被阻塞。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中描述：\"The widgets can't receive any input from a mouse click, when redrawing in the on_changed callback of a range Slider.\"",
+        "Issue 标题：\"blocks input to widgets\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pyplot.clf",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中用于清除当前图形的函数。"
+      },
+      {
+        "name": "pyplot.draw",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中用于重绘当前图形的函数。"
+      },
+      {
+        "name": "widgets.RangeSlider",
+        "kind": "class",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "Issue 的核心是关于 RangeSlider 的 on_changed 回调行为异常。"
+      },
+      {
+        "name": "widgets.RangeSlider.on_changed",
+        "kind": "method",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "Issue 中触发 bug 的回调连接方法。"
+      },
+      {
+        "name": "widgets.Button.on_clicked",
+        "kind": "method",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "Issue 中作为正常行为对比的回调连接方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/widgets.py",
+        "object": "RangeSlider",
+        "lines": "606-986",
+        "reason": "Issue 明确指出问题与 RangeSlider 的 on_changed 回调相关，而 Button 的 on_clicked 正常，暗示差异可能在 RangeSlider 的事件处理或回调机制中。"
+      },
+      {
+        "path": "lib/matplotlib/widgets.py",
+        "object": "RangeSlider.on_changed",
+        "lines": "971-986",
+        "reason": "这是连接回调函数的方法，其内部实现（如观察者模式）可能与图形重绘后的交互状态管理有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中通常直接操作 slider 属性（如 set_val）或进行简单的断言。",
+        "target_pattern": "在 RangeSlider 的 on_changed 回调函数中，执行清除图形（clf）、添加新控件、重绘图形（draw）的操作链。",
+        "reason": "Issue 表明这个特定的操作链在 on_changed 回调中会触发问题，而在 on_clicked 中则不会。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中图形和 widgets 在测试开始时创建，状态相对静态。",
+        "target_pattern": "在图形显示和事件循环激活的状态下，通过用户交互（移动滑块）触发回调，动态地改变图形内容。",
+        "reason": "Bug 的触发依赖于交互式事件（滑块值改变）触发的回调，以及回调中对图形状态的动态修改。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "RangeSlider 的 on_changed 回调在清除图形、添加新控件并重绘后，所有 widgets 应能正常接收鼠标输入，行为应与 Button 的 on_clicked 回调一致。",
+      "evidence": [
+        "Issue 中描述：\"The range slider callback on_changed behaves the same as the button callback on_clicked.\"",
+        "Issue 中描述在 Button 的 onclick 回调中相同操作 \"everything works fine\"。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "回调函数执行后，新创建的 widgets（如 Button 或另一个 RangeSlider）对模拟鼠标点击事件的响应状态。",
+        "reason": "Issue 的核心症状是 widgets 无法接收输入，因此需要观测交互元素是否处于活动状态。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "图形 canvas 的事件队列或焦点状态。",
+        "reason": "输入阻塞可能与事件处理或焦点管理在图形重绘后未正确恢复有关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 RangeSlider 的 on_changed 回调执行 clf 和 draw 后，新添加的 Button 能够成功响应点击事件（例如，其回调函数被调用）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的像素坐标或完整的图形状态，因为这些可能因后端或环境而异。",
+        "reason": "这直接验证了 Issue 中描述的“输入阻塞”问题是否被解决，并与 Button 回调的正常行为对齐。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Bug 的确切根源是在 RangeSlider 的内部事件处理、观察者回调机制，还是在图形系统（canvas）重绘后的状态恢复逻辑中。",
+    "是否所有交互式后端（TkAgg, QtAgg等）都会出现此问题，还是特定于某些后端。",
+    "除了 clf 和 draw，其他修改图形的操作是否也会触发类似问题。"
+  ],
+  "raw": {
+    "issue_summary": "在 RangeSlider 的 on_changed 回调中调用 clf 和 draw 会阻塞所有 widget 的输入，而 Button 的 on_clicked 回调中相同操作则正常。",
+    "trigger_condition": {
+      "text": "在 RangeSlider 的 on_changed 回调函数中，调用 pyplot.clf() 清除当前图形，然后添加新的 widgets，最后调用 pyplot.draw() 重绘图形。",
+      "evidence": [
+        "Issue 中的代码示例展示了在 onchanged 函数中调用 pyplot.clf(), addElements(), pyplot.draw()。",
+        "Issue 描述明确指出问题发生在 RangeSlider 的 on_changed 回调中。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "图形中的所有 widgets 无法接收鼠标点击输入，界面被阻塞。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中描述：\"The widgets can't receive any input from a mouse click, when redrawing in the on_changed callback of a range Slider.\"",
+        "Issue 标题：\"blocks input to widgets\"。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "RangeSlider 的 on_changed 回调在清除图形、添加新控件并重绘后，所有 widgets 应能正常接收鼠标输入，行为应与 Button 的 on_clicked 回调一致。",
+      "evidence": [
+        "Issue 中描述：\"The range slider callback on_changed behaves the same as the button callback on_clicked.\"",
+        "Issue 中描述在 Button 的 onclick 回调中相同操作 \"everything works fine\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pyplot.clf",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中用于清除当前图形的函数。"
+      },
+      {
+        "name": "pyplot.draw",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中用于重绘当前图形的函数。"
+      },
+      {
+        "name": "widgets.RangeSlider",
+        "kind": "class",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "Issue 的核心是关于 RangeSlider 的 on_changed 回调行为异常。"
+      },
+      {
+        "name": "widgets.RangeSlider.on_changed",
+        "kind": "method",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "Issue 中触发 bug 的回调连接方法。"
+      },
+      {
+        "name": "widgets.Button.on_clicked",
+        "kind": "method",
+        "source_path": "lib/matplotlib/widgets.py",
+        "reason": "Issue 中作为正常行为对比的回调连接方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/widgets.py",
+        "object": "RangeSlider",
+        "lines": "606-986",
+        "reason": "Issue 明确指出问题与 RangeSlider 的 on_changed 回调相关，而 Button 的 on_clicked 正常，暗示差异可能在 RangeSlider 的事件处理或回调机制中。"
+      },
+      {
+        "path": "lib/matplotlib/widgets.py",
+        "object": "RangeSlider.on_changed",
+        "lines": "971-986",
+        "reason": "这是连接回调函数的方法，其内部实现（如观察者模式）可能与图形重绘后的交互状态管理有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_range_slider",
+        "test_file": "lib/matplotlib/tests/test_widgets.py",
+        "why_relevant": "该测试直接构造了 RangeSlider 对象，并测试了其基本功能（如 set_val, reset），可以作为构建测试的起点。",
+        "reusable_parts": [
+          "widgets.RangeSlider 的导入和构造方式",
+          "使用 plt.subplots() 创建图形和坐标轴",
+          "assert_allclose 断言风格"
+        ],
+        "possible_gap": "该测试是单元测试，不涉及图形界面的交互（如鼠标事件），也不测试在回调函数中清除和重绘图形。"
+      },
+      {
+        "test_name": "test_never_update",
+        "test_file": "lib/matplotlib/tests/test_backend_tk.py",
+        "why_relevant": "该测试使用了 TkAgg 后端（与 Issue 中部分环境一致），并涉及 plt.draw() 和图形显示，可能提供与图形更新和事件循环相关的测试上下文。",
+        "reusable_parts": [
+          "@pytest.mark.backend('TkAgg', ...) 装饰器",
+          "使用 plt.figure() 和 plt.show(block=False)",
+          "plt.draw() 的调用"
+        ],
+        "possible_gap": "该测试主要关注后端特定行为（Tkinter 的 update 方法），不涉及 widgets 或回调函数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中通常直接操作 slider 属性（如 set_val）或进行简单的断言。",
+        "target_pattern": "在 RangeSlider 的 on_changed 回调函数中，执行清除图形（clf）、添加新控件、重绘图形（draw）的操作链。",
+        "reason": "Issue 表明这个特定的操作链在 on_changed 回调中会触发问题，而在 on_clicked 中则不会。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中图形和 widgets 在测试开始时创建，状态相对静态。",
+        "target_pattern": "在图形显示和事件循环激活的状态下，通过用户交互（移动滑块）触发回调，动态地改变图形内容。",
+        "reason": "Bug 的触发依赖于交互式事件（滑块值改变）触发的回调，以及回调中对图形状态的动态修改。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "回调函数执行后，新创建的 widgets（如 Button 或另一个 RangeSlider）对模拟鼠标点击事件的响应状态。",
+        "reason": "Issue 的核心症状是 widgets 无法接收输入，因此需要观测交互元素是否处于活动状态。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "图形 canvas 的事件队列或焦点状态。",
+        "reason": "输入阻塞可能与事件处理或焦点管理在图形重绘后未正确恢复有关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 RangeSlider 的 on_changed 回调执行 clf 和 draw 后，新添加的 Button 能够成功响应点击事件（例如，其回调函数被调用）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的像素坐标或完整的图形状态，因为这些可能因后端或环境而异。",
+        "reason": "这直接验证了 Issue 中描述的“输入阻塞”问题是否被解决，并与 Button 回调的正常行为对齐。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用交互式后端（如 TkAgg 或 QtAgg）来模拟图形界面和鼠标事件。可能需要使用 pytest 的 backend 标记。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要模拟鼠标事件来触发滑块移动和按钮点击。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要管理图形窗口的生命周期，避免测试间干扰。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Bug 的确切根源是在 RangeSlider 的内部事件处理、观察者回调机制，还是在图形系统（canvas）重绘后的状态恢复逻辑中。",
+      "是否所有交互式后端（TkAgg, QtAgg等）都会出现此问题，还是特定于某些后端。",
+      "除了 clf 和 draw，其他修改图形的操作是否也会触发类似问题。"
+    ]
+  }
+}

@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-22719",
+  "issue_summary": "当向使用字符串单位转换器的坐标轴传递空数据结构时，会触发令人困惑的弃用警告和转换错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 和 matplotlib.units。可能需要使用 pytest 的 warnings.catch_warnings fixture。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试环境应模拟 Issue 中的步骤：创建坐标轴、设置单位、绘制空数据。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_empty_arrays",
+        "test_file": "lib/matplotlib/tests/test_units.py",
+        "why_relevant": "该测试直接涉及绘制空数组的场景，但使用的是 datetime64 类型而非分类单位。",
+        "reusable_parts": [
+          "imports",
+          "plt.subplots()",
+          "plt.scatter(np.array([]), np.array([])) 的调用模式"
+        ],
+        "possible_gap": "测试未设置分类单位转换器（如 update_units([\"a\", \"b\"])），且使用的是 scatter 而非 plot。"
+      },
+      {
+        "test_name": "test_overriding_units_in_plot",
+        "test_file": "lib/matplotlib/tests/test_category.py",
+        "why_relevant": "该测试涉及在 plot 调用中覆盖单位，并检查单位属性是否被意外重置。",
+        "reusable_parts": [
+          "@mpl.style.context('default')",
+          "fig.subplots()",
+          "ax.plot(...) 的调用模式",
+          "对 ax.xaxis.units 和 ax.yaxis.units 的断言"
+        ],
+        "possible_gap": "测试传递的是非空数据（[t0, t1], [\"V1\", \"V2\"]），而非空数组。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在调用 ax.xaxis.update_units([\"a\", \"b\"]) 设置分类单位后，调用 ax.plot([], []) 绘制空数据。",
+      "evidence": [
+        "Issue 中的代码示例：ax.xaxis.update_units([\"a\", \"b\"]); ax.plot([], [])",
+        "Issue 中的 traceback 显示 ax.plot([], []) 触发了警告和异常"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "触发 MatplotlibDeprecationWarning 并最终引发 ConversionError，警告信息为“Support for passing numbers through unit converters is deprecated...”，但实际传递的是空数组而非数字。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示 MatplotlibDeprecationWarning 和 ConversionError: Failed to convert value(s) to axis units: array([], dtype=float64)",
+        "Issue 描述：“I'm seeing a MatplotlibDeprecationWarning when using calling axes methods on empty data structures for axes that are using string unit converters.”"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.axis.Axis.update_units",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "Issue 中用于设置坐标轴单位（[\"a\", \"b\"]）的方法。"
+      },
+      {
+        "name": "matplotlib.axes.Axes.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发警告和异常的主要 API 调用。"
+      },
+      {
+        "name": "matplotlib.axis.Axis.convert_units",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "Issue 中警告信息建议使用的替代方法，但调用 ax.convert_xunits([]) 同样会触发问题。"
+      },
+      {
+        "name": "matplotlib.artist.Artist.convert_xunits",
+        "kind": "method",
+        "source_path": "lib/matplotlib/artist.py",
+        "reason": "在 plot 内部调用链中，最终会调用 ax.xaxis.convert_units。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/category.py",
+        "object": "convert",
+        "lines": "",
+        "reason": "Issue 的 traceback 显示警告来自 category.py 第 62 行，其中检查 is_numlike 并触发弃用警告，可能未正确处理空数组。"
+      },
+      {
+        "path": "lib/matplotlib/axis.py",
+        "object": "convert_units",
+        "lines": "1611-1626",
+        "reason": "Issue 的 traceback 显示异常最终在此处被捕获并重新抛出为 ConversionError。该方法调用了 self.converter.convert(x, self.units, self)。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 plot 或 scatter 调用使用非空数据（如 [t0, t1], [\"V1\", \"V2\"] 或 np.arange(...)）。",
+        "target_pattern": "将数据输入替换为空列表或空数组：ax.plot([], [])。",
+        "reason": "Issue 明确指出空数据结构会触发问题，而相似测试使用正常数据不会触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "坐标轴可能使用默认单位或无单位转换器。",
+        "target_pattern": "在调用 plot 之前，通过 ax.xaxis.update_units([\"a\", \"b\"]) 设置分类单位转换器。",
+        "reason": "Issue 表明问题发生在“axes that are using string unit converters”时。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当向已设置分类单位的坐标轴传递空数据时，应正常处理（例如创建无数据的艺术家）而不触发弃用警告或转换错误。",
+      "evidence": [
+        "Issue 中的预期结果：“I would expect this to either (1) continue producing artists with no data, or (2) more accurately describe what the problem is and how to avoid it.”"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings(record=True) 捕获的 MatplotlibDeprecationWarning 及其 message 属性。",
+        "reason": "Issue 的核心症状之一是触发了一个被认为令人困惑或不准确的弃用警告。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "是否引发 munits.ConversionError 及其错误消息。",
+        "reason": "Issue 显示最终会抛出 ConversionError，导致绘图失败。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ax.plot([], []) 的返回值（艺术家列表）或 ax.convert_xunits([]) 的返回值。",
+        "reason": "观察在触发警告/异常后，API 是否仍能正常返回（例如空列表或转换后的值）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在设置分类单位后绘制空数据不会引发 ConversionError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在修复中改变。",
+        "reason": "Issue 表明当前行为会抛出异常，修复后应不再抛出。"
+      },
+      {
+        "assertion_goal": "验证在设置分类单位后绘制空数据不会触发关于“passing numbers”的弃用警告。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言警告的完整堆栈或精确行号。",
+        "reason": "Issue 认为该警告是 false alarm 或 non-actionable，修复后应消除或改变。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "category.py 中 convert 方法内部 is_numlike 检查的确切逻辑，以及空数组为何被判定为“numlike”。",
+    "修复后的确切行为：是应该完全静默处理空数据，还是应该触发一个更准确（非弃用）的警告或信息？",
+    "除了 plot([], [])，其他绘图方法（如 scatter, bar）在相同条件下是否也会触发相同问题。"
+  ],
+  "raw": {
+    "issue_summary": "当向使用字符串单位转换器的坐标轴传递空数据结构时，会触发令人困惑的弃用警告和转换错误。",
+    "trigger_condition": {
+      "text": "在调用 ax.xaxis.update_units([\"a\", \"b\"]) 设置分类单位后，调用 ax.plot([], []) 绘制空数据。",
+      "evidence": [
+        "Issue 中的代码示例：ax.xaxis.update_units([\"a\", \"b\"]); ax.plot([], [])",
+        "Issue 中的 traceback 显示 ax.plot([], []) 触发了警告和异常"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "触发 MatplotlibDeprecationWarning 并最终引发 ConversionError，警告信息为“Support for passing numbers through unit converters is deprecated...”，但实际传递的是空数组而非数字。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示 MatplotlibDeprecationWarning 和 ConversionError: Failed to convert value(s) to axis units: array([], dtype=float64)",
+        "Issue 描述：“I'm seeing a MatplotlibDeprecationWarning when using calling axes methods on empty data structures for axes that are using string unit converters.”"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当向已设置分类单位的坐标轴传递空数据时，应正常处理（例如创建无数据的艺术家）而不触发弃用警告或转换错误。",
+      "evidence": [
+        "Issue 中的预期结果：“I would expect this to either (1) continue producing artists with no data, or (2) more accurately describe what the problem is and how to avoid it.”"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.axis.Axis.update_units",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "Issue 中用于设置坐标轴单位（[\"a\", \"b\"]）的方法。"
+      },
+      {
+        "name": "matplotlib.axes.Axes.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发警告和异常的主要 API 调用。"
+      },
+      {
+        "name": "matplotlib.axis.Axis.convert_units",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "Issue 中警告信息建议使用的替代方法，但调用 ax.convert_xunits([]) 同样会触发问题。"
+      },
+      {
+        "name": "matplotlib.artist.Artist.convert_xunits",
+        "kind": "method",
+        "source_path": "lib/matplotlib/artist.py",
+        "reason": "在 plot 内部调用链中，最终会调用 ax.xaxis.convert_units。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/category.py",
+        "object": "convert",
+        "lines": "",
+        "reason": "Issue 的 traceback 显示警告来自 category.py 第 62 行，其中检查 is_numlike 并触发弃用警告，可能未正确处理空数组。"
+      },
+      {
+        "path": "lib/matplotlib/axis.py",
+        "object": "convert_units",
+        "lines": "1611-1626",
+        "reason": "Issue 的 traceback 显示异常最终在此处被捕获并重新抛出为 ConversionError。该方法调用了 self.converter.convert(x, self.units, self)。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_empty_arrays",
+        "test_file": "lib/matplotlib/tests/test_units.py",
+        "why_relevant": "该测试直接涉及绘制空数组的场景，但使用的是 datetime64 类型而非分类单位。",
+        "reusable_parts": [
+          "imports",
+          "plt.subplots()",
+          "plt.scatter(np.array([]), np.array([])) 的调用模式"
+        ],
+        "possible_gap": "测试未设置分类单位转换器（如 update_units([\"a\", \"b\"])），且使用的是 scatter 而非 plot。"
+      },
+      {
+        "test_name": "test_overriding_units_in_plot",
+        "test_file": "lib/matplotlib/tests/test_category.py",
+        "why_relevant": "该测试涉及在 plot 调用中覆盖单位，并检查单位属性是否被意外重置。",
+        "reusable_parts": [
+          "@mpl.style.context('default')",
+          "fig.subplots()",
+          "ax.plot(...) 的调用模式",
+          "对 ax.xaxis.units 和 ax.yaxis.units 的断言"
+        ],
+        "possible_gap": "测试传递的是非空数据（[t0, t1], [\"V1\", \"V2\"]），而非空数组。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 plot 或 scatter 调用使用非空数据（如 [t0, t1], [\"V1\", \"V2\"] 或 np.arange(...)）。",
+        "target_pattern": "将数据输入替换为空列表或空数组：ax.plot([], [])。",
+        "reason": "Issue 明确指出空数据结构会触发问题，而相似测试使用正常数据不会触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "坐标轴可能使用默认单位或无单位转换器。",
+        "target_pattern": "在调用 plot 之前，通过 ax.xaxis.update_units([\"a\", \"b\"]) 设置分类单位转换器。",
+        "reason": "Issue 表明问题发生在“axes that are using string unit converters”时。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings(record=True) 捕获的 MatplotlibDeprecationWarning 及其 message 属性。",
+        "reason": "Issue 的核心症状之一是触发了一个被认为令人困惑或不准确的弃用警告。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "是否引发 munits.ConversionError 及其错误消息。",
+        "reason": "Issue 显示最终会抛出 ConversionError，导致绘图失败。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ax.plot([], []) 的返回值（艺术家列表）或 ax.convert_xunits([]) 的返回值。",
+        "reason": "观察在触发警告/异常后，API 是否仍能正常返回（例如空列表或转换后的值）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在设置分类单位后绘制空数据不会引发 ConversionError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在修复中改变。",
+        "reason": "Issue 表明当前行为会抛出异常，修复后应不再抛出。"
+      },
+      {
+        "assertion_goal": "验证在设置分类单位后绘制空数据不会触发关于“passing numbers”的弃用警告。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言警告的完整堆栈或精确行号。",
+        "reason": "Issue 认为该警告是 false alarm 或 non-actionable，修复后应消除或改变。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 和 matplotlib.units。可能需要使用 pytest 的 warnings.catch_warnings fixture。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试环境应模拟 Issue 中的步骤：创建坐标轴、设置单位、绘制空数据。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "category.py 中 convert 方法内部 is_numlike 检查的确切逻辑，以及空数组为何被判定为“numlike”。",
+      "修复后的确切行为：是应该完全静默处理空数据，还是应该触发一个更准确（非弃用）的警告或信息？",
+      "除了 plot([], [])，其他绘图方法（如 scatter, bar）在相同条件下是否也会触发相同问题。"
+    ]
+  }
+}

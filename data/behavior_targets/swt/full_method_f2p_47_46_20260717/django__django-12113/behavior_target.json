@@ -1,0 +1,328 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12113",
+  "issue_summary": "使用持久化 SQLite 数据库（--keepdb）运行 admin_views.test_multidb 测试时，在 setUpTestData 阶段出现 'database is locked' 错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 作为基类，并配置 DATABASES 设置，为 'default' 和 'other' 数据库都设置 ENGINE='django.db.backends.sqlite3' 和 TEST['NAME']。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或使用 --keepdb 运行测试的环境，以确保数据库文件是持久化的。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试类应继承自 TestCase 并包含 setUpTestData 方法，在其中创建涉及多数据库操作的对象（如为每个数据库创建超级用户）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MultiDatabaseTests.test_add_view",
+        "test_file": "tests/admin_views/test_multidb.py",
+        "why_relevant": "这是 Issue 中失败测试类 MultiDatabaseTests 中的一个测试，使用相同的测试类、多数据库配置和路由器。",
+        "reusable_parts": [
+          "测试类装饰器 @override_settings",
+          "DATABASE_ROUTERS 配置",
+          "MultiDatabaseTests 类结构",
+          "使用 connections 遍历数据库",
+          "self.superusers[db] 的用法"
+        ],
+        "possible_gap": "现有测试方法可能依赖于已成功执行的 setUpTestData（创建 superusers），而 Issue 的失败发生在 setUpTestData 本身，因此直接运行现有测试可能无法复现 setUp 阶段的锁定错误。"
+      },
+      {
+        "test_name": "QueryTestCase.test_m2m_cross_database_protection",
+        "test_file": "tests/multiple_database/tests.py",
+        "why_relevant": "它也涉及多数据库操作（'default' 和 'other'），并使用了 transaction.atomic，可能与数据库连接和事务管理相关。",
+        "reusable_parts": [
+          "多数据库的配置模式",
+          "使用 Book.objects.using('other').create(...)",
+          "transaction.atomic 上下文管理器的使用"
+        ],
+        "possible_gap": "该测试不涉及 --keepdb 或持久化数据库文件，且错误类型是 ValueError 而非 OperationalError，场景不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用带有 TEST['NAME'] 配置的多个 SQLite 数据库（'default' 和 'other'），并启用 --keepdb 选项运行 admin_views.test_multidb.MultiDatabaseTests 测试类。",
+      "evidence": [
+        "Issue 描述：'I've tried using persistent SQLite databases for the tests (to make use of --keepdb)'",
+        "Issue 中的 diff 显示为 'default' 和 'other' 数据库添加了 TEST['NAME'] 配置",
+        "Issue 中的运行命令：'% tests/runtests.py admin_views.test_multidb -v 3 --keepdb --parallel 1'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在测试类的 setUpClass/setUpTestData 阶段，执行数据库操作（创建超级用户）时抛出 sqlite3.OperationalError: database is locked 异常，最终包装为 django.db.utils.OperationalError。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈：'sqlite3.OperationalError: database is locked'",
+        "堆栈跟踪显示错误发生在 admin_views.test_multidb.MultiDatabaseTests.setUpTestData 中调用 create_superuser 时",
+        "堆栈最终指向 django/db/backends/sqlite3/base.py 的 execute 方法"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.test.testcases.TestCase.setUpClass",
+        "kind": "method",
+        "source_path": "django/test/testcases.py",
+        "reason": "错误发生在测试类的 setUpClass 阶段，它调用了 setUpTestData。"
+      },
+      {
+        "name": "django.test.testcases.TestCase.setUpTestData",
+        "kind": "method",
+        "source_path": "django/test/testcases.py",
+        "reason": "Issue 堆栈显示错误发生在 MultiDatabaseTests.setUpTestData 方法中。"
+      },
+      {
+        "name": "django.contrib.auth.models.UserManager.create_superuser",
+        "kind": "method",
+        "source_path": "django/contrib/auth/models.py",
+        "reason": "堆栈显示在 setUpTestData 中调用了 create_superuser 来创建用户，最终导致数据库操作。"
+      },
+      {
+        "name": "django.db.backends.utils.CursorWrapper._execute",
+        "kind": "method",
+        "source_path": "django/db/backends/utils.py",
+        "reason": "错误堆栈最终指向此方法执行 SQL 时抛出异常。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/test/testcases.py",
+        "object": "TestCase.setUpClass 或相关数据库初始化逻辑",
+        "lines": "169-177",
+        "reason": "Issue 错误发生在 setUpClass 阶段，且源码片段显示其中有 _add_databases_failures() 调用，可能与多数据库初始化/连接管理有关。"
+      },
+      {
+        "path": "django/db/backends/sqlite3/base.py",
+        "object": "DatabaseWrapper 或相关连接/事务管理",
+        "lines": "",
+        "reason": "错误最终由 sqlite3 后端抛出 'database is locked'，可能涉及多个数据库连接同时访问同一文件时的锁管理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能使用内存数据库或临时数据库文件。",
+        "target_pattern": "将数据库配置改为使用带有 TEST['NAME'] 的持久化 SQLite 数据库文件，并为多个数据库（'default' 和 'other'）都配置。",
+        "reason": "Issue 表明问题仅在为多个数据库配置持久化文件名并使用 --keepdb 时出现。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试方法在 setUpTestData 成功执行后运行。",
+        "target_pattern": "确保测试执行流程会触发测试类的 setUpClass -> setUpTestData 初始化路径，并可能需要在启用 --keepdb 标志的环境下运行。",
+        "reason": "错误发生在测试初始化的早期阶段，需要模拟整个测试类的启动过程。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在使用持久化 SQLite 数据库（--keepdb）运行涉及多个数据库的测试时，测试的初始数据设置（setUpTestData）应能正常完成，不出现数据库锁定错误。",
+      "evidence": [
+        "Issue 描述：'This is not an issue when only using TEST[\"NAME\"] with \"default\" (which is good enough in terms of performance).' 暗示期望多数据库配置也能正常工作",
+        "Issue 标题和描述表明这是一个需要修复的失败，隐含了正常行为应是测试通过"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在测试类的 setUpClass 或 setUpTestData 方法执行期间，捕获 django.db.utils.OperationalError 或 sqlite3.OperationalError。",
+        "reason": "Issue 的核心错误现象是 'database is locked' 异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察在 setUpTestData 执行前后，多个数据库连接（connections['default'], connections['other']）的状态，特别是与事务或文件锁相关的属性。",
+        "reason": "错误可能与多个连接同时初始化或访问同一数据库文件时的锁竞争有关。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "检查测试运行时的 DATABASES 配置，特别是每个数据库的 TEST['NAME'] 设置以及 --keepdb 标志是否生效。",
+        "reason": "Issue 表明特定的配置组合是触发条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证测试类的初始化（setUpTestData）能够在不抛出 OperationalError 的情况下完成。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的 SQL 语句或完整的错误消息字符串，因为锁错误的确切时机可能不稳定。",
+        "reason": "修复后，setUpTestData 应正常执行，不应出现数据库锁定异常。因此，复现测试的断言目标应是捕获该异常（在修复前），而修复后的测试应无异常。但根据规则9，此处提示修复前的测试断言风格。对于修复后的正向行为，应是 'not raises'，但规则要求 assertion_hints 与 expected_behavior 极性一致。因此，这里描述的是复现测试（用于触发bug）的断言目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致 'database is locked' 的具体代码路径和竞争条件是什么？是 setUpClass 中的 _add_databases_failures()，还是多个数据库连接同时初始化？",
+    "是否只有在 --keepdb 且并行运行测试（--parallel >1）时才会触发？Issue 中使用了 --parallel 1。",
+    "除了 admin_views.test_multidb，其他多数据库测试是否也会受此影响？"
+  ],
+  "raw": {
+    "issue_summary": "使用持久化 SQLite 数据库（--keepdb）运行 admin_views.test_multidb 测试时，在 setUpTestData 阶段出现 'database is locked' 错误。",
+    "trigger_condition": {
+      "text": "使用带有 TEST['NAME'] 配置的多个 SQLite 数据库（'default' 和 'other'），并启用 --keepdb 选项运行 admin_views.test_multidb.MultiDatabaseTests 测试类。",
+      "evidence": [
+        "Issue 描述：'I've tried using persistent SQLite databases for the tests (to make use of --keepdb)'",
+        "Issue 中的 diff 显示为 'default' 和 'other' 数据库添加了 TEST['NAME'] 配置",
+        "Issue 中的运行命令：'% tests/runtests.py admin_views.test_multidb -v 3 --keepdb --parallel 1'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在测试类的 setUpClass/setUpTestData 阶段，执行数据库操作（创建超级用户）时抛出 sqlite3.OperationalError: database is locked 异常，最终包装为 django.db.utils.OperationalError。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈：'sqlite3.OperationalError: database is locked'",
+        "堆栈跟踪显示错误发生在 admin_views.test_multidb.MultiDatabaseTests.setUpTestData 中调用 create_superuser 时",
+        "堆栈最终指向 django/db/backends/sqlite3/base.py 的 execute 方法"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在使用持久化 SQLite 数据库（--keepdb）运行涉及多个数据库的测试时，测试的初始数据设置（setUpTestData）应能正常完成，不出现数据库锁定错误。",
+      "evidence": [
+        "Issue 描述：'This is not an issue when only using TEST[\"NAME\"] with \"default\" (which is good enough in terms of performance).' 暗示期望多数据库配置也能正常工作",
+        "Issue 标题和描述表明这是一个需要修复的失败，隐含了正常行为应是测试通过"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "django.test.testcases.TestCase.setUpClass",
+        "kind": "method",
+        "source_path": "django/test/testcases.py",
+        "reason": "错误发生在测试类的 setUpClass 阶段，它调用了 setUpTestData。"
+      },
+      {
+        "name": "django.test.testcases.TestCase.setUpTestData",
+        "kind": "method",
+        "source_path": "django/test/testcases.py",
+        "reason": "Issue 堆栈显示错误发生在 MultiDatabaseTests.setUpTestData 方法中。"
+      },
+      {
+        "name": "django.contrib.auth.models.UserManager.create_superuser",
+        "kind": "method",
+        "source_path": "django/contrib/auth/models.py",
+        "reason": "堆栈显示在 setUpTestData 中调用了 create_superuser 来创建用户，最终导致数据库操作。"
+      },
+      {
+        "name": "django.db.backends.utils.CursorWrapper._execute",
+        "kind": "method",
+        "source_path": "django/db/backends/utils.py",
+        "reason": "错误堆栈最终指向此方法执行 SQL 时抛出异常。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/test/testcases.py",
+        "object": "TestCase.setUpClass 或相关数据库初始化逻辑",
+        "lines": "169-177",
+        "reason": "Issue 错误发生在 setUpClass 阶段，且源码片段显示其中有 _add_databases_failures() 调用，可能与多数据库初始化/连接管理有关。"
+      },
+      {
+        "path": "django/db/backends/sqlite3/base.py",
+        "object": "DatabaseWrapper 或相关连接/事务管理",
+        "lines": "",
+        "reason": "错误最终由 sqlite3 后端抛出 'database is locked'，可能涉及多个数据库连接同时访问同一文件时的锁管理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MultiDatabaseTests.test_add_view",
+        "test_file": "tests/admin_views/test_multidb.py",
+        "why_relevant": "这是 Issue 中失败测试类 MultiDatabaseTests 中的一个测试，使用相同的测试类、多数据库配置和路由器。",
+        "reusable_parts": [
+          "测试类装饰器 @override_settings",
+          "DATABASE_ROUTERS 配置",
+          "MultiDatabaseTests 类结构",
+          "使用 connections 遍历数据库",
+          "self.superusers[db] 的用法"
+        ],
+        "possible_gap": "现有测试方法可能依赖于已成功执行的 setUpTestData（创建 superusers），而 Issue 的失败发生在 setUpTestData 本身，因此直接运行现有测试可能无法复现 setUp 阶段的锁定错误。"
+      },
+      {
+        "test_name": "QueryTestCase.test_m2m_cross_database_protection",
+        "test_file": "tests/multiple_database/tests.py",
+        "why_relevant": "它也涉及多数据库操作（'default' 和 'other'），并使用了 transaction.atomic，可能与数据库连接和事务管理相关。",
+        "reusable_parts": [
+          "多数据库的配置模式",
+          "使用 Book.objects.using('other').create(...)",
+          "transaction.atomic 上下文管理器的使用"
+        ],
+        "possible_gap": "该测试不涉及 --keepdb 或持久化数据库文件，且错误类型是 ValueError 而非 OperationalError，场景不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能使用内存数据库或临时数据库文件。",
+        "target_pattern": "将数据库配置改为使用带有 TEST['NAME'] 的持久化 SQLite 数据库文件，并为多个数据库（'default' 和 'other'）都配置。",
+        "reason": "Issue 表明问题仅在为多个数据库配置持久化文件名并使用 --keepdb 时出现。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试方法在 setUpTestData 成功执行后运行。",
+        "target_pattern": "确保测试执行流程会触发测试类的 setUpClass -> setUpTestData 初始化路径，并可能需要在启用 --keepdb 标志的环境下运行。",
+        "reason": "错误发生在测试初始化的早期阶段，需要模拟整个测试类的启动过程。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在测试类的 setUpClass 或 setUpTestData 方法执行期间，捕获 django.db.utils.OperationalError 或 sqlite3.OperationalError。",
+        "reason": "Issue 的核心错误现象是 'database is locked' 异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察在 setUpTestData 执行前后，多个数据库连接（connections['default'], connections['other']）的状态，特别是与事务或文件锁相关的属性。",
+        "reason": "错误可能与多个连接同时初始化或访问同一数据库文件时的锁竞争有关。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "检查测试运行时的 DATABASES 配置，特别是每个数据库的 TEST['NAME'] 设置以及 --keepdb 标志是否生效。",
+        "reason": "Issue 表明特定的配置组合是触发条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证测试类的初始化（setUpTestData）能够在不抛出 OperationalError 的情况下完成。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的 SQL 语句或完整的错误消息字符串，因为锁错误的确切时机可能不稳定。",
+        "reason": "修复后，setUpTestData 应正常执行，不应出现数据库锁定异常。因此，复现测试的断言目标应是捕获该异常（在修复前），而修复后的测试应无异常。但根据规则9，此处提示修复前的测试断言风格。对于修复后的正向行为，应是 'not raises'，但规则要求 assertion_hints 与 expected_behavior 极性一致。因此，这里描述的是复现测试（用于触发bug）的断言目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 作为基类，并配置 DATABASES 设置，为 'default' 和 'other' 数据库都设置 ENGINE='django.db.backends.sqlite3' 和 TEST['NAME']。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或使用 --keepdb 运行测试的环境，以确保数据库文件是持久化的。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试类应继承自 TestCase 并包含 setUpTestData 方法，在其中创建涉及多数据库操作的对象（如为每个数据库创建超级用户）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致 'database is locked' 的具体代码路径和竞争条件是什么？是 setUpClass 中的 _add_databases_failures()，还是多个数据库连接同时初始化？",
+      "是否只有在 --keepdb 且并行运行测试（--parallel >1）时才会触发？Issue 中使用了 --parallel 1。",
+      "除了 admin_views.test_multidb，其他多数据库测试是否也会受此影响？"
+    ]
+  }
+}

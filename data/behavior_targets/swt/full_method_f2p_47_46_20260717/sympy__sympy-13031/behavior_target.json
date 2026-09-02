@@ -1,0 +1,310 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-13031",
+  "issue_summary": "在 sympy 1.1 中，当水平堆叠多个零行矩阵时，结果矩阵的列数计算错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 Matrix 类（或相关测试类如 ShapingOnlyMatrix）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 sympy 的测试框架下运行，可能涉及特定的测试类或 fixture（如 ShapingOnlyMatrix）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_hstack",
+        "test_file": "sympy/matrices/tests/test_commonmatrix.py",
+        "why_relevant": "它直接测试了 hstack 函数，并且包含了与 Issue 完全相同的输入矩阵构造和调用，用于验证零行矩阵堆叠的正确行为。",
+        "reusable_parts": [
+          "导入 Matrix 和 ShapingOnlyMatrix",
+          "使用 Matrix.zeros 构造零矩阵",
+          "调用 Matrix.hstack 或 ShapingOnlyMatrix.hstack",
+          "断言结果矩阵的形状 (rows, cols)"
+        ],
+        "possible_gap": "该测试已经断言了正确的行为（cols == 6），因此它本身不会失败。需要变异输入或观察在缺陷版本中该断言会失败。"
+      },
+      {
+        "test_name": "test_empty_zeros",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "它测试了 zeros 函数创建零行/零列矩阵的行为，确保输入矩阵的构造是正确的。",
+        "reusable_parts": [
+          "使用 zeros 函数构造不同形状的零矩阵",
+          "断言矩阵的 rows 和 cols 属性"
+        ],
+        "possible_gap": "它不涉及 hstack 操作，只关注单个矩阵的构造。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Matrix.hstack 水平堆叠多个行数为零但列数不同的矩阵，例如 Matrix.zeros(0, 0)、Matrix.zeros(0, 1)、Matrix.zeros(0, 2)、Matrix.zeros(0, 3)。",
+      "evidence": [
+        "Issue 中的代码示例：`sy.Matrix.hstack(M1, M2, M3, M4).shape` 返回 `(0, 3)`，而预期应为 `(0, 6)`。",
+        "相关测试 1 中包含了相同的输入矩阵构造和 hstack 调用。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Matrix.hstack 返回的矩阵列数不正确，比预期列数少。对于零行矩阵，列数被错误地计算为最后一个矩阵的列数（3），而不是所有矩阵列数之和（6）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了 sympy 1.0 返回 `(0, 6)` 和 sympy 1.1 返回 `(0, 3)`。",
+        "相关测试 1 的断言 `assert m.rows == 0 and m.cols == 6` 表明预期行为是列数为 6。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Matrix.hstack",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "Issue 直接报告了该函数的行为变化，它是触发缺陷的 API。"
+      },
+      {
+        "name": "Matrix.zeros",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "用于构造 Issue 中使用的零矩阵输入。"
+      },
+      {
+        "name": "Matrix.row_join",
+        "kind": "method",
+        "source_path": "",
+        "reason": "根据源码片段 3，hstack 内部使用 reduce(kls.row_join, args)，row_join 的实现可能影响结果。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "Matrix.hstack",
+        "lines": "364-381",
+        "reason": "该函数是缺陷的直接入口，其内部实现（特别是 reduce 操作）在处理零行矩阵时可能有问题。"
+      },
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "Matrix.row_join",
+        "lines": "",
+        "reason": "hstack 通过 reduce 调用 row_join，row_join 在处理零行矩阵时的行为可能导致列数计算错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中已经使用了与 Issue 完全相同的输入：M1(0,0), M2(0,1), M3(0,2), M4(0,3)。",
+        "target_pattern": "保持相同输入，但观察在缺陷版本中 hstack 的返回值。",
+        "reason": "该输入在 Issue 中已证实能触发错误列数计算。测试中已有此模式，无需变异输入，但需要确保测试在缺陷版本下运行并捕获错误结果。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 `ShapingOnlyMatrix.hstack(M1, M2, M3, M4)` 或 `Matrix.hstack(...)`。",
+        "target_pattern": "相同调用链，但可能需要在调用前后插入观测点以检查中间结果或 row_join 的行为。",
+        "reason": "缺陷可能隐藏在 hstack 内部的 reduce 或 row_join 逻辑中，观测调用链有助于定位问题。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Matrix.hstack 应正确计算所有输入矩阵的列数之和，即使输入矩阵的行数为零。对于零行矩阵，结果矩阵的列数应为所有输入矩阵列数的总和。",
+      "evidence": [
+        "Issue 中 sympy 1.0 的行为返回 `(0, 6)`。",
+        "相关测试 1 的断言 `assert m.rows == 0 and m.cols == 6` 明确期望列数为 6。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "hstack_result.shape",
+        "reason": "Issue 的核心是返回矩阵的形状（特别是列数）错误，直接观察 shape 属性可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "hstack_result",
+        "reason": "观察返回的矩阵对象本身，可能其内部表示或数据在零行情况下有问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 reduce(kls.row_join, args) 过程中，每次 row_join 调用后的中间矩阵形状",
+        "reason": "缺陷可能源于 row_join 在处理零行矩阵时未正确累加列数，观测中间状态有助于理解错误传播。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Matrix.hstack 返回的矩阵列数等于所有输入矩阵列数之和。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的矩阵内容或 repr，因为零行矩阵可能没有具体元素。",
+        "reason": "Issue 的核心是列数计算错误，直接断言形状的 cols 部分是最稳定且与问题直接相关的。"
+      },
+      {
+        "assertion_goal": "验证 Matrix.hstack 返回的矩阵行数与输入矩阵的行数一致（应为 0）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言非零行的情况，除非 Issue 扩展。",
+        "reason": "确保行数在零行情况下也被正确处理，虽然 Issue 主要关注列数。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切根源是在 hstack 函数内部，还是在 row_join 方法中，亦或是矩阵类本身的某个特殊处理逻辑。",
+    "除了零行矩阵，是否还有其他边界情况（如零列矩阵、混合零行和非零行矩阵）也会受到类似影响。",
+    "Issue 中提到的 vstack 是否也有类似问题，但未在提供的材料中明确。"
+  ],
+  "raw": {
+    "issue_summary": "在 sympy 1.1 中，当水平堆叠多个零行矩阵时，结果矩阵的列数计算错误。",
+    "trigger_condition": {
+      "text": "调用 Matrix.hstack 水平堆叠多个行数为零但列数不同的矩阵，例如 Matrix.zeros(0, 0)、Matrix.zeros(0, 1)、Matrix.zeros(0, 2)、Matrix.zeros(0, 3)。",
+      "evidence": [
+        "Issue 中的代码示例：`sy.Matrix.hstack(M1, M2, M3, M4).shape` 返回 `(0, 3)`，而预期应为 `(0, 6)`。",
+        "相关测试 1 中包含了相同的输入矩阵构造和 hstack 调用。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Matrix.hstack 返回的矩阵列数不正确，比预期列数少。对于零行矩阵，列数被错误地计算为最后一个矩阵的列数（3），而不是所有矩阵列数之和（6）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了 sympy 1.0 返回 `(0, 6)` 和 sympy 1.1 返回 `(0, 3)`。",
+        "相关测试 1 的断言 `assert m.rows == 0 and m.cols == 6` 表明预期行为是列数为 6。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Matrix.hstack 应正确计算所有输入矩阵的列数之和，即使输入矩阵的行数为零。对于零行矩阵，结果矩阵的列数应为所有输入矩阵列数的总和。",
+      "evidence": [
+        "Issue 中 sympy 1.0 的行为返回 `(0, 6)`。",
+        "相关测试 1 的断言 `assert m.rows == 0 and m.cols == 6` 明确期望列数为 6。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Matrix.hstack",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "Issue 直接报告了该函数的行为变化，它是触发缺陷的 API。"
+      },
+      {
+        "name": "Matrix.zeros",
+        "kind": "class_function",
+        "source_path": "sympy/matrices/common.py",
+        "reason": "用于构造 Issue 中使用的零矩阵输入。"
+      },
+      {
+        "name": "Matrix.row_join",
+        "kind": "method",
+        "source_path": "",
+        "reason": "根据源码片段 3，hstack 内部使用 reduce(kls.row_join, args)，row_join 的实现可能影响结果。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "Matrix.hstack",
+        "lines": "364-381",
+        "reason": "该函数是缺陷的直接入口，其内部实现（特别是 reduce 操作）在处理零行矩阵时可能有问题。"
+      },
+      {
+        "path": "sympy/matrices/common.py",
+        "object": "Matrix.row_join",
+        "lines": "",
+        "reason": "hstack 通过 reduce 调用 row_join，row_join 在处理零行矩阵时的行为可能导致列数计算错误。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_hstack",
+        "test_file": "sympy/matrices/tests/test_commonmatrix.py",
+        "why_relevant": "它直接测试了 hstack 函数，并且包含了与 Issue 完全相同的输入矩阵构造和调用，用于验证零行矩阵堆叠的正确行为。",
+        "reusable_parts": [
+          "导入 Matrix 和 ShapingOnlyMatrix",
+          "使用 Matrix.zeros 构造零矩阵",
+          "调用 Matrix.hstack 或 ShapingOnlyMatrix.hstack",
+          "断言结果矩阵的形状 (rows, cols)"
+        ],
+        "possible_gap": "该测试已经断言了正确的行为（cols == 6），因此它本身不会失败。需要变异输入或观察在缺陷版本中该断言会失败。"
+      },
+      {
+        "test_name": "test_empty_zeros",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "它测试了 zeros 函数创建零行/零列矩阵的行为，确保输入矩阵的构造是正确的。",
+        "reusable_parts": [
+          "使用 zeros 函数构造不同形状的零矩阵",
+          "断言矩阵的 rows 和 cols 属性"
+        ],
+        "possible_gap": "它不涉及 hstack 操作，只关注单个矩阵的构造。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中已经使用了与 Issue 完全相同的输入：M1(0,0), M2(0,1), M3(0,2), M4(0,3)。",
+        "target_pattern": "保持相同输入，但观察在缺陷版本中 hstack 的返回值。",
+        "reason": "该输入在 Issue 中已证实能触发错误列数计算。测试中已有此模式，无需变异输入，但需要确保测试在缺陷版本下运行并捕获错误结果。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 `ShapingOnlyMatrix.hstack(M1, M2, M3, M4)` 或 `Matrix.hstack(...)`。",
+        "target_pattern": "相同调用链，但可能需要在调用前后插入观测点以检查中间结果或 row_join 的行为。",
+        "reason": "缺陷可能隐藏在 hstack 内部的 reduce 或 row_join 逻辑中，观测调用链有助于定位问题。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "hstack_result.shape",
+        "reason": "Issue 的核心是返回矩阵的形状（特别是列数）错误，直接观察 shape 属性可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "hstack_result",
+        "reason": "观察返回的矩阵对象本身，可能其内部表示或数据在零行情况下有问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 reduce(kls.row_join, args) 过程中，每次 row_join 调用后的中间矩阵形状",
+        "reason": "缺陷可能源于 row_join 在处理零行矩阵时未正确累加列数，观测中间状态有助于理解错误传播。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Matrix.hstack 返回的矩阵列数等于所有输入矩阵列数之和。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的矩阵内容或 repr，因为零行矩阵可能没有具体元素。",
+        "reason": "Issue 的核心是列数计算错误，直接断言形状的 cols 部分是最稳定且与问题直接相关的。"
+      },
+      {
+        "assertion_goal": "验证 Matrix.hstack 返回的矩阵行数与输入矩阵的行数一致（应为 0）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言非零行的情况，除非 Issue 扩展。",
+        "reason": "确保行数在零行情况下也被正确处理，虽然 Issue 主要关注列数。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 Matrix 类（或相关测试类如 ShapingOnlyMatrix）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 sympy 的测试框架下运行，可能涉及特定的测试类或 fixture（如 ShapingOnlyMatrix）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切根源是在 hstack 函数内部，还是在 row_join 方法中，亦或是矩阵类本身的某个特殊处理逻辑。",
+      "除了零行矩阵，是否还有其他边界情况（如零列矩阵、混合零行和非零行矩阵）也会受到类似影响。",
+      "Issue 中提到的 vstack 是否也有类似问题，但未在提供的材料中明确。"
+    ]
+  }
+}

@@ -1,0 +1,282 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-5809",
+  "issue_summary": "pytest的--pastebin选项使用lexer=python3上传内容时，某些内容会导致HTTP 400错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要pastebin fixture（如相关测试1所示）来获取pastebin插件实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要mock网络请求（如mocked_urlopen）来拦截和检查请求数据，避免依赖外部服务。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要testdir fixture来创建测试文件和运行pytest命令（如相关测试2、3、4所示）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_create_new_paste",
+        "test_file": "testing/test_pastebin.py",
+        "why_relevant": "该测试直接测试pastebin.create_new_paste方法，并检查了请求数据（包括lexer参数），与Issue的核心触发路径高度相关。",
+        "reusable_parts": [
+          "pastebin fixture",
+          "mocked_urlopen fixture",
+          "对create_new_paste的调用",
+          "对请求数据和URL的断言检查风格"
+        ],
+        "possible_gap": "该测试使用固定的b\"full-paste-contents\"作为输入，可能不包含会触发HTTP 400的特定内容。它mock了网络请求，因此不会实际触发HTTP错误。"
+      },
+      {
+        "test_name": "TestPasteCapture.test_all",
+        "test_file": "testing/test_pastebin.py",
+        "why_relevant": "该测试使用--pastebin=all选项运行pytest，模拟了真实的使用场景，并检查了上传的内容。",
+        "reusable_parts": [
+          "testdir fixture",
+          "使用--pastebin=all运行pytest",
+          "对pastebinlist内容的检查",
+          "LineMatcher的使用"
+        ],
+        "possible_gap": "该测试也使用了mock（pastebinlist），不进行真实的网络请求，因此无法复现HTTP错误。其测试内容（标准测试输出）可能不包含触发bug的特定字符。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用--pastebin选项（如--pastebin=all或--pastebin=failed）运行pytest，且pytest的输出内容包含某些特定字符或格式时。",
+      "evidence": [
+        "Issue描述：'For some `contents`, this will raise a \"HTTP Error 400: Bad Request\".'",
+        "Issue中提供了触发HTTP 400的示例数据和代码片段。",
+        "相关测试1显示pastebin.create_new_paste被调用，并检查data中是否包含lexer=python3。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "向bpaste.net发送POST请求时，服务器返回HTTP 400 Bad Request错误。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue描述：'this will raise a \"HTTP Error 400: Bad Request\"'",
+        "Issue中的示例代码展示了urlopen调用抛出HTTPError异常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pastebin.create_new_paste",
+        "kind": "method",
+        "source_path": "src/_pytest/pastebin.py",
+        "reason": "Issue中提到的pastebin功能的核心方法，负责创建和提交paste。相关测试1也调用了此方法。"
+      },
+      {
+        "name": "_pytest.pastebin",
+        "kind": "module",
+        "source_path": "src/_pytest/pastebin.py",
+        "reason": "包含pastebin功能的实现。Issue中引用了该文件的特定行（68-73行）。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/pastebin.py",
+        "object": "pastebin相关函数（可能在create_new_paste或其调用的函数中）",
+        "lines": "68-73",
+        "reason": "Issue中明确引用了该文件68-73行，指出该处使用lexer=python3。这是导致HTTP 400的直接原因。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用固定的、简单的测试输出内容（如'full-paste-contents'或标准测试报告）。",
+        "target_pattern": "使用能导致bpaste.net在lexer=python3时返回HTTP 400的特定内容。Issue附件data.txt的内容可能是一个例子。",
+        "reason": "Issue明确指出问题取决于contents。改变输入内容是触发bug的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试中可能使用默认配置或mock来避免网络调用。",
+        "target_pattern": "配置测试以进行真实的网络请求（或至少让请求数据生成逻辑运行到可能出错的那一步）。",
+        "reason": "要观察HTTP 400错误，需要让请求被实际构造并可能发送（或至少在构造阶段暴露出问题）。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用--pastebin选项时，pytest应能成功将运行输出（任意文本）上传到pastebin服务，而不会因lexer设置导致HTTP错误。",
+      "evidence": [
+        "Issue建议：'The call goes through fine if `lexer` is changed from `python3` to `text`.'",
+        "Issue指出：'the console output of a `pytest` run that is being uploaded is not Python code, but arbitrary text.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用pastebin.create_new_paste或相关内部函数时是否抛出HTTPError（或其包装的异常）。",
+        "reason": "Issue的核心错误现象是HTTP 400异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "pastebin.create_new_paste的返回值，或内部构建的请求数据（data参数）。",
+        "reason": "可以检查构建的POST数据中lexer参数的值，以及是否包含有问题的内容。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用lexer=python3和特定内容时，请求会失败（抛出异常或返回错误）。或者验证修复后，lexer被改为text，请求成功。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串（可能因服务器或网络而异），或断言完整的请求数据字节串。",
+        "reason": "Issue的核心是特定条件下会引发HTTPError。使用raises可以稳定地捕获这一行为。修复后，断言可能变为不引发异常或请求数据中包含lexer=text。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致HTTP 400的具体内容特征是什么？Issue只提供了一个示例文件（data.txt），但未说明其通用特征。",
+    "除了lexer参数，请求数据中的其他部分（如code参数的内容编码、格式）是否也起作用？",
+    "bpaste.net对lexer=python3和lexer=text的具体处理差异是什么？",
+    "修复是否只是将lexer从python3改为text，还是需要更复杂的处理（如内容转义）？"
+  ],
+  "raw": {
+    "issue_summary": "pytest的--pastebin选项使用lexer=python3上传内容时，某些内容会导致HTTP 400错误。",
+    "trigger_condition": {
+      "text": "使用--pastebin选项（如--pastebin=all或--pastebin=failed）运行pytest，且pytest的输出内容包含某些特定字符或格式时。",
+      "evidence": [
+        "Issue描述：'For some `contents`, this will raise a \"HTTP Error 400: Bad Request\".'",
+        "Issue中提供了触发HTTP 400的示例数据和代码片段。",
+        "相关测试1显示pastebin.create_new_paste被调用，并检查data中是否包含lexer=python3。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "向bpaste.net发送POST请求时，服务器返回HTTP 400 Bad Request错误。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue描述：'this will raise a \"HTTP Error 400: Bad Request\"'",
+        "Issue中的示例代码展示了urlopen调用抛出HTTPError异常。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用--pastebin选项时，pytest应能成功将运行输出（任意文本）上传到pastebin服务，而不会因lexer设置导致HTTP错误。",
+      "evidence": [
+        "Issue建议：'The call goes through fine if `lexer` is changed from `python3` to `text`.'",
+        "Issue指出：'the console output of a `pytest` run that is being uploaded is not Python code, but arbitrary text.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pastebin.create_new_paste",
+        "kind": "method",
+        "source_path": "src/_pytest/pastebin.py",
+        "reason": "Issue中提到的pastebin功能的核心方法，负责创建和提交paste。相关测试1也调用了此方法。"
+      },
+      {
+        "name": "_pytest.pastebin",
+        "kind": "module",
+        "source_path": "src/_pytest/pastebin.py",
+        "reason": "包含pastebin功能的实现。Issue中引用了该文件的特定行（68-73行）。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/pastebin.py",
+        "object": "pastebin相关函数（可能在create_new_paste或其调用的函数中）",
+        "lines": "68-73",
+        "reason": "Issue中明确引用了该文件68-73行，指出该处使用lexer=python3。这是导致HTTP 400的直接原因。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_create_new_paste",
+        "test_file": "testing/test_pastebin.py",
+        "why_relevant": "该测试直接测试pastebin.create_new_paste方法，并检查了请求数据（包括lexer参数），与Issue的核心触发路径高度相关。",
+        "reusable_parts": [
+          "pastebin fixture",
+          "mocked_urlopen fixture",
+          "对create_new_paste的调用",
+          "对请求数据和URL的断言检查风格"
+        ],
+        "possible_gap": "该测试使用固定的b\"full-paste-contents\"作为输入，可能不包含会触发HTTP 400的特定内容。它mock了网络请求，因此不会实际触发HTTP错误。"
+      },
+      {
+        "test_name": "TestPasteCapture.test_all",
+        "test_file": "testing/test_pastebin.py",
+        "why_relevant": "该测试使用--pastebin=all选项运行pytest，模拟了真实的使用场景，并检查了上传的内容。",
+        "reusable_parts": [
+          "testdir fixture",
+          "使用--pastebin=all运行pytest",
+          "对pastebinlist内容的检查",
+          "LineMatcher的使用"
+        ],
+        "possible_gap": "该测试也使用了mock（pastebinlist），不进行真实的网络请求，因此无法复现HTTP错误。其测试内容（标准测试输出）可能不包含触发bug的特定字符。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用固定的、简单的测试输出内容（如'full-paste-contents'或标准测试报告）。",
+        "target_pattern": "使用能导致bpaste.net在lexer=python3时返回HTTP 400的特定内容。Issue附件data.txt的内容可能是一个例子。",
+        "reason": "Issue明确指出问题取决于contents。改变输入内容是触发bug的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试中可能使用默认配置或mock来避免网络调用。",
+        "target_pattern": "配置测试以进行真实的网络请求（或至少让请求数据生成逻辑运行到可能出错的那一步）。",
+        "reason": "要观察HTTP 400错误，需要让请求被实际构造并可能发送（或至少在构造阶段暴露出问题）。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用pastebin.create_new_paste或相关内部函数时是否抛出HTTPError（或其包装的异常）。",
+        "reason": "Issue的核心错误现象是HTTP 400异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "pastebin.create_new_paste的返回值，或内部构建的请求数据（data参数）。",
+        "reason": "可以检查构建的POST数据中lexer参数的值，以及是否包含有问题的内容。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用lexer=python3和特定内容时，请求会失败（抛出异常或返回错误）。或者验证修复后，lexer被改为text，请求成功。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串（可能因服务器或网络而异），或断言完整的请求数据字节串。",
+        "reason": "Issue的核心是特定条件下会引发HTTPError。使用raises可以稳定地捕获这一行为。修复后，断言可能变为不引发异常或请求数据中包含lexer=text。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要pastebin fixture（如相关测试1所示）来获取pastebin插件实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要mock网络请求（如mocked_urlopen）来拦截和检查请求数据，避免依赖外部服务。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要testdir fixture来创建测试文件和运行pytest命令（如相关测试2、3、4所示）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致HTTP 400的具体内容特征是什么？Issue只提供了一个示例文件（data.txt），但未说明其通用特征。",
+      "除了lexer参数，请求数据中的其他部分（如code参数的内容编码、格式）是否也起作用？",
+      "bpaste.net对lexer=python3和lexer=text的具体处理差异是什么？",
+      "修复是否只是将lexer从python3改为text，还是需要更复杂的处理（如内容转义）？"
+    ]
+  }
+}

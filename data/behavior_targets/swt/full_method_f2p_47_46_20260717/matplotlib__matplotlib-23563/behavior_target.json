@@ -1,0 +1,372 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-23563",
+  "issue_summary": "在特定操作序列后，Line3D对象在绘制时缺少'_verts3d'属性，导致AttributeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要matplotlib的3D投影和numpy。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要非交互式后端以避免显示窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要模拟Issue中描述的操作序列：先错误调用，后正确调用。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_line3d_set_get_data_3d",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "直接测试Line3D对象的3D数据设置和获取，涉及_verts3d属性相关的操作。",
+        "reusable_parts": [
+          "imports",
+          "fig = plt.figure()",
+          "ax = fig.add_subplot(projection='3d')",
+          "lines = ax.plot(x, y, z)",
+          "line = lines[0]",
+          "line.get_data_3d()",
+          "line.set_data_3d()",
+          "np.testing.assert_array_equal"
+        ],
+        "possible_gap": "该测试在正常状态下运行，没有模拟Issue中先触发维度错误再使用整数数据的异常操作序列。"
+      },
+      {
+        "test_name": "test_lines3d",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "测试基本的3D线条绘制，与Issue中试图实现的功能一致。",
+        "reusable_parts": [
+          "imports",
+          "fig = plt.figure()",
+          "ax = fig.add_subplot(projection='3d')",
+          "ax.plot(x, y, z)",
+          "图像比较装饰器"
+        ],
+        "possible_gap": "使用连续数据正常绘图，没有测试错误恢复后的状态。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "先使用numpy数组调用ax.plot()触发维度错误，然后使用整数调用ax.plot()，最后调用plt.show()进行绘制。",
+      "evidence": [
+        "Issue描述：'But, if I give `x_s_0[n]` a numpy array, it will report the error 'input operand has more dimensions than allowed by the axis remapping'. The point is when next I give  `x_s_0[n]` and other variables an int number, the AttributeError: 'Line3D' object has no attribute '_verts3d' will appear'",
+        "Issue代码中展示了在循环中使用int()转换后调用ax.plot()"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "AttributeError: 'Line3D' object has no attribute '_verts3d'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue的Actual outcome部分完整堆栈跟踪显示：'File \"/home/hanyaning/anaconda3/envs/SBeA/lib/python3.8/site-packages/mpl_toolkits/mplot3d/art3d.py\", line 215, in draw\\n    xs3d, ys3d, zs3d = self._verts3d\\nAttributeError: 'Line3D' object has no attribute '_verts3d''"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.figure",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue代码中用于创建图形。"
+      },
+      {
+        "name": "fig.gca",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue代码中用于获取3D坐标轴。"
+      },
+      {
+        "name": "ax.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue代码中用于绘制3D线条，是触发错误的核心API。"
+      },
+      {
+        "name": "Line3D",
+        "kind": "class",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "错误直接发生在Line3D对象的draw方法中。"
+      },
+      {
+        "name": "plt.show",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue代码中触发绘制的调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Line3D.draw",
+        "lines": "159-218",
+        "reason": "错误堆栈指向art3d.py第215行，在draw方法中访问self._verts3d属性失败。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Line3D.__init__",
+        "lines": "159-218",
+        "reason": "_verts3d属性可能在初始化或后续数据设置过程中未正确设置。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Line3D.set_data_3d",
+        "lines": "159-218",
+        "reason": "设置3D数据的方法可能影响_verts3d属性的状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用正常的数值列表（如[0, 1], [2, 3], [4, 5]）作为plot参数。",
+        "target_pattern": "先使用可能导致维度错误的numpy数组输入，然后使用整数输入。",
+        "reason": "Issue表明特定的错误序列会导致Line3D对象状态损坏，缺少_verts3d属性。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常单次调用ax.plot()然后进行断言。",
+        "target_pattern": "多次调用ax.plot()，中间可能触发其他错误，最后调用plt.show()。",
+        "reason": "错误只在特定操作序列后出现，需要模拟完整的触发流程。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Line3D对象在绘制时应正确拥有'_verts3d'属性，能够成功渲染3D线条。",
+      "evidence": [
+        "Issue的Expected outcome：'Some 3D lines'",
+        "相关测试test_lines3d展示了正常绘制3D线条的行为"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用plt.show()或fig.canvas.draw()时是否抛出AttributeError。",
+        "reason": "Issue中的错误在绘制时暴露，这是检测_verts3d属性缺失的直接时机。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Line3D对象的hasattr(line, '_verts3d')在plot调用后、绘制前的状态。",
+        "reason": "需要确认_verts3d属性是否在数据设置过程中被正确初始化。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "ax.plot()返回对象的类型和属性。",
+        "reason": "确认返回的是Line3D对象，并检查其内部状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Line3D对象在绘制前应拥有_verts3d属性。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "完整的属性值相等断言，因为具体值可能随输入变化。",
+        "reason": "Issue的核心是属性缺失，修复后应确保属性存在。"
+      },
+      {
+        "assertion_goal": "绘制过程不应抛出AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "捕获其他无关异常。",
+        "reason": "直接验证修复后错误症状消失。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发维度错误的具体numpy数组形状和内容是什么？",
+    "错误序列中哪些步骤是必需的？是否只需要先错误后正确的调用顺序？",
+    "_verts3d属性应该在Line3D生命周期的哪个时刻被设置？",
+    "这是否与matplotlib的状态管理或缓存机制有关？",
+    "重启内核才能修复是否意味着某些全局状态被污染？"
+  ],
+  "raw": {
+    "issue_summary": "在特定操作序列后，Line3D对象在绘制时缺少'_verts3d'属性，导致AttributeError。",
+    "trigger_condition": {
+      "text": "先使用numpy数组调用ax.plot()触发维度错误，然后使用整数调用ax.plot()，最后调用plt.show()进行绘制。",
+      "evidence": [
+        "Issue描述：'But, if I give `x_s_0[n]` a numpy array, it will report the error 'input operand has more dimensions than allowed by the axis remapping'. The point is when next I give  `x_s_0[n]` and other variables an int number, the AttributeError: 'Line3D' object has no attribute '_verts3d' will appear'",
+        "Issue代码中展示了在循环中使用int()转换后调用ax.plot()"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "AttributeError: 'Line3D' object has no attribute '_verts3d'",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue的Actual outcome部分完整堆栈跟踪显示：'File \"/home/hanyaning/anaconda3/envs/SBeA/lib/python3.8/site-packages/mpl_toolkits/mplot3d/art3d.py\", line 215, in draw\\n    xs3d, ys3d, zs3d = self._verts3d\\nAttributeError: 'Line3D' object has no attribute '_verts3d''"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Line3D对象在绘制时应正确拥有'_verts3d'属性，能够成功渲染3D线条。",
+      "evidence": [
+        "Issue的Expected outcome：'Some 3D lines'",
+        "相关测试test_lines3d展示了正常绘制3D线条的行为"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.figure",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue代码中用于创建图形。"
+      },
+      {
+        "name": "fig.gca",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue代码中用于获取3D坐标轴。"
+      },
+      {
+        "name": "ax.plot",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue代码中用于绘制3D线条，是触发错误的核心API。"
+      },
+      {
+        "name": "Line3D",
+        "kind": "class",
+        "source_path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "reason": "错误直接发生在Line3D对象的draw方法中。"
+      },
+      {
+        "name": "plt.show",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue代码中触发绘制的调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Line3D.draw",
+        "lines": "159-218",
+        "reason": "错误堆栈指向art3d.py第215行，在draw方法中访问self._verts3d属性失败。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Line3D.__init__",
+        "lines": "159-218",
+        "reason": "_verts3d属性可能在初始化或后续数据设置过程中未正确设置。"
+      },
+      {
+        "path": "lib/mpl_toolkits/mplot3d/art3d.py",
+        "object": "Line3D.set_data_3d",
+        "lines": "159-218",
+        "reason": "设置3D数据的方法可能影响_verts3d属性的状态。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_line3d_set_get_data_3d",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "直接测试Line3D对象的3D数据设置和获取，涉及_verts3d属性相关的操作。",
+        "reusable_parts": [
+          "imports",
+          "fig = plt.figure()",
+          "ax = fig.add_subplot(projection='3d')",
+          "lines = ax.plot(x, y, z)",
+          "line = lines[0]",
+          "line.get_data_3d()",
+          "line.set_data_3d()",
+          "np.testing.assert_array_equal"
+        ],
+        "possible_gap": "该测试在正常状态下运行，没有模拟Issue中先触发维度错误再使用整数数据的异常操作序列。"
+      },
+      {
+        "test_name": "test_lines3d",
+        "test_file": "lib/mpl_toolkits/tests/test_mplot3d.py",
+        "why_relevant": "测试基本的3D线条绘制，与Issue中试图实现的功能一致。",
+        "reusable_parts": [
+          "imports",
+          "fig = plt.figure()",
+          "ax = fig.add_subplot(projection='3d')",
+          "ax.plot(x, y, z)",
+          "图像比较装饰器"
+        ],
+        "possible_gap": "使用连续数据正常绘图，没有测试错误恢复后的状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用正常的数值列表（如[0, 1], [2, 3], [4, 5]）作为plot参数。",
+        "target_pattern": "先使用可能导致维度错误的numpy数组输入，然后使用整数输入。",
+        "reason": "Issue表明特定的错误序列会导致Line3D对象状态损坏，缺少_verts3d属性。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常单次调用ax.plot()然后进行断言。",
+        "target_pattern": "多次调用ax.plot()，中间可能触发其他错误，最后调用plt.show()。",
+        "reason": "错误只在特定操作序列后出现，需要模拟完整的触发流程。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用plt.show()或fig.canvas.draw()时是否抛出AttributeError。",
+        "reason": "Issue中的错误在绘制时暴露，这是检测_verts3d属性缺失的直接时机。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Line3D对象的hasattr(line, '_verts3d')在plot调用后、绘制前的状态。",
+        "reason": "需要确认_verts3d属性是否在数据设置过程中被正确初始化。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "ax.plot()返回对象的类型和属性。",
+        "reason": "确认返回的是Line3D对象，并检查其内部状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Line3D对象在绘制前应拥有_verts3d属性。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "完整的属性值相等断言，因为具体值可能随输入变化。",
+        "reason": "Issue的核心是属性缺失，修复后应确保属性存在。"
+      },
+      {
+        "assertion_goal": "绘制过程不应抛出AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "捕获其他无关异常。",
+        "reason": "直接验证修复后错误症状消失。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要matplotlib的3D投影和numpy。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要非交互式后端以避免显示窗口。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要模拟Issue中描述的操作序列：先错误调用，后正确调用。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发维度错误的具体numpy数组形状和内容是什么？",
+      "错误序列中哪些步骤是必需的？是否只需要先错误后正确的调用顺序？",
+      "_verts3d属性应该在Line3D生命周期的哪个时刻被设置？",
+      "这是否与matplotlib的状态管理或缓存机制有关？",
+      "重启内核才能修复是否意味着某些全局状态被污染？"
+    ]
+  }
+}

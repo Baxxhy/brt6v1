@@ -1,0 +1,284 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-24970",
+  "issue_summary": "使用 NumPy 1.24 时，调用 plt.get_cmap() 并传入特定类型的空数组会触发多个关于整数转换的弃用警告。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要导入 warnings 模块来捕获和检查警告。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境可能需要配置为将 NumPy 的 DeprecationWarning 视为错误，或者至少确保它们能被捕获。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 pytest 的 fixture 或 context manager（如 pytest.warns 或 warnings.catch_warnings）来管理警告。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_colormap_alpha_array",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试直接调用了颜色映射对象（cmap）并传入数组（vals），测试了包括越界值（-1, 2）在内的行为，与 Issue 中调用颜色映射对象并传入数组的模式相似。",
+        "reusable_parts": [
+          "导入 mpl.colormaps",
+          "获取颜色映射对象（如 'viridis'）",
+          "调用 cmap(vals)",
+          "使用 assert_array_equal 进行断言"
+        ],
+        "possible_gap": "该测试传入的是浮点数列表 [-1, 0.5, 2]，而 Issue 中传入的是空 uint8 数组。测试关注的是 alpha 参数和 bytes 模式，未涉及空数组或 uint8 类型输入，也未检查警告。"
+      },
+      {
+        "test_name": "test_resampled",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试调用了颜色映射对象（lsc, lc）并传入了特殊值（np.inf, -np.inf, np.nan），测试了 set_under/set_over/set_bad 的行为，这与 Issue 中可能涉及处理越界/无效值的逻辑相关。",
+        "reusable_parts": [
+          "构造 LinearSegmentedColormap 和 ListedColormap 对象",
+          "调用 cmap(np.inf) 等",
+          "使用 assert_array_almost_equal"
+        ],
+        "possible_gap": "测试传入的是标量特殊值，而非数组。测试重点在于重采样后的颜色映射行为一致性，而非数据类型转换或警告。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 plt.get_cmap() 返回的默认颜色映射对象，并传入一个形状为 (0,) 且数据类型为 np.uint8 的空 NumPy 数组。",
+      "evidence": [
+        "Issue 中的复现代码：`plt.get_cmap()(np.empty((0, ), dtype=np.uint8))`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "观察到多个 DeprecationWarning，提示 NumPy 将停止允许将超出范围的 Python 整数转换为整数数组。警告指向 matplotlib/colors.py 文件中的第 730-732 行。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中的实际输出显示了三个 DeprecationWarning，分别涉及将 257、256、258 转换为 uint8。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.get_cmap",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "Issue 复现代码的起点，用于获取颜色映射对象。"
+      },
+      {
+        "name": "Colormap.__call__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中通过 `plt.get_cmap()(...)` 调用颜色映射对象，这是触发警告的直接操作。"
+      },
+      {
+        "name": "np.empty",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于生成触发警告的特定输入数组。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/colors.py",
+        "object": "",
+        "lines": "730-732",
+        "reason": "警告信息直接指向该文件的第 730-732 行，涉及 `xa[xa > self.N - 1] = self._i_over` 等赋值操作，这些操作可能将 Python 整数（如 257）赋值给 uint8 数组元素。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_colormap_alpha_array 中使用浮点数列表 [-1, 0.5, 2] 作为 cmap 的输入。",
+        "target_pattern": "使用形状为 (0,) 且数据类型为 np.uint8 的空 NumPy 数组作为 cmap 的输入。",
+        "reason": "Issue 表明，这种特定的空 uint8 数组输入会触发内部赋值操作，导致将超出 uint8 范围的 Python 整数（如 257）赋值给数组元素，从而引发 NumPy 弃用警告。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "test_resampled 中颜色映射对象设置了 set_under('r')、set_over('g')、set_bad('b')。",
+        "target_pattern": "使用默认的颜色映射对象（如通过 plt.get_cmap() 获取），其内部可能包含 self._i_over、self._i_under、self._i_bad 等属性，这些属性可能是超出 uint8 范围的整数。",
+        "reason": "警告信息显示赋值操作使用了 self._i_over (257)、self._i_under (256)、self._i_bad (258)，这些值在赋值给 uint8 数组元素时触发了警告。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "执行相同的操作时，不应产生任何弃用警告。",
+      "evidence": [
+        "Issue 中的预期结果：\"No warnings.\""
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "调用 cmap(empty_uint8_array) 时产生的 warnings.catch_warnings 记录。",
+        "reason": "Issue 的核心现象是出现了特定的 DeprecationWarning。观测警告内容、数量和来源行号是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "cmap(empty_uint8_array) 的返回值（形状和数据类型）。",
+        "reason": "尽管输入是空数组，但观察返回值可以确认函数是否正常执行完毕，以及返回的数组类型是否与输入类型相关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在调用 cmap(empty_uint8_array) 时，没有产生任何 DeprecationWarning（特别是关于整数转换的警告）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告信息字符串，因为警告文本可能随 NumPy 版本变化。避免断言返回值的确切内容，因为输入是空数组，返回值可能也是空的，但这并非 Issue 焦点。",
+        "reason": "Issue 的预期行为是“No warnings”。断言没有出现包含特定关键词（如“conversion of ... to uint8”）的警告是稳定且与 Issue 目标一致的方法。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "警告是否只在使用默认颜色映射（plt.get_cmap()）时触发，还是使用任何颜色映射（如 'viridis'）并传入空 uint8 数组都会触发？",
+    "self._i_over、self._i_under、self._i_bad 这些属性的确切值（257, 256, 258）是硬编码的，还是取决于特定的颜色映射？",
+    "除了空 uint8 数组，其他形状或数据类型的数组（如非空数组、其他整数类型）是否也会触发相同的警告？",
+    "颜色映射内部处理空数组的逻辑是什么？为什么会对空数组执行涉及 self._i_over 等的赋值操作？"
+  ],
+  "raw": {
+    "issue_summary": "使用 NumPy 1.24 时，调用 plt.get_cmap() 并传入特定类型的空数组会触发多个关于整数转换的弃用警告。",
+    "trigger_condition": {
+      "text": "调用 plt.get_cmap() 返回的默认颜色映射对象，并传入一个形状为 (0,) 且数据类型为 np.uint8 的空 NumPy 数组。",
+      "evidence": [
+        "Issue 中的复现代码：`plt.get_cmap()(np.empty((0, ), dtype=np.uint8))`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "观察到多个 DeprecationWarning，提示 NumPy 将停止允许将超出范围的 Python 整数转换为整数数组。警告指向 matplotlib/colors.py 文件中的第 730-732 行。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中的实际输出显示了三个 DeprecationWarning，分别涉及将 257、256、258 转换为 uint8。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "执行相同的操作时，不应产生任何弃用警告。",
+      "evidence": [
+        "Issue 中的预期结果：\"No warnings.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.get_cmap",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "Issue 复现代码的起点，用于获取颜色映射对象。"
+      },
+      {
+        "name": "Colormap.__call__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中通过 `plt.get_cmap()(...)` 调用颜色映射对象，这是触发警告的直接操作。"
+      },
+      {
+        "name": "np.empty",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于生成触发警告的特定输入数组。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/colors.py",
+        "object": "",
+        "lines": "730-732",
+        "reason": "警告信息直接指向该文件的第 730-732 行，涉及 `xa[xa > self.N - 1] = self._i_over` 等赋值操作，这些操作可能将 Python 整数（如 257）赋值给 uint8 数组元素。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_colormap_alpha_array",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试直接调用了颜色映射对象（cmap）并传入数组（vals），测试了包括越界值（-1, 2）在内的行为，与 Issue 中调用颜色映射对象并传入数组的模式相似。",
+        "reusable_parts": [
+          "导入 mpl.colormaps",
+          "获取颜色映射对象（如 'viridis'）",
+          "调用 cmap(vals)",
+          "使用 assert_array_equal 进行断言"
+        ],
+        "possible_gap": "该测试传入的是浮点数列表 [-1, 0.5, 2]，而 Issue 中传入的是空 uint8 数组。测试关注的是 alpha 参数和 bytes 模式，未涉及空数组或 uint8 类型输入，也未检查警告。"
+      },
+      {
+        "test_name": "test_resampled",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试调用了颜色映射对象（lsc, lc）并传入了特殊值（np.inf, -np.inf, np.nan），测试了 set_under/set_over/set_bad 的行为，这与 Issue 中可能涉及处理越界/无效值的逻辑相关。",
+        "reusable_parts": [
+          "构造 LinearSegmentedColormap 和 ListedColormap 对象",
+          "调用 cmap(np.inf) 等",
+          "使用 assert_array_almost_equal"
+        ],
+        "possible_gap": "测试传入的是标量特殊值，而非数组。测试重点在于重采样后的颜色映射行为一致性，而非数据类型转换或警告。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_colormap_alpha_array 中使用浮点数列表 [-1, 0.5, 2] 作为 cmap 的输入。",
+        "target_pattern": "使用形状为 (0,) 且数据类型为 np.uint8 的空 NumPy 数组作为 cmap 的输入。",
+        "reason": "Issue 表明，这种特定的空 uint8 数组输入会触发内部赋值操作，导致将超出 uint8 范围的 Python 整数（如 257）赋值给数组元素，从而引发 NumPy 弃用警告。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "test_resampled 中颜色映射对象设置了 set_under('r')、set_over('g')、set_bad('b')。",
+        "target_pattern": "使用默认的颜色映射对象（如通过 plt.get_cmap() 获取），其内部可能包含 self._i_over、self._i_under、self._i_bad 等属性，这些属性可能是超出 uint8 范围的整数。",
+        "reason": "警告信息显示赋值操作使用了 self._i_over (257)、self._i_under (256)、self._i_bad (258)，这些值在赋值给 uint8 数组元素时触发了警告。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "调用 cmap(empty_uint8_array) 时产生的 warnings.catch_warnings 记录。",
+        "reason": "Issue 的核心现象是出现了特定的 DeprecationWarning。观测警告内容、数量和来源行号是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "cmap(empty_uint8_array) 的返回值（形状和数据类型）。",
+        "reason": "尽管输入是空数组，但观察返回值可以确认函数是否正常执行完毕，以及返回的数组类型是否与输入类型相关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在调用 cmap(empty_uint8_array) 时，没有产生任何 DeprecationWarning（特别是关于整数转换的警告）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的警告信息字符串，因为警告文本可能随 NumPy 版本变化。避免断言返回值的确切内容，因为输入是空数组，返回值可能也是空的，但这并非 Issue 焦点。",
+        "reason": "Issue 的预期行为是“No warnings”。断言没有出现包含特定关键词（如“conversion of ... to uint8”）的警告是稳定且与 Issue 目标一致的方法。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要导入 warnings 模块来捕获和检查警告。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境可能需要配置为将 NumPy 的 DeprecationWarning 视为错误，或者至少确保它们能被捕获。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 pytest 的 fixture 或 context manager（如 pytest.warns 或 warnings.catch_warnings）来管理警告。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "警告是否只在使用默认颜色映射（plt.get_cmap()）时触发，还是使用任何颜色映射（如 'viridis'）并传入空 uint8 数组都会触发？",
+      "self._i_over、self._i_under、self._i_bad 这些属性的确切值（257, 256, 258）是硬编码的，还是取决于特定的颜色映射？",
+      "除了空 uint8 数组，其他形状或数据类型的数组（如非空数组、其他整数类型）是否也会触发相同的警告？",
+      "颜色映射内部处理空数组的逻辑是什么？为什么会对空数组执行涉及 self._i_over 等的赋值操作？"
+    ]
+  }
+}

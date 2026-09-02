@@ -1,0 +1,438 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12589",
+  "issue_summary": "Django 3.0 中，当查询包含通过 Subquery 创建的字段注解，并且后续对该注解字段进行聚合（如 Count）时，生成的 SQL 的 GROUP BY 子句会错误地引用模糊的列名，导致数据库错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义与 Issue 描述类似的 Django 模型（A, B, AB, C），并可能创建一些测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 `django.test.TestCase` 以利用数据库事务和清理。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `skipUnlessDBFeature('supports_subqueries_in_group_by')` 装饰器，因为缺陷涉及 GROUP BY 中的子查询。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境应使用 PostgreSQL 数据库（如 Issue 所述），因为错误信息和 SQL 生成可能因数据库后端而异。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_group_by_subquery_annotation",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试明确验证了“Subquery annotations are included in the GROUP BY if they are grouped against.”，与 Issue 的核心问题（子查询注解在 GROUP BY 中的处理）直接相关。它使用了 Subquery、OuterRef、values_list 和 annotate(Count)。",
+        "reusable_parts": [
+          "测试类 `AggregateTestCase` 和装饰器 `@skipUnlessDBFeature('supports_subqueries_in_group_by')`。",
+          "使用 `OuterRef` 和 `Subquery` 构建子查询注解的模式。",
+          "在 `values_list` 中包含 `Subquery` 然后进行 `annotate(Count(...))` 的调用链。",
+          "使用 `self.assertEqual(dict(...), ...)` 进行结果断言。"
+        ],
+        "possible_gap": "该测试在 `values_list` 中直接使用 `Subquery(...)`，而 Issue 是在 `annotate()` 中定义子查询注解，然后在后续的 `values().annotate()` 中引用该注解。调用顺序和 API 组合略有不同。此外，Issue 的查询涉及更复杂的模型关系（多对多 through 表）和 Q 对象过滤。"
+      },
+      {
+        "test_name": "test_aggregation_subquery_annotation_multivalued",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试也涉及子查询注解和分组，并检查了子查询注解必须被包含在 GROUP BY 中的情况。它使用了 `Subquery` 和 `Count`。",
+        "reusable_parts": [
+          "测试类 `AggregateTestCase` 和相关的数据库特性跳过装饰器。",
+          "在 `annotate` 中使用 `Subquery` 创建注解，然后再次 `annotate(Count(...))` 的模式。",
+          "使用 `self.assertEqual(author_qs.count(), ...)` 进行断言。"
+        ],
+        "possible_gap": "该测试最终断言的是 `.count()` 结果，没有直接检查生成的 SQL 或触发数据库错误。它没有使用 `values()` 来指定分组字段，分组依据是隐式的。Issue 明确使用了 `values(\"status\")` 来指定分组列。"
+      },
+      {
+        "test_name": "test_grouped_annotation_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试验证了在 `values()` 中指定的注解字段应被包含在 GROUP BY 子句中。这涉及到 `values()` 和 `annotate()` 交互时 GROUP BY 的生成逻辑。",
+        "reusable_parts": [
+          "测试类 `AggregateTestCase`。",
+          "链式调用 `annotate().filter().values().annotate().values()` 的模式。",
+          "使用 `F` 表达式进行注解，然后通过 `values` 包含该注解并进行聚合。",
+          "断言结果为字典列表的格式。"
+        ],
+        "possible_gap": "该测试使用 `F('price')` 进行注解，而不是 `Subquery`。子查询注解在 GROUP BY 中的处理可能比简单字段表达式更复杂。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "构建一个查询，该查询使用 Subquery 创建字段注解（例如 `status=Subquery(...)`），然后对该注解字段调用 `values()` 和 `annotate()` 进行聚合（例如 `values(\"status\").annotate(total_count=Count(\"status\"))`）。查询可能涉及多表连接和复杂的 Q 对象过滤条件。",
+      "evidence": [
+        "Issue 中提供了完整的模型定义和触发错误的查询代码示例。",
+        "Issue 中展示了 Django 3.0.4 生成的错误 SQL，其中 GROUP BY 子句为 `GROUP BY \"status\"`，导致列名模糊。",
+        "相关测试 1 (test_group_by_subquery_annotation) 和 相关测试 5 (test_aggregation_subquery_annotation_multivalued) 展示了使用 Subquery 注解后进行分组聚合的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出数据库编程错误：`django.db.utils.ProgrammingError: column reference \"status\" is ambiguous`。生成的 SQL 中，GROUP BY 子句直接引用了列名（如 `\"status\"`），而不是完整的子查询表达式，导致在涉及多个表连接时列名不明确。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确记录了错误信息：`django.db.utils.ProgrammingError: column reference \"status\" is ambiguous`。",
+        "Issue 中对比了 Django 3.0.4（错误）和 Django 2.2.11（正确）生成的 SQL，差异在于 GROUP BY 子句。Django 3.0.4 为 `GROUP BY \"status\"`，而 2.2.11 为 `GROUP BY (SELECT U0.\"status\" ...)`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Subquery",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于创建字段注解（`status=Subquery(...)`）。相关源码片段 4 提供了其定义。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 中用于聚合（`Count(\"c\")`, `Count(\"status\")`）。相关源码片段 5 提供了其定义。"
+      },
+      {
+        "name": "QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中在聚合前调用了 `values(\"status\")`。相关源码片段 6 提供了其定义。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中用于添加注解（`annotate(status=Subquery(...), c_count=Count(...))` 和 `annotate(total_count=Count(...))`）。"
+      },
+      {
+        "name": "OuterRef",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "在 Subquery 中用于引用外部查询（`a=OuterRef(\"pk\")`）。相关源码片段 2 提供了其定义。"
+      },
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 中用于构建复杂的过滤条件（`filter_conditions = Q(pk=1) | Q(ab_a__b=1)`）。相关源码片段 3 提供了其定义。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet",
+        "lines": "",
+        "reason": "负责构建查询和生成 SQL。`values()` 和 `annotate()` 方法的组合逻辑，特别是处理子查询注解在 GROUP BY 中的引用方式，可能是缺陷根源。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "底层 SQL 查询构建的核心类。生成 GROUP BY 子句的逻辑（可能涉及如何将注解字段，特别是子查询注解，转换为 GROUP BY 中的列引用）很可能在此。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Subquery.get_group_by_cols",
+        "lines": "",
+        "reason": "相关源码片段 4 中 Subquery 类包含 `get_group_by_cols` 方法。该方法可能负责返回子查询表达式在 GROUP BY 中应如何表示，其实现可能存在问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，通常在 `values` 或 `values_list` 中直接嵌入 `Subquery` 表达式，然后进行 `annotate(Count(...))`。或者，在 `annotate` 中定义 `Subquery`，然后直接进行聚合（如 `.aggregate(...)` 或 `.count()`）。",
+        "target_pattern": "按照 Issue 模式变异：先使用 `annotate` 定义一个基于 `Subquery` 的字段注解（如 `status=Subquery(...)`），然后对该查询集调用 `values(\"<annotation_name>\")`，再链式调用 `annotate` 进行另一个聚合（如 `total_count=Count(\"<annotation_name>\")`）。",
+        "reason": "Issue 表明，这种特定的 API 调用顺序（`annotate(Subquery).values(annotation).annotate(Count)`）在 Django 3.0 中触发了有缺陷的 GROUP BY 生成。而相似测试可能使用了略有不同的组合。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中的模型关系相对简单（如 Publisher-Book, Company-Employee, Book-Author）。",
+        "target_pattern": "引入更复杂的模型关系，如 Issue 中的多对多 through 关系（A <- AB -> B）和额外的外键关系（A <- C）。并在过滤条件中使用涉及这些关系的 Q 对象（如 `Q(pk=1) | Q(ab_a__b=1)`）。",
+        "reason": "复杂的连接可能导致生成的 SQL 中有多个表包含同名字段（如 `status` 可能出现在 AB 表和 C 表？实际上 Issue 中 `status` 来自 AB 表和 Subquery），加剧了列名模糊的问题。这可能是触发缺陷的上下文。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中的 Subquery 通常输出单个值字段（如 `.values('count')`, `.values('salary')`, `.values('pk')`）。",
+        "target_pattern": "确保 Subquery 输出一个可能与连接表中其他列同名的字段（如 `\"status\"`），并且在外部查询的 `values()` 中直接引用这个注解名。",
+        "reason": "Issue 中 Subquery 输出 `\"status\"` 字段，并且在外部 `values(\"status\")` 中引用。如果该字段名在连接的其他表中也存在，GROUP BY 子句直接引用列名时就会产生歧义。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "查询应能正常执行，不抛出数据库错误。生成的 SQL 中，GROUP BY 子句应能正确、无歧义地引用子查询注解表达式，例如使用完整的子查询或唯一的别名，确保数据库能明确分组依据。",
+      "evidence": [
+        "Issue 中展示了 Django 2.2.11 版本能正确处理相同查询，生成的 SQL 中 GROUP BY 子句使用了完整的子查询表达式。",
+        "相关测试 1 (test_group_by_subquery_annotation) 的文档字符串说明：“Subquery annotations are included in the GROUP BY if they are grouped against.”，暗示了子查询注解在分组时应被正确包含。",
+        "相关测试 2 (test_aggregate_subquery_annotation) 表明，当聚合不涉及嵌套聚合时，可能不需要 GROUP BY，但本 Issue 的情况需要正确的 GROUP BY 子句。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 字符串，特别是 GROUP BY 子句部分。可以通过 `print(query.query)` 或捕获数据库查询日志获得。",
+        "reason": "Issue 的核心是生成的 SQL 有误。直接观察 GROUP BY 子句是判断缺陷是否触发的关键：是 `GROUP BY \"<column_name>\"`（错误）还是 `GROUP BY (<full_subquery_expression>)` 或使用唯一别名（正确）。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询（如调用 `list(query)` 或 `query.count()`）时是否抛出 `django.db.utils.ProgrammingError` 及其错误信息。",
+        "reason": "Issue 中观察到的直接错误现象是数据库抛出的列名模糊异常。捕获此异常是复现缺陷的直接证据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询执行成功后的返回结果（字典列表或 ValuesQuerySet）。",
+        "reason": "在修复后或正常版本（如 Django 2.2）中，查询应能返回正确的结果。比较结果可以辅助验证行为。但主要观测点仍是 SQL 和异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证执行查询不会抛出 `ProgrammingError` 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的、具体的错误信息字符串，因为不同数据库后端可能略有差异。",
+        "reason": "Issue 的核心是数据库错误。断言不抛出特定异常可以捕捉到缺陷。在修复版本中，此断言应失败（即不抛出异常）。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 的 GROUP BY 子句不包含可能引起歧义的简单列名引用（如 `\"status\"`），而应包含明确的表达式或别名。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的 GROUP BY 字符串，因为具体表达式可能随数据库适配器或 Django 内部实现而变化。",
+        "reason": "缺陷的直接表现是 GROUP BY 子句错误。断言 GROUP BY 中不出现模糊的列名引用是一种稳定且与 Issue 对齐的检查方式。可以检查 `str(query.query)`。"
+      },
+      {
+        "assertion_goal": "在缺陷修复后，查询应能成功执行并返回与预期逻辑一致的结果（例如，按 status 分组计数的结果）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言过于具体的结果值，除非测试数据完全可控且逻辑简单。优先检查查询成功执行和结果结构。",
+        "reason": "在修复版本中，除了不报错，查询的语义结果也应该是正确的。但结果的具体值依赖于测试数据，因此断言可能更适用于有固定 fixture 的测试。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否在所有数据库后端（如 SQLite, MySQL）上都会以相同形式出现，还是特定于 PostgreSQL。",
+    "除了 `Subquery`，其他类型的复杂表达式注解（如 `Case`, `Window`）是否也会在类似的 `values().annotate()` 场景下触发相同问题。",
+    "触发缺陷是否严格依赖于通过 `Subquery` 创建的注解，还是任何在 `values()` 中引用的、且名称与连接表列冲突的注解都可能有问题。",
+    "Django 3.0 中导致此回归的具体代码变更位置尚未从提供的源码片段中明确。",
+    "修复后的正确 GROUP BY 子句的确切形式（是完整的子查询表达式，还是为子查询注解生成了唯一别名）尚不确定。"
+  ],
+  "raw": {
+    "issue_summary": "Django 3.0 中，当查询包含通过 Subquery 创建的字段注解，并且后续对该注解字段进行聚合（如 Count）时，生成的 SQL 的 GROUP BY 子句会错误地引用模糊的列名，导致数据库错误。",
+    "trigger_condition": {
+      "text": "构建一个查询，该查询使用 Subquery 创建字段注解（例如 `status=Subquery(...)`），然后对该注解字段调用 `values()` 和 `annotate()` 进行聚合（例如 `values(\"status\").annotate(total_count=Count(\"status\"))`）。查询可能涉及多表连接和复杂的 Q 对象过滤条件。",
+      "evidence": [
+        "Issue 中提供了完整的模型定义和触发错误的查询代码示例。",
+        "Issue 中展示了 Django 3.0.4 生成的错误 SQL，其中 GROUP BY 子句为 `GROUP BY \"status\"`，导致列名模糊。",
+        "相关测试 1 (test_group_by_subquery_annotation) 和 相关测试 5 (test_aggregation_subquery_annotation_multivalued) 展示了使用 Subquery 注解后进行分组聚合的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出数据库编程错误：`django.db.utils.ProgrammingError: column reference \"status\" is ambiguous`。生成的 SQL 中，GROUP BY 子句直接引用了列名（如 `\"status\"`），而不是完整的子查询表达式，导致在涉及多个表连接时列名不明确。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确记录了错误信息：`django.db.utils.ProgrammingError: column reference \"status\" is ambiguous`。",
+        "Issue 中对比了 Django 3.0.4（错误）和 Django 2.2.11（正确）生成的 SQL，差异在于 GROUP BY 子句。Django 3.0.4 为 `GROUP BY \"status\"`，而 2.2.11 为 `GROUP BY (SELECT U0.\"status\" ...)`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "查询应能正常执行，不抛出数据库错误。生成的 SQL 中，GROUP BY 子句应能正确、无歧义地引用子查询注解表达式，例如使用完整的子查询或唯一的别名，确保数据库能明确分组依据。",
+      "evidence": [
+        "Issue 中展示了 Django 2.2.11 版本能正确处理相同查询，生成的 SQL 中 GROUP BY 子句使用了完整的子查询表达式。",
+        "相关测试 1 (test_group_by_subquery_annotation) 的文档字符串说明：“Subquery annotations are included in the GROUP BY if they are grouped against.”，暗示了子查询注解在分组时应被正确包含。",
+        "相关测试 2 (test_aggregate_subquery_annotation) 表明，当聚合不涉及嵌套聚合时，可能不需要 GROUP BY，但本 Issue 的情况需要正确的 GROUP BY 子句。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Subquery",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于创建字段注解（`status=Subquery(...)`）。相关源码片段 4 提供了其定义。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 中用于聚合（`Count(\"c\")`, `Count(\"status\")`）。相关源码片段 5 提供了其定义。"
+      },
+      {
+        "name": "QuerySet.values",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中在聚合前调用了 `values(\"status\")`。相关源码片段 6 提供了其定义。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中用于添加注解（`annotate(status=Subquery(...), c_count=Count(...))` 和 `annotate(total_count=Count(...))`）。"
+      },
+      {
+        "name": "OuterRef",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "在 Subquery 中用于引用外部查询（`a=OuterRef(\"pk\")`）。相关源码片段 2 提供了其定义。"
+      },
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 中用于构建复杂的过滤条件（`filter_conditions = Q(pk=1) | Q(ab_a__b=1)`）。相关源码片段 3 提供了其定义。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet",
+        "lines": "",
+        "reason": "负责构建查询和生成 SQL。`values()` 和 `annotate()` 方法的组合逻辑，特别是处理子查询注解在 GROUP BY 中的引用方式，可能是缺陷根源。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "底层 SQL 查询构建的核心类。生成 GROUP BY 子句的逻辑（可能涉及如何将注解字段，特别是子查询注解，转换为 GROUP BY 中的列引用）很可能在此。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Subquery.get_group_by_cols",
+        "lines": "",
+        "reason": "相关源码片段 4 中 Subquery 类包含 `get_group_by_cols` 方法。该方法可能负责返回子查询表达式在 GROUP BY 中应如何表示，其实现可能存在问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_group_by_subquery_annotation",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试明确验证了“Subquery annotations are included in the GROUP BY if they are grouped against.”，与 Issue 的核心问题（子查询注解在 GROUP BY 中的处理）直接相关。它使用了 Subquery、OuterRef、values_list 和 annotate(Count)。",
+        "reusable_parts": [
+          "测试类 `AggregateTestCase` 和装饰器 `@skipUnlessDBFeature('supports_subqueries_in_group_by')`。",
+          "使用 `OuterRef` 和 `Subquery` 构建子查询注解的模式。",
+          "在 `values_list` 中包含 `Subquery` 然后进行 `annotate(Count(...))` 的调用链。",
+          "使用 `self.assertEqual(dict(...), ...)` 进行结果断言。"
+        ],
+        "possible_gap": "该测试在 `values_list` 中直接使用 `Subquery(...)`，而 Issue 是在 `annotate()` 中定义子查询注解，然后在后续的 `values().annotate()` 中引用该注解。调用顺序和 API 组合略有不同。此外，Issue 的查询涉及更复杂的模型关系（多对多 through 表）和 Q 对象过滤。"
+      },
+      {
+        "test_name": "test_aggregation_subquery_annotation_multivalued",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试也涉及子查询注解和分组，并检查了子查询注解必须被包含在 GROUP BY 中的情况。它使用了 `Subquery` 和 `Count`。",
+        "reusable_parts": [
+          "测试类 `AggregateTestCase` 和相关的数据库特性跳过装饰器。",
+          "在 `annotate` 中使用 `Subquery` 创建注解，然后再次 `annotate(Count(...))` 的模式。",
+          "使用 `self.assertEqual(author_qs.count(), ...)` 进行断言。"
+        ],
+        "possible_gap": "该测试最终断言的是 `.count()` 结果，没有直接检查生成的 SQL 或触发数据库错误。它没有使用 `values()` 来指定分组字段，分组依据是隐式的。Issue 明确使用了 `values(\"status\")` 来指定分组列。"
+      },
+      {
+        "test_name": "test_grouped_annotation_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试验证了在 `values()` 中指定的注解字段应被包含在 GROUP BY 子句中。这涉及到 `values()` 和 `annotate()` 交互时 GROUP BY 的生成逻辑。",
+        "reusable_parts": [
+          "测试类 `AggregateTestCase`。",
+          "链式调用 `annotate().filter().values().annotate().values()` 的模式。",
+          "使用 `F` 表达式进行注解，然后通过 `values` 包含该注解并进行聚合。",
+          "断言结果为字典列表的格式。"
+        ],
+        "possible_gap": "该测试使用 `F('price')` 进行注解，而不是 `Subquery`。子查询注解在 GROUP BY 中的处理可能比简单字段表达式更复杂。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，通常在 `values` 或 `values_list` 中直接嵌入 `Subquery` 表达式，然后进行 `annotate(Count(...))`。或者，在 `annotate` 中定义 `Subquery`，然后直接进行聚合（如 `.aggregate(...)` 或 `.count()`）。",
+        "target_pattern": "按照 Issue 模式变异：先使用 `annotate` 定义一个基于 `Subquery` 的字段注解（如 `status=Subquery(...)`），然后对该查询集调用 `values(\"<annotation_name>\")`，再链式调用 `annotate` 进行另一个聚合（如 `total_count=Count(\"<annotation_name>\")`）。",
+        "reason": "Issue 表明，这种特定的 API 调用顺序（`annotate(Subquery).values(annotation).annotate(Count)`）在 Django 3.0 中触发了有缺陷的 GROUP BY 生成。而相似测试可能使用了略有不同的组合。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中的模型关系相对简单（如 Publisher-Book, Company-Employee, Book-Author）。",
+        "target_pattern": "引入更复杂的模型关系，如 Issue 中的多对多 through 关系（A <- AB -> B）和额外的外键关系（A <- C）。并在过滤条件中使用涉及这些关系的 Q 对象（如 `Q(pk=1) | Q(ab_a__b=1)`）。",
+        "reason": "复杂的连接可能导致生成的 SQL 中有多个表包含同名字段（如 `status` 可能出现在 AB 表和 C 表？实际上 Issue 中 `status` 来自 AB 表和 Subquery），加剧了列名模糊的问题。这可能是触发缺陷的上下文。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中的 Subquery 通常输出单个值字段（如 `.values('count')`, `.values('salary')`, `.values('pk')`）。",
+        "target_pattern": "确保 Subquery 输出一个可能与连接表中其他列同名的字段（如 `\"status\"`），并且在外部查询的 `values()` 中直接引用这个注解名。",
+        "reason": "Issue 中 Subquery 输出 `\"status\"` 字段，并且在外部 `values(\"status\")` 中引用。如果该字段名在连接的其他表中也存在，GROUP BY 子句直接引用列名时就会产生歧义。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 字符串，特别是 GROUP BY 子句部分。可以通过 `print(query.query)` 或捕获数据库查询日志获得。",
+        "reason": "Issue 的核心是生成的 SQL 有误。直接观察 GROUP BY 子句是判断缺陷是否触发的关键：是 `GROUP BY \"<column_name>\"`（错误）还是 `GROUP BY (<full_subquery_expression>)` 或使用唯一别名（正确）。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询（如调用 `list(query)` 或 `query.count()`）时是否抛出 `django.db.utils.ProgrammingError` 及其错误信息。",
+        "reason": "Issue 中观察到的直接错误现象是数据库抛出的列名模糊异常。捕获此异常是复现缺陷的直接证据。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询执行成功后的返回结果（字典列表或 ValuesQuerySet）。",
+        "reason": "在修复后或正常版本（如 Django 2.2）中，查询应能返回正确的结果。比较结果可以辅助验证行为。但主要观测点仍是 SQL 和异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证执行查询不会抛出 `ProgrammingError` 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的、具体的错误信息字符串，因为不同数据库后端可能略有差异。",
+        "reason": "Issue 的核心是数据库错误。断言不抛出特定异常可以捕捉到缺陷。在修复版本中，此断言应失败（即不抛出异常）。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 的 GROUP BY 子句不包含可能引起歧义的简单列名引用（如 `\"status\"`），而应包含明确的表达式或别名。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的 GROUP BY 字符串，因为具体表达式可能随数据库适配器或 Django 内部实现而变化。",
+        "reason": "缺陷的直接表现是 GROUP BY 子句错误。断言 GROUP BY 中不出现模糊的列名引用是一种稳定且与 Issue 对齐的检查方式。可以检查 `str(query.query)`。"
+      },
+      {
+        "assertion_goal": "在缺陷修复后，查询应能成功执行并返回与预期逻辑一致的结果（例如，按 status 分组计数的结果）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言过于具体的结果值，除非测试数据完全可控且逻辑简单。优先检查查询成功执行和结果结构。",
+        "reason": "在修复版本中，除了不报错，查询的语义结果也应该是正确的。但结果的具体值依赖于测试数据，因此断言可能更适用于有固定 fixture 的测试。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义与 Issue 描述类似的 Django 模型（A, B, AB, C），并可能创建一些测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 `django.test.TestCase` 以利用数据库事务和清理。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `skipUnlessDBFeature('supports_subqueries_in_group_by')` 装饰器，因为缺陷涉及 GROUP BY 中的子查询。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境应使用 PostgreSQL 数据库（如 Issue 所述），因为错误信息和 SQL 生成可能因数据库后端而异。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否在所有数据库后端（如 SQLite, MySQL）上都会以相同形式出现，还是特定于 PostgreSQL。",
+      "除了 `Subquery`，其他类型的复杂表达式注解（如 `Case`, `Window`）是否也会在类似的 `values().annotate()` 场景下触发相同问题。",
+      "触发缺陷是否严格依赖于通过 `Subquery` 创建的注解，还是任何在 `values()` 中引用的、且名称与连接表列冲突的注解都可能有问题。",
+      "Django 3.0 中导致此回归的具体代码变更位置尚未从提供的源码片段中明确。",
+      "修复后的正确 GROUP BY 子句的确切形式（是完整的子查询表达式，还是为子查询注解生成了唯一别名）尚不确定。"
+    ]
+  }
+}

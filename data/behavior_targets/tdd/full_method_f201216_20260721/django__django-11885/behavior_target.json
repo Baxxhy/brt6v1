@@ -1,0 +1,264 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11885",
+  "issue_summary": "在模拟 ON DELETE CASCADE 时，deletion.Collector 的快速删除查询未能按表合并，导致不必要的数据库往返次数。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义与 Issue 描述类似的模型：Person（具有自引用的 ManyToManyField）、User、Entry（具有两个指向 User 的 ForeignKey）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 Django 的 TestCase 和数据库，因为测试涉及模型操作和 SQL 查询。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_fast_delete_m2m",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接测试了快速删除（fast-delete）路径，并使用了 assertNumQueries 来验证查询数量，这与 Issue 关注的查询合并和数量问题高度相关。",
+        "reusable_parts": [
+          "FastDeleteTests 测试类",
+          "使用 assertNumQueries 断言查询数量",
+          "创建具有 M2M 关系的模型实例并执行删除的 setup 模式"
+        ],
+        "possible_gap": "该测试只涉及一个 M2M 关系，而 Issue 需要触发针对同一张表的多个条件（如 from_id 和 to_id）的删除查询，以暴露合并缺失的问题。"
+      },
+      {
+        "test_name": "test_fast_delete_fk",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试也测试了快速删除路径，并涉及外键关系，与 Issue 中提到的 ForeignKey 场景相关。",
+        "reusable_parts": [
+          "使用 assertNumQueries 断言查询数量",
+          "创建具有 FK 关系的模型实例并执行删除的 setup 模式"
+        ],
+        "possible_gap": "该测试只涉及单个外键关系，而 Issue 需要模型具有指向同一目标表的多个外键（如 Entry 的 created_by 和 updated_by），以触发针对同一张表的多个条件删除查询。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当使用 on_delete=models.CASCADE 并满足快速删除路径条件时，删除一个具有多个外键或多对多关系的模型实例（如 Person 或 User）。",
+      "evidence": [
+        "Issue 描述了在满足快速删除路径条件时，删除 Person 或 User 实例会触发多个 DELETE 查询。",
+        "Issue 中给出了 Person 和 User 的模型定义以及删除操作。",
+        "相关测试代码展示了触发快速删除路径的测试场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对同一张表的多个条件删除查询（例如，针对 person_friends 表的 from_id 和 to_id 条件）被拆分为多个独立的查询，而不是合并为一个使用 OR 条件的查询。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 中明确列出了未合并的查询列表，并指出它们可以合并。",
+        "Issue 描述了当前行为（多个查询）与期望行为（合并查询）的对比。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心是关于模型实例删除操作（person.delete() 或 user.delete()）触发的查询行为。"
+      },
+      {
+        "name": "Collector",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 明确指出 deletion.Collector 负责执行快速删除查询的逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "deletion.Collector",
+        "lines": "",
+        "reason": "Issue 明确指出 deletion.Collector 在处理快速删除查询时，应该合并查询但当前没有。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中创建具有单个 M2M 或 FK 关系的模型实例。",
+        "target_pattern": "创建具有多个指向同一张表的外键或多对多关系的模型实例（如 Issue 中的 Entry 模型有 created_by 和 updated_by 两个指向 User 的外键，或 Person 的 friends M2M 关系涉及 from_id 和 to_id）。",
+        "reason": "Issue 的触发条件是删除操作需要生成针对同一张表的多个条件删除查询。当前测试的模型关系不够复杂，无法触发此条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用单个模型实例的 delete() 方法。",
+        "target_pattern": "调用 delete() 方法删除一个具有复杂关系的实例（如 Person 或 User），以触发 deletion.Collector 的快速删除逻辑。",
+        "reason": "Issue 描述的行为是在执行 person.delete() 或 user.delete() 时发生的。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "deletion.Collector 在快速删除路径中，应将针对同一张表但不同条件的 DELETE 查询合并为使用 OR 条件的单个查询，以减少数据库往返次数。",
+      "evidence": [
+        "Issue 中明确给出了合并后的查询示例，例如 `DELETE FROM person_friends WHERE from_id = :id OR to_id = :id`。",
+        "Issue 标题和描述都强调了“combine”查询的目标。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在执行删除操作期间捕获的 SQL 查询列表，特别是 DELETE 查询的数量和 WHERE 子句结构。",
+        "reason": "Issue 的核心症状是 DELETE 查询的数量过多且未合并。观察实际执行的 SQL 可以确认是否出现了多个针对同一表的独立查询，而不是合并的 OR 查询。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "删除操作前后相关数据库表中的记录数量。",
+        "reason": "验证删除操作是否成功执行，确保测试关注的是查询优化问题而非功能错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证针对同一张表的条件删除查询被合并，从而减少总的 DELETE 查询数量。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的、具体的 SQL 字符串，因为不同数据库后端的 SQL 生成可能略有不同。",
+        "reason": "Issue 的目标是减少查询数量。使用 assertNumQueries 或类似方法比较合并前后的查询数量是稳定且与 Issue 目标对齐的断言方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "deletion.Collector 中实现快速删除和查询合并逻辑的具体代码位置和条件。",
+    "除了 Person 和 User 模型外，是否还有其他模型关系组合能触发此问题。",
+    "当前代码库中是否已存在针对此问题的部分修复或变通方法。"
+  ],
+  "raw": {
+    "issue_summary": "在模拟 ON DELETE CASCADE 时，deletion.Collector 的快速删除查询未能按表合并，导致不必要的数据库往返次数。",
+    "trigger_condition": {
+      "text": "当使用 on_delete=models.CASCADE 并满足快速删除路径条件时，删除一个具有多个外键或多对多关系的模型实例（如 Person 或 User）。",
+      "evidence": [
+        "Issue 描述了在满足快速删除路径条件时，删除 Person 或 User 实例会触发多个 DELETE 查询。",
+        "Issue 中给出了 Person 和 User 的模型定义以及删除操作。",
+        "相关测试代码展示了触发快速删除路径的测试场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对同一张表的多个条件删除查询（例如，针对 person_friends 表的 from_id 和 to_id 条件）被拆分为多个独立的查询，而不是合并为一个使用 OR 条件的查询。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 中明确列出了未合并的查询列表，并指出它们可以合并。",
+        "Issue 描述了当前行为（多个查询）与期望行为（合并查询）的对比。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "deletion.Collector 在快速删除路径中，应将针对同一张表但不同条件的 DELETE 查询合并为使用 OR 条件的单个查询，以减少数据库往返次数。",
+      "evidence": [
+        "Issue 中明确给出了合并后的查询示例，例如 `DELETE FROM person_friends WHERE from_id = :id OR to_id = :id`。",
+        "Issue 标题和描述都强调了“combine”查询的目标。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心是关于模型实例删除操作（person.delete() 或 user.delete()）触发的查询行为。"
+      },
+      {
+        "name": "Collector",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 明确指出 deletion.Collector 负责执行快速删除查询的逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "deletion.Collector",
+        "lines": "",
+        "reason": "Issue 明确指出 deletion.Collector 在处理快速删除查询时，应该合并查询但当前没有。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_fast_delete_m2m",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接测试了快速删除（fast-delete）路径，并使用了 assertNumQueries 来验证查询数量，这与 Issue 关注的查询合并和数量问题高度相关。",
+        "reusable_parts": [
+          "FastDeleteTests 测试类",
+          "使用 assertNumQueries 断言查询数量",
+          "创建具有 M2M 关系的模型实例并执行删除的 setup 模式"
+        ],
+        "possible_gap": "该测试只涉及一个 M2M 关系，而 Issue 需要触发针对同一张表的多个条件（如 from_id 和 to_id）的删除查询，以暴露合并缺失的问题。"
+      },
+      {
+        "test_name": "test_fast_delete_fk",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试也测试了快速删除路径，并涉及外键关系，与 Issue 中提到的 ForeignKey 场景相关。",
+        "reusable_parts": [
+          "使用 assertNumQueries 断言查询数量",
+          "创建具有 FK 关系的模型实例并执行删除的 setup 模式"
+        ],
+        "possible_gap": "该测试只涉及单个外键关系，而 Issue 需要模型具有指向同一目标表的多个外键（如 Entry 的 created_by 和 updated_by），以触发针对同一张表的多个条件删除查询。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中创建具有单个 M2M 或 FK 关系的模型实例。",
+        "target_pattern": "创建具有多个指向同一张表的外键或多对多关系的模型实例（如 Issue 中的 Entry 模型有 created_by 和 updated_by 两个指向 User 的外键，或 Person 的 friends M2M 关系涉及 from_id 和 to_id）。",
+        "reason": "Issue 的触发条件是删除操作需要生成针对同一张表的多个条件删除查询。当前测试的模型关系不够复杂，无法触发此条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用单个模型实例的 delete() 方法。",
+        "target_pattern": "调用 delete() 方法删除一个具有复杂关系的实例（如 Person 或 User），以触发 deletion.Collector 的快速删除逻辑。",
+        "reason": "Issue 描述的行为是在执行 person.delete() 或 user.delete() 时发生的。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在执行删除操作期间捕获的 SQL 查询列表，特别是 DELETE 查询的数量和 WHERE 子句结构。",
+        "reason": "Issue 的核心症状是 DELETE 查询的数量过多且未合并。观察实际执行的 SQL 可以确认是否出现了多个针对同一表的独立查询，而不是合并的 OR 查询。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "删除操作前后相关数据库表中的记录数量。",
+        "reason": "验证删除操作是否成功执行，确保测试关注的是查询优化问题而非功能错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证针对同一张表的条件删除查询被合并，从而减少总的 DELETE 查询数量。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的、具体的 SQL 字符串，因为不同数据库后端的 SQL 生成可能略有不同。",
+        "reason": "Issue 的目标是减少查询数量。使用 assertNumQueries 或类似方法比较合并前后的查询数量是稳定且与 Issue 目标对齐的断言方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义与 Issue 描述类似的模型：Person（具有自引用的 ManyToManyField）、User、Entry（具有两个指向 User 的 ForeignKey）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 Django 的 TestCase 和数据库，因为测试涉及模型操作和 SQL 查询。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "deletion.Collector 中实现快速删除和查询合并逻辑的具体代码位置和条件。",
+      "除了 Person 和 User 模型外，是否还有其他模型关系组合能触发此问题。",
+      "当前代码库中是否已存在针对此问题的部分修复或变通方法。"
+    ]
+  }
+}

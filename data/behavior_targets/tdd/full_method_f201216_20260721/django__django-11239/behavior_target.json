@@ -1,0 +1,274 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11239",
+  "issue_summary": "dbshell 命令不支持 PostgreSQL 数据库配置中的客户端证书和密钥参数。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `SimpleTestCase` 或类似的测试基类，并可能需要模拟数据库连接以避免真实数据库依赖。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试配置应包含 `OPTIONS` 字典，其中设置 `sslcert` 和 `sslkey` 等值。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "这是测试 PostgreSQL dbshell 基本功能的测试，提供了构建命令参数和断言的模式。",
+        "reusable_parts": [
+          "测试类结构",
+          "调用 `_run_it` 方法的方式",
+          "断言命令参数列表的格式"
+        ],
+        "possible_gap": "当前测试没有包含 `OPTIONS` 字典，特别是 SSL 相关的配置。"
+      },
+      {
+        "test_name": "MySqlDbshellCommandTestCase.test_ssl_certificate_is_added",
+        "test_file": "tests/dbshell/test_mysql.py",
+        "why_relevant": "该测试直接验证了 MySQL dbshell 在 `OPTIONS` 中支持 SSL 证书参数，为 PostgreSQL 的期望行为提供了参考模式。",
+        "reusable_parts": [
+          "在 `OPTIONS` 中配置 SSL 字典的模式",
+          "断言命令行参数包含 SSL 相关标志"
+        ],
+        "possible_gap": "测试针对 MySQL 后端，命令行参数标志（如 `--ssl-cert`）与 PostgreSQL (`-c sslcert=...` 或 `?sslcert=...`) 不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当使用包含 `sslcert` 和 `sslkey` 等 SSL 选项的 PostgreSQL 数据库配置运行 `dbshell` 命令时。",
+      "evidence": [
+        "Issue 描述中展示了包含 `sslcert` 和 `sslkey` 的 `OPTIONS` 配置。",
+        "Issue 明确指出 dbshell 命令不支持这些客户端证书参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "dbshell 命令在构建连接参数时，不会包含客户端证书和密钥，可能导致连接失败或安全性降低。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述指出 dbshell 命令不支持客户端证书参数。",
+        "相关测试 5 显示 MySQL 的 dbshell 支持添加 SSL 证书参数，暗示 PostgreSQL 可能缺失类似功能。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.commands.dbshell.Command",
+        "kind": "class",
+        "source_path": "django/core/management/commands/dbshell.py",
+        "reason": "Issue 直接关于 dbshell 命令，该类是命令的实现入口。"
+      },
+      {
+        "name": "django.db.backends.postgresql.client.DatabaseClient.runshell",
+        "kind": "method",
+        "source_path": "",
+        "reason": "PostgreSQL 的 dbshell 命令具体逻辑可能在此方法中，负责构建命令行参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/dbshell.py",
+        "object": "dbshell",
+        "lines": "",
+        "reason": "这是 dbshell 命令的主文件，Issue 直接指向此命令的功能缺失。"
+      },
+      {
+        "path": "django/db/backends/postgresql/client.py",
+        "object": "DatabaseClient",
+        "lines": "",
+        "reason": "PostgreSQL 后端的客户端连接逻辑，特别是构建 `psql` 命令行的部分，可能未处理 SSL 证书选项。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中数据库配置通常只包含 `NAME`, `USER`, `PASSWORD`, `HOST`, `PORT` 等基本字段。",
+        "target_pattern": "数据库配置应包含 `OPTIONS` 字典，其内部有 `sslcert` 和 `sslkey` 等键值对。",
+        "reason": "Issue 表明触发条件是配置中包含这些 SSL 选项，而现有测试未覆盖此配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试调用 `_run_it` 或 `get_command_line_arguments` 并传入基本配置字典。",
+        "target_pattern": "调用相同方法，但传入的配置字典包含 `OPTIONS` 中的 SSL 参数。",
+        "reason": "需要验证命令处理逻辑是否能正确解析并传递这些新参数。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "dbshell 命令在连接 PostgreSQL 数据库时，应能正确识别并传递 `OPTIONS` 中的 `sslcert` 和 `sslkey` 等 SSL 相关参数。",
+      "evidence": [
+        "Issue 描述指出 Django 的数据库配置已经支持这些 SSL 参数。",
+        "相关测试 5 表明 MySQL 后端已实现类似功能，可作为期望行为的参考。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "命令生成的参数列表（例如 `['psql', ...]`）",
+        "reason": "观察生成的命令行参数是否包含了 `-c sslcert=...` 或 `?sslcert=...` 等与 SSL 证书相关的片段。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "传入的数据库配置字典中的 `OPTIONS` 字段",
+        "reason": "确认测试是否正确设置了触发条件所需的配置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的命令行参数应包含代表客户端证书和密钥的选项。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的命令行字符串相等，因为参数顺序或格式可能变化。",
+        "reason": "Issue 的核心是支持这些参数，断言它们存在即可，无需精确匹配完整命令。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "PostgreSQL `psql` 命令行接受 SSL 证书参数的确切格式（例如是连接字符串参数还是命令行标志）。",
+    "除了 `sslcert` 和 `sslkey`，是否还需要支持 `sslrootcert` 或 `sslmode` 等其他 SSL 相关选项。",
+    "dbshell 命令处理 `OPTIONS` 中 SSL 参数的代码具体位于哪个文件和方法中。"
+  ],
+  "raw": {
+    "issue_summary": "dbshell 命令不支持 PostgreSQL 数据库配置中的客户端证书和密钥参数。",
+    "trigger_condition": {
+      "text": "当使用包含 `sslcert` 和 `sslkey` 等 SSL 选项的 PostgreSQL 数据库配置运行 `dbshell` 命令时。",
+      "evidence": [
+        "Issue 描述中展示了包含 `sslcert` 和 `sslkey` 的 `OPTIONS` 配置。",
+        "Issue 明确指出 dbshell 命令不支持这些客户端证书参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "dbshell 命令在构建连接参数时，不会包含客户端证书和密钥，可能导致连接失败或安全性降低。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述指出 dbshell 命令不支持客户端证书参数。",
+        "相关测试 5 显示 MySQL 的 dbshell 支持添加 SSL 证书参数，暗示 PostgreSQL 可能缺失类似功能。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "dbshell 命令在连接 PostgreSQL 数据库时，应能正确识别并传递 `OPTIONS` 中的 `sslcert` 和 `sslkey` 等 SSL 相关参数。",
+      "evidence": [
+        "Issue 描述指出 Django 的数据库配置已经支持这些 SSL 参数。",
+        "相关测试 5 表明 MySQL 后端已实现类似功能，可作为期望行为的参考。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.commands.dbshell.Command",
+        "kind": "class",
+        "source_path": "django/core/management/commands/dbshell.py",
+        "reason": "Issue 直接关于 dbshell 命令，该类是命令的实现入口。"
+      },
+      {
+        "name": "django.db.backends.postgresql.client.DatabaseClient.runshell",
+        "kind": "method",
+        "source_path": "",
+        "reason": "PostgreSQL 的 dbshell 命令具体逻辑可能在此方法中，负责构建命令行参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/dbshell.py",
+        "object": "dbshell",
+        "lines": "",
+        "reason": "这是 dbshell 命令的主文件，Issue 直接指向此命令的功能缺失。"
+      },
+      {
+        "path": "django/db/backends/postgresql/client.py",
+        "object": "DatabaseClient",
+        "lines": "",
+        "reason": "PostgreSQL 后端的客户端连接逻辑，特别是构建 `psql` 命令行的部分，可能未处理 SSL 证书选项。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PostgreSqlDbshellCommandTestCase.test_basic",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "这是测试 PostgreSQL dbshell 基本功能的测试，提供了构建命令参数和断言的模式。",
+        "reusable_parts": [
+          "测试类结构",
+          "调用 `_run_it` 方法的方式",
+          "断言命令参数列表的格式"
+        ],
+        "possible_gap": "当前测试没有包含 `OPTIONS` 字典，特别是 SSL 相关的配置。"
+      },
+      {
+        "test_name": "MySqlDbshellCommandTestCase.test_ssl_certificate_is_added",
+        "test_file": "tests/dbshell/test_mysql.py",
+        "why_relevant": "该测试直接验证了 MySQL dbshell 在 `OPTIONS` 中支持 SSL 证书参数，为 PostgreSQL 的期望行为提供了参考模式。",
+        "reusable_parts": [
+          "在 `OPTIONS` 中配置 SSL 字典的模式",
+          "断言命令行参数包含 SSL 相关标志"
+        ],
+        "possible_gap": "测试针对 MySQL 后端，命令行参数标志（如 `--ssl-cert`）与 PostgreSQL (`-c sslcert=...` 或 `?sslcert=...`) 不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中数据库配置通常只包含 `NAME`, `USER`, `PASSWORD`, `HOST`, `PORT` 等基本字段。",
+        "target_pattern": "数据库配置应包含 `OPTIONS` 字典，其内部有 `sslcert` 和 `sslkey` 等键值对。",
+        "reason": "Issue 表明触发条件是配置中包含这些 SSL 选项，而现有测试未覆盖此配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试调用 `_run_it` 或 `get_command_line_arguments` 并传入基本配置字典。",
+        "target_pattern": "调用相同方法，但传入的配置字典包含 `OPTIONS` 中的 SSL 参数。",
+        "reason": "需要验证命令处理逻辑是否能正确解析并传递这些新参数。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "命令生成的参数列表（例如 `['psql', ...]`）",
+        "reason": "观察生成的命令行参数是否包含了 `-c sslcert=...` 或 `?sslcert=...` 等与 SSL 证书相关的片段。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "传入的数据库配置字典中的 `OPTIONS` 字段",
+        "reason": "确认测试是否正确设置了触发条件所需的配置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的命令行参数应包含代表客户端证书和密钥的选项。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的命令行字符串相等，因为参数顺序或格式可能变化。",
+        "reason": "Issue 的核心是支持这些参数，断言它们存在即可，无需精确匹配完整命令。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `SimpleTestCase` 或类似的测试基类，并可能需要模拟数据库连接以避免真实数据库依赖。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试配置应包含 `OPTIONS` 字典，其中设置 `sslcert` 和 `sslkey` 等值。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "PostgreSQL `psql` 命令行接受 SSL 证书参数的确切格式（例如是连接字符串参数还是命令行标志）。",
+      "除了 `sslcert` 和 `sslkey`，是否还需要支持 `sslrootcert` 或 `sslmode` 等其他 SSL 相关选项。",
+      "dbshell 命令处理 `OPTIONS` 中 SSL 参数的代码具体位于哪个文件和方法中。"
+    ]
+  }
+}

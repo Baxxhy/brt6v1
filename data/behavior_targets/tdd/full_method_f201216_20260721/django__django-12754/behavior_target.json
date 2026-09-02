@@ -1,0 +1,360 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12754",
+  "issue_summary": "在将字段迁移到新的模型子类时，自动生成的迁移操作顺序错误导致执行 migrate 时抛出 FieldError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用继承自 MigrationTestBase 或类似基类的测试用例，以支持模型定义变更和迁移生成/测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置临时迁移模块（例如使用 temporary_migration_module）来隔离测试的迁移文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义前后两个版本的模型状态：初始版本（基类有字段）和变更后版本（基类无字段，子类有字段）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库，因为迁移操作涉及数据库 schema 变更。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AutodetectorTests.test_remove_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试直接测试了自动检测器对移除字段（RemoveField）的检测。Issue 中的迁移包含 RemoveField 操作。",
+        "reusable_parts": [
+          "测试类 AutodetectorTests 的框架",
+          "使用 self.get_changes 比较模型状态变化的方法",
+          "assertOperationTypes 和 assertOperationAttributes 等断言风格"
+        ],
+        "possible_gap": "该测试只测试了简单的字段移除，没有涉及字段在继承层次结构中的移动（从基类到子类），也没有测试操作顺序对执行结果的影响。"
+      },
+      {
+        "test_name": "OptimizerTests.test_alter_field_rename_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "该测试检查迁移操作的优化和重排序。Issue 的核心问题是迁移操作（CreateModel 和 RemoveField）的顺序错误，需要正确的排序才能工作。",
+        "reusable_parts": [
+          "使用 self.assertOptimizesTo 来验证操作列表的优化结果",
+          "涉及操作顺序的测试模式"
+        ],
+        "possible_gap": "该测试关注的是 RenameField 和 AlterField 的优化，而 Issue 涉及的是 CreateModel 和 RemoveField 的顺序。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_empty_migration",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试涉及 makemigrations 命令，这是 Issue 中触发 bug 的第一步（生成迁移）。",
+        "reusable_parts": [
+          "使用 temporary_migration_module 上下文管理器",
+          "调用 call_command(\"makemigrations\", ...)",
+          "检查生成的迁移文件"
+        ],
+        "possible_gap": "该测试只测试了生成空迁移，没有测试生成包含特定操作顺序的迁移，也没有执行迁移。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个模型子类，并将基类中的一个字段移动到该子类上，然后运行 makemigrations 和 migrate。具体操作为：将模型 Readable 中的字段 title 移动到其子类 Book 中，并删除 Readable 中的 title 字段。",
+      "evidence": [
+        "Issue 描述：'If creating a model subclass and moving a field onto it in the same step, makemigrations works but migrate dies...'",
+        "Issue 中的代码示例展示了模型结构的变更。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 migrate 命令时抛出 django.core.exceptions.FieldError: Local field 'title' in class 'Book' clashes with field of the same name from base class 'Readable'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确描述了错误：'migrate dies with django.core.exceptions.FieldError: Local field 'title' in class 'Book' clashes with field of the same name from base class 'Readable'.'",
+        "检索到的源码片段 3 定义了 FieldError 异常类。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中涉及使用 makemigrations 命令生成迁移文件。"
+      },
+      {
+        "name": "migrate",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中涉及运行 migrate 命令执行迁移，并在此过程中触发错误。"
+      },
+      {
+        "name": "CreateModel",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中提到迁移生成了 CreateModel 操作。相关测试 5 中也使用了 CreateModel。"
+      },
+      {
+        "name": "RemoveField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中提到迁移生成了 RemoveField 操作。相关测试 1 测试了 RemoveField。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "迁移自动检测器（autodetector）",
+        "lines": "",
+        "reason": "Issue 指出问题在于自动检测器生成的迁移操作顺序（CreateModel 在 RemoveField 之前）是错误的，而正确的顺序（先 CreateModel 再 RemoveField）可以工作。这表明缺陷可能在决定操作顺序的逻辑中。"
+      },
+      {
+        "path": "",
+        "object": "迁移优化器（optimizer）",
+        "lines": "",
+        "reason": "相关测试 2 和 3 涉及 RenameField 与 AlterField/AddField 的优化顺序。Issue 中的问题本质上是迁移操作（CreateModel 和 RemoveField）的顺序问题，可能与优化器决定操作顺序的逻辑有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，模型状态从包含字段变为空，触发简单的 RemoveField。",
+        "target_pattern": "模型状态变更应涉及继承：一个字段从基类定义变为在子类中定义，同时从基类中移除。这应触发 CreateModel（对于子类）和 RemoveField（对于基类）操作，且顺序至关重要。",
+        "reason": "Issue 表明，当字段在模型子类化过程中移动时，自动检测器生成的默认操作顺序（CreateModel 然后 RemoveField）会导致运行时错误。需要变异测试以模拟这种复杂的模型重构。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试通常使用简单的、非继承的模型定义。",
+        "target_pattern": "测试配置需要包含具有继承关系的模型：一个基类最初拥有一个字段，然后该字段被移动到新创建的子类中，并从基类中删除。",
+        "reason": "Issue 的触发条件依赖于模型继承层次结构。没有继承关系，就不会出现字段“从基类移动到子类”的场景。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "自动生成的迁移操作顺序应能正确执行，使得字段能成功从基类移动到子类，而不会引发字段冲突异常。",
+      "evidence": [
+        "Issue 中提到：'Reversing the order of the migration operations makes it pass. The auto-detector should be able to use this order.' 这表明正确的操作顺序（先创建子类字段，再移除基类字段）可以避免错误。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "生成的迁移文件中的 operations 列表顺序。",
+        "reason": "Issue 明确指出，操作顺序（CreateModel 在 RemoveField 之前）是导致错误的原因，而反转顺序则能成功。观察操作顺序是判断问题是否存在的关键。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 migrate 命令时是否抛出 django.core.exceptions.FieldError。",
+        "reason": "Issue 中观察到的直接错误现象就是 FieldError 异常。捕获此异常是确认缺陷被触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "迁移执行前后，数据库中对应表的结构（字段是否存在、位于哪个表）。",
+        "reason": "Issue 的预期行为是字段成功从基表移动到子表。观察数据库 schema 的最终状态可以验证迁移是否按预期工作。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证迁移操作能够成功执行，不抛出 FieldError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体路径或类名可能因测试环境而异。",
+        "reason": "Issue 的核心是迁移执行失败。一个稳定的断言是验证在缺陷状态下执行迁移会引发异常（如 FieldError），而在修复后则不会。"
+      },
+      {
+        "assertion_goal": "验证生成的迁移操作顺序是正确的（例如，CreateModel 在 RemoveField 之前是否是问题所在）。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "断言整个迁移文件的完整字符串表示。",
+        "reason": "Issue 指出操作顺序是关键。断言操作列表的顺序是否符合预期（或不符合有问题的顺序）是稳定且与问题直接相关的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "自动检测器生成错误顺序的确切代码位置和逻辑。",
+    "除了操作顺序反转之外，是否还有其他潜在因素（如字段类型、约束）会影响此错误。",
+    "在更复杂的继承或字段关系场景下，此缺陷是否会有不同的表现。"
+  ],
+  "raw": {
+    "issue_summary": "在将字段迁移到新的模型子类时，自动生成的迁移操作顺序错误导致执行 migrate 时抛出 FieldError 异常。",
+    "trigger_condition": {
+      "text": "创建一个模型子类，并将基类中的一个字段移动到该子类上，然后运行 makemigrations 和 migrate。具体操作为：将模型 Readable 中的字段 title 移动到其子类 Book 中，并删除 Readable 中的 title 字段。",
+      "evidence": [
+        "Issue 描述：'If creating a model subclass and moving a field onto it in the same step, makemigrations works but migrate dies...'",
+        "Issue 中的代码示例展示了模型结构的变更。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 migrate 命令时抛出 django.core.exceptions.FieldError: Local field 'title' in class 'Book' clashes with field of the same name from base class 'Readable'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确描述了错误：'migrate dies with django.core.exceptions.FieldError: Local field 'title' in class 'Book' clashes with field of the same name from base class 'Readable'.'",
+        "检索到的源码片段 3 定义了 FieldError 异常类。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "自动生成的迁移操作顺序应能正确执行，使得字段能成功从基类移动到子类，而不会引发字段冲突异常。",
+      "evidence": [
+        "Issue 中提到：'Reversing the order of the migration operations makes it pass. The auto-detector should be able to use this order.' 这表明正确的操作顺序（先创建子类字段，再移除基类字段）可以避免错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "makemigrations",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中涉及使用 makemigrations 命令生成迁移文件。"
+      },
+      {
+        "name": "migrate",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中涉及运行 migrate 命令执行迁移，并在此过程中触发错误。"
+      },
+      {
+        "name": "CreateModel",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中提到迁移生成了 CreateModel 操作。相关测试 5 中也使用了 CreateModel。"
+      },
+      {
+        "name": "RemoveField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中提到迁移生成了 RemoveField 操作。相关测试 1 测试了 RemoveField。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "迁移自动检测器（autodetector）",
+        "lines": "",
+        "reason": "Issue 指出问题在于自动检测器生成的迁移操作顺序（CreateModel 在 RemoveField 之前）是错误的，而正确的顺序（先 CreateModel 再 RemoveField）可以工作。这表明缺陷可能在决定操作顺序的逻辑中。"
+      },
+      {
+        "path": "",
+        "object": "迁移优化器（optimizer）",
+        "lines": "",
+        "reason": "相关测试 2 和 3 涉及 RenameField 与 AlterField/AddField 的优化顺序。Issue 中的问题本质上是迁移操作（CreateModel 和 RemoveField）的顺序问题，可能与优化器决定操作顺序的逻辑有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AutodetectorTests.test_remove_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试直接测试了自动检测器对移除字段（RemoveField）的检测。Issue 中的迁移包含 RemoveField 操作。",
+        "reusable_parts": [
+          "测试类 AutodetectorTests 的框架",
+          "使用 self.get_changes 比较模型状态变化的方法",
+          "assertOperationTypes 和 assertOperationAttributes 等断言风格"
+        ],
+        "possible_gap": "该测试只测试了简单的字段移除，没有涉及字段在继承层次结构中的移动（从基类到子类），也没有测试操作顺序对执行结果的影响。"
+      },
+      {
+        "test_name": "OptimizerTests.test_alter_field_rename_field",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "该测试检查迁移操作的优化和重排序。Issue 的核心问题是迁移操作（CreateModel 和 RemoveField）的顺序错误，需要正确的排序才能工作。",
+        "reusable_parts": [
+          "使用 self.assertOptimizesTo 来验证操作列表的优化结果",
+          "涉及操作顺序的测试模式"
+        ],
+        "possible_gap": "该测试关注的是 RenameField 和 AlterField 的优化，而 Issue 涉及的是 CreateModel 和 RemoveField 的顺序。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_empty_migration",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试涉及 makemigrations 命令，这是 Issue 中触发 bug 的第一步（生成迁移）。",
+        "reusable_parts": [
+          "使用 temporary_migration_module 上下文管理器",
+          "调用 call_command(\"makemigrations\", ...)",
+          "检查生成的迁移文件"
+        ],
+        "possible_gap": "该测试只测试了生成空迁移，没有测试生成包含特定操作顺序的迁移，也没有执行迁移。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中，模型状态从包含字段变为空，触发简单的 RemoveField。",
+        "target_pattern": "模型状态变更应涉及继承：一个字段从基类定义变为在子类中定义，同时从基类中移除。这应触发 CreateModel（对于子类）和 RemoveField（对于基类）操作，且顺序至关重要。",
+        "reason": "Issue 表明，当字段在模型子类化过程中移动时，自动检测器生成的默认操作顺序（CreateModel 然后 RemoveField）会导致运行时错误。需要变异测试以模拟这种复杂的模型重构。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试通常使用简单的、非继承的模型定义。",
+        "target_pattern": "测试配置需要包含具有继承关系的模型：一个基类最初拥有一个字段，然后该字段被移动到新创建的子类中，并从基类中删除。",
+        "reason": "Issue 的触发条件依赖于模型继承层次结构。没有继承关系，就不会出现字段“从基类移动到子类”的场景。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "生成的迁移文件中的 operations 列表顺序。",
+        "reason": "Issue 明确指出，操作顺序（CreateModel 在 RemoveField 之前）是导致错误的原因，而反转顺序则能成功。观察操作顺序是判断问题是否存在的关键。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行 migrate 命令时是否抛出 django.core.exceptions.FieldError。",
+        "reason": "Issue 中观察到的直接错误现象就是 FieldError 异常。捕获此异常是确认缺陷被触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "迁移执行前后，数据库中对应表的结构（字段是否存在、位于哪个表）。",
+        "reason": "Issue 的预期行为是字段成功从基表移动到子表。观察数据库 schema 的最终状态可以验证迁移是否按预期工作。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证迁移操作能够成功执行，不抛出 FieldError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体路径或类名可能因测试环境而异。",
+        "reason": "Issue 的核心是迁移执行失败。一个稳定的断言是验证在缺陷状态下执行迁移会引发异常（如 FieldError），而在修复后则不会。"
+      },
+      {
+        "assertion_goal": "验证生成的迁移操作顺序是正确的（例如，CreateModel 在 RemoveField 之前是否是问题所在）。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "断言整个迁移文件的完整字符串表示。",
+        "reason": "Issue 指出操作顺序是关键。断言操作列表的顺序是否符合预期（或不符合有问题的顺序）是稳定且与问题直接相关的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用继承自 MigrationTestBase 或类似基类的测试用例，以支持模型定义变更和迁移生成/测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置临时迁移模块（例如使用 temporary_migration_module）来隔离测试的迁移文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义前后两个版本的模型状态：初始版本（基类有字段）和变更后版本（基类无字段，子类有字段）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库，因为迁移操作涉及数据库 schema 变更。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "自动检测器生成错误顺序的确切代码位置和逻辑。",
+      "除了操作顺序反转之外，是否还有其他潜在因素（如字段类型、约束）会影响此错误。",
+      "在更复杂的继承或字段关系场景下，此缺陷是否会有不同的表现。"
+    ]
+  }
+}

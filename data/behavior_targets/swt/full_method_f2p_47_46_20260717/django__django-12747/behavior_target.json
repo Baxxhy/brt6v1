@@ -1,0 +1,302 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12747",
+  "issue_summary": "QuerySet.delete() 在删除零个对象时，对于有外键的模型和简单模型返回的字典格式不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要继承自 django.test.TestCase 以使用数据库。需要定义或导入简单的测试模型（无外键）和具有外键的测试模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试前确保数据库表为空，或使用过滤条件构造一个空的 QuerySet。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_queryset_delete_returns_num_rows",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接验证了 QuerySet.delete() 的返回值，包括删除计数和字典格式。",
+        "reusable_parts": [
+          "DeletionTests 测试类结构",
+          "使用 Avatar、R、HiddenUser 等模型构造数据",
+          "调用 .delete() 并断言返回值的模式"
+        ],
+        "possible_gap": "该测试只测试了删除非零对象的情况，没有测试删除零个对象（即空 QuerySet）的边界情况。"
+      },
+      {
+        "test_name": "test_model_delete_returns_num_rows",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试验证了 Model.delete() 的返回值，与 QuerySet.delete() 的返回值格式相关。",
+        "reusable_parts": [
+          "使用 R、HiddenUser 等具有外键关系的模型构造复杂数据",
+          "断言返回字典中每个键值对相等的模式"
+        ],
+        "possible_gap": "该测试同样没有测试删除零个对象的情况，且测试的是模型实例的 delete 方法，而非 QuerySet 的 delete 方法。"
+      },
+      {
+        "test_name": "test_o2o_primary_key_delete",
+        "test_file": "tests/one_to_one/tests.py",
+        "why_relevant": "该测试涉及外键关系（OneToOneField）的删除，并检查返回的字典。",
+        "reusable_parts": [
+          "创建具有外键关系的模型实例",
+          "使用 filter 构造 QuerySet 并调用 delete",
+          "断言返回字典的格式"
+        ],
+        "possible_gap": "该测试删除了一个对象，没有测试删除零个对象的情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个空的 QuerySet 调用 delete() 方法，该 QuerySet 可能指向一个没有外键的简单模型，也可能指向一个有外键的模型。",
+      "evidence": [
+        "Issue 描述：'When there are zero objects to delete in total - the result is inconsistent: For models with foreign keys - the result will be: (0, {}). For \"simple\" models without foreign key - the result will be: (0, {'my_app.BlockLibrary': 0})'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "delete() 方法返回的元组中第二个元素（字典）格式不一致：对于有外键的模型是空字典 {}，对于简单模型是包含模型标签且值为零的字典 {'my_app.BlockLibrary': 0}。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'I would expect there will be no difference between the two cases: Either both will have the empty dictionary OR both will have dictionary with model-label keys and zero value.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.delete",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接报告了 QuerySet.delete 方法在特定条件下的返回值不一致问题。"
+      },
+      {
+        "name": "Collector.delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "源码片段 1 显示 QuerySet.delete 内部调用了 collector.delete() 并返回其值。"
+      },
+      {
+        "name": "Options.label",
+        "kind": "method",
+        "source_path": "django/db/models/options.py",
+        "reason": "Issue 中提到的字典键是模型的 _meta.label，该属性由 Options.label 方法生成。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.delete",
+        "lines": "713-740",
+        "reason": "这是执行删除操作并返回结果的核心方法，其内部调用的 collector.delete() 可能根据模型是否有外键返回不同的字典结构。"
+      },
+      {
+        "path": "",
+        "object": "Collector.delete",
+        "lines": "",
+        "reason": "QuerySet.delete 的返回值来自 collector.delete()，当删除零个对象时，collector 处理有外键和简单模型的逻辑可能不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，QuerySet 包含一个或多个要删除的对象实例。",
+        "target_pattern": "QuerySet 为空，即过滤条件不匹配任何对象，或者模型表中没有数据。",
+        "reason": "Issue 明确指出 bug 在删除零个对象时触发，因此需要将测试数据准备从“有对象”变异为“无对象”。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型可能具有外键关系（如 HiddenUser 指向 R）。",
+        "target_pattern": "需要分别测试两种模型状态：1. 没有外键的简单模型；2. 有外键的模型。",
+        "reason": "Issue 表明不一致行为取决于模型是否有外键，因此测试需要覆盖这两种模型类型。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论模型是否有外键，当删除零个对象时，delete() 方法返回的字典格式应该一致：要么都是空字典，要么都包含模型标签且值为零的字典。",
+      "evidence": [
+        "Issue 描述：'I would expect there will be no difference between the two cases: Either both will have the empty dictionary OR both will have dictionary with model-label keys and zero value.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "delete() 方法返回的元组，特别是第二个元素（字典）的结构和内容。",
+        "reason": "Issue 的核心是返回字典格式不一致，直接观察返回值是判断 bug 是否触发的关键。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "返回字典的类型和键值对，例如 isinstance(result[1], dict), result[1].keys(), len(result[1])。",
+        "reason": "需要确认字典是空还是包含特定键，以及键是否为预期的模型标签格式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于空 QuerySet 的删除操作，无论模型是否有外键，返回的字典格式应一致（同为空或同包含零值条目）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的字典字面量，因为 Issue 未指定修复后是统一为空还是统一包含零值条目。",
+        "reason": "断言两种情况下返回字典的“一致性”（例如，长度相等或键的存在性相同）比断言具体内容更稳定，且与 Issue 期望对齐。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后的预期行为是统一返回空字典 {} 还是统一返回包含模型标签且值为零的字典（如 {'my_app.BlockLibrary': 0}），Issue 没有明确指定。",
+    "导致不一致的具体代码位置（Collector 内部逻辑）在提供的源码片段中没有显示。",
+    "是否所有类型的模型（代理模型、抽象模型、多表继承模型）都会表现出相同的不一致行为。"
+  ],
+  "raw": {
+    "issue_summary": "QuerySet.delete() 在删除零个对象时，对于有外键的模型和简单模型返回的字典格式不一致。",
+    "trigger_condition": {
+      "text": "对一个空的 QuerySet 调用 delete() 方法，该 QuerySet 可能指向一个没有外键的简单模型，也可能指向一个有外键的模型。",
+      "evidence": [
+        "Issue 描述：'When there are zero objects to delete in total - the result is inconsistent: For models with foreign keys - the result will be: (0, {}). For \"simple\" models without foreign key - the result will be: (0, {'my_app.BlockLibrary': 0})'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "delete() 方法返回的元组中第二个元素（字典）格式不一致：对于有外键的模型是空字典 {}，对于简单模型是包含模型标签且值为零的字典 {'my_app.BlockLibrary': 0}。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'I would expect there will be no difference between the two cases: Either both will have the empty dictionary OR both will have dictionary with model-label keys and zero value.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论模型是否有外键，当删除零个对象时，delete() 方法返回的字典格式应该一致：要么都是空字典，要么都包含模型标签且值为零的字典。",
+      "evidence": [
+        "Issue 描述：'I would expect there will be no difference between the two cases: Either both will have the empty dictionary OR both will have dictionary with model-label keys and zero value.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.delete",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接报告了 QuerySet.delete 方法在特定条件下的返回值不一致问题。"
+      },
+      {
+        "name": "Collector.delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "源码片段 1 显示 QuerySet.delete 内部调用了 collector.delete() 并返回其值。"
+      },
+      {
+        "name": "Options.label",
+        "kind": "method",
+        "source_path": "django/db/models/options.py",
+        "reason": "Issue 中提到的字典键是模型的 _meta.label，该属性由 Options.label 方法生成。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.delete",
+        "lines": "713-740",
+        "reason": "这是执行删除操作并返回结果的核心方法，其内部调用的 collector.delete() 可能根据模型是否有外键返回不同的字典结构。"
+      },
+      {
+        "path": "",
+        "object": "Collector.delete",
+        "lines": "",
+        "reason": "QuerySet.delete 的返回值来自 collector.delete()，当删除零个对象时，collector 处理有外键和简单模型的逻辑可能不同。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_queryset_delete_returns_num_rows",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接验证了 QuerySet.delete() 的返回值，包括删除计数和字典格式。",
+        "reusable_parts": [
+          "DeletionTests 测试类结构",
+          "使用 Avatar、R、HiddenUser 等模型构造数据",
+          "调用 .delete() 并断言返回值的模式"
+        ],
+        "possible_gap": "该测试只测试了删除非零对象的情况，没有测试删除零个对象（即空 QuerySet）的边界情况。"
+      },
+      {
+        "test_name": "test_model_delete_returns_num_rows",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试验证了 Model.delete() 的返回值，与 QuerySet.delete() 的返回值格式相关。",
+        "reusable_parts": [
+          "使用 R、HiddenUser 等具有外键关系的模型构造复杂数据",
+          "断言返回字典中每个键值对相等的模式"
+        ],
+        "possible_gap": "该测试同样没有测试删除零个对象的情况，且测试的是模型实例的 delete 方法，而非 QuerySet 的 delete 方法。"
+      },
+      {
+        "test_name": "test_o2o_primary_key_delete",
+        "test_file": "tests/one_to_one/tests.py",
+        "why_relevant": "该测试涉及外键关系（OneToOneField）的删除，并检查返回的字典。",
+        "reusable_parts": [
+          "创建具有外键关系的模型实例",
+          "使用 filter 构造 QuerySet 并调用 delete",
+          "断言返回字典的格式"
+        ],
+        "possible_gap": "该测试删除了一个对象，没有测试删除零个对象的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，QuerySet 包含一个或多个要删除的对象实例。",
+        "target_pattern": "QuerySet 为空，即过滤条件不匹配任何对象，或者模型表中没有数据。",
+        "reason": "Issue 明确指出 bug 在删除零个对象时触发，因此需要将测试数据准备从“有对象”变异为“无对象”。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型可能具有外键关系（如 HiddenUser 指向 R）。",
+        "target_pattern": "需要分别测试两种模型状态：1. 没有外键的简单模型；2. 有外键的模型。",
+        "reason": "Issue 表明不一致行为取决于模型是否有外键，因此测试需要覆盖这两种模型类型。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "delete() 方法返回的元组，特别是第二个元素（字典）的结构和内容。",
+        "reason": "Issue 的核心是返回字典格式不一致，直接观察返回值是判断 bug 是否触发的关键。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "返回字典的类型和键值对，例如 isinstance(result[1], dict), result[1].keys(), len(result[1])。",
+        "reason": "需要确认字典是空还是包含特定键，以及键是否为预期的模型标签格式。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于空 QuerySet 的删除操作，无论模型是否有外键，返回的字典格式应一致（同为空或同包含零值条目）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的字典字面量，因为 Issue 未指定修复后是统一为空还是统一包含零值条目。",
+        "reason": "断言两种情况下返回字典的“一致性”（例如，长度相等或键的存在性相同）比断言具体内容更稳定，且与 Issue 期望对齐。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要继承自 django.test.TestCase 以使用数据库。需要定义或导入简单的测试模型（无外键）和具有外键的测试模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试前确保数据库表为空，或使用过滤条件构造一个空的 QuerySet。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "修复后的预期行为是统一返回空字典 {} 还是统一返回包含模型标签且值为零的字典（如 {'my_app.BlockLibrary': 0}），Issue 没有明确指定。",
+      "导致不一致的具体代码位置（Collector 内部逻辑）在提供的源码片段中没有显示。",
+      "是否所有类型的模型（代理模型、抽象模型、多表继承模型）都会表现出相同的不一致行为。"
+    ]
+  }
+}

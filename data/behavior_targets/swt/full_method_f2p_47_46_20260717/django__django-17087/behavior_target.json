@@ -1,0 +1,352 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-17087",
+  "issue_summary": "当嵌套类的类方法用作 ArrayField 的 default 参数时，迁移文件会生成错误的引用路径。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 isolate_apps 或类似机制来隔离测试模型，避免模型定义冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建包含嵌套类和以该类方法为 default 的 ArrayField 的模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 PostgreSQL 数据库，因为 ArrayField 是 PostgreSQL 特定字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TransactionTestCase 并覆盖 MIGRATION_MODULES 设置来控制迁移。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_serialize_nested_class",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "该测试直接验证了嵌套类的序列化结果，与 Issue 中嵌套类方法序列化错误的场景高度相关。",
+        "reusable_parts": [
+          "测试类 WriterTests",
+          "assertSerializedResultEqual 断言方法",
+          "嵌套类的定义模式"
+        ],
+        "possible_gap": "该测试序列化的是嵌套类本身，而不是嵌套类的类方法作为另一个对象（Field.default）的参数值。"
+      },
+      {
+        "test_name": "test_deconstruct_nested_field",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试直接验证了嵌套类字段的 deconstruct() 方法，检查其生成的路径是否正确使用了 __qualname__。",
+        "reusable_parts": [
+          "deconstruct() 方法的调用和结果验证",
+          "对 path 字段的断言",
+          "嵌套类 Field 的定义"
+        ],
+        "possible_gap": "该测试针对的是字段类本身是嵌套类的情况，而 Issue 是字段的 default 参数值是嵌套类的类方法。"
+      },
+      {
+        "test_name": "test_adding_field_with_default",
+        "test_file": "tests/postgres_tests/test_array.py",
+        "why_relevant": "该测试涉及为模型添加带有默认值的 ArrayField 的迁移过程，与 Issue 中迁移出错的大场景一致。",
+        "reusable_parts": [
+          "使用 @override_settings 设置迁移模块",
+          "call_command 调用迁移",
+          "检查数据库表是否存在"
+        ],
+        "possible_gap": "该测试使用的默认值可能不是嵌套类的类方法，因此可能无法触发 Issue 中的特定路径序列化错误。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个模型，其中包含一个嵌套类（如 TextChoices），该嵌套类有一个类方法（如 default），并将此方法作为 ArrayField 的 default 参数值。",
+      "evidence": [
+        "Issue 中给出的 Profile 模型定义，其中 Capability 是嵌套类，其类方法 default 被用作 capabilities 字段的 default 参数。",
+        "Issue 描述：'Class methods from nested classes cannot be used as Field.default.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的迁移文件（migrations.AddField）中，default 参数的值是错误的字符串 'appname.models.Capability.default'，而不是正确的 'appname.models.Profile.Capability.default'，导致迁移时出错。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中展示的迁移代码片段：'default=appname.models.Capability.default'。",
+        "Issue 描述：'...which leads to an error when trying to migrate.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ArrayField",
+        "kind": "class",
+        "source_path": "django/contrib/postgres/fields/array.py",
+        "reason": "Issue 中出错的字段类型是 ArrayField，其 default 参数处理是问题的核心。"
+      },
+      {
+        "name": "AddField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 中展示的错误出现在生成的迁移操作 AddField 中。"
+      },
+      {
+        "name": "deconstruct",
+        "kind": "method",
+        "source_path": "",
+        "reason": "字段的序列化（用于生成迁移）依赖于 deconstruct 方法。相关测试 2 直接测试了此方法对嵌套类的处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/postgres/fields/array.py",
+        "object": "ArrayField.deconstruct",
+        "lines": "",
+        "reason": "ArrayField 的 deconstruct 方法负责序列化字段定义，包括 default 参数。Issue 表明 default 参数的序列化路径不正确。"
+      },
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AddField",
+        "lines": "",
+        "reason": "Issue 中展示的错误直接出现在 AddField 操作的参数中，表明迁移操作在接收或处理序列化后的 default 值时可能有问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中可能使用简单值（如列表 []）或顶级函数作为 Field.default。",
+        "target_pattern": "使用嵌套类（如 TextChoices）的类方法作为 Field.default 参数。",
+        "reason": "Issue 明确指出此模式会触发错误的序列化路径生成。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "在相关测试 1 和 2 中，嵌套类被直接序列化或作为字段类。",
+        "target_pattern": "嵌套类的类方法被作为另一个对象（Field）的构造参数值。",
+        "reason": "缺陷可能出现在将嵌套类方法作为参数值传递并序列化的链路上，而非直接序列化嵌套类本身。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当嵌套类的类方法被用作字段的 default 参数时，迁移文件应能正确序列化该方法的完整引用路径（包括外层类）。",
+      "evidence": [
+        "Issue 中明确指出了正确值应为 'appname.models.Profile.Capability.default'。",
+        "相关测试 2 表明 deconstruct() 应使用 __qualname__ 来支持嵌套类。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "调用字段实例的 deconstruct() 方法，观察返回的 kwargs 中 'default' 键对应的值。",
+        "reason": "Issue 的核心是序列化后的 default 值路径错误，直接观察 deconstruct 的输出最能定位问题。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "生成的迁移文件（Python 代码）中 AddField 操作的 'default' 参数字符串。",
+        "reason": "Issue 中展示的错误现象就体现在生成的迁移代码中，这是缺陷的最终表现。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "尝试运行迁移（migrate）命令时的异常堆栈。",
+        "reason": "Issue 提到错误的路径会导致迁移时出错，观察具体异常可以确认缺陷被触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证字段 deconstruct() 结果中 default 参数的路径字符串包含了外层类名（如 'Profile.Capability.default'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、包含应用名的绝对路径字符串相等，因为这可能因测试设置而异。",
+        "reason": "Issue 的关键在于路径是否完整（包含嵌套结构），而不是具体的应用模块名前缀。"
+      },
+      {
+        "assertion_goal": "验证生成的迁移操作可以成功执行，不会因 default 参数引用错误而失败。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言迁移过程中产生的具体 SQL 语句。",
+        "reason": "修复后，迁移应能正常进行。在缺陷存在时，断言会抛出异常；修复后，断言应改为不抛出异常或验证迁移成功。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 ArrayField.deconstruct 中，还是在更底层的序列化框架中处理可调用对象 default 值时。",
+    "除了 ArrayField，其他类型的 Field 在使用嵌套类的类方法作为 default 时是否也存在同样问题。",
+    "修复后，deconstruct 生成的路径具体格式（如使用 '.' 还是 '$' 连接嵌套类名）的细节。"
+  ],
+  "raw": {
+    "issue_summary": "当嵌套类的类方法用作 ArrayField 的 default 参数时，迁移文件会生成错误的引用路径。",
+    "trigger_condition": {
+      "text": "定义一个模型，其中包含一个嵌套类（如 TextChoices），该嵌套类有一个类方法（如 default），并将此方法作为 ArrayField 的 default 参数值。",
+      "evidence": [
+        "Issue 中给出的 Profile 模型定义，其中 Capability 是嵌套类，其类方法 default 被用作 capabilities 字段的 default 参数。",
+        "Issue 描述：'Class methods from nested classes cannot be used as Field.default.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的迁移文件（migrations.AddField）中，default 参数的值是错误的字符串 'appname.models.Capability.default'，而不是正确的 'appname.models.Profile.Capability.default'，导致迁移时出错。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中展示的迁移代码片段：'default=appname.models.Capability.default'。",
+        "Issue 描述：'...which leads to an error when trying to migrate.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当嵌套类的类方法被用作字段的 default 参数时，迁移文件应能正确序列化该方法的完整引用路径（包括外层类）。",
+      "evidence": [
+        "Issue 中明确指出了正确值应为 'appname.models.Profile.Capability.default'。",
+        "相关测试 2 表明 deconstruct() 应使用 __qualname__ 来支持嵌套类。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ArrayField",
+        "kind": "class",
+        "source_path": "django/contrib/postgres/fields/array.py",
+        "reason": "Issue 中出错的字段类型是 ArrayField，其 default 参数处理是问题的核心。"
+      },
+      {
+        "name": "AddField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 中展示的错误出现在生成的迁移操作 AddField 中。"
+      },
+      {
+        "name": "deconstruct",
+        "kind": "method",
+        "source_path": "",
+        "reason": "字段的序列化（用于生成迁移）依赖于 deconstruct 方法。相关测试 2 直接测试了此方法对嵌套类的处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/postgres/fields/array.py",
+        "object": "ArrayField.deconstruct",
+        "lines": "",
+        "reason": "ArrayField 的 deconstruct 方法负责序列化字段定义，包括 default 参数。Issue 表明 default 参数的序列化路径不正确。"
+      },
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AddField",
+        "lines": "",
+        "reason": "Issue 中展示的错误直接出现在 AddField 操作的参数中，表明迁移操作在接收或处理序列化后的 default 值时可能有问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_serialize_nested_class",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "该测试直接验证了嵌套类的序列化结果，与 Issue 中嵌套类方法序列化错误的场景高度相关。",
+        "reusable_parts": [
+          "测试类 WriterTests",
+          "assertSerializedResultEqual 断言方法",
+          "嵌套类的定义模式"
+        ],
+        "possible_gap": "该测试序列化的是嵌套类本身，而不是嵌套类的类方法作为另一个对象（Field.default）的参数值。"
+      },
+      {
+        "test_name": "test_deconstruct_nested_field",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试直接验证了嵌套类字段的 deconstruct() 方法，检查其生成的路径是否正确使用了 __qualname__。",
+        "reusable_parts": [
+          "deconstruct() 方法的调用和结果验证",
+          "对 path 字段的断言",
+          "嵌套类 Field 的定义"
+        ],
+        "possible_gap": "该测试针对的是字段类本身是嵌套类的情况，而 Issue 是字段的 default 参数值是嵌套类的类方法。"
+      },
+      {
+        "test_name": "test_adding_field_with_default",
+        "test_file": "tests/postgres_tests/test_array.py",
+        "why_relevant": "该测试涉及为模型添加带有默认值的 ArrayField 的迁移过程，与 Issue 中迁移出错的大场景一致。",
+        "reusable_parts": [
+          "使用 @override_settings 设置迁移模块",
+          "call_command 调用迁移",
+          "检查数据库表是否存在"
+        ],
+        "possible_gap": "该测试使用的默认值可能不是嵌套类的类方法，因此可能无法触发 Issue 中的特定路径序列化错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中可能使用简单值（如列表 []）或顶级函数作为 Field.default。",
+        "target_pattern": "使用嵌套类（如 TextChoices）的类方法作为 Field.default 参数。",
+        "reason": "Issue 明确指出此模式会触发错误的序列化路径生成。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "在相关测试 1 和 2 中，嵌套类被直接序列化或作为字段类。",
+        "target_pattern": "嵌套类的类方法被作为另一个对象（Field）的构造参数值。",
+        "reason": "缺陷可能出现在将嵌套类方法作为参数值传递并序列化的链路上，而非直接序列化嵌套类本身。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "调用字段实例的 deconstruct() 方法，观察返回的 kwargs 中 'default' 键对应的值。",
+        "reason": "Issue 的核心是序列化后的 default 值路径错误，直接观察 deconstruct 的输出最能定位问题。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "生成的迁移文件（Python 代码）中 AddField 操作的 'default' 参数字符串。",
+        "reason": "Issue 中展示的错误现象就体现在生成的迁移代码中，这是缺陷的最终表现。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "尝试运行迁移（migrate）命令时的异常堆栈。",
+        "reason": "Issue 提到错误的路径会导致迁移时出错，观察具体异常可以确认缺陷被触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证字段 deconstruct() 结果中 default 参数的路径字符串包含了外层类名（如 'Profile.Capability.default'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、包含应用名的绝对路径字符串相等，因为这可能因测试设置而异。",
+        "reason": "Issue 的关键在于路径是否完整（包含嵌套结构），而不是具体的应用模块名前缀。"
+      },
+      {
+        "assertion_goal": "验证生成的迁移操作可以成功执行，不会因 default 参数引用错误而失败。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言迁移过程中产生的具体 SQL 语句。",
+        "reason": "修复后，迁移应能正常进行。在缺陷存在时，断言会抛出异常；修复后，断言应改为不抛出异常或验证迁移成功。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 isolate_apps 或类似机制来隔离测试模型，避免模型定义冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建包含嵌套类和以该类方法为 default 的 ArrayField 的模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 PostgreSQL 数据库，因为 ArrayField 是 PostgreSQL 特定字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TransactionTestCase 并覆盖 MIGRATION_MODULES 设置来控制迁移。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 ArrayField.deconstruct 中，还是在更底层的序列化框架中处理可调用对象 default 值时。",
+      "除了 ArrayField，其他类型的 Field 在使用嵌套类的类方法作为 default 时是否也存在同样问题。",
+      "修复后，deconstruct 生成的路径具体格式（如使用 '.' 还是 '$' 连接嵌套类名）的细节。"
+    ]
+  }
+}

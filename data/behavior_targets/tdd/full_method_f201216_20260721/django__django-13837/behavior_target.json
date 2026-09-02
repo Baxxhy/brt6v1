@@ -1,0 +1,286 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13837",
+  "issue_summary": "当前 `get_child_arguments` 函数仅能检测 `python -m django` 启动方式，无法正确检测 `python -m pkg_other_than_django` 启动方式，导致基于 Django 的自定义命令行工具在运行 `runserver` 等命令时自动重载功能可能失效。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `unittest.mock` 来模拟 `sys.argv`、`sys.warnoptions`，可能还需要模拟 `__main__.__spec__`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 `SimpleTestCase`，这是 Django 测试工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时文件或目录来模拟脚本入口点，但 Issue 更关注 `-m` 模式而非脚本文件模式。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_run_as_module",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它直接测试 `get_child_arguments` 在 `python -m django runserver` 场景下的行为，是测试该函数的核心用例。",
+        "reusable_parts": [
+          "导入 `autoreload` 模块",
+          "使用 `@mock.patch` 装饰器模拟 `sys.argv` 和 `sys.warnoptions`",
+          "使用 `self.assertEqual` 断言返回值"
+        ],
+        "possible_gap": "它只测试了 `-m django` 这一特定包名，没有测试 `-m pkg_other_than_django` 的场景。"
+      },
+      {
+        "test_name": "RestartWithReloaderTests.test_python_m_django",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了更完整的重载流程 (`restart_with_reloader`)，并验证了最终传递给 `subprocess.call` 的参数。",
+        "reusable_parts": [
+          "使用 `self.patch_autoreload` 方法模拟 `subprocess.call`",
+          "使用 `mock.patch` 模拟 `django.__main__.__file__`",
+          "断言 `call_args` 的内容"
+        ],
+        "possible_gap": "同样只针对 `-m django` 场景，且依赖于 `__file__` 属性，而 Issue 提到在某些 Python 环境中 `__file__` 可能不存在。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 `python -m pkg_other_than_django runserver` 启动 Django 开发服务器，其中 `pkg_other_than_django` 是用户自定义的包名，且该包有自己的 `__main__` 子模块。",
+      "evidence": [
+        "Issue 描述中提到“Allow autoreloading of `python -m pkg_other_than_django runserver`”，并指出当前检测仅针对 `-m django`。",
+        "源码片段 1 中 `get_child_arguments` 函数通过比较 `py_script` 和 `django_main_path` 来判断是否以 `-m django` 启动。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当以 `python -m pkg_other_than_django runserver` 启动时，自动重载器可能无法正确重启子进程，因为 `get_child_arguments` 返回的子进程参数不正确（可能缺少 `-m pkg_other_than_django` 部分）。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述指出这是“one impediment to creating Django-based command-line utilities...”，暗示功能未按预期工作。",
+        "源码片段 1 显示，只有当 `py_script == django_main_path` 时才会添加 `['-m', 'django']` 参数。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.autoreload.get_child_arguments",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "这是 Issue 直接讨论和需要修复的核心函数，负责生成子进程重启参数。"
+      },
+      {
+        "name": "django.utils.autoreload.restart_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "相关测试中调用了此函数，它内部会调用 `get_child_arguments`，是自动重载流程的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "get_child_arguments",
+        "lines": "213-246",
+        "reason": "Issue 明确指出该函数当前检测逻辑有缺陷，仅检查 `-m django`。源码片段 1 展示了其当前实现。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "模拟 `sys.argv[0]` 为 `django.__main__.__file__`（即 `-m django` 场景）。",
+        "target_pattern": "模拟 `sys.argv[0]` 为其他包的 `__main__` 模块文件路径，或通过模拟 `__main__.__spec__` 来构造 `-m pkg_other_than_django` 的场景。",
+        "reason": "当前测试只覆盖了 `-m django`。要触发缺陷，需要让 `get_child_arguments` 处理非 `django` 包的 `-m` 启动方式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "测试中通过 `mock.patch('django.__main__.__file__', ...)` 来设置模块文件路径。",
+        "target_pattern": "可能需要改为模拟 `__main__.__spec__` 及其 `parent` 属性，以符合 Issue 建议的修复算法。",
+        "reason": "Issue 指出当前检测依赖 `__file__` 且不通用，而修复方案建议使用 `__main__.__spec__.parent`。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "`get_child_arguments` 函数应能正确检测 Python 是否以 `-m <package>` 形式启动，并据此为子进程构造包含 `-m <package>` 的正确参数列表，以支持任意包（包括非 `django` 包）的自动重载。",
+      "evidence": [
+        "Issue 描述中提到了“The fix... is to use Python's documented way of determining if -m was used...”，并给出了算法：`__main__.__spec__.parent == \"pkg\"`。",
+        "Issue 描述的目标是“remove one impediment to creating Django-based command-line utilities”。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`autoreload.get_child_arguments()` 的返回值列表。",
+        "reason": "该函数的返回值直接决定了子进程如何重启。观察其是否在 `-m pkg_other_than_django` 场景下正确包含了 `-m pkg_other_than_django` 参数。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`__main__.__spec__` 和 `__main__.__spec__.parent` 的值。",
+        "reason": "Issue 提出的新算法基于这些属性。观察它们在测试环境下的状态，以理解检测逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当以 `python -m mypackage runserver` 启动时，`get_child_arguments()` 返回的列表应包含 `['-m', 'mypackage']` 片段。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、包含绝对路径的返回值列表，因为路径可能因环境而异。",
+        "reason": "Issue 的核心是正确识别 `-m <package>` 并包含相应参数。断言包含特定片段比断言完整列表更稳定。"
+      },
+      {
+        "assertion_goal": "`get_child_arguments()` 的返回值应能用于正确重启子进程（例如，传递给 `subprocess.call` 时不会出错）。",
+        "preferred_assertion_style": "unknown",
+        "avoid": "避免断言与 `__file__` 直接相关的路径比较，因为 Issue 指出 `__file__` 在某些环境下可能不存在。",
+        "reason": "函数的最终目的是生成有效的子进程参数。断言其可用性比断言内部实现细节更稳健。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "在非 `django` 包的 `-m` 启动场景下，`django.__main__.__file__` 的值是什么？`get_child_arguments` 函数是否仍然会导入 `django.__main__`？",
+    "Issue 中提到的“Python environments in which __file__ is set on modules, which is not true of all Python environments”具体指哪些环境？这如何影响当前代码和测试？",
+    "除了 `-m` 检测，`get_child_arguments` 函数中处理 Windows 脚本和 `.exe` 回退的逻辑是否也需要为新的检测算法进行调整？"
+  ],
+  "raw": {
+    "issue_summary": "当前 `get_child_arguments` 函数仅能检测 `python -m django` 启动方式，无法正确检测 `python -m pkg_other_than_django` 启动方式，导致基于 Django 的自定义命令行工具在运行 `runserver` 等命令时自动重载功能可能失效。",
+    "trigger_condition": {
+      "text": "使用 `python -m pkg_other_than_django runserver` 启动 Django 开发服务器，其中 `pkg_other_than_django` 是用户自定义的包名，且该包有自己的 `__main__` 子模块。",
+      "evidence": [
+        "Issue 描述中提到“Allow autoreloading of `python -m pkg_other_than_django runserver`”，并指出当前检测仅针对 `-m django`。",
+        "源码片段 1 中 `get_child_arguments` 函数通过比较 `py_script` 和 `django_main_path` 来判断是否以 `-m django` 启动。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当以 `python -m pkg_other_than_django runserver` 启动时，自动重载器可能无法正确重启子进程，因为 `get_child_arguments` 返回的子进程参数不正确（可能缺少 `-m pkg_other_than_django` 部分）。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述指出这是“one impediment to creating Django-based command-line utilities...”，暗示功能未按预期工作。",
+        "源码片段 1 显示，只有当 `py_script == django_main_path` 时才会添加 `['-m', 'django']` 参数。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "`get_child_arguments` 函数应能正确检测 Python 是否以 `-m <package>` 形式启动，并据此为子进程构造包含 `-m <package>` 的正确参数列表，以支持任意包（包括非 `django` 包）的自动重载。",
+      "evidence": [
+        "Issue 描述中提到了“The fix... is to use Python's documented way of determining if -m was used...”，并给出了算法：`__main__.__spec__.parent == \"pkg\"`。",
+        "Issue 描述的目标是“remove one impediment to creating Django-based command-line utilities”。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.autoreload.get_child_arguments",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "这是 Issue 直接讨论和需要修复的核心函数，负责生成子进程重启参数。"
+      },
+      {
+        "name": "django.utils.autoreload.restart_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "相关测试中调用了此函数，它内部会调用 `get_child_arguments`，是自动重载流程的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "get_child_arguments",
+        "lines": "213-246",
+        "reason": "Issue 明确指出该函数当前检测逻辑有缺陷，仅检查 `-m django`。源码片段 1 展示了其当前实现。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_run_as_module",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它直接测试 `get_child_arguments` 在 `python -m django runserver` 场景下的行为，是测试该函数的核心用例。",
+        "reusable_parts": [
+          "导入 `autoreload` 模块",
+          "使用 `@mock.patch` 装饰器模拟 `sys.argv` 和 `sys.warnoptions`",
+          "使用 `self.assertEqual` 断言返回值"
+        ],
+        "possible_gap": "它只测试了 `-m django` 这一特定包名，没有测试 `-m pkg_other_than_django` 的场景。"
+      },
+      {
+        "test_name": "RestartWithReloaderTests.test_python_m_django",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了更完整的重载流程 (`restart_with_reloader`)，并验证了最终传递给 `subprocess.call` 的参数。",
+        "reusable_parts": [
+          "使用 `self.patch_autoreload` 方法模拟 `subprocess.call`",
+          "使用 `mock.patch` 模拟 `django.__main__.__file__`",
+          "断言 `call_args` 的内容"
+        ],
+        "possible_gap": "同样只针对 `-m django` 场景，且依赖于 `__file__` 属性，而 Issue 提到在某些 Python 环境中 `__file__` 可能不存在。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "模拟 `sys.argv[0]` 为 `django.__main__.__file__`（即 `-m django` 场景）。",
+        "target_pattern": "模拟 `sys.argv[0]` 为其他包的 `__main__` 模块文件路径，或通过模拟 `__main__.__spec__` 来构造 `-m pkg_other_than_django` 的场景。",
+        "reason": "当前测试只覆盖了 `-m django`。要触发缺陷，需要让 `get_child_arguments` 处理非 `django` 包的 `-m` 启动方式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "测试中通过 `mock.patch('django.__main__.__file__', ...)` 来设置模块文件路径。",
+        "target_pattern": "可能需要改为模拟 `__main__.__spec__` 及其 `parent` 属性，以符合 Issue 建议的修复算法。",
+        "reason": "Issue 指出当前检测依赖 `__file__` 且不通用，而修复方案建议使用 `__main__.__spec__.parent`。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`autoreload.get_child_arguments()` 的返回值列表。",
+        "reason": "该函数的返回值直接决定了子进程如何重启。观察其是否在 `-m pkg_other_than_django` 场景下正确包含了 `-m pkg_other_than_django` 参数。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`__main__.__spec__` 和 `__main__.__spec__.parent` 的值。",
+        "reason": "Issue 提出的新算法基于这些属性。观察它们在测试环境下的状态，以理解检测逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当以 `python -m mypackage runserver` 启动时，`get_child_arguments()` 返回的列表应包含 `['-m', 'mypackage']` 片段。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、包含绝对路径的返回值列表，因为路径可能因环境而异。",
+        "reason": "Issue 的核心是正确识别 `-m <package>` 并包含相应参数。断言包含特定片段比断言完整列表更稳定。"
+      },
+      {
+        "assertion_goal": "`get_child_arguments()` 的返回值应能用于正确重启子进程（例如，传递给 `subprocess.call` 时不会出错）。",
+        "preferred_assertion_style": "unknown",
+        "avoid": "避免断言与 `__file__` 直接相关的路径比较，因为 Issue 指出 `__file__` 在某些环境下可能不存在。",
+        "reason": "函数的最终目的是生成有效的子进程参数。断言其可用性比断言内部实现细节更稳健。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `unittest.mock` 来模拟 `sys.argv`、`sys.warnoptions`，可能还需要模拟 `__main__.__spec__`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 `SimpleTestCase`，这是 Django 测试工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时文件或目录来模拟脚本入口点，但 Issue 更关注 `-m` 模式而非脚本文件模式。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "在非 `django` 包的 `-m` 启动场景下，`django.__main__.__file__` 的值是什么？`get_child_arguments` 函数是否仍然会导入 `django.__main__`？",
+      "Issue 中提到的“Python environments in which __file__ is set on modules, which is not true of all Python environments”具体指哪些环境？这如何影响当前代码和测试？",
+      "除了 `-m` 检测，`get_child_arguments` 函数中处理 Windows 脚本和 `.exe` 回退的逻辑是否也需要为新的检测算法进行调整？"
+    ]
+  }
+}

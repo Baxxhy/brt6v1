@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-4094",
+  "issue_summary": "当变量只有单一维度时，to_unstacked_dataset 方法无法正确处理由 to_stacked_array 生成的 DataArray，导致合并错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy。可以使用类似于现有测试中的 `create_test_stacked_array` 辅助函数的思路来构造简单的单维测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以放在现有的 `TestDataset` 类中，或者作为一个独立的测试函数，以保持与现有测试套件的组织一致。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_to_stacked_array_to_unstacked_dataset_different_dimension",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试明确测试了变量具有不同维度（包括一个变量比另一个少一个维度）时的往返转换，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试结构：创建 Dataset -> to_stacked_array -> to_unstacked_dataset -> assert_identical。",
+          "使用 `create_test_stacked_array` 辅助函数构造数据。",
+          "使用 `assert_identical` 进行断言。"
+        ],
+        "possible_gap": "该测试中变量 'b' 是通过 `b.isel(y=0)` 创建的，它仍然保留了 'y' 维度（只是大小为 1），而 Issue 中的变量是完全单维的（只有 'x' 维度）。测试可能未覆盖完全缺失堆叠维度的极端情况。"
+      },
+      {
+        "test_name": "TestDataset.test_to_stacked_array_to_unstacked_dataset",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "这是基本的往返转换测试，展示了正常的多维情况下的工作流程。",
+        "reusable_parts": [
+          "测试的整体流程和断言方法。",
+          "对单个样本（`y[0]`）也进行了测试的模式。"
+        ],
+        "possible_gap": "它测试的是两个变量都具有相同多维度的场景，没有涉及单维变量。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个包含仅具有单个维度的变量的 Dataset 调用 to_stacked_array，然后对生成的 DataArray 调用 to_unstacked_dataset。",
+      "evidence": [
+        "Issue 中的 MCVE 代码示例：`data = xr.Dataset({\"a\": arr, \"b\": arr})`，其中 arr 是单维 DataArray，然后调用 `stacked = data.to_stacked_array('y', sample_dims=['x'])` 和 `unstacked = stacked.to_unstacked_dataset('y')`。",
+        "源码片段 4 中 to_unstacked_dataset 的实现逻辑涉及从 MultiIndex 中提取变量并调用 `.sel` 和 `.squeeze`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 MergeError: conflicting values for variable 'y' on objects to be combined.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：`# MergeError: conflicting values for variable 'y' on objects to be combined.`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.Dataset.to_stacked_array",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中触发 bug 的第一步操作，用于将 Dataset 转换为堆叠的 DataArray。"
+      },
+      {
+        "name": "xr.DataArray.to_unstacked_dataset",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 中触发 bug 的第二步操作，用于将堆叠的 DataArray 转换回 Dataset，但当前对单维变量失败。"
+      },
+      {
+        "name": "xr.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中操作的核心数据结构。"
+      },
+      {
+        "name": "xr.DataArray",
+        "kind": "class",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "to_stacked_array 的返回类型和 to_unstacked_dataset 的调用者。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataarray.py",
+        "object": "DataArray.to_unstacked_dataset",
+        "lines": "1901-1967",
+        "reason": "该方法是错误发生的直接位置，其内部逻辑（如使用 `.sel` 和 `.squeeze`）在处理由单维变量堆叠生成的 DataArray 时可能产生冲突的坐标。"
+      },
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.to_stacked_array",
+        "lines": "3370-3488",
+        "reason": "该方法为单维变量生成堆叠的 DataArray，其生成的 MultiIndex 结构（可能包含 NaN 占位符）可能是后续 unstack 失败的根源。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用 `create_test_stacked_array()` 生成的多维 DataArray，或通过 `.isel` 选择后仍保留维度的 DataArray。",
+        "target_pattern": "使用仅具有 `sample_dims` 中指定维度的单维 DataArray（例如，只有 'x' 维度，没有 'y' 维度）。",
+        "reason": "Issue 明确指出问题发生在变量“only have a single dimension”时。将测试数据变异为完全的单维变量可能触发现有测试未覆盖的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常先创建多维 Dataset，然后调用 to_stacked_array 和 to_unstacked_dataset。",
+        "target_pattern": "严格遵循 Issue 中的 MCVE：创建单维 DataArray，用它们构建 Dataset，然后进行堆叠和反堆叠。",
+        "reason": "确保复现步骤与 Issue 描述完全一致，以触发相同的 MergeError。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "to_stacked_array 和 to_unstacked_dataset 应该能够成功地进行往返转换，即使变量只有单一维度。",
+      "evidence": [
+        "Issue 中的 'Expected Output' 部分：'A working roundtrip.'",
+        "相关测试 1 和 2 展示了对于多维变量，往返转换是成功的。",
+        "源码片段 3 中 to_stacked_array 的文档字符串提到它与 to_unstacked_dataset 是互逆操作。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `stacked.to_unstacked_dataset('y')` 时是否抛出 MergeError 或其详细信息。",
+        "reason": "这是 Issue 中直接观察到的错误现象，是判断缺陷是否被触发的直接标志。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`stacked` DataArray 的 `indexes['y']`（即 MultiIndex）的结构，特别是对于单维变量，其 levels 和 labels 的值。",
+        "reason": "to_unstacked_dataset 严重依赖 MultiIndex 来重建变量。观察其结构有助于理解为什么后续的 `.sel` 和 `.squeeze` 会产生冲突。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用 `to_unstacked_dataset` 后返回的 Dataset 的结构，特别是其坐标 'y' 是否存在或值是否正确。",
+        "reason": "在修复后，需要验证返回的 Dataset 是否与原始 Dataset 相同（assert_identical）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对由单维变量堆叠生成的 DataArray 调用 to_unstacked_dataset 不会抛出 MergeError（或其他异常），并能成功返回一个 Dataset。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为具体措辞可能变化。",
+        "reason": "当前行为是抛出异常，修复后应不再抛出。初始的缺陷复现测试应捕获该异常。修复后的测试应验证无异常且结果正确。"
+      },
+      {
+        "assertion_goal": "验证往返转换后的 Dataset 与原始 Dataset 在结构和数据上完全一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅比较 repr 字符串或忽略元数据（attrs, encoding）的比较。",
+        "reason": "这是 to_stacked_array/to_unstacked_dataset 作为互逆操作的核心语义。使用 `assert_identical` 是相关测试中的标准做法。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "MergeError 具体是在 to_unstacked_dataset 方法内部的哪一行代码触发的？是 `.sel` 调用还是后续构建 Dataset 时？",
+    "对于单维变量，to_stacked_array 生成的 MultiIndex 中，缺失的堆叠维度（如 'y'）对应的 level 值具体是什么（是 None, NaN 还是其他占位符）？这如何影响后续的 `.sel({variable_dim: k})` 操作？",
+    "除了 MergeError，是否还有其他潜在的错误（如维度不匹配、坐标值错误）？",
+    "修复方案可能涉及修改 to_stacked_array 的索引生成逻辑，还是 to_unstacked_dataset 的数据提取逻辑，或两者都需要？"
+  ],
+  "raw": {
+    "issue_summary": "当变量只有单一维度时，to_unstacked_dataset 方法无法正确处理由 to_stacked_array 生成的 DataArray，导致合并错误。",
+    "trigger_condition": {
+      "text": "对一个包含仅具有单个维度的变量的 Dataset 调用 to_stacked_array，然后对生成的 DataArray 调用 to_unstacked_dataset。",
+      "evidence": [
+        "Issue 中的 MCVE 代码示例：`data = xr.Dataset({\"a\": arr, \"b\": arr})`，其中 arr 是单维 DataArray，然后调用 `stacked = data.to_stacked_array('y', sample_dims=['x'])` 和 `unstacked = stacked.to_unstacked_dataset('y')`。",
+        "源码片段 4 中 to_unstacked_dataset 的实现逻辑涉及从 MultiIndex 中提取变量并调用 `.sel` 和 `.squeeze`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 MergeError: conflicting values for variable 'y' on objects to be combined.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：`# MergeError: conflicting values for variable 'y' on objects to be combined.`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "to_stacked_array 和 to_unstacked_dataset 应该能够成功地进行往返转换，即使变量只有单一维度。",
+      "evidence": [
+        "Issue 中的 'Expected Output' 部分：'A working roundtrip.'",
+        "相关测试 1 和 2 展示了对于多维变量，往返转换是成功的。",
+        "源码片段 3 中 to_stacked_array 的文档字符串提到它与 to_unstacked_dataset 是互逆操作。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.Dataset.to_stacked_array",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中触发 bug 的第一步操作，用于将 Dataset 转换为堆叠的 DataArray。"
+      },
+      {
+        "name": "xr.DataArray.to_unstacked_dataset",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 中触发 bug 的第二步操作，用于将堆叠的 DataArray 转换回 Dataset，但当前对单维变量失败。"
+      },
+      {
+        "name": "xr.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中操作的核心数据结构。"
+      },
+      {
+        "name": "xr.DataArray",
+        "kind": "class",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "to_stacked_array 的返回类型和 to_unstacked_dataset 的调用者。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataarray.py",
+        "object": "DataArray.to_unstacked_dataset",
+        "lines": "1901-1967",
+        "reason": "该方法是错误发生的直接位置，其内部逻辑（如使用 `.sel` 和 `.squeeze`）在处理由单维变量堆叠生成的 DataArray 时可能产生冲突的坐标。"
+      },
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.to_stacked_array",
+        "lines": "3370-3488",
+        "reason": "该方法为单维变量生成堆叠的 DataArray，其生成的 MultiIndex 结构（可能包含 NaN 占位符）可能是后续 unstack 失败的根源。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_to_stacked_array_to_unstacked_dataset_different_dimension",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试明确测试了变量具有不同维度（包括一个变量比另一个少一个维度）时的往返转换，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试结构：创建 Dataset -> to_stacked_array -> to_unstacked_dataset -> assert_identical。",
+          "使用 `create_test_stacked_array` 辅助函数构造数据。",
+          "使用 `assert_identical` 进行断言。"
+        ],
+        "possible_gap": "该测试中变量 'b' 是通过 `b.isel(y=0)` 创建的，它仍然保留了 'y' 维度（只是大小为 1），而 Issue 中的变量是完全单维的（只有 'x' 维度）。测试可能未覆盖完全缺失堆叠维度的极端情况。"
+      },
+      {
+        "test_name": "TestDataset.test_to_stacked_array_to_unstacked_dataset",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "这是基本的往返转换测试，展示了正常的多维情况下的工作流程。",
+        "reusable_parts": [
+          "测试的整体流程和断言方法。",
+          "对单个样本（`y[0]`）也进行了测试的模式。"
+        ],
+        "possible_gap": "它测试的是两个变量都具有相同多维度的场景，没有涉及单维变量。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用 `create_test_stacked_array()` 生成的多维 DataArray，或通过 `.isel` 选择后仍保留维度的 DataArray。",
+        "target_pattern": "使用仅具有 `sample_dims` 中指定维度的单维 DataArray（例如，只有 'x' 维度，没有 'y' 维度）。",
+        "reason": "Issue 明确指出问题发生在变量“only have a single dimension”时。将测试数据变异为完全的单维变量可能触发现有测试未覆盖的代码路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常先创建多维 Dataset，然后调用 to_stacked_array 和 to_unstacked_dataset。",
+        "target_pattern": "严格遵循 Issue 中的 MCVE：创建单维 DataArray，用它们构建 Dataset，然后进行堆叠和反堆叠。",
+        "reason": "确保复现步骤与 Issue 描述完全一致，以触发相同的 MergeError。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `stacked.to_unstacked_dataset('y')` 时是否抛出 MergeError 或其详细信息。",
+        "reason": "这是 Issue 中直接观察到的错误现象，是判断缺陷是否被触发的直接标志。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`stacked` DataArray 的 `indexes['y']`（即 MultiIndex）的结构，特别是对于单维变量，其 levels 和 labels 的值。",
+        "reason": "to_unstacked_dataset 严重依赖 MultiIndex 来重建变量。观察其结构有助于理解为什么后续的 `.sel` 和 `.squeeze` 会产生冲突。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用 `to_unstacked_dataset` 后返回的 Dataset 的结构，特别是其坐标 'y' 是否存在或值是否正确。",
+        "reason": "在修复后，需要验证返回的 Dataset 是否与原始 Dataset 相同（assert_identical）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对由单维变量堆叠生成的 DataArray 调用 to_unstacked_dataset 不会抛出 MergeError（或其他异常），并能成功返回一个 Dataset。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为具体措辞可能变化。",
+        "reason": "当前行为是抛出异常，修复后应不再抛出。初始的缺陷复现测试应捕获该异常。修复后的测试应验证无异常且结果正确。"
+      },
+      {
+        "assertion_goal": "验证往返转换后的 Dataset 与原始 Dataset 在结构和数据上完全一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅比较 repr 字符串或忽略元数据（attrs, encoding）的比较。",
+        "reason": "这是 to_stacked_array/to_unstacked_dataset 作为互逆操作的核心语义。使用 `assert_identical` 是相关测试中的标准做法。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy。可以使用类似于现有测试中的 `create_test_stacked_array` 辅助函数的思路来构造简单的单维测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以放在现有的 `TestDataset` 类中，或者作为一个独立的测试函数，以保持与现有测试套件的组织一致。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "MergeError 具体是在 to_unstacked_dataset 方法内部的哪一行代码触发的？是 `.sel` 调用还是后续构建 Dataset 时？",
+      "对于单维变量，to_stacked_array 生成的 MultiIndex 中，缺失的堆叠维度（如 'y'）对应的 level 值具体是什么（是 None, NaN 还是其他占位符）？这如何影响后续的 `.sel({variable_dim: k})` 操作？",
+      "除了 MergeError，是否还有其他潜在的错误（如维度不匹配、坐标值错误）？",
+      "修复方案可能涉及修改 to_stacked_array 的索引生成逻辑，还是 to_unstacked_dataset 的数据提取逻辑，或两者都需要？"
+    ]
+  }
+}

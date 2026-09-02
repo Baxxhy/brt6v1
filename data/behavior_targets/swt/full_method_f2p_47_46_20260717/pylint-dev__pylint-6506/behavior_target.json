@@ -1,0 +1,308 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pylint-dev__pylint-6506",
+  "issue_summary": "当 pylint 接收到无法识别的选项时，会打印出 traceback 而不是友好的错误信息。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 `capsys` fixture 来捕获标准输出和标准错误。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 `run_pylint` 函数和 `_UnrecognizedOptionError` 异常。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境需要模拟命令行参数，例如传递 `[\"-Q\"]`。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_unknown_short_option_name",
+        "test_file": "tests/config/test_config.py",
+        "why_relevant": "该测试直接针对无法识别的短选项（`-Q`）触发 `_UnrecognizedOptionError`，与 Issue 触发条件相同。",
+        "reusable_parts": [
+          "使用 `Run` 类并传入参数列表",
+          "使用 `capsys` fixture 捕获输出",
+          "断言输出中包含 `E0015: Unrecognized option found: Q`"
+        ],
+        "possible_gap": "该测试使用 `pytest.raises` 捕获异常，因此不会看到 traceback 被打印到标准输出/错误。它没有测试当异常未被捕获时（如真实命令行运行）的行为。"
+      },
+      {
+        "test_name": "test_unknown_option_name",
+        "test_file": "tests/config/test_config.py",
+        "why_relevant": "该测试针对无法识别的长选项触发 `_UnrecognizedOptionError`，验证了相同的问题类别。",
+        "reusable_parts": [
+          "测试结构和对 `Run` 类的使用",
+          "使用 `capsys` 和断言输出模式"
+        ],
+        "possible_gap": "同样使用 `pytest.raises`，不测试未捕获异常时的输出。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在命令行中向 pylint 传递一个无法识别的选项，例如 `-Q`。",
+      "evidence": [
+        "Issue 中的命令：`pylint -Q`",
+        "相关测试 1 中使用了 `-Q` 作为未知短选项"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "除了打印预期的 `E0015: Unrecognized option found: Q` 消息外，还打印了完整的异常 traceback。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 输出中显示了 `_UnrecognizedOptionError` 的 traceback",
+        "源码片段 3 显示在检测到无法识别的选项时会抛出 `_UnrecognizedOptionError`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "run_pylint",
+        "kind": "function",
+        "source_path": "pylint/__init__.py",
+        "reason": "这是 pylint 命令行入口点，负责捕获异常并决定如何退出。"
+      },
+      {
+        "name": "_config_initialization",
+        "kind": "function",
+        "source_path": "pylint/config/config_initialization.py",
+        "reason": "该函数解析命令行参数，并在遇到无法识别的选项时抛出 `_UnrecognizedOptionError`。"
+      },
+      {
+        "name": "_UnrecognizedOptionError",
+        "kind": "class",
+        "source_path": "pylint/config/exceptions.py",
+        "reason": "这是当遇到无法识别的选项时抛出的异常类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/__init__.py",
+        "object": "run_pylint",
+        "lines": "17-27",
+        "reason": "该函数是命令行入口，它调用了 `PylintRun` 但没有捕获 `_UnrecognizedOptionError` 异常，导致 traceback 传播到顶层。"
+      },
+      {
+        "path": "pylint/lint/run.py",
+        "object": "PylintRun.__init__",
+        "lines": "",
+        "reason": "Issue 的 traceback 显示异常在 `PylintRun.__init__` 中被引发，该函数调用了 `_config_initialization`。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 `pytest.raises` 上下文中调用 `Run`，异常被测试框架捕获。",
+        "target_pattern": "直接调用 `Run` 或 `run_pylint`，让异常向上传播到顶层。",
+        "reason": "Issue 中的 traceback 表明异常在未被捕获的情况下传播到了顶层解释器。测试需要模拟这种调用链，而不是在测试框架内捕获异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 `Run` 调用时设置了 `exit=False`。",
+        "target_pattern": "调用时不设置 `exit=False`，或者直接调用 `run_pylint` 函数。",
+        "reason": "`exit=False` 可能改变了 `Run` 类的异常处理或退出行为。Issue 中的行为是标准命令行调用，没有此参数。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "只打印用户友好的错误消息（例如 `E0015: Unrecognized option found: Q`），而不打印 traceback。",
+      "evidence": [
+        "Issue 的 Expected behavior 部分指出 traceback 不是预期的，且不友好",
+        "Issue 期望输出类似 mypy 的错误提示，只包含用法提示和错误信息"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `run_pylint([\"-Q\"])` 或 `PylintRun([\"-Q\"])` 时是否抛出 `_UnrecognizedOptionError`。",
+        "reason": "这是缺陷触发的核心异常。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "调用后 `sys.stderr` 或 `capsys.readouterr().err` 的内容。",
+        "reason": "Issue 的关键在于 traceback 被打印到了标准错误输出。需要观察输出中是否包含 `Traceback` 字样以及异常堆栈。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证标准错误输出中包含预期的错误消息 `E0015: Unrecognized option found: Q`。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的输出字符串相等，因为版本或格式可能变化。",
+        "reason": "Issue 确认顶部的错误消息是有用的，应该保留。"
+      },
+      {
+        "assertion_goal": "验证标准错误输出中不包含 `Traceback` 字样或异常堆栈信息。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言不抛出任何异常（因为 `_UnrecognizedOptionError` 可能仍会被内部抛出，只是需要被妥善处理）。",
+        "reason": "Issue 的核心问题是 traceback 对用户不友好，修复后应该被抑制。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`Run` 类在 `exit=False` 和默认 `exit=True` 时的内部异常处理逻辑差异。",
+    "`run_pylint` 函数中是否应该捕获 `_UnrecognizedOptionError` 并以特定状态码退出，还是由更高层处理。",
+    "除了 `_UnrecognizedOptionError`，是否还有其他异常会导致类似的 traceback 泄露问题。"
+  ],
+  "raw": {
+    "issue_summary": "当 pylint 接收到无法识别的选项时，会打印出 traceback 而不是友好的错误信息。",
+    "trigger_condition": {
+      "text": "在命令行中向 pylint 传递一个无法识别的选项，例如 `-Q`。",
+      "evidence": [
+        "Issue 中的命令：`pylint -Q`",
+        "相关测试 1 中使用了 `-Q` 作为未知短选项"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "除了打印预期的 `E0015: Unrecognized option found: Q` 消息外，还打印了完整的异常 traceback。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 输出中显示了 `_UnrecognizedOptionError` 的 traceback",
+        "源码片段 3 显示在检测到无法识别的选项时会抛出 `_UnrecognizedOptionError`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "只打印用户友好的错误消息（例如 `E0015: Unrecognized option found: Q`），而不打印 traceback。",
+      "evidence": [
+        "Issue 的 Expected behavior 部分指出 traceback 不是预期的，且不友好",
+        "Issue 期望输出类似 mypy 的错误提示，只包含用法提示和错误信息"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "run_pylint",
+        "kind": "function",
+        "source_path": "pylint/__init__.py",
+        "reason": "这是 pylint 命令行入口点，负责捕获异常并决定如何退出。"
+      },
+      {
+        "name": "_config_initialization",
+        "kind": "function",
+        "source_path": "pylint/config/config_initialization.py",
+        "reason": "该函数解析命令行参数，并在遇到无法识别的选项时抛出 `_UnrecognizedOptionError`。"
+      },
+      {
+        "name": "_UnrecognizedOptionError",
+        "kind": "class",
+        "source_path": "pylint/config/exceptions.py",
+        "reason": "这是当遇到无法识别的选项时抛出的异常类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/__init__.py",
+        "object": "run_pylint",
+        "lines": "17-27",
+        "reason": "该函数是命令行入口，它调用了 `PylintRun` 但没有捕获 `_UnrecognizedOptionError` 异常，导致 traceback 传播到顶层。"
+      },
+      {
+        "path": "pylint/lint/run.py",
+        "object": "PylintRun.__init__",
+        "lines": "",
+        "reason": "Issue 的 traceback 显示异常在 `PylintRun.__init__` 中被引发，该函数调用了 `_config_initialization`。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_unknown_short_option_name",
+        "test_file": "tests/config/test_config.py",
+        "why_relevant": "该测试直接针对无法识别的短选项（`-Q`）触发 `_UnrecognizedOptionError`，与 Issue 触发条件相同。",
+        "reusable_parts": [
+          "使用 `Run` 类并传入参数列表",
+          "使用 `capsys` fixture 捕获输出",
+          "断言输出中包含 `E0015: Unrecognized option found: Q`"
+        ],
+        "possible_gap": "该测试使用 `pytest.raises` 捕获异常，因此不会看到 traceback 被打印到标准输出/错误。它没有测试当异常未被捕获时（如真实命令行运行）的行为。"
+      },
+      {
+        "test_name": "test_unknown_option_name",
+        "test_file": "tests/config/test_config.py",
+        "why_relevant": "该测试针对无法识别的长选项触发 `_UnrecognizedOptionError`，验证了相同的问题类别。",
+        "reusable_parts": [
+          "测试结构和对 `Run` 类的使用",
+          "使用 `capsys` 和断言输出模式"
+        ],
+        "possible_gap": "同样使用 `pytest.raises`，不测试未捕获异常时的输出。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 `pytest.raises` 上下文中调用 `Run`，异常被测试框架捕获。",
+        "target_pattern": "直接调用 `Run` 或 `run_pylint`，让异常向上传播到顶层。",
+        "reason": "Issue 中的 traceback 表明异常在未被捕获的情况下传播到了顶层解释器。测试需要模拟这种调用链，而不是在测试框架内捕获异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 `Run` 调用时设置了 `exit=False`。",
+        "target_pattern": "调用时不设置 `exit=False`，或者直接调用 `run_pylint` 函数。",
+        "reason": "`exit=False` 可能改变了 `Run` 类的异常处理或退出行为。Issue 中的行为是标准命令行调用，没有此参数。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `run_pylint([\"-Q\"])` 或 `PylintRun([\"-Q\"])` 时是否抛出 `_UnrecognizedOptionError`。",
+        "reason": "这是缺陷触发的核心异常。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "调用后 `sys.stderr` 或 `capsys.readouterr().err` 的内容。",
+        "reason": "Issue 的关键在于 traceback 被打印到了标准错误输出。需要观察输出中是否包含 `Traceback` 字样以及异常堆栈。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证标准错误输出中包含预期的错误消息 `E0015: Unrecognized option found: Q`。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的输出字符串相等，因为版本或格式可能变化。",
+        "reason": "Issue 确认顶部的错误消息是有用的，应该保留。"
+      },
+      {
+        "assertion_goal": "验证标准错误输出中不包含 `Traceback` 字样或异常堆栈信息。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言不抛出任何异常（因为 `_UnrecognizedOptionError` 可能仍会被内部抛出，只是需要被妥善处理）。",
+        "reason": "Issue 的核心问题是 traceback 对用户不友好，修复后应该被抑制。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 `capsys` fixture 来捕获标准输出和标准错误。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 `run_pylint` 函数和 `_UnrecognizedOptionError` 异常。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境需要模拟命令行参数，例如传递 `[\"-Q\"]`。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`Run` 类在 `exit=False` 和默认 `exit=True` 时的内部异常处理逻辑差异。",
+      "`run_pylint` 函数中是否应该捕获 `_UnrecognizedOptionError` 并以特定状态码退出，还是由更高层处理。",
+      "除了 `_UnrecognizedOptionError`，是否还有其他异常会导致类似的 traceback 泄露问题。"
+    ]
+  }
+}

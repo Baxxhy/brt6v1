@@ -1,0 +1,418 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15930",
+  "issue_summary": "使用 ~Q(pk__in=[]) 作为 Case/When 的条件时，生成的 SQL 语法错误，缺少 WHEN 子句的条件部分。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和相应的测试模型（如 CaseTestModel 或 User 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置数据库并创建一些测试数据行。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入相关的模块：django.test.TestCase, Case, When, Q, Value, BooleanField。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_annotate_with_empty_when",
+        "test_file": "tests/expressions_case/tests.py",
+        "why_relevant": "测试了 Case/When 在 condition 涉及空列表 (pk__in=[]) 时的行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类 CaseExpressionTests",
+          "使用 CaseTestModel.objects.annotate 的模式",
+          "使用 Case 和 When 的构造方式",
+          "使用 Value 作为 then 和 default",
+          "使用 assertEqual 和 all() 进行结果断言"
+        ],
+        "possible_gap": "该测试使用的是 When(pk__in=[])，而 Issue 使用的是 When(~Q(pk__in=[]))，缺少了 Q 对象和取反操作 (~)。"
+      },
+      {
+        "test_name": "test_combined_q_object",
+        "test_file": "tests/expressions_case/tests.py",
+        "why_relevant": "测试了在 Case/When 的 condition 中使用 Q 对象（包括组合操作），与 Issue 中使用了 Q 对象相关。",
+        "reusable_parts": [
+          "在 When 中使用 Q 对象作为 condition",
+          "使用 assertQuerysetEqual 进行结果断言",
+          "CaseTestModel 的 fixture 设置"
+        ],
+        "possible_gap": "该测试使用的是正常组合的 Q 对象 (Q(integer=2) | Q(integer2=3))，而 Issue 使用的是取反的 Q 对象 (~Q(pk__in=[]))，且涉及空列表。"
+      },
+      {
+        "test_name": "test_q_negated",
+        "test_file": "tests/or_lookups/tests.py",
+        "why_relevant": "测试了 Q 对象的取反操作 (~Q) 在 filter 中的使用，与 Issue 中 ~Q 的使用相关。",
+        "reusable_parts": [
+          "使用 ~Q 的构造",
+          "Article 模型的 fixture 设置",
+          "使用 assertQuerysetEqual 进行结果断言"
+        ],
+        "possible_gap": "该测试是在 filter() 中使用 ~Q，而 Issue 是在 Case/When 的 condition 中使用 ~Q，上下文不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 QuerySet.annotate() 中使用 Case 表达式，其 When 子句的条件为 ~Q(pk__in=[])。",
+      "evidence": [
+        "Issue 描述：User.objects.annotate(_a=Case(When(~Q(pk__in=[]), then=Value(True)), default=Value(False), output_field=BooleanField(),)).order_by(\"-a\").values(\"pk\")"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 ProgrammingError，SQL 语法错误，生成的 SQL 中 WHEN 关键字后缺少条件表达式，形如 \"CASE WHEN THEN true ...\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：ProgrammingError: syntax error at or near \"THEN\"",
+        "Issue 描述：生成的 SQL 是：SELECT ... ORDER BY CASE WHEN THEN True ELSE False END ASC"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Case",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中使用的核心表达式类，用于构建 SQL CASE 语句。"
+      },
+      {
+        "name": "When",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于定义 Case 表达式分支的类，其 condition 参数为 ~Q(pk__in=[])。"
+      },
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 中用于构建查询条件的对象，使用了 __in=[] 和 ~ 取反操作。"
+      },
+      {
+        "name": "Value",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于包装 then 和 default 值的表达式。"
+      },
+      {
+        "name": "BooleanField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中 Case 表达式的 output_field。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发查询的 API 调用入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "When",
+        "lines": "1245-1315",
+        "reason": "When 类的 as_sql 方法负责生成 \"WHEN condition THEN result\" 模板。当 condition 为 ~Q(pk__in=[]) 时，可能未正确处理导致 condition 部分为空。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Case",
+        "lines": "1319-1409",
+        "reason": "Case 类的 as_sql 方法负责组装完整的 CASE 语句。当某个 When 分支的 condition 生成空字符串时，可能导致最终 SQL 格式错误。"
+      },
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q",
+        "lines": "35-147",
+        "reason": "Q 类的 resolve_expression 或 __invert__ 方法在处理 pk__in=[] 这种特殊情况时，可能返回了不期望的表达式，导致后续 SQL 生成出错。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "When(pk__in=[]) （来自 test_annotate_with_empty_when）",
+        "target_pattern": "When(~Q(pk__in=[]))",
+        "reason": "Issue 表明，当 When 的 condition 是取反的空列表 Q 对象时，会触发 SQL 生成错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "Q(integer=2) | Q(integer2=3) （来自 test_combined_q_object）",
+        "target_pattern": "~Q(pk__in=[])",
+        "reason": "将正常组合的 Q 对象替换为取反的、针对空列表的 Q 对象，这是 Issue 的核心触发模式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "then=Value(\"selected\") （来自 test_annotate_with_empty_when）",
+        "target_pattern": "then=Value(True), output_field=BooleanField()",
+        "reason": "Issue 中使用了 BooleanField 作为 output_field，且 then 和 default 值为布尔值。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "查询应能正常执行，并正确地为所有行添加值为 True 的注解，因为所有行都匹配 ~Q(pk__in=[]) 条件。",
+      "evidence": [
+        "Issue 描述：I expected behavior to annotate all rows with the value True since they all match."
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 CASE ... WHEN ... 部分。",
+        "reason": "Issue 的核心错误是生成的 SQL 语法错误，观察 SQL 可以确认是否出现 \"WHEN THEN\" 这种缺少条件的情况。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询时是否抛出 ProgrammingError 及其消息。",
+        "reason": "Issue 明确报告了 ProgrammingError，这是缺陷触发的直接表现。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "执行查询后返回的 QuerySet 或结果列表，以及注解字段的值。",
+        "reason": "修复后，查询应能正常执行，且所有行的注解字段值应为 True。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "查询能够正常执行，不抛出 ProgrammingError 或其他异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的、具体的异常消息字符串，因为不同数据库后端的消息可能不同。",
+        "reason": "Issue 的核心是 SQL 语法错误导致异常，修复后应不再抛出异常。"
+      },
+      {
+        "assertion_goal": "生成的 SQL 中，CASE 语句的 WHEN 子句包含有效的条件表达式，而不是空的。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串。",
+        "reason": "Issue 的错误是 SQL 片段 \"WHEN THEN\" 缺少条件。修复后，SQL 应包含有效的条件（例如 \"WHEN NOT (\"users_user\".\"id\" IN ()) THEN\" 或其他合理形式）。"
+      },
+      {
+        "assertion_goal": "查询结果中，所有对象的注解字段值都为 True（或预期的布尔值）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言不相关的模型字段或数量。",
+        "reason": "Issue 的预期行为是，由于所有行都匹配 ~Q(pk__in=[])，注解值应为 True。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "~Q(pk__in=[]) 在 SQL 转换时，其内部表示或解析结果具体是什么？是空字符串、None，还是一个特殊的表达式对象？",
+    "缺陷的确切位置是在 When.as_sql()、Q.resolve_expression() 还是其他地方？",
+    "对于不同的数据库后端（如 PostgreSQL、SQLite、MySQL），错误表现或修复后的 SQL 是否完全相同？",
+    "除了 ~Q(pk__in=[])，是否还有其他类似的 Q 对象组合会导致相同的问题？"
+  ],
+  "raw": {
+    "issue_summary": "使用 ~Q(pk__in=[]) 作为 Case/When 的条件时，生成的 SQL 语法错误，缺少 WHEN 子句的条件部分。",
+    "trigger_condition": {
+      "text": "在 QuerySet.annotate() 中使用 Case 表达式，其 When 子句的条件为 ~Q(pk__in=[])。",
+      "evidence": [
+        "Issue 描述：User.objects.annotate(_a=Case(When(~Q(pk__in=[]), then=Value(True)), default=Value(False), output_field=BooleanField(),)).order_by(\"-a\").values(\"pk\")"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 ProgrammingError，SQL 语法错误，生成的 SQL 中 WHEN 关键字后缺少条件表达式，形如 \"CASE WHEN THEN true ...\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：ProgrammingError: syntax error at or near \"THEN\"",
+        "Issue 描述：生成的 SQL 是：SELECT ... ORDER BY CASE WHEN THEN True ELSE False END ASC"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "查询应能正常执行，并正确地为所有行添加值为 True 的注解，因为所有行都匹配 ~Q(pk__in=[]) 条件。",
+      "evidence": [
+        "Issue 描述：I expected behavior to annotate all rows with the value True since they all match."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Case",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中使用的核心表达式类，用于构建 SQL CASE 语句。"
+      },
+      {
+        "name": "When",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于定义 Case 表达式分支的类，其 condition 参数为 ~Q(pk__in=[])。"
+      },
+      {
+        "name": "Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 中用于构建查询条件的对象，使用了 __in=[] 和 ~ 取反操作。"
+      },
+      {
+        "name": "Value",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中用于包装 then 和 default 值的表达式。"
+      },
+      {
+        "name": "BooleanField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中 Case 表达式的 output_field。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发查询的 API 调用入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "When",
+        "lines": "1245-1315",
+        "reason": "When 类的 as_sql 方法负责生成 \"WHEN condition THEN result\" 模板。当 condition 为 ~Q(pk__in=[]) 时，可能未正确处理导致 condition 部分为空。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Case",
+        "lines": "1319-1409",
+        "reason": "Case 类的 as_sql 方法负责组装完整的 CASE 语句。当某个 When 分支的 condition 生成空字符串时，可能导致最终 SQL 格式错误。"
+      },
+      {
+        "path": "django/db/models/query_utils.py",
+        "object": "Q",
+        "lines": "35-147",
+        "reason": "Q 类的 resolve_expression 或 __invert__ 方法在处理 pk__in=[] 这种特殊情况时，可能返回了不期望的表达式，导致后续 SQL 生成出错。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_annotate_with_empty_when",
+        "test_file": "tests/expressions_case/tests.py",
+        "why_relevant": "测试了 Case/When 在 condition 涉及空列表 (pk__in=[]) 时的行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类 CaseExpressionTests",
+          "使用 CaseTestModel.objects.annotate 的模式",
+          "使用 Case 和 When 的构造方式",
+          "使用 Value 作为 then 和 default",
+          "使用 assertEqual 和 all() 进行结果断言"
+        ],
+        "possible_gap": "该测试使用的是 When(pk__in=[])，而 Issue 使用的是 When(~Q(pk__in=[]))，缺少了 Q 对象和取反操作 (~)。"
+      },
+      {
+        "test_name": "test_combined_q_object",
+        "test_file": "tests/expressions_case/tests.py",
+        "why_relevant": "测试了在 Case/When 的 condition 中使用 Q 对象（包括组合操作），与 Issue 中使用了 Q 对象相关。",
+        "reusable_parts": [
+          "在 When 中使用 Q 对象作为 condition",
+          "使用 assertQuerysetEqual 进行结果断言",
+          "CaseTestModel 的 fixture 设置"
+        ],
+        "possible_gap": "该测试使用的是正常组合的 Q 对象 (Q(integer=2) | Q(integer2=3))，而 Issue 使用的是取反的 Q 对象 (~Q(pk__in=[]))，且涉及空列表。"
+      },
+      {
+        "test_name": "test_q_negated",
+        "test_file": "tests/or_lookups/tests.py",
+        "why_relevant": "测试了 Q 对象的取反操作 (~Q) 在 filter 中的使用，与 Issue 中 ~Q 的使用相关。",
+        "reusable_parts": [
+          "使用 ~Q 的构造",
+          "Article 模型的 fixture 设置",
+          "使用 assertQuerysetEqual 进行结果断言"
+        ],
+        "possible_gap": "该测试是在 filter() 中使用 ~Q，而 Issue 是在 Case/When 的 condition 中使用 ~Q，上下文不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "When(pk__in=[]) （来自 test_annotate_with_empty_when）",
+        "target_pattern": "When(~Q(pk__in=[]))",
+        "reason": "Issue 表明，当 When 的 condition 是取反的空列表 Q 对象时，会触发 SQL 生成错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "Q(integer=2) | Q(integer2=3) （来自 test_combined_q_object）",
+        "target_pattern": "~Q(pk__in=[])",
+        "reason": "将正常组合的 Q 对象替换为取反的、针对空列表的 Q 对象，这是 Issue 的核心触发模式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "then=Value(\"selected\") （来自 test_annotate_with_empty_when）",
+        "target_pattern": "then=Value(True), output_field=BooleanField()",
+        "reason": "Issue 中使用了 BooleanField 作为 output_field，且 then 和 default 值为布尔值。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 CASE ... WHEN ... 部分。",
+        "reason": "Issue 的核心错误是生成的 SQL 语法错误，观察 SQL 可以确认是否出现 \"WHEN THEN\" 这种缺少条件的情况。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询时是否抛出 ProgrammingError 及其消息。",
+        "reason": "Issue 明确报告了 ProgrammingError，这是缺陷触发的直接表现。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "执行查询后返回的 QuerySet 或结果列表，以及注解字段的值。",
+        "reason": "修复后，查询应能正常执行，且所有行的注解字段值应为 True。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "查询能够正常执行，不抛出 ProgrammingError 或其他异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的、具体的异常消息字符串，因为不同数据库后端的消息可能不同。",
+        "reason": "Issue 的核心是 SQL 语法错误导致异常，修复后应不再抛出异常。"
+      },
+      {
+        "assertion_goal": "生成的 SQL 中，CASE 语句的 WHEN 子句包含有效的条件表达式，而不是空的。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串。",
+        "reason": "Issue 的错误是 SQL 片段 \"WHEN THEN\" 缺少条件。修复后，SQL 应包含有效的条件（例如 \"WHEN NOT (\"users_user\".\"id\" IN ()) THEN\" 或其他合理形式）。"
+      },
+      {
+        "assertion_goal": "查询结果中，所有对象的注解字段值都为 True（或预期的布尔值）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言不相关的模型字段或数量。",
+        "reason": "Issue 的预期行为是，由于所有行都匹配 ~Q(pk__in=[])，注解值应为 True。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和相应的测试模型（如 CaseTestModel 或 User 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置数据库并创建一些测试数据行。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入相关的模块：django.test.TestCase, Case, When, Q, Value, BooleanField。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "~Q(pk__in=[]) 在 SQL 转换时，其内部表示或解析结果具体是什么？是空字符串、None，还是一个特殊的表达式对象？",
+      "缺陷的确切位置是在 When.as_sql()、Q.resolve_expression() 还是其他地方？",
+      "对于不同的数据库后端（如 PostgreSQL、SQLite、MySQL），错误表现或修复后的 SQL 是否完全相同？",
+      "除了 ~Q(pk__in=[])，是否还有其他类似的 Q 对象组合会导致相同的问题？"
+    ]
+  }
+}

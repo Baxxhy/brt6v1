@@ -1,0 +1,306 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16801",
+  "issue_summary": "ImageField 在未设置 width_field/height_field 时仍会添加一个无用的 post_init 信号处理器，导致模型初始化性能下降。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个包含 ImageField 的 Django 模型定义，并可能涉及数据库操作（如从数据库获取实例）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 和 isolate_apps 来管理应用注册和模型生命周期。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要 mock 或使用简单的 ImageFieldFile 来避免实际图像文件依赖。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_model_pre_init_and_post_init",
+        "test_file": "tests/signals/tests.py",
+        "why_relevant": "它演示了如何连接和触发 post_init 信号，并验证信号回调被调用。",
+        "reusable_parts": [
+          "signals.post_init.connect 的用法",
+          "Person 模型的实例化",
+          "使用 self.assertEqual 断言数据"
+        ],
+        "possible_gap": "它测试的是通用的信号机制，而不是 ImageField 特定的信号注册逻辑。"
+      },
+      {
+        "test_name": "test_disconnect_model",
+        "test_file": "tests/signals/tests.py",
+        "why_relevant": "它展示了如何为特定模型连接和断开 post_init 信号，并验证断开后信号不被接收。",
+        "reusable_parts": [
+          "signals.post_init.connect/disconnect 的用法",
+          "自定义模型类的创建",
+          "验证 received 列表为空"
+        ],
+        "possible_gap": "它测试的是手动信号管理，而不是 ImageField 自动注册的信号。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个包含 ImageField 但不设置 width_field 和 height_field 的 Django 模型，然后从数据库获取或初始化该模型的实例。",
+      "evidence": [
+        "Issue 提到 'we were using ImageField' 且 'we don't use the width_field / height_field'。",
+        "源码片段1显示 ImageField 的 __init__ 方法接受 width_field 和 height_field 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "模型初始化（从数据库获取后）的性能开销显著增加，约 30-40% 的时间花费在评估 post_init 信号上，而该信号处理器是空操作。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述 '30% of the time was being spent on evaluating post_init signals' 和 'Removing this signal handler gave us a 30-40% speedup'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ImageField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/files.py",
+        "reason": "Issue 的核心是关于 ImageField 的行为。"
+      },
+      {
+        "name": "post_init",
+        "kind": "global_var",
+        "source_path": "django/db/models/signals.py",
+        "reason": "Issue 涉及 post_init 信号的注册和性能影响。"
+      },
+      {
+        "name": "contribute_to_class",
+        "kind": "method",
+        "source_path": "django/db/models/fields/files.py",
+        "reason": "ImageField 可能在此方法中注册信号处理器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/files.py",
+        "object": "ImageField.contribute_to_class",
+        "lines": "",
+        "reason": "该方法可能负责将字段添加到模型类，并可能无条件地连接 post_init 信号。"
+      },
+      {
+        "path": "django/db/models/fields/files.py",
+        "object": "ImageField.__init__",
+        "lines": "",
+        "reason": "初始化方法接收 width_field 和 height_field 参数，但后续逻辑可能未根据它们是否设置来决定是否注册信号。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中通常直接连接/断开信号，或使用通用模型。",
+        "target_pattern": "创建一个包含 ImageField（不设置 width_field/height_field）的模型，并实例化它。",
+        "reason": "Issue 的触发条件是使用未配置尺寸字段的 ImageField。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中显式调用 signals.post_init.connect。",
+        "target_pattern": "依赖 ImageField.contribute_to_class 在模型准备期间自动注册信号。",
+        "reason": "缺陷在于 ImageField 自动添加了信号处理器，而不是手动连接。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 ImageField 未设置 width_field 和 height_field 时，不应注册 post_init 信号处理器，从而避免不必要的性能开销。",
+      "evidence": [
+        "Issue 指出 'If width_field and height_field are not set, removing the post_init signal should have no effect since the signal handler will return right away.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "signals.post_init.receivers 在模型类准备后的状态，或特定模型实例初始化后信号接收器的调用计数。",
+        "reason": "可以观察是否为包含 ImageField 的模型注册了不必要的信号接收器。"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "批量初始化模型实例的时间开销，或信号处理器被调用的次数。",
+        "reason": "Issue 的核心是性能下降，观测时间或调用次数可以量化影响。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 ImageField 未设置 width_field/height_field 时，post_init 信号没有为该模型注册额外的接收器（或注册的接收器是空操作且可安全移除）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 receivers 列表内容，因为其他代码可能注册了无关接收器。",
+        "reason": "应关注与 ImageField 相关的接收器是否存在，而不是所有接收器。"
+      },
+      {
+        "assertion_goal": "验证移除（或不注册）该信号处理器后，模型初始化性能提升或信号处理器调用次数减少。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言绝对时间值，因为执行时间可能波动。",
+        "reason": "Issue 强调性能改进，比较相对时间更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "ImageField.contribute_to_class 方法的确切实现和信号注册逻辑未在提供的源码片段中显示。",
+    "post_init 信号处理器在 ImageField 中的具体实现（update_dimension_fields 方法）及其在 width_field/height_field 未设置时的行为细节。",
+    "性能测试的精确基准和测量方法在单元测试环境中如何可靠实现。"
+  ],
+  "raw": {
+    "issue_summary": "ImageField 在未设置 width_field/height_field 时仍会添加一个无用的 post_init 信号处理器，导致模型初始化性能下降。",
+    "trigger_condition": {
+      "text": "定义一个包含 ImageField 但不设置 width_field 和 height_field 的 Django 模型，然后从数据库获取或初始化该模型的实例。",
+      "evidence": [
+        "Issue 提到 'we were using ImageField' 且 'we don't use the width_field / height_field'。",
+        "源码片段1显示 ImageField 的 __init__ 方法接受 width_field 和 height_field 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "模型初始化（从数据库获取后）的性能开销显著增加，约 30-40% 的时间花费在评估 post_init 信号上，而该信号处理器是空操作。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述 '30% of the time was being spent on evaluating post_init signals' 和 'Removing this signal handler gave us a 30-40% speedup'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 ImageField 未设置 width_field 和 height_field 时，不应注册 post_init 信号处理器，从而避免不必要的性能开销。",
+      "evidence": [
+        "Issue 指出 'If width_field and height_field are not set, removing the post_init signal should have no effect since the signal handler will return right away.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ImageField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/files.py",
+        "reason": "Issue 的核心是关于 ImageField 的行为。"
+      },
+      {
+        "name": "post_init",
+        "kind": "global_var",
+        "source_path": "django/db/models/signals.py",
+        "reason": "Issue 涉及 post_init 信号的注册和性能影响。"
+      },
+      {
+        "name": "contribute_to_class",
+        "kind": "method",
+        "source_path": "django/db/models/fields/files.py",
+        "reason": "ImageField 可能在此方法中注册信号处理器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/files.py",
+        "object": "ImageField.contribute_to_class",
+        "lines": "",
+        "reason": "该方法可能负责将字段添加到模型类，并可能无条件地连接 post_init 信号。"
+      },
+      {
+        "path": "django/db/models/fields/files.py",
+        "object": "ImageField.__init__",
+        "lines": "",
+        "reason": "初始化方法接收 width_field 和 height_field 参数，但后续逻辑可能未根据它们是否设置来决定是否注册信号。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_model_pre_init_and_post_init",
+        "test_file": "tests/signals/tests.py",
+        "why_relevant": "它演示了如何连接和触发 post_init 信号，并验证信号回调被调用。",
+        "reusable_parts": [
+          "signals.post_init.connect 的用法",
+          "Person 模型的实例化",
+          "使用 self.assertEqual 断言数据"
+        ],
+        "possible_gap": "它测试的是通用的信号机制，而不是 ImageField 特定的信号注册逻辑。"
+      },
+      {
+        "test_name": "test_disconnect_model",
+        "test_file": "tests/signals/tests.py",
+        "why_relevant": "它展示了如何为特定模型连接和断开 post_init 信号，并验证断开后信号不被接收。",
+        "reusable_parts": [
+          "signals.post_init.connect/disconnect 的用法",
+          "自定义模型类的创建",
+          "验证 received 列表为空"
+        ],
+        "possible_gap": "它测试的是手动信号管理，而不是 ImageField 自动注册的信号。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试中通常直接连接/断开信号，或使用通用模型。",
+        "target_pattern": "创建一个包含 ImageField（不设置 width_field/height_field）的模型，并实例化它。",
+        "reason": "Issue 的触发条件是使用未配置尺寸字段的 ImageField。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中显式调用 signals.post_init.connect。",
+        "target_pattern": "依赖 ImageField.contribute_to_class 在模型准备期间自动注册信号。",
+        "reason": "缺陷在于 ImageField 自动添加了信号处理器，而不是手动连接。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "signals.post_init.receivers 在模型类准备后的状态，或特定模型实例初始化后信号接收器的调用计数。",
+        "reason": "可以观察是否为包含 ImageField 的模型注册了不必要的信号接收器。"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "批量初始化模型实例的时间开销，或信号处理器被调用的次数。",
+        "reason": "Issue 的核心是性能下降，观测时间或调用次数可以量化影响。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 ImageField 未设置 width_field/height_field 时，post_init 信号没有为该模型注册额外的接收器（或注册的接收器是空操作且可安全移除）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 receivers 列表内容，因为其他代码可能注册了无关接收器。",
+        "reason": "应关注与 ImageField 相关的接收器是否存在，而不是所有接收器。"
+      },
+      {
+        "assertion_goal": "验证移除（或不注册）该信号处理器后，模型初始化性能提升或信号处理器调用次数减少。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言绝对时间值，因为执行时间可能波动。",
+        "reason": "Issue 强调性能改进，比较相对时间更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个包含 ImageField 的 Django 模型定义，并可能涉及数据库操作（如从数据库获取实例）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 和 isolate_apps 来管理应用注册和模型生命周期。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要 mock 或使用简单的 ImageFieldFile 来避免实际图像文件依赖。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "ImageField.contribute_to_class 方法的确切实现和信号注册逻辑未在提供的源码片段中显示。",
+      "post_init 信号处理器在 ImageField 中的具体实现（update_dimension_fields 方法）及其在 width_field/height_field 未设置时的行为细节。",
+      "性能测试的精确基准和测量方法在单元测试环境中如何可靠实现。"
+    ]
+  }
+}

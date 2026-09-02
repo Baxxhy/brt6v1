@@ -1,0 +1,358 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16642",
+  "issue_summary": "FileResponse 对扩展名为 .Z 和 .br 的文件错误地猜测 MIME 类型为 text/html。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 作为测试基类，如现有相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时文件（例如使用 tempfile.NamedTemporaryFile）并命名为 .Z 或 .br 扩展名，以模拟 Issue 中的 open() 调用。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以使用 io.BytesIO 并设置其 .name 属性来模拟有特定扩展名的文件对象，如相关测试 1 所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试后可能需要关闭 response（如果使用真实文件对象），如相关测试 2 所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FileResponseTests.test_content_type_buffer_named",
+        "test_file": "tests/responses/test_fileresponse.py",
+        "why_relevant": "该测试直接验证了 FileResponse 根据 buffer.name（即文件名）猜测 Content-Type 的行为，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "测试类结构 (FileResponseTests)",
+          "使用 io.BytesIO 模拟文件对象",
+          "设置 buffer.name",
+          "创建 FileResponse 对象",
+          "使用 assertIn 检查 Content-Type 是否在预期列表中"
+        ],
+        "possible_gap": "现有测试用例未覆盖 .Z 和 .br 扩展名，因此无法复现 Issue 描述的错误猜测。"
+      },
+      {
+        "test_name": "FileResponseTests.test_content_type_file",
+        "test_file": "tests/responses/test_fileresponse.py",
+        "why_relevant": "该测试使用真实文件对象（open(__file__, \"rb\")）测试 Content-Type 猜测，与 Issue 中 open('test.html.Z', 'rb') 的调用方式相似。",
+        "reusable_parts": [
+          "使用 open() 打开真实文件",
+          "创建 FileResponse 对象",
+          "使用 assertIn 检查 Content-Type"
+        ],
+        "possible_gap": "测试使用的是已知扩展名（.py），未测试 .Z 或 .br 扩展名。"
+      },
+      {
+        "test_name": "FileResponseTests.test_content_type_buffer",
+        "test_file": "tests/responses/test_fileresponse.py",
+        "why_relevant": "该测试展示了当文件对象没有名称（或无法猜测类型）时，Content-Type 的默认值（application/octet-stream）。这为 .Z/.br 文件的预期行为提供了参考。",
+        "reusable_parts": [
+          "使用 io.BytesIO 创建无名称的 buffer",
+          "创建 FileResponse 对象",
+          "使用 assertEqual 检查 Content-Type"
+        ],
+        "possible_gap": "测试中的 buffer 没有设置 .name 属性，而 Issue 中的文件对象有明确的文件名。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 FileResponse 打开一个扩展名为 .Z 或 .br 的文件（例如 test.html.Z 或 test.html.br）。",
+      "evidence": [
+        "Issue 描述：'FileResponse(open('test.html.Z', 'rb'))' 和 'FileResponse(open('test.html.br', 'rb'))'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Content-Type 响应头被错误地设置为 text/html，而不是预期的 MIME 类型（如 application/octet-stream 或特定压缩类型的 MIME）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'will set the content type as text/html, even if the last file extension is \"Z\" or \"br\"'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "FileResponse",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 直接报告了 FileResponse 类的行为问题。"
+      },
+      {
+        "name": "FileResponse.__init__",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "创建 FileResponse 对象是触发问题的入口。"
+      },
+      {
+        "name": "FileResponse.set_headers",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "源码片段显示 set_headers 方法，该方法可能负责设置 Content-Type 头。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/http/response.py",
+        "object": "FileResponse.set_headers",
+        "lines": "",
+        "reason": "该方法负责设置响应头，包括 Content-Type。MIME 类型猜测逻辑可能在此处或其调用的辅助函数中。"
+      },
+      {
+        "path": "django/http/response.py",
+        "object": "FileResponse",
+        "lines": "548-625",
+        "reason": "Issue 涉及的类定义在此范围内，MIME 类型猜测可能发生在初始化或内容设置过程中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用 __file__（.py 扩展名）或 'test_fileresponse.py' 作为文件名。",
+        "target_pattern": "使用带有 .Z 或 .br 扩展名的文件名，例如 'test.html.Z' 或 'test.html.br'。",
+        "reason": "Issue 明确指出 .Z 和 .br 扩展名触发了错误的 MIME 类型猜测。改变文件扩展名是触发缺陷路径的直接方式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中通过 `buffer.name = filename` 设置 BytesIO 对象的名称。",
+        "target_pattern": "将 filename 设置为包含 .Z 或 .br 扩展名的字符串。",
+        "reason": "FileResponse 可能通过文件对象的 .name 属性来猜测 MIME 类型。改变此属性值可以模拟打开特定扩展名文件的行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中使用 `open(__file__, \"rb\")` 打开一个 .py 文件。",
+        "target_pattern": "创建一个临时文件，其名称以 .Z 或 .br 结尾，并用 open() 以二进制模式打开它。",
+        "reason": "Issue 中的示例直接使用了 open() 函数。使用真实文件对象（而非仅模拟的 buffer）可能更贴近原始触发条件。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "FileResponse 应该为 .Z 和 .br 文件设置正确的 MIME 类型（例如 application/octet-stream 或 application/x-compress、application/x-brotli），而不是 text/html。",
+      "evidence": [
+        "相关测试 1 和 3 表明，对于未知或非常规扩展名，Content-Type 应默认为 application/octet-stream。",
+        "相关测试 1 展示了根据文件扩展名猜测 MIME 类型的行为。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.headers['Content-Type']",
+        "reason": "Issue 的核心错误是 Content-Type 头的值不正确。直接观察此头信息是判断问题是否触发的关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "filelike.name (如果 filelike 有该属性)",
+        "reason": "观察传入 FileResponse 的文件对象的名称，以确认测试输入是否正确设置了触发缺陷的扩展名。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Content-Type 头不是 'text/html'（对于 .Z/.br 文件）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 Content-Type 等于某个特定的、猜测的正确 MIME 类型（如 application/x-compress），因为 Issue 未明确指定，且正确的 MIME 类型可能依赖于 Django 的 mimetypes 库或配置。",
+        "reason": "Issue 明确说明当前错误是设置为 text/html。断言它不等于 text/html 是稳定且与 Issue 直接对齐的验证方式。修复后，它应该是其他值（如 application/octet-stream 或更具体的类型）。"
+      },
+      {
+        "assertion_goal": "验证 Content-Type 头是 application/octet-stream 或另一个非 text/html 的值。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 MIME 类型字符串，除非从现有测试或源码中明确得知。",
+        "reason": "相关测试 1 和 3 表明，对于非常规或未知扩展名，默认的 Content-Type 是 application/octet-stream。这是一个合理的、稳定的预期行为片段。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "对于 .Z 和 .br 文件，修复后确切的、正确的 MIME 类型应该是什么（例如 application/x-compress, application/x-brotli, 还是保持 application/octet-stream）。",
+    "MIME 类型猜测的具体逻辑位于 Django 的哪个模块（可能是 mimetypes 或 django.utils._os）。",
+    "FileResponse 内部是直接使用 Python 的 mimetypes.guess_type，还是有自己的映射表。",
+    "问题是否也影响其他不常见的文件扩展名。"
+  ],
+  "raw": {
+    "issue_summary": "FileResponse 对扩展名为 .Z 和 .br 的文件错误地猜测 MIME 类型为 text/html。",
+    "trigger_condition": {
+      "text": "使用 FileResponse 打开一个扩展名为 .Z 或 .br 的文件（例如 test.html.Z 或 test.html.br）。",
+      "evidence": [
+        "Issue 描述：'FileResponse(open('test.html.Z', 'rb'))' 和 'FileResponse(open('test.html.br', 'rb'))'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Content-Type 响应头被错误地设置为 text/html，而不是预期的 MIME 类型（如 application/octet-stream 或特定压缩类型的 MIME）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'will set the content type as text/html, even if the last file extension is \"Z\" or \"br\"'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "FileResponse 应该为 .Z 和 .br 文件设置正确的 MIME 类型（例如 application/octet-stream 或 application/x-compress、application/x-brotli），而不是 text/html。",
+      "evidence": [
+        "相关测试 1 和 3 表明，对于未知或非常规扩展名，Content-Type 应默认为 application/octet-stream。",
+        "相关测试 1 展示了根据文件扩展名猜测 MIME 类型的行为。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "FileResponse",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 直接报告了 FileResponse 类的行为问题。"
+      },
+      {
+        "name": "FileResponse.__init__",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "创建 FileResponse 对象是触发问题的入口。"
+      },
+      {
+        "name": "FileResponse.set_headers",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "源码片段显示 set_headers 方法，该方法可能负责设置 Content-Type 头。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/http/response.py",
+        "object": "FileResponse.set_headers",
+        "lines": "",
+        "reason": "该方法负责设置响应头，包括 Content-Type。MIME 类型猜测逻辑可能在此处或其调用的辅助函数中。"
+      },
+      {
+        "path": "django/http/response.py",
+        "object": "FileResponse",
+        "lines": "548-625",
+        "reason": "Issue 涉及的类定义在此范围内，MIME 类型猜测可能发生在初始化或内容设置过程中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FileResponseTests.test_content_type_buffer_named",
+        "test_file": "tests/responses/test_fileresponse.py",
+        "why_relevant": "该测试直接验证了 FileResponse 根据 buffer.name（即文件名）猜测 Content-Type 的行为，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "测试类结构 (FileResponseTests)",
+          "使用 io.BytesIO 模拟文件对象",
+          "设置 buffer.name",
+          "创建 FileResponse 对象",
+          "使用 assertIn 检查 Content-Type 是否在预期列表中"
+        ],
+        "possible_gap": "现有测试用例未覆盖 .Z 和 .br 扩展名，因此无法复现 Issue 描述的错误猜测。"
+      },
+      {
+        "test_name": "FileResponseTests.test_content_type_file",
+        "test_file": "tests/responses/test_fileresponse.py",
+        "why_relevant": "该测试使用真实文件对象（open(__file__, \"rb\")）测试 Content-Type 猜测，与 Issue 中 open('test.html.Z', 'rb') 的调用方式相似。",
+        "reusable_parts": [
+          "使用 open() 打开真实文件",
+          "创建 FileResponse 对象",
+          "使用 assertIn 检查 Content-Type"
+        ],
+        "possible_gap": "测试使用的是已知扩展名（.py），未测试 .Z 或 .br 扩展名。"
+      },
+      {
+        "test_name": "FileResponseTests.test_content_type_buffer",
+        "test_file": "tests/responses/test_fileresponse.py",
+        "why_relevant": "该测试展示了当文件对象没有名称（或无法猜测类型）时，Content-Type 的默认值（application/octet-stream）。这为 .Z/.br 文件的预期行为提供了参考。",
+        "reusable_parts": [
+          "使用 io.BytesIO 创建无名称的 buffer",
+          "创建 FileResponse 对象",
+          "使用 assertEqual 检查 Content-Type"
+        ],
+        "possible_gap": "测试中的 buffer 没有设置 .name 属性，而 Issue 中的文件对象有明确的文件名。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用 __file__（.py 扩展名）或 'test_fileresponse.py' 作为文件名。",
+        "target_pattern": "使用带有 .Z 或 .br 扩展名的文件名，例如 'test.html.Z' 或 'test.html.br'。",
+        "reason": "Issue 明确指出 .Z 和 .br 扩展名触发了错误的 MIME 类型猜测。改变文件扩展名是触发缺陷路径的直接方式。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中通过 `buffer.name = filename` 设置 BytesIO 对象的名称。",
+        "target_pattern": "将 filename 设置为包含 .Z 或 .br 扩展名的字符串。",
+        "reason": "FileResponse 可能通过文件对象的 .name 属性来猜测 MIME 类型。改变此属性值可以模拟打开特定扩展名文件的行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中使用 `open(__file__, \"rb\")` 打开一个 .py 文件。",
+        "target_pattern": "创建一个临时文件，其名称以 .Z 或 .br 结尾，并用 open() 以二进制模式打开它。",
+        "reason": "Issue 中的示例直接使用了 open() 函数。使用真实文件对象（而非仅模拟的 buffer）可能更贴近原始触发条件。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.headers['Content-Type']",
+        "reason": "Issue 的核心错误是 Content-Type 头的值不正确。直接观察此头信息是判断问题是否触发的关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "filelike.name (如果 filelike 有该属性)",
+        "reason": "观察传入 FileResponse 的文件对象的名称，以确认测试输入是否正确设置了触发缺陷的扩展名。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Content-Type 头不是 'text/html'（对于 .Z/.br 文件）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 Content-Type 等于某个特定的、猜测的正确 MIME 类型（如 application/x-compress），因为 Issue 未明确指定，且正确的 MIME 类型可能依赖于 Django 的 mimetypes 库或配置。",
+        "reason": "Issue 明确说明当前错误是设置为 text/html。断言它不等于 text/html 是稳定且与 Issue 直接对齐的验证方式。修复后，它应该是其他值（如 application/octet-stream 或更具体的类型）。"
+      },
+      {
+        "assertion_goal": "验证 Content-Type 头是 application/octet-stream 或另一个非 text/html 的值。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 MIME 类型字符串，除非从现有测试或源码中明确得知。",
+        "reason": "相关测试 1 和 3 表明，对于非常规或未知扩展名，默认的 Content-Type 是 application/octet-stream。这是一个合理的、稳定的预期行为片段。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 作为测试基类，如现有相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时文件（例如使用 tempfile.NamedTemporaryFile）并命名为 .Z 或 .br 扩展名，以模拟 Issue 中的 open() 调用。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可以使用 io.BytesIO 并设置其 .name 属性来模拟有特定扩展名的文件对象，如相关测试 1 所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试后可能需要关闭 response（如果使用真实文件对象），如相关测试 2 所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "对于 .Z 和 .br 文件，修复后确切的、正确的 MIME 类型应该是什么（例如 application/x-compress, application/x-brotli, 还是保持 application/octet-stream）。",
+      "MIME 类型猜测的具体逻辑位于 Django 的哪个模块（可能是 mimetypes 或 django.utils._os）。",
+      "FileResponse 内部是直接使用 Python 的 mimetypes.guess_type，还是有自己的映射表。",
+      "问题是否也影响其他不常见的文件扩展名。"
+    ]
+  }
+}

@@ -1,0 +1,266 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15987",
+  "issue_summary": "当 FIXTURE_DIRS 包含 Path 实例时，loaddata 命令中的重复检查无法检测到重复项。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 override_settings 来临时设置 FIXTURE_DIRS。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 TestCase、override_settings、management、ImproperlyConfigured 以及 Path。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要一个包含 fixture 文件的目录（如 'fixtures_1'）来让 loaddata 命令有数据可加载。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_fixture_dirs_with_duplicates",
+        "test_file": "tests/fixtures_regress/tests.py",
+        "why_relevant": "它直接测试了 FIXTURE_DIRS 包含重复项（字符串路径）时，loaddata 命令应抛出异常的场景，与当前 Issue 的语义高度相关。",
+        "reusable_parts": [
+          "TestFixtures 类",
+          "override_settings 装饰器",
+          "management.call_command 调用",
+          "assertRaisesMessage 断言风格",
+          "导入的模块和常量"
+        ],
+        "possible_gap": "它使用字符串路径列表作为重复项，而 Issue 指出当使用 Path 实例时，重复检查失效。"
+      },
+      {
+        "test_name": "test_fixtures_dir_pathlib",
+        "test_file": "tests/fixtures_regress/tests.py",
+        "why_relevant": "它展示了 FIXTURE_DIRS 可以包含 Path 实例，并且 loaddata 命令可以成功运行（在非重复场景下）。",
+        "reusable_parts": [
+          "使用 Path 对象配置 FIXTURE_DIRS",
+          "调用 loaddata 命令",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "它只测试了单个 Path 实例，没有测试重复的 Path 实例。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 FIXTURE_DIRS 设置中配置包含重复路径的 Path 实例，然后调用 loaddata 命令。",
+      "evidence": [
+        "Issue 描述：'When FIXTURE_DIRS contains Path instances, the duplicate check in loaddata does not detect duplicates.'",
+        "相关测试 2 展示了 FIXTURE_DIRS 可以包含 Path 实例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "重复的 Path 实例未被检测到，导致可能重复加载 fixture，而预期应抛出 ImproperlyConfigured 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述指出重复检查未检测到重复项。",
+        "相关测试 1 表明当 FIXTURE_DIRS 包含重复的字符串路径时，会抛出 ImproperlyConfigured 异常。",
+        "相关测试 4 也表明对于其他无效配置会抛出 ImproperlyConfigured 异常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "management.call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "所有相关测试都使用此函数调用 loaddata 命令来触发相关逻辑。"
+      },
+      {
+        "name": "loaddata",
+        "kind": "command",
+        "source_path": "django/core/management/commands/loaddata.py",
+        "reason": "Issue 明确指出问题发生在 loaddata 命令的重复检查中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/loaddata.py",
+        "object": "loaddata",
+        "lines": "",
+        "reason": "Issue 明确指出问题在 loaddata 命令中的重复检查逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "FIXTURE_DIRS 设置为包含两个相同字符串路径的列表。",
+        "target_pattern": "FIXTURE_DIRS 设置为包含两个相同 Path 实例的列表。",
+        "reason": "Issue 的核心是当配置项为 Path 实例时，重复检查逻辑失效。将字符串路径替换为 Path 实例可能触发缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论 FIXTURE_DIRS 中的路径是字符串还是 Path 实例，重复的路径都应该被检测到，并抛出 ImproperlyConfigured 异常以防止重复加载。",
+      "evidence": [
+        "相关测试 1 的文档字符串：'settings.FIXTURE_DIRS cannot contain duplicates in order to avoid repeated fixture loading.'",
+        "相关测试 1 和 4 都表明对于无效配置，系统应抛出 ImproperlyConfigured 异常。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 management.call_command('loaddata', ...) 时是否抛出 ImproperlyConfigured 异常及其消息。",
+        "reason": "正确的行为应该抛出异常，而缺陷行为可能不会抛出异常，导致命令继续执行。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.FIXTURE_DIRS 中 Path 实例的表示形式（如 str(path) 或 repr(path)）以及去重比较时的状态。",
+        "reason": "问题可能源于 Path 实例与字符串在比较时的不一致，观察其表示形式有助于理解比较逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 FIXTURE_DIRS 包含重复的 Path 实例时，调用 loaddata 命令应抛出 ImproperlyConfigured 异常，提示存在重复。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息的具体措辞可能变化。",
+        "reason": "Issue 的核心是异常是否被抛出，而不是异常消息的精确措辞。使用 raises 断言可以稳定地验证这一语义。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "重复检查逻辑具体在 loaddata.py 文件中的哪个函数或哪几行代码中。",
+    "Path 实例与字符串在比较时具体是如何处理的，是直接比较对象还是转换为字符串后比较。",
+    "除了抛出异常，重复加载 fixture 是否会产生其他可观测的副作用（如数据库记录重复）。"
+  ],
+  "raw": {
+    "issue_summary": "当 FIXTURE_DIRS 包含 Path 实例时，loaddata 命令中的重复检查无法检测到重复项。",
+    "trigger_condition": {
+      "text": "在 FIXTURE_DIRS 设置中配置包含重复路径的 Path 实例，然后调用 loaddata 命令。",
+      "evidence": [
+        "Issue 描述：'When FIXTURE_DIRS contains Path instances, the duplicate check in loaddata does not detect duplicates.'",
+        "相关测试 2 展示了 FIXTURE_DIRS 可以包含 Path 实例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "重复的 Path 实例未被检测到，导致可能重复加载 fixture，而预期应抛出 ImproperlyConfigured 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述指出重复检查未检测到重复项。",
+        "相关测试 1 表明当 FIXTURE_DIRS 包含重复的字符串路径时，会抛出 ImproperlyConfigured 异常。",
+        "相关测试 4 也表明对于其他无效配置会抛出 ImproperlyConfigured 异常。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论 FIXTURE_DIRS 中的路径是字符串还是 Path 实例，重复的路径都应该被检测到，并抛出 ImproperlyConfigured 异常以防止重复加载。",
+      "evidence": [
+        "相关测试 1 的文档字符串：'settings.FIXTURE_DIRS cannot contain duplicates in order to avoid repeated fixture loading.'",
+        "相关测试 1 和 4 都表明对于无效配置，系统应抛出 ImproperlyConfigured 异常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "management.call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "所有相关测试都使用此函数调用 loaddata 命令来触发相关逻辑。"
+      },
+      {
+        "name": "loaddata",
+        "kind": "command",
+        "source_path": "django/core/management/commands/loaddata.py",
+        "reason": "Issue 明确指出问题发生在 loaddata 命令的重复检查中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/loaddata.py",
+        "object": "loaddata",
+        "lines": "",
+        "reason": "Issue 明确指出问题在 loaddata 命令中的重复检查逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_fixture_dirs_with_duplicates",
+        "test_file": "tests/fixtures_regress/tests.py",
+        "why_relevant": "它直接测试了 FIXTURE_DIRS 包含重复项（字符串路径）时，loaddata 命令应抛出异常的场景，与当前 Issue 的语义高度相关。",
+        "reusable_parts": [
+          "TestFixtures 类",
+          "override_settings 装饰器",
+          "management.call_command 调用",
+          "assertRaisesMessage 断言风格",
+          "导入的模块和常量"
+        ],
+        "possible_gap": "它使用字符串路径列表作为重复项，而 Issue 指出当使用 Path 实例时，重复检查失效。"
+      },
+      {
+        "test_name": "test_fixtures_dir_pathlib",
+        "test_file": "tests/fixtures_regress/tests.py",
+        "why_relevant": "它展示了 FIXTURE_DIRS 可以包含 Path 实例，并且 loaddata 命令可以成功运行（在非重复场景下）。",
+        "reusable_parts": [
+          "使用 Path 对象配置 FIXTURE_DIRS",
+          "调用 loaddata 命令",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "它只测试了单个 Path 实例，没有测试重复的 Path 实例。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "FIXTURE_DIRS 设置为包含两个相同字符串路径的列表。",
+        "target_pattern": "FIXTURE_DIRS 设置为包含两个相同 Path 实例的列表。",
+        "reason": "Issue 的核心是当配置项为 Path 实例时，重复检查逻辑失效。将字符串路径替换为 Path 实例可能触发缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 management.call_command('loaddata', ...) 时是否抛出 ImproperlyConfigured 异常及其消息。",
+        "reason": "正确的行为应该抛出异常，而缺陷行为可能不会抛出异常，导致命令继续执行。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.FIXTURE_DIRS 中 Path 实例的表示形式（如 str(path) 或 repr(path)）以及去重比较时的状态。",
+        "reason": "问题可能源于 Path 实例与字符串在比较时的不一致，观察其表示形式有助于理解比较逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 FIXTURE_DIRS 包含重复的 Path 实例时，调用 loaddata 命令应抛出 ImproperlyConfigured 异常，提示存在重复。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息的具体措辞可能变化。",
+        "reason": "Issue 的核心是异常是否被抛出，而不是异常消息的精确措辞。使用 raises 断言可以稳定地验证这一语义。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 override_settings 来临时设置 FIXTURE_DIRS。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 TestCase、override_settings、management、ImproperlyConfigured 以及 Path。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要一个包含 fixture 文件的目录（如 'fixtures_1'）来让 loaddata 命令有数据可加载。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "重复检查逻辑具体在 loaddata.py 文件中的哪个函数或哪几行代码中。",
+      "Path 实例与字符串在比较时具体是如何处理的，是直接比较对象还是转换为字符串后比较。",
+      "除了抛出异常，重复加载 fixture 是否会产生其他可观测的副作用（如数据库记录重复）。"
+    ]
+  }
+}

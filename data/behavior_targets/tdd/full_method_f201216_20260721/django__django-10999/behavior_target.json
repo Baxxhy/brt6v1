@@ -1,0 +1,278 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-10999",
+  "issue_summary": "parse_duration() 的正则表达式 standard_duration_re 无法匹配某些负持续时间字符串，因为小时部分的正则表达式缺少对负号的前瞻支持。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 unittest.TestCase 作为测试基类，如 DurationParseTests。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 parse_duration 和 datetime.timedelta。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DurationParseTests.test_negative",
+        "test_file": "tests/utils_tests/test_dateparse.py",
+        "why_relevant": "该测试专门针对负持续时间进行测试，包含多种负格式，与 Issue 描述的场景高度相关。",
+        "reusable_parts": [
+          "测试类 DurationParseTests",
+          "导入的 parse_duration 函数和 timedelta",
+          "使用 self.subTest 的循环结构",
+          "使用 self.assertEqual 比较 parse_duration 结果与预期 timedelta 的断言风格"
+        ],
+        "possible_gap": "该测试可能已经包含了触发缺陷的用例（如 '-1:15:30'），但可能由于正则表达式不匹配，这些用例可能已经失败或未被该正则捕获。需要检查这些用例是否确实通过 standard_duration_re 匹配。"
+      },
+      {
+        "test_name": "DurationParseTests.test_parse_python_format",
+        "test_file": "tests/utils_tests/test_dateparse.py",
+        "why_relevant": "该测试包含负持续时间的往返测试（timedelta(days=-4, minutes=15, seconds=30)），展示了从 timedelta 到字符串再解析的期望行为。",
+        "reusable_parts": [
+          "使用 format(timedelta) 生成持续时间字符串的模式",
+          "断言 parse_duration(format(delta)) 等于原始 delta 的往返验证模式"
+        ],
+        "possible_gap": "该测试依赖于 format(timedelta) 生成的字符串格式，可能不是直接触发 Issue 中描述的特定正则表达式缺陷的原始字符串输入。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 parse_duration() 函数，传入包含负小时部分的持续时间字符串，例如 '-1:15:30' 或 '-4 15:30'。",
+      "evidence": [
+        "Issue 描述指出正则表达式 standard_duration_re 不匹配负持续时间，因为小时定义的最后部分（前瞻）没有 '-?'。",
+        "相关测试 1 (test_negative) 包含负小时格式的测试用例，如 '-1:15:30'。",
+        "源码片段 2 显示了 standard_duration_re 的定义，其中小时部分的前瞻为 (?=\\d+:\\d+)，不包含负号。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "parse_duration() 对于某些负持续时间字符串返回 None 或错误的 timedelta 值。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述指出正则表达式不匹配负持续时间，这可能导致 parse_duration() 返回 None 或通过其他正则匹配得到错误结果。",
+        "相关测试 1 (test_negative) 的存在表明期望 parse_duration() 能正确处理负持续时间，如果失败则测试会失败。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "parse_duration",
+        "kind": "function",
+        "source_path": "django/utils/dateparse.py",
+        "reason": "Issue 直接报告此函数在处理负持续时间时存在缺陷。"
+      },
+      {
+        "name": "standard_duration_re",
+        "kind": "global_var",
+        "source_path": "django/utils/dateparse.py",
+        "reason": "Issue 指出此正则表达式是导致缺陷的根本原因。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/dateparse.py",
+        "object": "standard_duration_re",
+        "lines": "29-37",
+        "reason": "Issue 明确指出该正则表达式的小时部分前瞻 (?=\\d+:\\d+) 缺少对负号的支持，导致无法匹配负持续时间。"
+      },
+      {
+        "path": "django/utils/dateparse.py",
+        "object": "parse_duration",
+        "lines": "124-146",
+        "reason": "该函数使用 standard_duration_re 进行匹配，因此正则表达式的问题会直接影响此函数的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的正持续时间字符串，如 '10:15:30' 或 format(timedelta(...)) 生成的字符串。",
+        "target_pattern": "包含负小时部分的持续时间字符串，如 '-1:15:30' 或 '-4 15:30'。",
+        "reason": "Issue 明确指出 standard_duration_re 的小时部分前瞻不支持负号，因此包含负小时的输入可能无法匹配或导致错误解析。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "仅包含负天数、分钟、秒的持续时间字符串，如 '-15:30'（仅负分钟和秒）。",
+        "target_pattern": "包含负小时且可能与其他负组件组合的字符串，如 '-1:15:30'（负小时、正分钟和秒）或 '-4 -15:00:30'（负天数和负小时）。",
+        "reason": "Issue 描述的小时部分正则问题可能只在小时为负且需要匹配时触发，而现有负测试可能覆盖了其他组件为负的情况。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "parse_duration() 应能正确解析包含负小时部分的持续时间字符串，并返回相应的负 timedelta 对象。",
+      "evidence": [
+        "Issue 中建议的修复是将小时部分的前瞻改为 (?=-?\\d+:-?\\d+)，以支持负号。",
+        "相关测试 1 (test_negative) 定义了负持续时间字符串及其对应的正确 timedelta 值，如 ('-1:15:30', timedelta(hours=-1, minutes=15, seconds=30))。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "parse_duration(source) 的返回值，特别是是否为 None 或是否与预期 timedelta 匹配。",
+        "reason": "缺陷的直接表现是函数返回 None（不匹配）或错误的 timedelta 值。观察返回值可以判断是否触发了缺陷。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "standard_duration_re.match(value) 的匹配结果（match 对象）。",
+        "reason": "Issue 根源在于正则表达式匹配失败。观察匹配结果可以确认输入是否被 standard_duration_re 正确捕获。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "parse_duration(negative_duration_string) 应返回与预期负 timedelta 相等的值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或依赖于内部正则匹配细节的断言。",
+        "reason": "Issue 是关于功能正确性：给定负持续时间字符串，应返回正确的 timedelta 对象。使用 equals 比较 timedelta 对象是稳定且与 Issue 对齐的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的具体不匹配的负持续时间字符串示例未明确给出，仅描述了正则表达式问题。",
+    "现有测试 test_negative 中的用例（如 '-1:15:30'）是否确实因该缺陷而失败，还是通过其他正则（如 iso8601_duration_re）匹配成功。",
+    "除了小时部分，其他组件（如分钟、秒）为负时，与负小时的组合是否会产生其他边缘情况。"
+  ],
+  "raw": {
+    "issue_summary": "parse_duration() 的正则表达式 standard_duration_re 无法匹配某些负持续时间字符串，因为小时部分的正则表达式缺少对负号的前瞻支持。",
+    "trigger_condition": {
+      "text": "调用 parse_duration() 函数，传入包含负小时部分的持续时间字符串，例如 '-1:15:30' 或 '-4 15:30'。",
+      "evidence": [
+        "Issue 描述指出正则表达式 standard_duration_re 不匹配负持续时间，因为小时定义的最后部分（前瞻）没有 '-?'。",
+        "相关测试 1 (test_negative) 包含负小时格式的测试用例，如 '-1:15:30'。",
+        "源码片段 2 显示了 standard_duration_re 的定义，其中小时部分的前瞻为 (?=\\d+:\\d+)，不包含负号。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "parse_duration() 对于某些负持续时间字符串返回 None 或错误的 timedelta 值。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述指出正则表达式不匹配负持续时间，这可能导致 parse_duration() 返回 None 或通过其他正则匹配得到错误结果。",
+        "相关测试 1 (test_negative) 的存在表明期望 parse_duration() 能正确处理负持续时间，如果失败则测试会失败。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "parse_duration() 应能正确解析包含负小时部分的持续时间字符串，并返回相应的负 timedelta 对象。",
+      "evidence": [
+        "Issue 中建议的修复是将小时部分的前瞻改为 (?=-?\\d+:-?\\d+)，以支持负号。",
+        "相关测试 1 (test_negative) 定义了负持续时间字符串及其对应的正确 timedelta 值，如 ('-1:15:30', timedelta(hours=-1, minutes=15, seconds=30))。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "parse_duration",
+        "kind": "function",
+        "source_path": "django/utils/dateparse.py",
+        "reason": "Issue 直接报告此函数在处理负持续时间时存在缺陷。"
+      },
+      {
+        "name": "standard_duration_re",
+        "kind": "global_var",
+        "source_path": "django/utils/dateparse.py",
+        "reason": "Issue 指出此正则表达式是导致缺陷的根本原因。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/dateparse.py",
+        "object": "standard_duration_re",
+        "lines": "29-37",
+        "reason": "Issue 明确指出该正则表达式的小时部分前瞻 (?=\\d+:\\d+) 缺少对负号的支持，导致无法匹配负持续时间。"
+      },
+      {
+        "path": "django/utils/dateparse.py",
+        "object": "parse_duration",
+        "lines": "124-146",
+        "reason": "该函数使用 standard_duration_re 进行匹配，因此正则表达式的问题会直接影响此函数的行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DurationParseTests.test_negative",
+        "test_file": "tests/utils_tests/test_dateparse.py",
+        "why_relevant": "该测试专门针对负持续时间进行测试，包含多种负格式，与 Issue 描述的场景高度相关。",
+        "reusable_parts": [
+          "测试类 DurationParseTests",
+          "导入的 parse_duration 函数和 timedelta",
+          "使用 self.subTest 的循环结构",
+          "使用 self.assertEqual 比较 parse_duration 结果与预期 timedelta 的断言风格"
+        ],
+        "possible_gap": "该测试可能已经包含了触发缺陷的用例（如 '-1:15:30'），但可能由于正则表达式不匹配，这些用例可能已经失败或未被该正则捕获。需要检查这些用例是否确实通过 standard_duration_re 匹配。"
+      },
+      {
+        "test_name": "DurationParseTests.test_parse_python_format",
+        "test_file": "tests/utils_tests/test_dateparse.py",
+        "why_relevant": "该测试包含负持续时间的往返测试（timedelta(days=-4, minutes=15, seconds=30)），展示了从 timedelta 到字符串再解析的期望行为。",
+        "reusable_parts": [
+          "使用 format(timedelta) 生成持续时间字符串的模式",
+          "断言 parse_duration(format(delta)) 等于原始 delta 的往返验证模式"
+        ],
+        "possible_gap": "该测试依赖于 format(timedelta) 生成的字符串格式，可能不是直接触发 Issue 中描述的特定正则表达式缺陷的原始字符串输入。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的正持续时间字符串，如 '10:15:30' 或 format(timedelta(...)) 生成的字符串。",
+        "target_pattern": "包含负小时部分的持续时间字符串，如 '-1:15:30' 或 '-4 15:30'。",
+        "reason": "Issue 明确指出 standard_duration_re 的小时部分前瞻不支持负号，因此包含负小时的输入可能无法匹配或导致错误解析。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "仅包含负天数、分钟、秒的持续时间字符串，如 '-15:30'（仅负分钟和秒）。",
+        "target_pattern": "包含负小时且可能与其他负组件组合的字符串，如 '-1:15:30'（负小时、正分钟和秒）或 '-4 -15:00:30'（负天数和负小时）。",
+        "reason": "Issue 描述的小时部分正则问题可能只在小时为负且需要匹配时触发，而现有负测试可能覆盖了其他组件为负的情况。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "parse_duration(source) 的返回值，特别是是否为 None 或是否与预期 timedelta 匹配。",
+        "reason": "缺陷的直接表现是函数返回 None（不匹配）或错误的 timedelta 值。观察返回值可以判断是否触发了缺陷。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "standard_duration_re.match(value) 的匹配结果（match 对象）。",
+        "reason": "Issue 根源在于正则表达式匹配失败。观察匹配结果可以确认输入是否被 standard_duration_re 正确捕获。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "parse_duration(negative_duration_string) 应返回与预期负 timedelta 相等的值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或依赖于内部正则匹配细节的断言。",
+        "reason": "Issue 是关于功能正确性：给定负持续时间字符串，应返回正确的 timedelta 对象。使用 equals 比较 timedelta 对象是稳定且与 Issue 对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 unittest.TestCase 作为测试基类，如 DurationParseTests。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 parse_duration 和 datetime.timedelta。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的具体不匹配的负持续时间字符串示例未明确给出，仅描述了正则表达式问题。",
+      "现有测试 test_negative 中的用例（如 '-1:15:30'）是否确实因该缺陷而失败，还是通过其他正则（如 iso8601_duration_re）匹配成功。",
+      "除了小时部分，其他组件（如分钟、秒）为负时，与负小时的组合是否会产生其他边缘情况。"
+    ]
+  }
+}

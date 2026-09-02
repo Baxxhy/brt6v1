@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11880",
+  "issue_summary": "Form Field 的 __deepcopy__ 方法没有深度复制 error_messages 字典，导致多个字段实例共享同一个字典，修改一个实例的错误信息会影响所有实例。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.forms 模块中的 Form 和相关的字段类（如 CharField）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要自定义一个表单类，其中包含一个字段，并可能设置初始的 error_messages。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_field_deepcopies_widget_instance",
+        "test_file": "tests/forms_tests/field_tests/test_base.py",
+        "why_relevant": "它测试了字段对 widget 实例的深度复制，验证了字段副本应独立，这与 error_messages 需要独立复制的场景类似。",
+        "reusable_parts": [
+          "SimpleTestCase 基类",
+          "自定义表单类模式",
+          "通过 f.fields 访问和修改字段属性",
+          "使用 assertEqual 比较属性值"
+        ],
+        "possible_gap": "它测试的是 widget.choices，而不是 error_messages 字典。"
+      },
+      {
+        "test_name": "test_deepcopies_widget",
+        "test_file": "tests/model_forms/test_modelchoicefield.py",
+        "why_relevant": "它测试了字段和 widget 在深度复制后的独立性，并检查了引用关系，与 Issue 中字段副本应独立的核心问题相关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "创建表单实例并获取字段",
+          "使用 assertIsNot 和 assertIs 检查对象标识"
+        ],
+        "possible_gap": "它关注的是 widget.choices 和 field 引用，而非 error_messages 字典。"
+      },
+      {
+        "test_name": "test_error_messages_overrides",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它直接测试了 error_messages 的行为，验证了错误信息可以被覆盖和正确显示。",
+        "reusable_parts": [
+          "SimpleTestCase 基类",
+          "使用 form.full_clean() 和 form.errors",
+          "assertEqual 比较错误信息"
+        ],
+        "possible_gap": "它测试的是静态错误信息覆盖，而不是动态修改多个实例共享字典的问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建多个相同表单类的实例，并动态修改其中一个实例字段的 error_messages 字典或其中的错误信息。",
+      "evidence": [
+        "Issue 描述：'Forms and ModelForms that modify the error messages of their fields dynamically'",
+        "Issue 描述：'any modification of either the dictionary or the error message itself for one formfield is immediately reflected on all other formfiels'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "修改一个表单实例字段的错误信息后，其他相同表单类的实例字段的错误信息也发生相同变化，导致错误信息被错误地引发。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'all copies of the same field share the same dictionary and any modification... is immediately reflected on all other formfiels'",
+        "Issue 描述：'resulting in incorrectly raised errors'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.fields.Field.__deepcopy__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 明确指出该方法是缺陷所在，它没有深度复制 error_messages 字典。"
+      },
+      {
+        "name": "django.forms.Form",
+        "kind": "class",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 涉及 Forms 和 ModelForms，它们是使用字段的上下文。"
+      },
+      {
+        "name": "django.forms.fields.Field.error_messages",
+        "kind": "attribute",
+        "source_path": "django/forms/fields.py",
+        "reason": "这是需要被深度复制的属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/fields.py",
+        "object": "Field.__deepcopy__",
+        "lines": "200",
+        "reason": "Issue 直接链接到该方法，并指出它没有对 error_messages 字典进行额外处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中修改字段的 choices 或 queryset 属性。",
+        "target_pattern": "修改字段的 error_messages 字典或其内部的错误信息字符串。",
+        "reason": "Issue 的核心是 error_messages 字典在深度复制时没有被正确处理，修改它是触发缺陷的直接操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接创建表单实例并访问其字段。",
+        "target_pattern": "创建多个表单实例，并修改其中一个实例字段的 error_messages。",
+        "reason": "Issue 描述的问题在多个表单实例共享相同字段时显现，需要多个实例来观察状态污染。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "每个表单实例的字段应具有独立的 error_messages 字典副本，修改一个实例的错误信息不应影响其他实例。",
+      "evidence": [
+        "Issue 描述：'each instance of the specific form... is expected to have a set of fields “sealed” away from other instances of the same ProfileForm'",
+        "相关测试 1 和 2 展示了字段和 widget 实例应被深度复制以保持独立性的模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "修改一个表单实例字段的 error_messages 后，检查另一个实例相同字段的 error_messages 字典的 id() 或其内容。",
+        "reason": "如果字典是共享的，它们的 id 将相同，或者对其中一个的修改会反映在另一个上。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 copy.deepcopy() 复制字段后，检查原字段和复制字段的 error_messages 字典的 id()。",
+        "reason": "深度复制应产生独立的字典，id 应不同。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证两个表单实例的相同字段的 error_messages 字典是不同的对象（id 不同）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "直接比较完整的 error_messages 字典内容，除非已确认它们应独立但内容相同。",
+        "reason": "这直接测试了深度复制是否创建了独立字典，是 Issue 的核心。使用 id 或 is 比较对象标识更稳定。"
+      },
+      {
+        "assertion_goal": "验证修改一个实例字段的 error_messages 后，另一个实例的 error_messages 保持不变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言错误信息字符串的完整格式，除非 Issue 明确指定。",
+        "reason": "这测试了状态隔离，是预期的正确行为。比较字典内容可以验证独立性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "error_messages 字典的确切结构以及修改它的典型方式（例如，直接赋值 vs. 更新内部键值）在 Issue 中没有详细说明。",
+    "除了 error_messages，是否还有其他字段属性在 __deepcopy__ 中需要类似处理尚不明确。",
+    "触发缺陷是否一定需要调用 copy.deepcopy()，还是通过表单实例化过程中的其他机制也会暴露问题。"
+  ],
+  "raw": {
+    "issue_summary": "Form Field 的 __deepcopy__ 方法没有深度复制 error_messages 字典，导致多个字段实例共享同一个字典，修改一个实例的错误信息会影响所有实例。",
+    "trigger_condition": {
+      "text": "创建多个相同表单类的实例，并动态修改其中一个实例字段的 error_messages 字典或其中的错误信息。",
+      "evidence": [
+        "Issue 描述：'Forms and ModelForms that modify the error messages of their fields dynamically'",
+        "Issue 描述：'any modification of either the dictionary or the error message itself for one formfield is immediately reflected on all other formfiels'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "修改一个表单实例字段的错误信息后，其他相同表单类的实例字段的错误信息也发生相同变化，导致错误信息被错误地引发。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'all copies of the same field share the same dictionary and any modification... is immediately reflected on all other formfiels'",
+        "Issue 描述：'resulting in incorrectly raised errors'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "每个表单实例的字段应具有独立的 error_messages 字典副本，修改一个实例的错误信息不应影响其他实例。",
+      "evidence": [
+        "Issue 描述：'each instance of the specific form... is expected to have a set of fields “sealed” away from other instances of the same ProfileForm'",
+        "相关测试 1 和 2 展示了字段和 widget 实例应被深度复制以保持独立性的模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.fields.Field.__deepcopy__",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 明确指出该方法是缺陷所在，它没有深度复制 error_messages 字典。"
+      },
+      {
+        "name": "django.forms.Form",
+        "kind": "class",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 涉及 Forms 和 ModelForms，它们是使用字段的上下文。"
+      },
+      {
+        "name": "django.forms.fields.Field.error_messages",
+        "kind": "attribute",
+        "source_path": "django/forms/fields.py",
+        "reason": "这是需要被深度复制的属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/fields.py",
+        "object": "Field.__deepcopy__",
+        "lines": "200",
+        "reason": "Issue 直接链接到该方法，并指出它没有对 error_messages 字典进行额外处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_field_deepcopies_widget_instance",
+        "test_file": "tests/forms_tests/field_tests/test_base.py",
+        "why_relevant": "它测试了字段对 widget 实例的深度复制，验证了字段副本应独立，这与 error_messages 需要独立复制的场景类似。",
+        "reusable_parts": [
+          "SimpleTestCase 基类",
+          "自定义表单类模式",
+          "通过 f.fields 访问和修改字段属性",
+          "使用 assertEqual 比较属性值"
+        ],
+        "possible_gap": "它测试的是 widget.choices，而不是 error_messages 字典。"
+      },
+      {
+        "test_name": "test_deepcopies_widget",
+        "test_file": "tests/model_forms/test_modelchoicefield.py",
+        "why_relevant": "它测试了字段和 widget 在深度复制后的独立性，并检查了引用关系，与 Issue 中字段副本应独立的核心问题相关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "创建表单实例并获取字段",
+          "使用 assertIsNot 和 assertIs 检查对象标识"
+        ],
+        "possible_gap": "它关注的是 widget.choices 和 field 引用，而非 error_messages 字典。"
+      },
+      {
+        "test_name": "test_error_messages_overrides",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它直接测试了 error_messages 的行为，验证了错误信息可以被覆盖和正确显示。",
+        "reusable_parts": [
+          "SimpleTestCase 基类",
+          "使用 form.full_clean() 和 form.errors",
+          "assertEqual 比较错误信息"
+        ],
+        "possible_gap": "它测试的是静态错误信息覆盖，而不是动态修改多个实例共享字典的问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中修改字段的 choices 或 queryset 属性。",
+        "target_pattern": "修改字段的 error_messages 字典或其内部的错误信息字符串。",
+        "reason": "Issue 的核心是 error_messages 字典在深度复制时没有被正确处理，修改它是触发缺陷的直接操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接创建表单实例并访问其字段。",
+        "target_pattern": "创建多个表单实例，并修改其中一个实例字段的 error_messages。",
+        "reason": "Issue 描述的问题在多个表单实例共享相同字段时显现，需要多个实例来观察状态污染。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "修改一个表单实例字段的 error_messages 后，检查另一个实例相同字段的 error_messages 字典的 id() 或其内容。",
+        "reason": "如果字典是共享的，它们的 id 将相同，或者对其中一个的修改会反映在另一个上。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 copy.deepcopy() 复制字段后，检查原字段和复制字段的 error_messages 字典的 id()。",
+        "reason": "深度复制应产生独立的字典，id 应不同。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证两个表单实例的相同字段的 error_messages 字典是不同的对象（id 不同）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "直接比较完整的 error_messages 字典内容，除非已确认它们应独立但内容相同。",
+        "reason": "这直接测试了深度复制是否创建了独立字典，是 Issue 的核心。使用 id 或 is 比较对象标识更稳定。"
+      },
+      {
+        "assertion_goal": "验证修改一个实例字段的 error_messages 后，另一个实例的 error_messages 保持不变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言错误信息字符串的完整格式，除非 Issue 明确指定。",
+        "reason": "这测试了状态隔离，是预期的正确行为。比较字典内容可以验证独立性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.forms 模块中的 Form 和相关的字段类（如 CharField）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要自定义一个表单类，其中包含一个字段，并可能设置初始的 error_messages。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "error_messages 字典的确切结构以及修改它的典型方式（例如，直接赋值 vs. 更新内部键值）在 Issue 中没有详细说明。",
+      "除了 error_messages，是否还有其他字段属性在 __deepcopy__ 中需要类似处理尚不明确。",
+      "触发缺陷是否一定需要调用 copy.deepcopy()，还是通过表单实例化过程中的其他机制也会暴露问题。"
+    ]
+  }
+}

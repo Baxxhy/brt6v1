@@ -1,0 +1,318 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-4493",
+  "issue_summary": "Dataset.update 方法在处理分块（chunked）的 dask DataArray 时，会触发其提前计算，导致数据不再保持分块状态。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 dask.array 并创建分块数据。可能需要类似 `DaskTestCase` 的测试环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 `xr.DataArray(...).chunk()` 或直接使用 `da.array` 创建分块 DataArray。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_update",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "这是 Dataset.update 方法的基础测试，包含了调用 update 和验证结果的标准模式。",
+        "reusable_parts": [
+          "`create_test_data` fixture 的使用",
+          "`assert_identical` 断言风格",
+          "使用字典和 Dataset 作为 `other` 参数的调用模式"
+        ],
+        "possible_gap": "该测试使用普通 numpy 数组，没有测试包含惰性 dask 数组的情况，因此无法复现 Issue。"
+      },
+      {
+        "test_name": "TestDataArrayAndDataset.test_lazy_dataset",
+        "test_file": "xarray/tests/test_dask.py",
+        "why_relevant": "该测试验证了 Dataset 可以包含惰性 dask 数组，并检查了 `lazy_ds.foo.variable.data` 的类型。",
+        "reusable_parts": [
+          "`DaskTestCase` 基类可能提供了 dask 环境",
+          "使用 `da.Array` 构造惰性数据",
+          "使用 `isinstance(... , da.Array)` 进行类型断言"
+        ],
+        "possible_gap": "该测试只检查了 Dataset 的初始构造，没有测试 update 操作对惰性数据的影响。"
+      },
+      {
+        "test_name": "TestDataset.test_update_auto_align",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试涉及 update 方法更复杂的场景（自动对齐），展示了 update 可能触发内部计算（如对齐）的路径。",
+        "reusable_parts": [
+          "使用 `ds.copy()` 和 `actual.update(other)` 的模式",
+          "处理坐标冲突的场景"
+        ],
+        "possible_gap": "同样使用普通 numpy 数组，没有涉及惰性数据。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个包含分块 dask DataArray 的 Dataset 调用 update 方法，传入一个包含该 DataArray 或其切片的字典。",
+      "evidence": [
+        "Issue 中的 MCVE 展示了使用 `ds.update(update_dict)` 后，`foo` 不再分块。",
+        "Issue 中第二个例子展示了使用 `xr.Dataset(dict(a=(('x', 'y'), ds.a)))` 构造 Dataset 时也会触发计算。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "原本是 dask.array.core.Array 类型的数据，在 update 操作后变成了 numpy.ndarray 类型，分块属性丢失。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 中：`ds # now foo is no longer chunked`",
+        "Issue 中第二个例子：`type(ds2.a.data)` 输出 `numpy.ndarray`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xarray.Dataset.update",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 直接报告此方法导致分块数据被提前计算。"
+      },
+      {
+        "name": "xarray.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中第二个问题涉及 Dataset 构造函数也可能触发类似的计算。"
+      },
+      {
+        "name": "xarray.DataArray",
+        "kind": "class",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 的核心对象是分块的 DataArray。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "update",
+        "lines": "3883-3910",
+        "reason": "Issue 直接由调用此方法触发。源码显示它调用 `dataset_update_method` 并返回 `self._replace(inplace=True, ...)`，可能在此过程中数据被具体化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通 numpy 数组或 Variable 作为 update 的输入。",
+        "target_pattern": "使用分块的 dask DataArray 或其切片作为 update 字典中的值。",
+        "reason": "Issue 表明当输入是惰性分块数据时，update 方法会触发计算。将输入变异为此类型可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "被更新的 Dataset 中的变量是普通 numpy 数组。",
+        "target_pattern": "被更新的 Dataset 中已经包含一个分块的 dask DataArray 变量。",
+        "reason": "Issue 的 MCVE 显示，当 Dataset 中已有一个分块变量，并用其切片更新它时，bug 被触发。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Dataset.update 方法应保持输入 DataArray 的惰性（lazy）和分块（chunked）属性，更新后的数据仍应为 dask array 类型。",
+      "evidence": [
+        "Issue 标题和期望：`The chunked DataArray should still be chunked after the update`",
+        "相关测试 2 (`test_lazy_dataset`) 表明 Dataset 可以包含惰性数据。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "`ds['foo'].data` 或 `ds.foo.variable.data` 的类型，在 update 操作前后。",
+        "reason": "Issue 的核心症状是数据从 `dask.array.core.Array` 类型变为 `numpy.ndarray` 类型。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "`repr(ds)` 或 `repr(ds['foo'])` 的输出，观察是否包含 'dask.array' 或分块信息。",
+        "reason": "分块 DataArray 的 repr 通常包含 dask 相关信息，计算后可能消失。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`ds['foo']._in_memory` 属性（如果存在）或检查数据是否已计算。",
+        "reason": "可以判断数据是否已从惰性状态变为内存中的具体状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 update 操作后，Dataset 中相关变量的数据仍保持为 dask array 类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串相等，因为 dask array 的 repr 可能包含随机标识符。",
+        "reason": "Issue 的核心是类型变化，使用 isinstance 检查 `da.Array` 是稳定且直接的验证方式。"
+      },
+      {
+        "assertion_goal": "验证 update 操作没有触发不必要的计算，数据保持惰性。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的数组值相等，因为值可能随机生成。",
+        "reason": "可以比较 update 前后数据的类型或惰性属性是否一致，这比断言具体值更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 `dataset_update_method` 函数中，还是在 `_replace` 方法中，亦或是在数据对齐/合并的某个底层步骤中？",
+    "除了 update 方法，Dataset 构造函数在特定参数形式下是否共享同一段有缺陷的代码路径？",
+    "修复后，除了类型保持不变，是否还需要保证分块大小（chunks）等元数据也得到保持？"
+  ],
+  "raw": {
+    "issue_summary": "Dataset.update 方法在处理分块（chunked）的 dask DataArray 时，会触发其提前计算，导致数据不再保持分块状态。",
+    "trigger_condition": {
+      "text": "对一个包含分块 dask DataArray 的 Dataset 调用 update 方法，传入一个包含该 DataArray 或其切片的字典。",
+      "evidence": [
+        "Issue 中的 MCVE 展示了使用 `ds.update(update_dict)` 后，`foo` 不再分块。",
+        "Issue 中第二个例子展示了使用 `xr.Dataset(dict(a=(('x', 'y'), ds.a)))` 构造 Dataset 时也会触发计算。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "原本是 dask.array.core.Array 类型的数据，在 update 操作后变成了 numpy.ndarray 类型，分块属性丢失。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 中：`ds # now foo is no longer chunked`",
+        "Issue 中第二个例子：`type(ds2.a.data)` 输出 `numpy.ndarray`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Dataset.update 方法应保持输入 DataArray 的惰性（lazy）和分块（chunked）属性，更新后的数据仍应为 dask array 类型。",
+      "evidence": [
+        "Issue 标题和期望：`The chunked DataArray should still be chunked after the update`",
+        "相关测试 2 (`test_lazy_dataset`) 表明 Dataset 可以包含惰性数据。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xarray.Dataset.update",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 直接报告此方法导致分块数据被提前计算。"
+      },
+      {
+        "name": "xarray.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中第二个问题涉及 Dataset 构造函数也可能触发类似的计算。"
+      },
+      {
+        "name": "xarray.DataArray",
+        "kind": "class",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 的核心对象是分块的 DataArray。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "update",
+        "lines": "3883-3910",
+        "reason": "Issue 直接由调用此方法触发。源码显示它调用 `dataset_update_method` 并返回 `self._replace(inplace=True, ...)`，可能在此过程中数据被具体化。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_update",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "这是 Dataset.update 方法的基础测试，包含了调用 update 和验证结果的标准模式。",
+        "reusable_parts": [
+          "`create_test_data` fixture 的使用",
+          "`assert_identical` 断言风格",
+          "使用字典和 Dataset 作为 `other` 参数的调用模式"
+        ],
+        "possible_gap": "该测试使用普通 numpy 数组，没有测试包含惰性 dask 数组的情况，因此无法复现 Issue。"
+      },
+      {
+        "test_name": "TestDataArrayAndDataset.test_lazy_dataset",
+        "test_file": "xarray/tests/test_dask.py",
+        "why_relevant": "该测试验证了 Dataset 可以包含惰性 dask 数组，并检查了 `lazy_ds.foo.variable.data` 的类型。",
+        "reusable_parts": [
+          "`DaskTestCase` 基类可能提供了 dask 环境",
+          "使用 `da.Array` 构造惰性数据",
+          "使用 `isinstance(... , da.Array)` 进行类型断言"
+        ],
+        "possible_gap": "该测试只检查了 Dataset 的初始构造，没有测试 update 操作对惰性数据的影响。"
+      },
+      {
+        "test_name": "TestDataset.test_update_auto_align",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试涉及 update 方法更复杂的场景（自动对齐），展示了 update 可能触发内部计算（如对齐）的路径。",
+        "reusable_parts": [
+          "使用 `ds.copy()` 和 `actual.update(other)` 的模式",
+          "处理坐标冲突的场景"
+        ],
+        "possible_gap": "同样使用普通 numpy 数组，没有涉及惰性数据。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用普通 numpy 数组或 Variable 作为 update 的输入。",
+        "target_pattern": "使用分块的 dask DataArray 或其切片作为 update 字典中的值。",
+        "reason": "Issue 表明当输入是惰性分块数据时，update 方法会触发计算。将输入变异为此类型可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "被更新的 Dataset 中的变量是普通 numpy 数组。",
+        "target_pattern": "被更新的 Dataset 中已经包含一个分块的 dask DataArray 变量。",
+        "reason": "Issue 的 MCVE 显示，当 Dataset 中已有一个分块变量，并用其切片更新它时，bug 被触发。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "`ds['foo'].data` 或 `ds.foo.variable.data` 的类型，在 update 操作前后。",
+        "reason": "Issue 的核心症状是数据从 `dask.array.core.Array` 类型变为 `numpy.ndarray` 类型。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "`repr(ds)` 或 `repr(ds['foo'])` 的输出，观察是否包含 'dask.array' 或分块信息。",
+        "reason": "分块 DataArray 的 repr 通常包含 dask 相关信息，计算后可能消失。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`ds['foo']._in_memory` 属性（如果存在）或检查数据是否已计算。",
+        "reason": "可以判断数据是否已从惰性状态变为内存中的具体状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 update 操作后，Dataset 中相关变量的数据仍保持为 dask array 类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串相等，因为 dask array 的 repr 可能包含随机标识符。",
+        "reason": "Issue 的核心是类型变化，使用 isinstance 检查 `da.Array` 是稳定且直接的验证方式。"
+      },
+      {
+        "assertion_goal": "验证 update 操作没有触发不必要的计算，数据保持惰性。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的数组值相等，因为值可能随机生成。",
+        "reason": "可以比较 update 前后数据的类型或惰性属性是否一致，这比断言具体值更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 dask.array 并创建分块数据。可能需要类似 `DaskTestCase` 的测试环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 `xr.DataArray(...).chunk()` 或直接使用 `da.array` 创建分块 DataArray。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 `dataset_update_method` 函数中，还是在 `_replace` 方法中，亦或是在数据对齐/合并的某个底层步骤中？",
+      "除了 update 方法，Dataset 构造函数在特定参数形式下是否共享同一段有缺陷的代码路径？",
+      "修复后，除了类型保持不变，是否还需要保证分块大小（chunks）等元数据也得到保持？"
+    ]
+  }
+}

@@ -1,0 +1,268 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13135",
+  "issue_summary": "KBinsDiscretizer 使用 kmeans 策略时，在某些情况下因 bin_edges 未排序导致 np.digitize 抛出 ValueError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy, KBinsDiscretizer, 以及 pytest 的 assert 工具（如 assert_array_equal）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest.mark.parametrize 来测试不同的 n_bins 值，但复现测试可能更关注单个触发值。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_nonuniform_strategies",
+        "test_file": "sklearn/preprocessing/tests/test_discretization.py",
+        "why_relevant": "Issue 明确提到通过修改此测试（将 n_bins 从 3 改为 5）即可复现问题。该测试已经使用了与 Issue 完全相同的输入数据 X 和 strategy='kmeans'。",
+        "reusable_parts": [
+          "imports (numpy, KBinsDiscretizer, assert_array_equal)",
+          "输入数据 X 的定义",
+          "KBinsDiscretizer 的构造模式 (strategy, encode)",
+          "fit_transform 的调用方式",
+          "assert_array_equal 的断言风格"
+        ],
+        "possible_gap": "该测试当前使用的 n_bins 值（2 和 3）不会触发缺陷。需要将 n_bins 增加到更高的值（如 5）才能复现。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 KBinsDiscretizer，设置 strategy='kmeans'，n_bins 值较高（例如接近数据点数），对特定数据（如 [0, 0.5, 2, 3, 9, 10]）调用 fit_transform。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分提供了触发代码：n_bins=5, strategy='kmeans', encode='ordinal'，输入 X = [0, 0.5, 2, 3, 9, 10]。",
+        "Issue 描述提到在 n_bins 数量合理（如 log_2(唯一值数量)）的生产场景中也会发生。",
+        "相关测试 test_nonuniform_strategies 使用了相同的输入 X 和 strategy='kmeans'，但 n_bins 为 2 或 3 时正常。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 fit_transform 时抛出 ValueError: bins must be monotonically increasing or decreasing，源自 np.digitize 调用。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 Actual Results 部分显示了完整的错误堆栈，最终错误在 _discretization.py 的 transform 方法中 np.digitize 调用处。",
+        "错误信息明确指出 'bins must be monotonically increasing or decreasing'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "KBinsDiscretizer",
+        "kind": "class",
+        "source_path": "sklearn/preprocessing/_discretization.py",
+        "reason": "Issue 直接报告了该类在使用 kmeans 策略时的缺陷。"
+      },
+      {
+        "name": "KBinsDiscretizer.fit_transform",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_discretization.py",
+        "reason": "Issue 中触发错误的调用链是 est.fit_transform(X)，该方法继承自 BaseEstimator.fit_transform。"
+      },
+      {
+        "name": "KBinsDiscretizer.transform",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_discretization.py",
+        "reason": "错误堆栈显示异常发生在 transform 方法内部（第 255 行）的 np.digitize 调用处。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/preprocessing/_discretization.py",
+        "object": "KBinsDiscretizer.transform",
+        "lines": "253-255",
+        "reason": "错误堆栈指向 transform 方法中调用 np.digitize 的行，该函数要求 bins 参数单调。Issue 描述指出问题根源是 bin_edges 未排序。"
+      },
+      {
+        "path": "sklearn/preprocessing/_discretization.py",
+        "object": "KBinsDiscretizer.fit",
+        "lines": "",
+        "reason": "Issue 描述指出问题源于 'centers and consequently bin_edges being unsorted'。bin_edges 是在 fit 阶段根据 kmeans 中心计算得到的，因此 fit 方法中计算 bin_edges 的逻辑可能是缺陷源头。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试 test_nonuniform_strategies 中，对 kmeans 策略测试了 n_bins=2 和 n_bins=3。",
+        "target_pattern": "将 n_bins 参数增加到更高的值，例如 5（如 Issue 所示），或接近数据点数量的值。",
+        "reason": "Issue 表明当 n_bins 较高时，kmeans 策略可能产生未排序的 centers/bin_edges，从而触发错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "KBinsDiscretizer 在使用 kmeans 策略时，无论 n_bins 设置如何，都应成功完成 fit_transform 而不抛出异常，并生成有效的离散化结果。",
+      "evidence": [
+        "Issue 的 Expected Results 部分明确说明 'No error is thrown.'。",
+        "相关测试 test_nonuniform_strategies 表明，对于相同的输入和策略，当 n_bins 为 2 或 3 时，fit_transform 成功执行并产生预期输出。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "est.fit_transform(X) 的调用结果，捕获 ValueError。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError。观测是否抛出此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "est.bin_edges_ 在 fit 之后的值，特别是其单调性。",
+        "reason": "Issue 指出缺陷根源是 bin_edges 未排序。观测 bin_edges_ 是否单调递增/递减可以验证问题根源。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "est.fit(X) 后 est 的内部状态，如 est.bin_edges_ 和可能的 est.n_bins_。",
+        "reason": "了解 fit 后估计器的状态有助于理解 bin_edges 是如何计算的，以及为何在某些 n_bins 下会无序。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在触发条件下调用 fit_transform 不会抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的 bin_edges 值或转换后的 Xt 值，因为这些在修复前可能不稳定或未知。",
+        "reason": "Issue 的预期结果是 'No error is thrown.'。修复后，调用应成功完成。但在生成复现测试时，我们首先需要断言当前行为会抛出异常（raises ValueError），以确认缺陷被触发。修复后，此断言应改为不抛出异常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发缺陷所需的确切 n_bins 阈值是否仅取决于数据点数量，还是与数据分布有关？Issue 提到 n_bins=5 对示例数据触发，但生产环境中 'reasonable number of bins' 也会触发。",
+    "bin_edges 未排序的具体原因是什么？是 kmeans 聚类算法本身返回了无序中心，还是后续计算 bin_edges 的代码逻辑有误？",
+    "除了 n_bins 参数，是否还有其他配置（如不同的 encode 模式、随机种子）会影响缺陷的触发？"
+  ],
+  "raw": {
+    "issue_summary": "KBinsDiscretizer 使用 kmeans 策略时，在某些情况下因 bin_edges 未排序导致 np.digitize 抛出 ValueError。",
+    "trigger_condition": {
+      "text": "使用 KBinsDiscretizer，设置 strategy='kmeans'，n_bins 值较高（例如接近数据点数），对特定数据（如 [0, 0.5, 2, 3, 9, 10]）调用 fit_transform。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分提供了触发代码：n_bins=5, strategy='kmeans', encode='ordinal'，输入 X = [0, 0.5, 2, 3, 9, 10]。",
+        "Issue 描述提到在 n_bins 数量合理（如 log_2(唯一值数量)）的生产场景中也会发生。",
+        "相关测试 test_nonuniform_strategies 使用了相同的输入 X 和 strategy='kmeans'，但 n_bins 为 2 或 3 时正常。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 fit_transform 时抛出 ValueError: bins must be monotonically increasing or decreasing，源自 np.digitize 调用。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 Actual Results 部分显示了完整的错误堆栈，最终错误在 _discretization.py 的 transform 方法中 np.digitize 调用处。",
+        "错误信息明确指出 'bins must be monotonically increasing or decreasing'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "KBinsDiscretizer 在使用 kmeans 策略时，无论 n_bins 设置如何，都应成功完成 fit_transform 而不抛出异常，并生成有效的离散化结果。",
+      "evidence": [
+        "Issue 的 Expected Results 部分明确说明 'No error is thrown.'。",
+        "相关测试 test_nonuniform_strategies 表明，对于相同的输入和策略，当 n_bins 为 2 或 3 时，fit_transform 成功执行并产生预期输出。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "KBinsDiscretizer",
+        "kind": "class",
+        "source_path": "sklearn/preprocessing/_discretization.py",
+        "reason": "Issue 直接报告了该类在使用 kmeans 策略时的缺陷。"
+      },
+      {
+        "name": "KBinsDiscretizer.fit_transform",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_discretization.py",
+        "reason": "Issue 中触发错误的调用链是 est.fit_transform(X)，该方法继承自 BaseEstimator.fit_transform。"
+      },
+      {
+        "name": "KBinsDiscretizer.transform",
+        "kind": "method",
+        "source_path": "sklearn/preprocessing/_discretization.py",
+        "reason": "错误堆栈显示异常发生在 transform 方法内部（第 255 行）的 np.digitize 调用处。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/preprocessing/_discretization.py",
+        "object": "KBinsDiscretizer.transform",
+        "lines": "253-255",
+        "reason": "错误堆栈指向 transform 方法中调用 np.digitize 的行，该函数要求 bins 参数单调。Issue 描述指出问题根源是 bin_edges 未排序。"
+      },
+      {
+        "path": "sklearn/preprocessing/_discretization.py",
+        "object": "KBinsDiscretizer.fit",
+        "lines": "",
+        "reason": "Issue 描述指出问题源于 'centers and consequently bin_edges being unsorted'。bin_edges 是在 fit 阶段根据 kmeans 中心计算得到的，因此 fit 方法中计算 bin_edges 的逻辑可能是缺陷源头。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_nonuniform_strategies",
+        "test_file": "sklearn/preprocessing/tests/test_discretization.py",
+        "why_relevant": "Issue 明确提到通过修改此测试（将 n_bins 从 3 改为 5）即可复现问题。该测试已经使用了与 Issue 完全相同的输入数据 X 和 strategy='kmeans'。",
+        "reusable_parts": [
+          "imports (numpy, KBinsDiscretizer, assert_array_equal)",
+          "输入数据 X 的定义",
+          "KBinsDiscretizer 的构造模式 (strategy, encode)",
+          "fit_transform 的调用方式",
+          "assert_array_equal 的断言风格"
+        ],
+        "possible_gap": "该测试当前使用的 n_bins 值（2 和 3）不会触发缺陷。需要将 n_bins 增加到更高的值（如 5）才能复现。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试 test_nonuniform_strategies 中，对 kmeans 策略测试了 n_bins=2 和 n_bins=3。",
+        "target_pattern": "将 n_bins 参数增加到更高的值，例如 5（如 Issue 所示），或接近数据点数量的值。",
+        "reason": "Issue 表明当 n_bins 较高时，kmeans 策略可能产生未排序的 centers/bin_edges，从而触发错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "est.fit_transform(X) 的调用结果，捕获 ValueError。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError。观测是否抛出此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "est.bin_edges_ 在 fit 之后的值，特别是其单调性。",
+        "reason": "Issue 指出缺陷根源是 bin_edges 未排序。观测 bin_edges_ 是否单调递增/递减可以验证问题根源。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "est.fit(X) 后 est 的内部状态，如 est.bin_edges_ 和可能的 est.n_bins_。",
+        "reason": "了解 fit 后估计器的状态有助于理解 bin_edges 是如何计算的，以及为何在某些 n_bins 下会无序。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在触发条件下调用 fit_transform 不会抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的 bin_edges 值或转换后的 Xt 值，因为这些在修复前可能不稳定或未知。",
+        "reason": "Issue 的预期结果是 'No error is thrown.'。修复后，调用应成功完成。但在生成复现测试时，我们首先需要断言当前行为会抛出异常（raises ValueError），以确认缺陷被触发。修复后，此断言应改为不抛出异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy, KBinsDiscretizer, 以及 pytest 的 assert 工具（如 assert_array_equal）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest.mark.parametrize 来测试不同的 n_bins 值，但复现测试可能更关注单个触发值。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "触发缺陷所需的确切 n_bins 阈值是否仅取决于数据点数量，还是与数据分布有关？Issue 提到 n_bins=5 对示例数据触发，但生产环境中 'reasonable number of bins' 也会触发。",
+      "bin_edges 未排序的具体原因是什么？是 kmeans 聚类算法本身返回了无序中心，还是后续计算 bin_edges 的代码逻辑有误？",
+      "除了 n_bins 参数，是否还有其他配置（如不同的 encode 模式、随机种子）会影响缺陷的触发？"
+    ]
+  }
+}

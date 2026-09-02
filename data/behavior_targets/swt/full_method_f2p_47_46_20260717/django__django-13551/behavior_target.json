@@ -1,0 +1,282 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13551",
+  "issue_summary": "用户更改邮箱后，之前为该邮箱生成的密码重置令牌仍然有效，导致安全漏洞。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase 和 User 模型来创建和操作用户。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 PASSWORD_RESET_TIMEOUT 以避免超时干扰测试。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TokenGeneratorTest.test_make_token",
+        "test_file": "tests/auth_tests/test_tokens.py",
+        "why_relevant": "它展示了如何创建用户、生成令牌并验证令牌的基本流程。",
+        "reusable_parts": [
+          "User.objects.create_user",
+          "PasswordResetTokenGenerator 实例化",
+          "make_token 和 check_token 的调用模式",
+          "assertIs 断言风格"
+        ],
+        "possible_gap": "该测试没有改变用户状态（如邮箱），也没有测试令牌在状态改变后是否失效。"
+      },
+      {
+        "test_name": "TokenGeneratorTest.test_timeout",
+        "test_file": "tests/auth_tests/test_tokens.py",
+        "why_relevant": "它测试了令牌在特定条件（超时）下失效的行为，展示了如何验证令牌有效性随时间变化。",
+        "reusable_parts": [
+          "使用 MockedPasswordResetTokenGenerator 来模拟时间变化",
+          "基于时间偏移验证令牌有效性的断言模式"
+        ],
+        "possible_gap": "它关注的是超时，而不是用户属性（如邮箱）变化导致的失效。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "用户请求密码重置（生成令牌但未使用），然后更改其账户的电子邮件地址，之后使用旧的密码重置令牌。",
+      "evidence": [
+        "Issue 描述中的操作序列：'Password reset request for that email (unused)'，'foo@… account changes their email address'，'Password reset email is used'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在用户更改邮箱后，旧的密码重置令牌被允许使用，而不是被拒绝。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'The password reset email's token should be rejected at that point, but in fact it is allowed'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PasswordResetTokenGenerator.make_token",
+        "kind": "method",
+        "source_path": "django/contrib/auth/tokens.py",
+        "reason": "用于生成密码重置令牌。"
+      },
+      {
+        "name": "PasswordResetTokenGenerator.check_token",
+        "kind": "method",
+        "source_path": "django/contrib/auth/tokens.py",
+        "reason": "用于验证密码重置令牌是否有效。"
+      },
+      {
+        "name": "PasswordResetTokenGenerator._make_hash_value",
+        "kind": "method",
+        "source_path": "django/contrib/auth/tokens.py",
+        "reason": "Issue 明确指出修复需要修改此方法以包含用户邮箱。"
+      },
+      {
+        "name": "AbstractBaseUser.get_session_auth_hash",
+        "kind": "method",
+        "source_path": "django/contrib/auth/base_user.py",
+        "reason": "Issue 提到 token generation method 可以像 get_session_auth_hash() 一样被重构到模型上。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/tokens.py",
+        "object": "PasswordResetTokenGenerator._make_hash_value",
+        "lines": "79-97",
+        "reason": "Issue 明确指出修复是向此方法添加用户的电子邮件地址。当前方法仅使用 user.pk、user.password、last_login 和 timestamp 来生成哈希值，不包括邮箱。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，用户创建后其状态（如邮箱）保持不变。",
+        "target_pattern": "在生成令牌后，改变用户对象的电子邮件地址。",
+        "reason": "Issue 的核心触发条件是用户邮箱在令牌生成后被更改。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常遵循：创建用户 -> 生成令牌 -> 立即验证令牌。",
+        "target_pattern": "创建用户 -> 生成令牌 -> 更改用户邮箱 -> 验证令牌。",
+        "reason": "需要在令牌生成和验证之间插入改变用户状态的操作。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当用户更改其电子邮件地址后，任何为该用户旧邮箱生成的密码重置令牌都应被视为无效。",
+      "evidence": [
+        "Issue 描述：'The password reset email's token should be rejected at that point'，以及 Issue 建议的修复：'add the user's email address into PasswordResetTokenGenerator._make_hash_value()'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "PasswordResetTokenGenerator.check_token(user, token) 的返回值",
+        "reason": "Issue 的关键是令牌在邮箱更改后是否被接受（返回 True）或拒绝（返回 False）。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "用户对象的 email 字段在生成令牌前后的值",
+        "reason": "需要确认用户邮箱确实被更改，这是触发条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在用户邮箱更改后，使用旧令牌调用 check_token 应返回 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的令牌字符串或内部哈希值。",
+        "reason": "断言 check_token 返回 False 直接对应 Issue 中“令牌应被拒绝”的期望行为，且不依赖于令牌生成的具体实现细节。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "用户模型是否一定有 email 字段？Issue 提到 'Nothing forces a user to even have an email as per AbstractBaseUser'。",
+    "如果用户没有邮箱字段，预期的行为是什么？",
+    "修复后 _make_hash_value 方法具体如何整合邮箱信息（例如，使用 normalize_email？）。"
+  ],
+  "raw": {
+    "issue_summary": "用户更改邮箱后，之前为该邮箱生成的密码重置令牌仍然有效，导致安全漏洞。",
+    "trigger_condition": {
+      "text": "用户请求密码重置（生成令牌但未使用），然后更改其账户的电子邮件地址，之后使用旧的密码重置令牌。",
+      "evidence": [
+        "Issue 描述中的操作序列：'Password reset request for that email (unused)'，'foo@… account changes their email address'，'Password reset email is used'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在用户更改邮箱后，旧的密码重置令牌被允许使用，而不是被拒绝。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'The password reset email's token should be rejected at that point, but in fact it is allowed'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当用户更改其电子邮件地址后，任何为该用户旧邮箱生成的密码重置令牌都应被视为无效。",
+      "evidence": [
+        "Issue 描述：'The password reset email's token should be rejected at that point'，以及 Issue 建议的修复：'add the user's email address into PasswordResetTokenGenerator._make_hash_value()'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PasswordResetTokenGenerator.make_token",
+        "kind": "method",
+        "source_path": "django/contrib/auth/tokens.py",
+        "reason": "用于生成密码重置令牌。"
+      },
+      {
+        "name": "PasswordResetTokenGenerator.check_token",
+        "kind": "method",
+        "source_path": "django/contrib/auth/tokens.py",
+        "reason": "用于验证密码重置令牌是否有效。"
+      },
+      {
+        "name": "PasswordResetTokenGenerator._make_hash_value",
+        "kind": "method",
+        "source_path": "django/contrib/auth/tokens.py",
+        "reason": "Issue 明确指出修复需要修改此方法以包含用户邮箱。"
+      },
+      {
+        "name": "AbstractBaseUser.get_session_auth_hash",
+        "kind": "method",
+        "source_path": "django/contrib/auth/base_user.py",
+        "reason": "Issue 提到 token generation method 可以像 get_session_auth_hash() 一样被重构到模型上。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/tokens.py",
+        "object": "PasswordResetTokenGenerator._make_hash_value",
+        "lines": "79-97",
+        "reason": "Issue 明确指出修复是向此方法添加用户的电子邮件地址。当前方法仅使用 user.pk、user.password、last_login 和 timestamp 来生成哈希值，不包括邮箱。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TokenGeneratorTest.test_make_token",
+        "test_file": "tests/auth_tests/test_tokens.py",
+        "why_relevant": "它展示了如何创建用户、生成令牌并验证令牌的基本流程。",
+        "reusable_parts": [
+          "User.objects.create_user",
+          "PasswordResetTokenGenerator 实例化",
+          "make_token 和 check_token 的调用模式",
+          "assertIs 断言风格"
+        ],
+        "possible_gap": "该测试没有改变用户状态（如邮箱），也没有测试令牌在状态改变后是否失效。"
+      },
+      {
+        "test_name": "TokenGeneratorTest.test_timeout",
+        "test_file": "tests/auth_tests/test_tokens.py",
+        "why_relevant": "它测试了令牌在特定条件（超时）下失效的行为，展示了如何验证令牌有效性随时间变化。",
+        "reusable_parts": [
+          "使用 MockedPasswordResetTokenGenerator 来模拟时间变化",
+          "基于时间偏移验证令牌有效性的断言模式"
+        ],
+        "possible_gap": "它关注的是超时，而不是用户属性（如邮箱）变化导致的失效。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，用户创建后其状态（如邮箱）保持不变。",
+        "target_pattern": "在生成令牌后，改变用户对象的电子邮件地址。",
+        "reason": "Issue 的核心触发条件是用户邮箱在令牌生成后被更改。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常遵循：创建用户 -> 生成令牌 -> 立即验证令牌。",
+        "target_pattern": "创建用户 -> 生成令牌 -> 更改用户邮箱 -> 验证令牌。",
+        "reason": "需要在令牌生成和验证之间插入改变用户状态的操作。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "PasswordResetTokenGenerator.check_token(user, token) 的返回值",
+        "reason": "Issue 的关键是令牌在邮箱更改后是否被接受（返回 True）或拒绝（返回 False）。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "用户对象的 email 字段在生成令牌前后的值",
+        "reason": "需要确认用户邮箱确实被更改，这是触发条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在用户邮箱更改后，使用旧令牌调用 check_token 应返回 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的令牌字符串或内部哈希值。",
+        "reason": "断言 check_token 返回 False 直接对应 Issue 中“令牌应被拒绝”的期望行为，且不依赖于令牌生成的具体实现细节。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase 和 User 模型来创建和操作用户。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 PASSWORD_RESET_TIMEOUT 以避免超时干扰测试。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "用户模型是否一定有 email 字段？Issue 提到 'Nothing forces a user to even have an email as per AbstractBaseUser'。",
+      "如果用户没有邮箱字段，预期的行为是什么？",
+      "修复后 _make_hash_value 方法具体如何整合邮箱信息（例如，使用 normalize_email？）。"
+    ]
+  }
+}

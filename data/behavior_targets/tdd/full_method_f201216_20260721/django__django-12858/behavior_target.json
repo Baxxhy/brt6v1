@@ -1,0 +1,374 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12858",
+  "issue_summary": "Django 模型检查错误地报告 ordering 使用了不存在的字段，但实际上该 ordering 表达式在查询时能正常工作。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义具有多级外键关系的模型（如 Stock -> Supply -> Product -> Product(self)），以构造 'supply__product__parent__isnull' 这样的路径。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 @isolate_apps 装饰器来隔离测试中定义的模型，避免影响其他测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 并设置测试数据库，因为 order_by 查询需要操作数据库。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要创建测试数据，包括 parent 字段为 null 和不为 null 的 Product 实例，以及关联的 Supply 和 Stock 实例，以观察 __isnull 排序的效果。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ordering_pointing_to_foreignkey_field",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "该测试直接测试模型 Meta.ordering 配置的检查，涉及 ordering 指向外键字段（parent_id）的场景，与当前 Issue 主题（ordering 检查）高度相关。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "使用 SimpleTestCase",
+          "定义内嵌模型类",
+          "调用 Model.check() 方法",
+          "使用 assertFalse 断言检查结果"
+        ],
+        "possible_gap": "该测试验证的是 ordering 指向一个存在的字段（parent_id），而当前 Issue 是 ordering 包含一个查找（__isnull），检查逻辑可能不同。它没有测试多级外键路径和查找。"
+      },
+      {
+        "test_name": "test_order_by_fk_attname",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试测试了通过 QuerySet.order_by 使用外键属性名（author_id）进行排序，涉及 ordering 与查询的实际行为，与 Issue 中 order_by 能工作但检查失败的现象相关。",
+        "reusable_parts": [
+          "使用 TestCase",
+          "使用 Author 和 Article 模型 fixture",
+          "使用 order_by 方法",
+          "使用 assertQuerysetEqual 断言排序结果"
+        ],
+        "possible_gap": "该测试使用的是简单的 author_id 字段，而不是包含 __isnull 查找的多级外键路径。它没有涉及模型系统检查（./manage.py check）。"
+      },
+      {
+        "test_name": "test_order_by_nulls_last",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试使用了 F 表达式和 nulls_last，涉及排序中的空值处理，与 __isnull 查找在语义上有一定关联（都关心字段是否为 null）。",
+        "reusable_parts": [
+          "使用 F 表达式",
+          "使用 nulls_last 参数",
+          "使用 assertQuerysetEqualReversible",
+          "使用多字段排序"
+        ],
+        "possible_gap": "该测试使用的是 F 表达式的高级功能，而不是简单的字符串 ordering 表达式。它没有测试模型 Meta.ordering 或系统检查。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在模型的 Meta.ordering 中或使用 QuerySet.order_by() 时，使用包含 __isnull 查找（lookup）的多级外键路径（例如 'supply__product__parent__isnull'）。",
+      "evidence": [
+        "Issue 描述：'ordering' refers to the nonexistent field, related field, or lookup 'supply__product__parent__isnull'.",
+        "Issue 中展示了 Stock.objects.order_by('supply__product__parent__isnull') 的调用示例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 ./manage.py check 时，系统检查抛出 SystemCheckError，报告 models.E015 错误，声称 ordering 引用了不存在的字段、关联字段或查找。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：SystemCheckError: System check identified some issues: ERRORS: app.Stock: (models.E015) 'ordering' refers to the nonexistent field, related field, or lookup 'supply__product__parent__isnull'."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中直接使用了 Stock.objects.order_by(...)，并且相关源码片段 2 展示了 order_by 方法。"
+      },
+      {
+        "name": "Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发错误的命令是 ./manage.py check，它执行模型系统检查，会调用模型的 check 方法。相关测试 1 也涉及 check() 方法。"
+      },
+      {
+        "name": "models.Model.Meta.ordering",
+        "kind": "config",
+        "source_path": "",
+        "reason": "Issue 是关于模型 ordering 配置的检查错误，相关测试 1 展示了在 Meta.ordering 中配置排序。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "模型系统检查中处理 ordering 字段验证的逻辑",
+        "lines": "",
+        "reason": "Issue 指出错误发生在 ./manage.py check 时，报告 models.E015。这表明问题可能在于模型验证代码未能正确识别包含 __isnull 查找的 ordering 表达式。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.order_by 或相关的查询构建逻辑",
+        "lines": "1127-1134",
+        "reason": "相关源码片段 2 展示了 order_by 方法，它是实际执行排序的 API。Issue 表明 order_by 能工作但检查失败，可能意味着检查逻辑和查询构建逻辑对 ordering 表达式的解析不一致。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 ordering 使用简单的字段名（如 'parent_id', 'author_id'）或 F 表达式。",
+        "target_pattern": "将 ordering 输入改为包含 __isnull 查找的多级外键路径字符串（如 'supply__product__parent__isnull'）。",
+        "reason": "Issue 表明包含 __isnull 的路径会触发检查错误，但查询能工作。将测试的输入变异为此模式可能复现检查与查询行为的不一致。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "在测试类内部定义模型，并在 Meta.ordering 中配置排序字段。",
+        "target_pattern": "在定义的模型的 Meta.ordering 中配置包含 __isnull 查找的路径。",
+        "reason": "Issue 的错误是在运行 ./manage.py check 时触发的，这通常检查的是模型中 Meta.ordering 的配置。将模型配置变异为此模式可能直接触发 E015 错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能只测试 QuerySet.order_by 或只测试 Model.check。",
+        "target_pattern": "在同一个测试中，先配置模型的 Meta.ordering，然后调用 Model.check() 触发系统检查，再使用 QuerySet.order_by() 执行实际查询。",
+        "reason": "Issue 的核心矛盾是检查失败但查询成功。需要在一个测试中同时观察这两种行为，以复现不一致性。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "系统检查（./manage.py check）不应将包含 __isnull 查找的有效 ordering 表达式（如 'supply__product__parent__isnull'）报告为错误，因为它在实际查询中能正常工作。",
+      "evidence": [
+        "Issue 描述：However this ordering works fine: ... list(Stock.objects.order_by('supply__product__parent__isnull').values_list('pk', flat=True)[:5]) ...",
+        "Issue 暗示该 ordering 在 #29408 实现前是正常的。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 Model.check() 或执行 ./manage.py check 等效代码时的异常（SystemCheckError 及 models.E015 消息）。",
+        "reason": "Issue 的主要错误现象就是系统检查抛出异常。观测此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "QuerySet.order_by(...).values_list(...) 查询的执行结果（如返回的 ID 列表）。",
+        "reason": "Issue 表明实际查询能正常工作并返回结果。观测查询结果可以验证 ordering 表达式在数据库层面的有效性，与检查错误形成对比。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "QuerySet.order_by(...).query 生成的 SQL 字符串（或通过 connection.queries 获取）。",
+        "reason": "观察生成的 SQL 可以确认 __isnull 查找是否被正确转换为 SQL 的 ORDER BY ... IS NULL 子句，帮助理解查询构建逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当模型的 Meta.ordering 包含类似 'supply__product__parent__isnull' 的路径时，调用 Model.check() 不会引发 SystemCheckError（或特定地，不会包含 models.E015 错误）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息格式可能变化。避免断言不相关的检查错误。",
+        "reason": "Issue 的核心是检查错误地报告了问题。修复后，检查应通过（不引发特定异常）。使用 raises 断言（配合 assertNotRaises 或检查错误列表）可以稳定地验证这一点。"
+      },
+      {
+        "assertion_goal": "验证使用包含 __isnull 查找的路径调用 QuerySet.order_by() 能够成功执行并返回预期的排序结果（例如，包含 null 和非 null 值的记录按预期顺序排列）。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "断言精确的 ID 序列，因为数据准备可能不同。避免断言完整的 SQL 字符串。",
+        "reason": "Issue 表明查询能工作。修复后，查询应继续正常工作。断言排序结果的相对顺序（例如，null 值在前或在后）比断言具体 ID 更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 #29408 具体修改了什么，以及它如何导致了此问题。",
+    "模型系统检查中验证 ordering 字段的具体代码位置和逻辑。",
+    "__isnull 查找是否应该被视为有效的 ordering 表达式的一部分，或者是否有其他查找（如 __exact, __gt）也会出现同样问题。",
+    "除了 Meta.ordering，在 QuerySet.order_by() 中直接使用该路径是否也会触发相同的检查错误（Issue 只展示了 check 命令的错误）。"
+  ],
+  "raw": {
+    "issue_summary": "Django 模型检查错误地报告 ordering 使用了不存在的字段，但实际上该 ordering 表达式在查询时能正常工作。",
+    "trigger_condition": {
+      "text": "在模型的 Meta.ordering 中或使用 QuerySet.order_by() 时，使用包含 __isnull 查找（lookup）的多级外键路径（例如 'supply__product__parent__isnull'）。",
+      "evidence": [
+        "Issue 描述：'ordering' refers to the nonexistent field, related field, or lookup 'supply__product__parent__isnull'.",
+        "Issue 中展示了 Stock.objects.order_by('supply__product__parent__isnull') 的调用示例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 ./manage.py check 时，系统检查抛出 SystemCheckError，报告 models.E015 错误，声称 ordering 引用了不存在的字段、关联字段或查找。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：SystemCheckError: System check identified some issues: ERRORS: app.Stock: (models.E015) 'ordering' refers to the nonexistent field, related field, or lookup 'supply__product__parent__isnull'."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "系统检查（./manage.py check）不应将包含 __isnull 查找的有效 ordering 表达式（如 'supply__product__parent__isnull'）报告为错误，因为它在实际查询中能正常工作。",
+      "evidence": [
+        "Issue 描述：However this ordering works fine: ... list(Stock.objects.order_by('supply__product__parent__isnull').values_list('pk', flat=True)[:5]) ...",
+        "Issue 暗示该 ordering 在 #29408 实现前是正常的。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中直接使用了 Stock.objects.order_by(...)，并且相关源码片段 2 展示了 order_by 方法。"
+      },
+      {
+        "name": "Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发错误的命令是 ./manage.py check，它执行模型系统检查，会调用模型的 check 方法。相关测试 1 也涉及 check() 方法。"
+      },
+      {
+        "name": "models.Model.Meta.ordering",
+        "kind": "config",
+        "source_path": "",
+        "reason": "Issue 是关于模型 ordering 配置的检查错误，相关测试 1 展示了在 Meta.ordering 中配置排序。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "模型系统检查中处理 ordering 字段验证的逻辑",
+        "lines": "",
+        "reason": "Issue 指出错误发生在 ./manage.py check 时，报告 models.E015。这表明问题可能在于模型验证代码未能正确识别包含 __isnull 查找的 ordering 表达式。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.order_by 或相关的查询构建逻辑",
+        "lines": "1127-1134",
+        "reason": "相关源码片段 2 展示了 order_by 方法，它是实际执行排序的 API。Issue 表明 order_by 能工作但检查失败，可能意味着检查逻辑和查询构建逻辑对 ordering 表达式的解析不一致。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ordering_pointing_to_foreignkey_field",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "该测试直接测试模型 Meta.ordering 配置的检查，涉及 ordering 指向外键字段（parent_id）的场景，与当前 Issue 主题（ordering 检查）高度相关。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "使用 SimpleTestCase",
+          "定义内嵌模型类",
+          "调用 Model.check() 方法",
+          "使用 assertFalse 断言检查结果"
+        ],
+        "possible_gap": "该测试验证的是 ordering 指向一个存在的字段（parent_id），而当前 Issue 是 ordering 包含一个查找（__isnull），检查逻辑可能不同。它没有测试多级外键路径和查找。"
+      },
+      {
+        "test_name": "test_order_by_fk_attname",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试测试了通过 QuerySet.order_by 使用外键属性名（author_id）进行排序，涉及 ordering 与查询的实际行为，与 Issue 中 order_by 能工作但检查失败的现象相关。",
+        "reusable_parts": [
+          "使用 TestCase",
+          "使用 Author 和 Article 模型 fixture",
+          "使用 order_by 方法",
+          "使用 assertQuerysetEqual 断言排序结果"
+        ],
+        "possible_gap": "该测试使用的是简单的 author_id 字段，而不是包含 __isnull 查找的多级外键路径。它没有涉及模型系统检查（./manage.py check）。"
+      },
+      {
+        "test_name": "test_order_by_nulls_last",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试使用了 F 表达式和 nulls_last，涉及排序中的空值处理，与 __isnull 查找在语义上有一定关联（都关心字段是否为 null）。",
+        "reusable_parts": [
+          "使用 F 表达式",
+          "使用 nulls_last 参数",
+          "使用 assertQuerysetEqualReversible",
+          "使用多字段排序"
+        ],
+        "possible_gap": "该测试使用的是 F 表达式的高级功能，而不是简单的字符串 ordering 表达式。它没有测试模型 Meta.ordering 或系统检查。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 ordering 使用简单的字段名（如 'parent_id', 'author_id'）或 F 表达式。",
+        "target_pattern": "将 ordering 输入改为包含 __isnull 查找的多级外键路径字符串（如 'supply__product__parent__isnull'）。",
+        "reason": "Issue 表明包含 __isnull 的路径会触发检查错误，但查询能工作。将测试的输入变异为此模式可能复现检查与查询行为的不一致。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "在测试类内部定义模型，并在 Meta.ordering 中配置排序字段。",
+        "target_pattern": "在定义的模型的 Meta.ordering 中配置包含 __isnull 查找的路径。",
+        "reason": "Issue 的错误是在运行 ./manage.py check 时触发的，这通常检查的是模型中 Meta.ordering 的配置。将模型配置变异为此模式可能直接触发 E015 错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能只测试 QuerySet.order_by 或只测试 Model.check。",
+        "target_pattern": "在同一个测试中，先配置模型的 Meta.ordering，然后调用 Model.check() 触发系统检查，再使用 QuerySet.order_by() 执行实际查询。",
+        "reason": "Issue 的核心矛盾是检查失败但查询成功。需要在一个测试中同时观察这两种行为，以复现不一致性。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 Model.check() 或执行 ./manage.py check 等效代码时的异常（SystemCheckError 及 models.E015 消息）。",
+        "reason": "Issue 的主要错误现象就是系统检查抛出异常。观测此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "QuerySet.order_by(...).values_list(...) 查询的执行结果（如返回的 ID 列表）。",
+        "reason": "Issue 表明实际查询能正常工作并返回结果。观测查询结果可以验证 ordering 表达式在数据库层面的有效性，与检查错误形成对比。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "QuerySet.order_by(...).query 生成的 SQL 字符串（或通过 connection.queries 获取）。",
+        "reason": "观察生成的 SQL 可以确认 __isnull 查找是否被正确转换为 SQL 的 ORDER BY ... IS NULL 子句，帮助理解查询构建逻辑。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当模型的 Meta.ordering 包含类似 'supply__product__parent__isnull' 的路径时，调用 Model.check() 不会引发 SystemCheckError（或特定地，不会包含 models.E015 错误）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息格式可能变化。避免断言不相关的检查错误。",
+        "reason": "Issue 的核心是检查错误地报告了问题。修复后，检查应通过（不引发特定异常）。使用 raises 断言（配合 assertNotRaises 或检查错误列表）可以稳定地验证这一点。"
+      },
+      {
+        "assertion_goal": "验证使用包含 __isnull 查找的路径调用 QuerySet.order_by() 能够成功执行并返回预期的排序结果（例如，包含 null 和非 null 值的记录按预期顺序排列）。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "断言精确的 ID 序列，因为数据准备可能不同。避免断言完整的 SQL 字符串。",
+        "reason": "Issue 表明查询能工作。修复后，查询应继续正常工作。断言排序结果的相对顺序（例如，null 值在前或在后）比断言具体 ID 更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义具有多级外键关系的模型（如 Stock -> Supply -> Product -> Product(self)），以构造 'supply__product__parent__isnull' 这样的路径。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 @isolate_apps 装饰器来隔离测试中定义的模型，避免影响其他测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 并设置测试数据库，因为 order_by 查询需要操作数据库。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要创建测试数据，包括 parent 字段为 null 和不为 null 的 Product 实例，以及关联的 Supply 和 Stock 实例，以观察 __isnull 排序的效果。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 #29408 具体修改了什么，以及它如何导致了此问题。",
+      "模型系统检查中验证 ordering 字段的具体代码位置和逻辑。",
+      "__isnull 查找是否应该被视为有效的 ordering 表达式的一部分，或者是否有其他查找（如 __exact, __gt）也会出现同样问题。",
+      "除了 Meta.ordering，在 QuerySet.order_by() 中直接使用该路径是否也会触发相同的检查错误（Issue 只展示了 check 命令的错误）。"
+    ]
+  }
+}

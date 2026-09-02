@@ -1,0 +1,262 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13670",
+  "issue_summary": "dateformat.y() 对年份小于 1000 的日期不支持前导零，与 Python datetime 和 PHP 的行为不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类，并可能需要处理时区设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 datetime 和 dateformat 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DateFormatTests.test_time_formats",
+        "test_file": "tests/utils_tests/test_dateformat.py",
+        "why_relevant": "该测试直接使用了 dateformat.format 函数并测试了 'y' 格式符，是测试相同 API 的起点。",
+        "reusable_parts": [
+          "imports (datetime, dateformat)",
+          "测试类结构 (DateFormatTests)",
+          "使用 dateformat.format 的调用方式",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试使用的日期年份是 1979，属于正常范围（>=1000），无法触发年份小于 1000 的边界情况。"
+      },
+      {
+        "test_name": "DateFormatTests.test_date_formats",
+        "test_file": "tests/utils_tests/test_dateformat.py",
+        "why_relevant": "该测试也广泛测试了 dateformat.format 的各种格式符，提供了相似的测试结构和上下文。",
+        "reusable_parts": [
+          "测试类结构",
+          "datetime 对象的构造",
+          "dateformat.format 的调用模式"
+        ],
+        "possible_gap": "同样，使用的日期年份是 1979 和 2008，无法触发目标缺陷。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 dateformat.format() 函数，传入一个年份小于 1000 的 datetime 对象，并使用格式字符 'y'。",
+      "evidence": [
+        "Issue 描述中给出了示例：dateformat.format(datetime.datetime(123, 4, 5, 6, 7), \"y\")",
+        "相关测试 1 中使用了 dateformat.format(my_birthday, 'y')，但年份为 1979。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于年份小于 1000 的日期，使用 'y' 格式符返回的两位数年表示缺少前导零（例如，年份 123 返回 '3' 而不是 '23'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中明确给出了错误输出：'3'，而期望的 Python 行为是 '23'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "dateformat.format",
+        "kind": "function",
+        "source_path": "django/utils/dateformat.py",
+        "reason": "Issue 直接报告了此函数在使用 'y' 格式符时的行为问题。"
+      },
+      {
+        "name": "DateFormat",
+        "kind": "class",
+        "source_path": "django/utils/dateformat.py",
+        "reason": "dateformat.format 函数内部创建了 DateFormat 对象，'y' 格式符的处理逻辑应在该类中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/dateformat.py",
+        "object": "DateFormat 类中处理 'y' 格式符的方法",
+        "lines": "",
+        "reason": "Issue 的核心是 'y' 格式符的处理逻辑，该逻辑应位于 DateFormat 类内部。相关源码片段 2 显示了 format 函数，它依赖于 DateFormat 类。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "datetime(1979, 7, 8, 22, 00) 或 datetime(2008, 5, 19, 11, 45, 23, 123456)",
+        "target_pattern": "datetime(123, 4, 5, 6, 7) 或任何年份小于 1000 的 datetime 对象",
+        "reason": "Issue 明确指出缺陷在年份小于 1000 时触发，而现有测试用例的年份都大于等于 1000。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "dateformat.format(my_birthday, 'y') 中的 'y' 格式符",
+        "target_pattern": "保持不变，但输入日期对象改变。",
+        "reason": "缺陷与格式符 'y' 直接相关，但现有测试已使用此格式符，主要变异在于输入日期。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于任何年份，'y' 格式符都应返回两位数的年份表示，对于小于 10 的年份，应包含前导零。",
+      "evidence": [
+        "Issue 描述中引用了 Python datetime.strftime(\"%y\") 和 PHP date(\"y\") 的行为作为正确行为的参考，它们对于年份 123 都返回 '23'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "dateformat.format(datetime_obj, 'y') 的返回值",
+        "reason": "Issue 的核心是返回值错误，直接观察此返回值是否缺少前导零即可判断缺陷。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "dateformat.format(datetime_obj, 'y') 返回的字符串长度和内容",
+        "reason": "正确的返回值应为两位数字符串，观察其长度是否为 2 以及内容是否包含前导零。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于年份小于 1000 的日期，'y' 格式符返回的字符串长度为 2 且第二位是年份的最后一位。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、硬编码的日期字符串，因为年份值可能变化。",
+        "reason": "Issue 提供了具体示例（年份123 -> '23'），但断言应关注“两位数”和“最后两位年份”的语义，而非特定值，以保持稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否也影响其他与年份相关的格式符（如 'Y' 可能返回四位年份）？Issue 只提到了 'y'。",
+    "年份为 0-9 时，期望的输出是 '00' 到 '09' 吗？Issue 示例是 123 -> 23，未明确说明个位数年份。",
+    "dateformat 模块内部处理 'y' 格式符的具体代码位置和逻辑尚不明确。"
+  ],
+  "raw": {
+    "issue_summary": "dateformat.y() 对年份小于 1000 的日期不支持前导零，与 Python datetime 和 PHP 的行为不一致。",
+    "trigger_condition": {
+      "text": "使用 dateformat.format() 函数，传入一个年份小于 1000 的 datetime 对象，并使用格式字符 'y'。",
+      "evidence": [
+        "Issue 描述中给出了示例：dateformat.format(datetime.datetime(123, 4, 5, 6, 7), \"y\")",
+        "相关测试 1 中使用了 dateformat.format(my_birthday, 'y')，但年份为 1979。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于年份小于 1000 的日期，使用 'y' 格式符返回的两位数年表示缺少前导零（例如，年份 123 返回 '3' 而不是 '23'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述中明确给出了错误输出：'3'，而期望的 Python 行为是 '23'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于任何年份，'y' 格式符都应返回两位数的年份表示，对于小于 10 的年份，应包含前导零。",
+      "evidence": [
+        "Issue 描述中引用了 Python datetime.strftime(\"%y\") 和 PHP date(\"y\") 的行为作为正确行为的参考，它们对于年份 123 都返回 '23'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "dateformat.format",
+        "kind": "function",
+        "source_path": "django/utils/dateformat.py",
+        "reason": "Issue 直接报告了此函数在使用 'y' 格式符时的行为问题。"
+      },
+      {
+        "name": "DateFormat",
+        "kind": "class",
+        "source_path": "django/utils/dateformat.py",
+        "reason": "dateformat.format 函数内部创建了 DateFormat 对象，'y' 格式符的处理逻辑应在该类中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/dateformat.py",
+        "object": "DateFormat 类中处理 'y' 格式符的方法",
+        "lines": "",
+        "reason": "Issue 的核心是 'y' 格式符的处理逻辑，该逻辑应位于 DateFormat 类内部。相关源码片段 2 显示了 format 函数，它依赖于 DateFormat 类。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DateFormatTests.test_time_formats",
+        "test_file": "tests/utils_tests/test_dateformat.py",
+        "why_relevant": "该测试直接使用了 dateformat.format 函数并测试了 'y' 格式符，是测试相同 API 的起点。",
+        "reusable_parts": [
+          "imports (datetime, dateformat)",
+          "测试类结构 (DateFormatTests)",
+          "使用 dateformat.format 的调用方式",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试使用的日期年份是 1979，属于正常范围（>=1000），无法触发年份小于 1000 的边界情况。"
+      },
+      {
+        "test_name": "DateFormatTests.test_date_formats",
+        "test_file": "tests/utils_tests/test_dateformat.py",
+        "why_relevant": "该测试也广泛测试了 dateformat.format 的各种格式符，提供了相似的测试结构和上下文。",
+        "reusable_parts": [
+          "测试类结构",
+          "datetime 对象的构造",
+          "dateformat.format 的调用模式"
+        ],
+        "possible_gap": "同样，使用的日期年份是 1979 和 2008，无法触发目标缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "datetime(1979, 7, 8, 22, 00) 或 datetime(2008, 5, 19, 11, 45, 23, 123456)",
+        "target_pattern": "datetime(123, 4, 5, 6, 7) 或任何年份小于 1000 的 datetime 对象",
+        "reason": "Issue 明确指出缺陷在年份小于 1000 时触发，而现有测试用例的年份都大于等于 1000。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "dateformat.format(my_birthday, 'y') 中的 'y' 格式符",
+        "target_pattern": "保持不变，但输入日期对象改变。",
+        "reason": "缺陷与格式符 'y' 直接相关，但现有测试已使用此格式符，主要变异在于输入日期。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "dateformat.format(datetime_obj, 'y') 的返回值",
+        "reason": "Issue 的核心是返回值错误，直接观察此返回值是否缺少前导零即可判断缺陷。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "dateformat.format(datetime_obj, 'y') 返回的字符串长度和内容",
+        "reason": "正确的返回值应为两位数字符串，观察其长度是否为 2 以及内容是否包含前导零。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于年份小于 1000 的日期，'y' 格式符返回的字符串长度为 2 且第二位是年份的最后一位。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、硬编码的日期字符串，因为年份值可能变化。",
+        "reason": "Issue 提供了具体示例（年份123 -> '23'），但断言应关注“两位数”和“最后两位年份”的语义，而非特定值，以保持稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类，并可能需要处理时区设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 datetime 和 dateformat 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否也影响其他与年份相关的格式符（如 'Y' 可能返回四位年份）？Issue 只提到了 'y'。",
+      "年份为 0-9 时，期望的输出是 '00' 到 '09' 吗？Issue 示例是 123 -> 23，未明确说明个位数年份。",
+      "dateformat 模块内部处理 'y' 格式符的具体代码位置和逻辑尚不明确。"
+    ]
+  }
+}

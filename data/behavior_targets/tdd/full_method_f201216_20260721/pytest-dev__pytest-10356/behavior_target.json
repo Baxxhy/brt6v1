@@ -1,0 +1,288 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-10356",
+  "issue_summary": "当测试类从多个带有pytest标记的基类继承时，其中一个基类的标记会丢失，未按MRO合并标记。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用pytester fixture来创建临时测试文件并收集测试项。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要处理Python 2/3中元类声明的差异，但Issue提供了兼容性说明。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestFunctional.test_mark_decorator_baseclasses_merged",
+        "test_file": "testing/test_mark.py",
+        "why_relevant": "该测试检查了标记在类继承链中的合并行为，涉及Base、Base2和Test1的继承关系，并验证了标记的传播。",
+        "reusable_parts": [
+          "使用pytester.makepyfile创建测试模块",
+          "使用inline_genitems收集测试项",
+          "使用assert_markers（或类似方法）验证标记集合",
+          "使用@pytest.mark装饰类的模式"
+        ],
+        "possible_gap": "该测试只涉及单继承链（Base -> Base2 -> Test1），而Issue涉及多继承（TestDings(Foo, Bar)）。"
+      },
+      {
+        "test_name": "TestFunctional.test_mark_decorator_subclass_does_not_propagate_to_base",
+        "test_file": "testing/test_mark.py",
+        "why_relevant": "该测试检查了标记从子类到基类的传播（或不传播），涉及标记在类层次结构中的处理。",
+        "reusable_parts": [
+          "测试结构：定义带标记的基类，创建子类，验证测试方法的标记",
+          "使用pytester和inline_genitems的测试框架"
+        ],
+        "possible_gap": "该测试也是单继承场景，没有测试从多个带标记基类继承的情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个带有pytest标记的基类Foo（例如@pytest.mark.foo），另一个带有不同标记的基类Bar（例如@pytest.mark.bar），然后创建一个测试类TestDings同时继承Foo和Bar，并定义一个测试方法test_dings。",
+      "evidence": [
+        "Issue中的代码示例展示了Foo和Bar分别用@pytest.mark.foo和@pytest.mark.bar装饰，TestDings(Foo, Bar)继承两者。",
+        "Issue描述：'inheriting from both of those baseclasses will lose the markers of one of those classes'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "测试方法test_dings只拥有一个标记（例如foo），而丢失了另一个标记（例如bar）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue描述：'I'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.'",
+        "Issue代码注释：'In practice markers are resolved using MRO (so foo wins), unless the metaclass is applied'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.mark",
+        "kind": "decorator",
+        "source_path": "",
+        "reason": "Issue涉及使用pytest标记装饰类。"
+      },
+      {
+        "name": "pytestmark",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue中通过自定义元类操作pytestmark属性来合并标记。"
+      },
+      {
+        "name": "iter_markers",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中使用item.iter_markers()来检查标记。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/mark/__init__.py",
+        "object": "处理类继承和标记合并的函数或类",
+        "lines": "",
+        "reason": "Issue涉及从多个基类继承时标记的收集和合并逻辑，这很可能在标记处理模块中。"
+      },
+      {
+        "path": "src/_pytest/python.py",
+        "object": "收集测试项和处理类层次结构的函数",
+        "lines": "",
+        "reason": "测试项的收集和标记的传播可能与Python测试类发现逻辑相关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用单继承链（例如Base -> Base2 -> Test1）。",
+        "target_pattern": "创建一个测试类同时继承两个独立的、都带有pytest标记的基类（例如TestDings(Foo, Bar)）。",
+        "reason": "Issue的核心触发条件是多重继承，而现有测试只覆盖了单继承。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中基类的标记可能相同或形成线性链。",
+        "target_pattern": "使两个基类拥有不同的标记名称（例如foo和bar）。",
+        "reason": "需要区分来自不同基类的标记，以观察是否丢失其中一个。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "测试方法test_dings应该同时拥有来自所有基类（Foo和Bar）的标记（foo和bar）。",
+      "evidence": [
+        "Issue描述：'I'd expect `foo` and `bar` to be markers for `test_dings`'",
+        "Issue中提供的自定义元类BaseMeta通过遍历MRO合并标记，展示了期望行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "收集到的测试项（item）的标记集合，例如list(item.iter_markers(name=...))或item.keywords。",
+        "reason": "Issue的症状是标记集合不完整，直接观察测试项拥有的标记可以判断问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "测试类（例如TestDings）的pytestmark属性值。",
+        "reason": "标记可能存储在类的pytestmark属性中，观察其内容可以了解标记收集过程。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证从多重继承类创建的测试项同时拥有来自所有基类的标记。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的标记列表顺序或精确的repr字符串，因为实现细节可能变化。",
+        "reason": "Issue的核心是标记的存在性，而不是顺序或内部表示。应断言标记名称存在于收集到的标记集合中。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "标记合并的确切算法和冲突解决策略（例如同名标记）在修复后如何定义？",
+    "除了类装饰器标记（@pytest.mark），类属性pytestmark是否也受此bug影响？",
+    "标记的传播深度和边界条件（例如更复杂的菱形继承）是否已考虑？"
+  ],
+  "raw": {
+    "issue_summary": "当测试类从多个带有pytest标记的基类继承时，其中一个基类的标记会丢失，未按MRO合并标记。",
+    "trigger_condition": {
+      "text": "定义一个带有pytest标记的基类Foo（例如@pytest.mark.foo），另一个带有不同标记的基类Bar（例如@pytest.mark.bar），然后创建一个测试类TestDings同时继承Foo和Bar，并定义一个测试方法test_dings。",
+      "evidence": [
+        "Issue中的代码示例展示了Foo和Bar分别用@pytest.mark.foo和@pytest.mark.bar装饰，TestDings(Foo, Bar)继承两者。",
+        "Issue描述：'inheriting from both of those baseclasses will lose the markers of one of those classes'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "测试方法test_dings只拥有一个标记（例如foo），而丢失了另一个标记（例如bar）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue描述：'I'd expect `foo` and `bar` to be markers for `test_dings`, but this only actually is the case with this metaclass.'",
+        "Issue代码注释：'In practice markers are resolved using MRO (so foo wins), unless the metaclass is applied'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "测试方法test_dings应该同时拥有来自所有基类（Foo和Bar）的标记（foo和bar）。",
+      "evidence": [
+        "Issue描述：'I'd expect `foo` and `bar` to be markers for `test_dings`'",
+        "Issue中提供的自定义元类BaseMeta通过遍历MRO合并标记，展示了期望行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.mark",
+        "kind": "decorator",
+        "source_path": "",
+        "reason": "Issue涉及使用pytest标记装饰类。"
+      },
+      {
+        "name": "pytestmark",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue中通过自定义元类操作pytestmark属性来合并标记。"
+      },
+      {
+        "name": "iter_markers",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中使用item.iter_markers()来检查标记。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/mark/__init__.py",
+        "object": "处理类继承和标记合并的函数或类",
+        "lines": "",
+        "reason": "Issue涉及从多个基类继承时标记的收集和合并逻辑，这很可能在标记处理模块中。"
+      },
+      {
+        "path": "src/_pytest/python.py",
+        "object": "收集测试项和处理类层次结构的函数",
+        "lines": "",
+        "reason": "测试项的收集和标记的传播可能与Python测试类发现逻辑相关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestFunctional.test_mark_decorator_baseclasses_merged",
+        "test_file": "testing/test_mark.py",
+        "why_relevant": "该测试检查了标记在类继承链中的合并行为，涉及Base、Base2和Test1的继承关系，并验证了标记的传播。",
+        "reusable_parts": [
+          "使用pytester.makepyfile创建测试模块",
+          "使用inline_genitems收集测试项",
+          "使用assert_markers（或类似方法）验证标记集合",
+          "使用@pytest.mark装饰类的模式"
+        ],
+        "possible_gap": "该测试只涉及单继承链（Base -> Base2 -> Test1），而Issue涉及多继承（TestDings(Foo, Bar)）。"
+      },
+      {
+        "test_name": "TestFunctional.test_mark_decorator_subclass_does_not_propagate_to_base",
+        "test_file": "testing/test_mark.py",
+        "why_relevant": "该测试检查了标记从子类到基类的传播（或不传播），涉及标记在类层次结构中的处理。",
+        "reusable_parts": [
+          "测试结构：定义带标记的基类，创建子类，验证测试方法的标记",
+          "使用pytester和inline_genitems的测试框架"
+        ],
+        "possible_gap": "该测试也是单继承场景，没有测试从多个带标记基类继承的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用单继承链（例如Base -> Base2 -> Test1）。",
+        "target_pattern": "创建一个测试类同时继承两个独立的、都带有pytest标记的基类（例如TestDings(Foo, Bar)）。",
+        "reason": "Issue的核心触发条件是多重继承，而现有测试只覆盖了单继承。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中基类的标记可能相同或形成线性链。",
+        "target_pattern": "使两个基类拥有不同的标记名称（例如foo和bar）。",
+        "reason": "需要区分来自不同基类的标记，以观察是否丢失其中一个。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "收集到的测试项（item）的标记集合，例如list(item.iter_markers(name=...))或item.keywords。",
+        "reason": "Issue的症状是标记集合不完整，直接观察测试项拥有的标记可以判断问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "测试类（例如TestDings）的pytestmark属性值。",
+        "reason": "标记可能存储在类的pytestmark属性中，观察其内容可以了解标记收集过程。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证从多重继承类创建的测试项同时拥有来自所有基类的标记。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的标记列表顺序或精确的repr字符串，因为实现细节可能变化。",
+        "reason": "Issue的核心是标记的存在性，而不是顺序或内部表示。应断言标记名称存在于收集到的标记集合中。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用pytester fixture来创建临时测试文件并收集测试项。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要处理Python 2/3中元类声明的差异，但Issue提供了兼容性说明。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "标记合并的确切算法和冲突解决策略（例如同名标记）在修复后如何定义？",
+      "除了类装饰器标记（@pytest.mark），类属性pytestmark是否也受此bug影响？",
+      "标记的传播深度和边界条件（例如更复杂的菱形继承）是否已考虑？"
+    ]
+  }
+}

@@ -1,0 +1,366 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14631",
+  "issue_summary": "BaseForm._clean_fields() 和 BaseForm.changed_data 未通过 BoundField 对象访问字段值，导致与 form[name].initial 不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 作为测试基类，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义包含 disabled 字段且 initial 为 callable 的表单类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或直接调用 _clean_fields() 和 changed_data 方法。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FormsTestCase.test_datetime_clean_initial_callable_disabled",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试涉及 disabled 字段和 callable initial，与 Issue 描述的触发条件高度相关。",
+        "reusable_parts": [
+          "DateTimeForm 定义，使用 DateTimeField(initial=lambda: now, disabled=True)",
+          "form = DateTimeForm({}) 构造",
+          "assertEqual(form.cleaned_data, {'dt': now}) 断言风格"
+        ],
+        "possible_gap": "该测试目前验证 cleaned_data 正确，但未直接比较 _clean_fields() 内部值与 form[name].initial。"
+      },
+      {
+        "test_name": "FormsTestCase.test_boundfield_value_disabled_callable_initial",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试验证 disabled 字段的 BoundField.value() 行为，涉及 callable initial。",
+        "reusable_parts": [
+          "PersonForm 定义，使用 CharField(initial=lambda: 'John Doe', disabled=True)",
+          "form = PersonForm() 和 form = PersonForm({}) 构造",
+          "assertEqual(form['name'].value(), 'John Doe') 断言风格"
+        ],
+        "possible_gap": "该测试关注 BoundField.value()，未涉及 _clean_fields() 或 changed_data。"
+      },
+      {
+        "test_name": "FormsTestCase.test_changed_data",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试直接验证 changed_data 的行为，包括字段变化检测和 ValidationError 处理。",
+        "reusable_parts": [
+          "Person 和 Person2 表单定义",
+          "p = Person(data=...) 构造",
+          "assertIn/assertNotIn 用于 changed_data 的断言风格"
+        ],
+        "possible_gap": "该测试未涉及 disabled 字段或 callable initial 场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 disabled 字段，且其 initial 为可调用对象（callable），在 _clean_fields() 或 changed_data 计算中触发。",
+      "evidence": [
+        "Issue 提到 'form._clean_fields() can return a different value from form[name].initial when they should be the same'，并引用 test_datetime_clean_initial_callable_disabled 测试。",
+        "源码 _clean_fields 中，当 field.disabled 时，value = self.get_initial_for_field(field, name)。",
+        "测试 test_boundfield_value_disabled_callable_initial 和 test_datetime_clean_initial_callable_disabled 涉及 disabled 字段和 callable initial。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "form._clean_fields() 返回的值与 form[name].initial 不同，而它们本应相同。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确说明 'form._clean_fields() can return a different value from form[name].initial when they should be the same'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BaseForm._clean_fields",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 明确指出该方法未通过 BoundField 访问值，可能导致不一致。"
+      },
+      {
+        "name": "BaseForm.changed_data",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 明确指出该方法未通过 BoundField 访问值，建议重构。"
+      },
+      {
+        "name": "BoundField",
+        "kind": "class",
+        "source_path": "django/forms/boundfield.py",
+        "reason": "Issue 建议将 changed_data 的字段级逻辑移至 BoundField 的方法中。"
+      },
+      {
+        "name": "BaseForm.get_initial_for_field",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "在 _clean_fields 中用于获取 disabled 字段的初始值。"
+      },
+      {
+        "name": "BoundField.initial",
+        "kind": "property",
+        "source_path": "django/forms/boundfield.py",
+        "reason": "Issue 强调 form[name].initial 应与 _clean_fields() 返回值一致。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/forms.py",
+        "object": "BaseForm._clean_fields",
+        "lines": "389-406",
+        "reason": "该方法直接使用 self.get_initial_for_field(field, name) 获取 disabled 字段的值，而非通过 BoundField。"
+      },
+      {
+        "path": "django/forms/forms.py",
+        "object": "BaseForm.changed_data",
+        "lines": "438-459",
+        "reason": "该方法直接计算 initial_value 和 data_value，未统一通过 BoundField 访问。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_datetime_clean_initial_callable_disabled 中使用空字典 {} 作为表单数据。",
+        "target_pattern": "在表单数据中提供与 initial 不同的值，但字段为 disabled，观察 _clean_fields() 内部取值。",
+        "reason": "Issue 暗示 _clean_fields() 可能未通过 BoundField 获取正确的初始值，变异可触发不一致路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中字段定义为 disabled=True，initial 为 callable。",
+        "target_pattern": "在 changed_data 计算中，确保 initial_value 通过 BoundField.initial 获取，而非直接计算。",
+        "reason": "changed_data 中 initial_value 计算可能绕过 BoundField，导致与 form[name].initial 不一致。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "BaseForm._clean_fields() 和 BaseForm.changed_data 应通过 BoundField 对象访问字段值，确保与 form[name].initial 一致。",
+      "evidence": [
+        "Issue 提到 'It would be better for consistency if they did, and to reduce the number of code paths.'",
+        "Issue 建议将 changed_data 的 per-field 逻辑移至 BoundField.bf.did_change() 方法。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "在 _clean_fields 循环中，比较 value（用于 cleaned_data）与 form[name].initial 的值。",
+        "reason": "Issue 核心是两者不一致，观测此关系可直接验证缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "changed_data 返回的列表内容，特别是 disabled 字段是否被错误包含或排除。",
+        "reason": "changed_data 逻辑可能因未通过 BoundField 而错误判断字段变化。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "BoundField.initial 属性的值，确保其与 _clean_fields 中使用的初始值相同。",
+        "reason": "BoundField.initial 是预期的统一访问点，观测其值可确认一致性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 disabled 字段，_clean_fields() 中使用的值应等于 form[name].initial。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 cleaned_data 字典，除非明确所有字段。",
+        "reason": "直接比较两个值是否相等，与 Issue 描述的不一致问题精准对齐。"
+      },
+      {
+        "assertion_goal": "changed_data 不应错误包含 disabled 且未变化的字段。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免依赖 changed_data 返回的顺序或完整列表。",
+        "reason": "Issue 暗示 changed_data 可能因访问路径问题产生错误结果，断言缺失更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 'test_datetime_clean_initial_callable_disabled() (the test can be adjusted to cover this case)' 具体调整方式未明确。",
+    "BoundField 是否已有 _did_change() 方法或类似属性未知。",
+    "除了 disabled + callable initial 外，是否还有其他场景会导致不一致。"
+  ],
+  "raw": {
+    "issue_summary": "BaseForm._clean_fields() 和 BaseForm.changed_data 未通过 BoundField 对象访问字段值，导致与 form[name].initial 不一致。",
+    "trigger_condition": {
+      "text": "使用 disabled 字段，且其 initial 为可调用对象（callable），在 _clean_fields() 或 changed_data 计算中触发。",
+      "evidence": [
+        "Issue 提到 'form._clean_fields() can return a different value from form[name].initial when they should be the same'，并引用 test_datetime_clean_initial_callable_disabled 测试。",
+        "源码 _clean_fields 中，当 field.disabled 时，value = self.get_initial_for_field(field, name)。",
+        "测试 test_boundfield_value_disabled_callable_initial 和 test_datetime_clean_initial_callable_disabled 涉及 disabled 字段和 callable initial。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "form._clean_fields() 返回的值与 form[name].initial 不同，而它们本应相同。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 明确说明 'form._clean_fields() can return a different value from form[name].initial when they should be the same'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "BaseForm._clean_fields() 和 BaseForm.changed_data 应通过 BoundField 对象访问字段值，确保与 form[name].initial 一致。",
+      "evidence": [
+        "Issue 提到 'It would be better for consistency if they did, and to reduce the number of code paths.'",
+        "Issue 建议将 changed_data 的 per-field 逻辑移至 BoundField.bf.did_change() 方法。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BaseForm._clean_fields",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 明确指出该方法未通过 BoundField 访问值，可能导致不一致。"
+      },
+      {
+        "name": "BaseForm.changed_data",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "Issue 明确指出该方法未通过 BoundField 访问值，建议重构。"
+      },
+      {
+        "name": "BoundField",
+        "kind": "class",
+        "source_path": "django/forms/boundfield.py",
+        "reason": "Issue 建议将 changed_data 的字段级逻辑移至 BoundField 的方法中。"
+      },
+      {
+        "name": "BaseForm.get_initial_for_field",
+        "kind": "method",
+        "source_path": "django/forms/forms.py",
+        "reason": "在 _clean_fields 中用于获取 disabled 字段的初始值。"
+      },
+      {
+        "name": "BoundField.initial",
+        "kind": "property",
+        "source_path": "django/forms/boundfield.py",
+        "reason": "Issue 强调 form[name].initial 应与 _clean_fields() 返回值一致。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/forms.py",
+        "object": "BaseForm._clean_fields",
+        "lines": "389-406",
+        "reason": "该方法直接使用 self.get_initial_for_field(field, name) 获取 disabled 字段的值，而非通过 BoundField。"
+      },
+      {
+        "path": "django/forms/forms.py",
+        "object": "BaseForm.changed_data",
+        "lines": "438-459",
+        "reason": "该方法直接计算 initial_value 和 data_value，未统一通过 BoundField 访问。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FormsTestCase.test_datetime_clean_initial_callable_disabled",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试涉及 disabled 字段和 callable initial，与 Issue 描述的触发条件高度相关。",
+        "reusable_parts": [
+          "DateTimeForm 定义，使用 DateTimeField(initial=lambda: now, disabled=True)",
+          "form = DateTimeForm({}) 构造",
+          "assertEqual(form.cleaned_data, {'dt': now}) 断言风格"
+        ],
+        "possible_gap": "该测试目前验证 cleaned_data 正确，但未直接比较 _clean_fields() 内部值与 form[name].initial。"
+      },
+      {
+        "test_name": "FormsTestCase.test_boundfield_value_disabled_callable_initial",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试验证 disabled 字段的 BoundField.value() 行为，涉及 callable initial。",
+        "reusable_parts": [
+          "PersonForm 定义，使用 CharField(initial=lambda: 'John Doe', disabled=True)",
+          "form = PersonForm() 和 form = PersonForm({}) 构造",
+          "assertEqual(form['name'].value(), 'John Doe') 断言风格"
+        ],
+        "possible_gap": "该测试关注 BoundField.value()，未涉及 _clean_fields() 或 changed_data。"
+      },
+      {
+        "test_name": "FormsTestCase.test_changed_data",
+        "test_file": "tests/forms_tests/tests/test_forms.py",
+        "why_relevant": "该测试直接验证 changed_data 的行为，包括字段变化检测和 ValidationError 处理。",
+        "reusable_parts": [
+          "Person 和 Person2 表单定义",
+          "p = Person(data=...) 构造",
+          "assertIn/assertNotIn 用于 changed_data 的断言风格"
+        ],
+        "possible_gap": "该测试未涉及 disabled 字段或 callable initial 场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_datetime_clean_initial_callable_disabled 中使用空字典 {} 作为表单数据。",
+        "target_pattern": "在表单数据中提供与 initial 不同的值，但字段为 disabled，观察 _clean_fields() 内部取值。",
+        "reason": "Issue 暗示 _clean_fields() 可能未通过 BoundField 获取正确的初始值，变异可触发不一致路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中字段定义为 disabled=True，initial 为 callable。",
+        "target_pattern": "在 changed_data 计算中，确保 initial_value 通过 BoundField.initial 获取，而非直接计算。",
+        "reason": "changed_data 中 initial_value 计算可能绕过 BoundField，导致与 form[name].initial 不一致。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "在 _clean_fields 循环中，比较 value（用于 cleaned_data）与 form[name].initial 的值。",
+        "reason": "Issue 核心是两者不一致，观测此关系可直接验证缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "changed_data 返回的列表内容，特别是 disabled 字段是否被错误包含或排除。",
+        "reason": "changed_data 逻辑可能因未通过 BoundField 而错误判断字段变化。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "BoundField.initial 属性的值，确保其与 _clean_fields 中使用的初始值相同。",
+        "reason": "BoundField.initial 是预期的统一访问点，观测其值可确认一致性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 disabled 字段，_clean_fields() 中使用的值应等于 form[name].initial。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 cleaned_data 字典，除非明确所有字段。",
+        "reason": "直接比较两个值是否相等，与 Issue 描述的不一致问题精准对齐。"
+      },
+      {
+        "assertion_goal": "changed_data 不应错误包含 disabled 且未变化的字段。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免依赖 changed_data 返回的顺序或完整列表。",
+        "reason": "Issue 暗示 changed_data 可能因访问路径问题产生错误结果，断言缺失更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 作为测试基类，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "定义包含 disabled 字段且 initial 为 callable 的表单类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或直接调用 _clean_fields() 和 changed_data 方法。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 'test_datetime_clean_initial_callable_disabled() (the test can be adjusted to cover this case)' 具体调整方式未明确。",
+      "BoundField 是否已有 _did_change() 方法或类似属性未知。",
+      "除了 disabled + callable initial 外，是否还有其他场景会导致不一致。"
+    ]
+  }
+}

@@ -1,0 +1,328 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13112",
+  "issue_summary": "在 Django 3.1b1 中，当 ForeignKey 引用混合大小写的应用名时，makemigrations 命令崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 来动态设置 INSTALLED_APPS，包含一个混合大小写的应用标签。可能需要创建一个临时的 Django 应用（或使用测试应用）来定义相关的模型类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 MigrationTestBase 或类似基类来管理临时迁移模块。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要确保数据库配置允许创建和运行迁移。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_unspecified_app_with_conflict_no_merge",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试使用 @override_settings 来设置 INSTALLED_APPS，并调用 call_command('makemigrations', ...)，这与触发 bug 的操作模式（运行 makemigrations 命令）高度相似。",
+        "reusable_parts": [
+          "class MakeMigrationsTests(MigrationTestBase)",
+          "@override_settings",
+          "call_command(\"makemigrations\", ...)",
+          "使用临时迁移模块的上下文管理器"
+        ],
+        "possible_gap": "该测试关注的是未指定应用时的冲突处理，不涉及应用名大小写不一致的 ForeignKey 引用。"
+      },
+      {
+        "test_name": "AppLabelErrorTests.test_makemigrations_nonexistent_app_label",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试验证了当给 makemigrations 传递一个不存在的应用标签时的错误处理，涉及应用标签的验证，与当前 Issue 中应用标签识别问题相关。",
+        "reusable_parts": [
+          "class AppLabelErrorTests(TestCase)",
+          "call_command('makemigrations', ...)",
+          "使用 assertRaises 捕获 SystemExit",
+          "检查 stderr 输出"
+        ],
+        "possible_gap": "该测试针对的是命令行参数中指定的不存在的应用，而当前 Issue 是模型定义内部 ForeignKey 的惰性引用与已安装应用名大小写不匹配。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_disabled_migrations_for_app",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试验证了当应用迁移被禁用时 makemigrations 抛出特定 ValueError，与当前 Issue 抛出 ValueError 的模式相似。",
+        "reusable_parts": [
+          "@override_settings",
+          "使用 assertRaisesMessage 捕获 ValueError",
+          "call_command(\"makemigrations\", ...)"
+        ],
+        "possible_gap": "该测试的错误原因（MIGRATION_MODULES 设置）与当前 Issue 不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "运行 `python manage.py makemigrations` 或 `python manage.py migrate` 命令，且项目中存在一个模型，其 ForeignKey 字段引用了另一个模型，该模型所属应用在 INSTALLED_APPS 中的名称（如 'DJ_RegLogin'）与 ForeignKey 引用时使用的名称（如 'dj_reglogin'）大小写不一致。",
+      "evidence": [
+        "Issue 描述中用户运行 `python3 manage.py migrate` 时出错。",
+        "Issue 中展示了 `settings.py` 的 INSTALLED_APPS 包含 `'DJ_RegLogin'`。",
+        "Issue 中展示了 `model.py` 中 `Content.category` 字段定义为 `models.ForeignKey(Category, on_delete=models.CASCADE)`，而 `Category` 类定义在同一个文件（推测属于 `DJ_RegLogin` 应用）中。",
+        "错误信息提到 `'dj_reglogin.category'` 但应用是 `'DJ_RegLogin'`，表明大小写不匹配。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: The field DJ_RegLogin.Content.category was declared with a lazy reference to 'dj_reglogin.category', but app 'dj_reglogin' isn't installed.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述中直接给出了错误信息。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中触发错误的操作是运行 manage.py 命令，相关测试中也使用 call_command 来调用 makemigrations。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "",
+        "reason": "这是直接触发问题的管理命令。"
+      },
+      {
+        "name": "migrate",
+        "kind": "command",
+        "source_path": "",
+        "reason": "Issue 中用户运行的是 migrate 命令，但根本问题与迁移生成相关。"
+      },
+      {
+        "name": "models.ForeignKey",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是 ForeignKey 字段声明导致的问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "处理惰性引用或应用标签解析的代码",
+        "lines": "",
+        "reason": "错误信息表明在解析 ForeignKey 的惰性引用 'dj_reglogin.category' 时，未能正确匹配已安装的应用 'DJ_RegLogin'，这暗示在将应用标签规范化（例如转为小写）或查找匹配时存在缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 @override_settings 设置 INSTALLED_APPS，其中的应用名通常是全小写或标准格式（如 'migrations'）。",
+        "target_pattern": "在 @override_settings 中设置 INSTALLED_APPS，包含一个混合大小写的应用名（如 'DJ_RegLogin'），并在该应用中定义包含 ForeignKey 引用的模型。",
+        "reason": "Issue 表明当 INSTALLED_APPS 中的应用名大小写与 ForeignKey 惰性引用中隐含的应用标签大小写不一致时触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中可能没有明确定义具体的模型类，或者模型定义在测试应用内。",
+        "target_pattern": "需要定义一个模型类，其 ForeignKey 字段引用同一个应用内的另一个模型（使用默认的字符串引用或类名引用）。",
+        "reason": "Issue 中的错误源于模型定义中的 ForeignKey 字段。需要创建类似的模型结构来触发惰性引用解析。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "makemigrations 和 migrate 命令应能正确处理 ForeignKey 引用，即使被引用应用在 INSTALLED_APPS 中的名称与 ForeignKey 内部引用时使用的大小写形式不同，命令应成功执行而不抛出 ValueError。",
+      "evidence": [
+        "Issue 提到 'the code works well in 3.0'，表明在 Django 3.0 中这是正常行为。",
+        "相关测试 1 和 2 表明 makemigrations 命令在正常情况下应能处理应用和迁移冲突。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 call_command('makemigrations', ...) 时捕获的异常及其消息。",
+        "reason": "Issue 明确描述了抛出的 ValueError 及其消息，这是判断 bug 是否触发的直接标志。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.INSTALLED_APPS 中应用名的实际值，以及模型定义中 ForeignKey 字段解析出的应用标签。",
+        "reason": "需要确认应用名大小写配置和 ForeignKey 引用时使用的标签是否确实不一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 INSTALLED_APPS 中包含混合大小写应用名且模型 ForeignKey 引用该应用内模型时，调用 makemigrations 不应抛出 ValueError 声称应用未安装。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串完全相等，因为消息格式可能在版本间变化。",
+        "reason": "Issue 的核心是异常被错误地抛出。在修复后，该异常不应出现。因此，在复现测试中，我们预期会抛出异常（raises），但最终目标是修复后该断言失败（即不再抛出异常）。注意：此处的极性与 expected_behavior 一致，因为 expected_behavior 描述修复后的状态（不抛异常），而我们在生成复现测试时，目标是触发当前 bug（抛异常）。所以 assertion_hints 应指导如何断言当前 buggy 行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误是否只在 Django 3.1b1 中出现，还是也影响其他版本。",
+    "触发错误的确切条件：是否必须通过 `migrate` 命令，还是 `makemigrations` 命令也会触发。",
+    "ForeignKey 引用必须使用字符串形式还是直接使用模型类也会触发。",
+    "具体的修复代码位置和逻辑。"
+  ],
+  "raw": {
+    "issue_summary": "在 Django 3.1b1 中，当 ForeignKey 引用混合大小写的应用名时，makemigrations 命令崩溃。",
+    "trigger_condition": {
+      "text": "运行 `python manage.py makemigrations` 或 `python manage.py migrate` 命令，且项目中存在一个模型，其 ForeignKey 字段引用了另一个模型，该模型所属应用在 INSTALLED_APPS 中的名称（如 'DJ_RegLogin'）与 ForeignKey 引用时使用的名称（如 'dj_reglogin'）大小写不一致。",
+      "evidence": [
+        "Issue 描述中用户运行 `python3 manage.py migrate` 时出错。",
+        "Issue 中展示了 `settings.py` 的 INSTALLED_APPS 包含 `'DJ_RegLogin'`。",
+        "Issue 中展示了 `model.py` 中 `Content.category` 字段定义为 `models.ForeignKey(Category, on_delete=models.CASCADE)`，而 `Category` 类定义在同一个文件（推测属于 `DJ_RegLogin` 应用）中。",
+        "错误信息提到 `'dj_reglogin.category'` 但应用是 `'DJ_RegLogin'`，表明大小写不匹配。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: The field DJ_RegLogin.Content.category was declared with a lazy reference to 'dj_reglogin.category', but app 'dj_reglogin' isn't installed.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述中直接给出了错误信息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "makemigrations 和 migrate 命令应能正确处理 ForeignKey 引用，即使被引用应用在 INSTALLED_APPS 中的名称与 ForeignKey 内部引用时使用的大小写形式不同，命令应成功执行而不抛出 ValueError。",
+      "evidence": [
+        "Issue 提到 'the code works well in 3.0'，表明在 Django 3.0 中这是正常行为。",
+        "相关测试 1 和 2 表明 makemigrations 命令在正常情况下应能处理应用和迁移冲突。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中触发错误的操作是运行 manage.py 命令，相关测试中也使用 call_command 来调用 makemigrations。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "command",
+        "source_path": "",
+        "reason": "这是直接触发问题的管理命令。"
+      },
+      {
+        "name": "migrate",
+        "kind": "command",
+        "source_path": "",
+        "reason": "Issue 中用户运行的是 migrate 命令，但根本问题与迁移生成相关。"
+      },
+      {
+        "name": "models.ForeignKey",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是 ForeignKey 字段声明导致的问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "处理惰性引用或应用标签解析的代码",
+        "lines": "",
+        "reason": "错误信息表明在解析 ForeignKey 的惰性引用 'dj_reglogin.category' 时，未能正确匹配已安装的应用 'DJ_RegLogin'，这暗示在将应用标签规范化（例如转为小写）或查找匹配时存在缺陷。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_unspecified_app_with_conflict_no_merge",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试使用 @override_settings 来设置 INSTALLED_APPS，并调用 call_command('makemigrations', ...)，这与触发 bug 的操作模式（运行 makemigrations 命令）高度相似。",
+        "reusable_parts": [
+          "class MakeMigrationsTests(MigrationTestBase)",
+          "@override_settings",
+          "call_command(\"makemigrations\", ...)",
+          "使用临时迁移模块的上下文管理器"
+        ],
+        "possible_gap": "该测试关注的是未指定应用时的冲突处理，不涉及应用名大小写不一致的 ForeignKey 引用。"
+      },
+      {
+        "test_name": "AppLabelErrorTests.test_makemigrations_nonexistent_app_label",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试验证了当给 makemigrations 传递一个不存在的应用标签时的错误处理，涉及应用标签的验证，与当前 Issue 中应用标签识别问题相关。",
+        "reusable_parts": [
+          "class AppLabelErrorTests(TestCase)",
+          "call_command('makemigrations', ...)",
+          "使用 assertRaises 捕获 SystemExit",
+          "检查 stderr 输出"
+        ],
+        "possible_gap": "该测试针对的是命令行参数中指定的不存在的应用，而当前 Issue 是模型定义内部 ForeignKey 的惰性引用与已安装应用名大小写不匹配。"
+      },
+      {
+        "test_name": "MakeMigrationsTests.test_makemigrations_disabled_migrations_for_app",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "该测试验证了当应用迁移被禁用时 makemigrations 抛出特定 ValueError，与当前 Issue 抛出 ValueError 的模式相似。",
+        "reusable_parts": [
+          "@override_settings",
+          "使用 assertRaisesMessage 捕获 ValueError",
+          "call_command(\"makemigrations\", ...)"
+        ],
+        "possible_gap": "该测试的错误原因（MIGRATION_MODULES 设置）与当前 Issue 不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 @override_settings 设置 INSTALLED_APPS，其中的应用名通常是全小写或标准格式（如 'migrations'）。",
+        "target_pattern": "在 @override_settings 中设置 INSTALLED_APPS，包含一个混合大小写的应用名（如 'DJ_RegLogin'），并在该应用中定义包含 ForeignKey 引用的模型。",
+        "reason": "Issue 表明当 INSTALLED_APPS 中的应用名大小写与 ForeignKey 惰性引用中隐含的应用标签大小写不一致时触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中可能没有明确定义具体的模型类，或者模型定义在测试应用内。",
+        "target_pattern": "需要定义一个模型类，其 ForeignKey 字段引用同一个应用内的另一个模型（使用默认的字符串引用或类名引用）。",
+        "reason": "Issue 中的错误源于模型定义中的 ForeignKey 字段。需要创建类似的模型结构来触发惰性引用解析。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 call_command('makemigrations', ...) 时捕获的异常及其消息。",
+        "reason": "Issue 明确描述了抛出的 ValueError 及其消息，这是判断 bug 是否触发的直接标志。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.INSTALLED_APPS 中应用名的实际值，以及模型定义中 ForeignKey 字段解析出的应用标签。",
+        "reason": "需要确认应用名大小写配置和 ForeignKey 引用时使用的标签是否确实不一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 INSTALLED_APPS 中包含混合大小写应用名且模型 ForeignKey 引用该应用内模型时，调用 makemigrations 不应抛出 ValueError 声称应用未安装。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串完全相等，因为消息格式可能在版本间变化。",
+        "reason": "Issue 的核心是异常被错误地抛出。在修复后，该异常不应出现。因此，在复现测试中，我们预期会抛出异常（raises），但最终目标是修复后该断言失败（即不再抛出异常）。注意：此处的极性与 expected_behavior 一致，因为 expected_behavior 描述修复后的状态（不抛异常），而我们在生成复现测试时，目标是触发当前 bug（抛异常）。所以 assertion_hints 应指导如何断言当前 buggy 行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 来动态设置 INSTALLED_APPS，包含一个混合大小写的应用标签。可能需要创建一个临时的 Django 应用（或使用测试应用）来定义相关的模型类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 MigrationTestBase 或类似基类来管理临时迁移模块。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要确保数据库配置允许创建和运行迁移。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "错误是否只在 Django 3.1b1 中出现，还是也影响其他版本。",
+      "触发错误的确切条件：是否必须通过 `migrate` 命令，还是 `makemigrations` 命令也会触发。",
+      "ForeignKey 引用必须使用字符串形式还是直接使用模型类也会触发。",
+      "具体的修复代码位置和逻辑。"
+    ]
+  }
+}

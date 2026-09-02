@@ -1,0 +1,214 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11206",
+  "issue_summary": "utils.numberformat.format 在指定 decimal_pos 时，对极小的十进制数错误地使用科学计数法表示，而非显示为零。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 Decimal 类和 nformat 函数。测试应继承自 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestNumberFormat.test_decimal_numbers",
+        "test_file": "tests/utils_tests/test_numberformat.py",
+        "why_relevant": "该测试直接测试 nformat 函数处理 Decimal 数的各种情况，包括极小数的格式化，并包含 decimal_pos 参数的使用。",
+        "reusable_parts": [
+          "导入：from django.utils.numberformat import format as nformat",
+          "测试类：class TestNumberFormat(SimpleTestCase)",
+          "断言风格：self.assertEqual(nformat(...), ...)",
+          "Decimal 对象的构造方式：Decimal('1e-200')"
+        ],
+        "possible_gap": "该测试虽然包含极小数的测试（如 '1e-9', '1e-10'），但其预期结果（'0.00000000'）表明这些值在 decimal_pos=8 时未触发 bug。测试可能未覆盖触发科学计数法表示的那个精确的截止点（如 Issue 中的 1e-200）。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 django.utils.numberformat.format 函数，传入一个绝对值极小的 Decimal 值（例如 1e-200）并指定 decimal_pos 参数（例如 2）。",
+      "evidence": [
+        "Issue 中提供的示例：nformat(Decimal('1e-200'), '.', decimal_pos=2) 触发了问题。",
+        "相关测试 1 中包含了大量极小数的测试用例，如 '1e-9', '1e-10', '1e-11' 等。",
+        "Issue 描述指出问题源于内部逻辑的硬编码截止点。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回科学计数法字符串（例如 '1.00e-200'），而非预期的由零填充到指定小数位数的字符串（例如 '0.00'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了 nformat(Decimal('1e-199'), '.', decimal_pos=2) 返回 '0.00'，而 nformat(Decimal('1e-200'), '.', decimal_pos=2) 返回 '1.00e-200'。",
+        "相关测试 1 中对于 '1e-9' 等值，当 decimal_pos=8 时，预期结果是 '0.00000000'，而非科学计数法。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.numberformat.format",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告此函数的行为问题，所有示例和测试都围绕此函数调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 提到问题源于 \"a hardcoded cut-off point in the internal logic\"，但检索出的相关源码片段（dateformat.py）与 numberformat 无关，因此无法确定具体位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中测试了 Decimal('9e-19') 和 Decimal('1e-9') 等值，它们在某些 decimal_pos 下返回 '0.00' 或 '0.00000000'。",
+        "target_pattern": "使用绝对值更小的 Decimal 值，例如 Decimal('1e-200')，并指定一个 decimal_pos（如 2），使其小于内部截止点。",
+        "reason": "Issue 表明在某个截止点（1e-200 vs 1e-199）之下，行为从返回零变为返回科学计数法。变异输入值以跨越此截止点可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中 decimal_pos 参数的值多样，如 0, 2, 3, 8。",
+        "target_pattern": "使用一个相对较小的 decimal_pos 值（如 2），与极小的输入值结合，使得输入值的绝对值小于 10^(-decimal_pos)。",
+        "reason": "Issue 的核心是当数字太小以至于无法用指定的小数位数表示时，应显示为零。较小的 decimal_pos 更容易使输入值低于此阈值。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当提供了 decimal_pos 参数，且待格式化数字的绝对值小于用指定小数位数所能表示的最小值时，函数应返回一个由零填充到指定小数位数的字符串（例如 '0.00'）。",
+      "evidence": [
+        "Issue 描述中明确说明：\"the returned string should be 0.0000...000 instead.\"",
+        "相关测试 1 中对于 '1e-9' 等值，当 decimal_pos=8 时，预期结果是 '0.00000000'，这符合 Issue 描述的正确行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "nformat(...) 的返回值，特别是其字符串表示是否包含 'e'（科学计数法标志）。",
+        "reason": "错误症状是返回了科学计数法字符串，正确行为应返回零填充的字符串。观察返回值可直接判断问题是否触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于极小的 Decimal 输入和指定的 decimal_pos，nformat 的返回值不包含科学计数法符号 'e'，并且是一个由零和小数点组成的字符串。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、硬编码的预期字符串（如 '0.00'），因为零的个数取决于 decimal_pos。避免断言与科学计数法无关的属性。",
+        "reason": "Issue 的核心是避免科学计数法，并确保显示为零。断言不包含 'e' 是稳定的，且与 decimal_pos 参数的值无关。可以结合检查字符串以小数点开头或包含适当数量的零。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "内部硬编码截止点的精确值是多少？除了 1e-200，是否还有其他边界值？",
+    "触发缺陷的输入值范围与 decimal_pos 参数值之间的确切数学关系是什么？",
+    "除了 Decimal 类型，其他数字类型（如 float、int、str）在类似条件下是否也会表现出相同的问题？"
+  ],
+  "raw": {
+    "issue_summary": "utils.numberformat.format 在指定 decimal_pos 时，对极小的十进制数错误地使用科学计数法表示，而非显示为零。",
+    "trigger_condition": {
+      "text": "调用 django.utils.numberformat.format 函数，传入一个绝对值极小的 Decimal 值（例如 1e-200）并指定 decimal_pos 参数（例如 2）。",
+      "evidence": [
+        "Issue 中提供的示例：nformat(Decimal('1e-200'), '.', decimal_pos=2) 触发了问题。",
+        "相关测试 1 中包含了大量极小数的测试用例，如 '1e-9', '1e-10', '1e-11' 等。",
+        "Issue 描述指出问题源于内部逻辑的硬编码截止点。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回科学计数法字符串（例如 '1.00e-200'），而非预期的由零填充到指定小数位数的字符串（例如 '0.00'）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了 nformat(Decimal('1e-199'), '.', decimal_pos=2) 返回 '0.00'，而 nformat(Decimal('1e-200'), '.', decimal_pos=2) 返回 '1.00e-200'。",
+        "相关测试 1 中对于 '1e-9' 等值，当 decimal_pos=8 时，预期结果是 '0.00000000'，而非科学计数法。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当提供了 decimal_pos 参数，且待格式化数字的绝对值小于用指定小数位数所能表示的最小值时，函数应返回一个由零填充到指定小数位数的字符串（例如 '0.00'）。",
+      "evidence": [
+        "Issue 描述中明确说明：\"the returned string should be 0.0000...000 instead.\"",
+        "相关测试 1 中对于 '1e-9' 等值，当 decimal_pos=8 时，预期结果是 '0.00000000'，这符合 Issue 描述的正确行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.utils.numberformat.format",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告此函数的行为问题，所有示例和测试都围绕此函数调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 提到问题源于 \"a hardcoded cut-off point in the internal logic\"，但检索出的相关源码片段（dateformat.py）与 numberformat 无关，因此无法确定具体位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestNumberFormat.test_decimal_numbers",
+        "test_file": "tests/utils_tests/test_numberformat.py",
+        "why_relevant": "该测试直接测试 nformat 函数处理 Decimal 数的各种情况，包括极小数的格式化，并包含 decimal_pos 参数的使用。",
+        "reusable_parts": [
+          "导入：from django.utils.numberformat import format as nformat",
+          "测试类：class TestNumberFormat(SimpleTestCase)",
+          "断言风格：self.assertEqual(nformat(...), ...)",
+          "Decimal 对象的构造方式：Decimal('1e-200')"
+        ],
+        "possible_gap": "该测试虽然包含极小数的测试（如 '1e-9', '1e-10'），但其预期结果（'0.00000000'）表明这些值在 decimal_pos=8 时未触发 bug。测试可能未覆盖触发科学计数法表示的那个精确的截止点（如 Issue 中的 1e-200）。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中测试了 Decimal('9e-19') 和 Decimal('1e-9') 等值，它们在某些 decimal_pos 下返回 '0.00' 或 '0.00000000'。",
+        "target_pattern": "使用绝对值更小的 Decimal 值，例如 Decimal('1e-200')，并指定一个 decimal_pos（如 2），使其小于内部截止点。",
+        "reason": "Issue 表明在某个截止点（1e-200 vs 1e-199）之下，行为从返回零变为返回科学计数法。变异输入值以跨越此截止点可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中 decimal_pos 参数的值多样，如 0, 2, 3, 8。",
+        "target_pattern": "使用一个相对较小的 decimal_pos 值（如 2），与极小的输入值结合，使得输入值的绝对值小于 10^(-decimal_pos)。",
+        "reason": "Issue 的核心是当数字太小以至于无法用指定的小数位数表示时，应显示为零。较小的 decimal_pos 更容易使输入值低于此阈值。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "nformat(...) 的返回值，特别是其字符串表示是否包含 'e'（科学计数法标志）。",
+        "reason": "错误症状是返回了科学计数法字符串，正确行为应返回零填充的字符串。观察返回值可直接判断问题是否触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于极小的 Decimal 输入和指定的 decimal_pos，nformat 的返回值不包含科学计数法符号 'e'，并且是一个由零和小数点组成的字符串。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、硬编码的预期字符串（如 '0.00'），因为零的个数取决于 decimal_pos。避免断言与科学计数法无关的属性。",
+        "reason": "Issue 的核心是避免科学计数法，并确保显示为零。断言不包含 'e' 是稳定的，且与 decimal_pos 参数的值无关。可以结合检查字符串以小数点开头或包含适当数量的零。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 Decimal 类和 nformat 函数。测试应继承自 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "内部硬编码截止点的精确值是多少？除了 1e-200，是否还有其他边界值？",
+      "触发缺陷的输入值范围与 decimal_pos 参数值之间的确切数学关系是什么？",
+      "除了 Decimal 类型，其他数字类型（如 float、int、str）在类似条件下是否也会表现出相同的问题？"
+    ]
+  }
+}

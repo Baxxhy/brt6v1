@@ -1,0 +1,334 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15320",
+  "issue_summary": "Subquery.as_sql() 方法生成无效的 SQL，错误地移除了子查询字符串的首尾字符。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个可用的数据库连接（connection）。可能需要继承自 `django.test.TestCase` 以获取 `connection`。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个简单的模型（如 Issue 中的 `App`）或使用测试套件中已有的模型（如 `Company`, `Employee`）来构建查询集。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要调用 `connection.ops.compiler` 或使用 `query.get_compiler` 来获取 compiler 对象，作为 `as_sql` 的参数。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "BasicExpressionsTests.test_aggregate_subquery_annotation",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试使用了 Subquery 类，并检查生成的 SQL。",
+        "reusable_parts": [
+          "导入 Subquery",
+          "使用 Subquery 作为注解的一部分",
+          "使用 `assertNumQueries` 捕获 SQL",
+          "检查 SQL 字符串内容（如 `sql.count('SELECT')`）"
+        ],
+        "possible_gap": "该测试中的 Subquery 可能是在特定上下文（如注解、聚合）中使用的，其内部 query.subquery 属性可能已被正确设置，因此没有触发原始 Issue 中的错误路径。"
+      },
+      {
+        "test_name": "SubqueryTests.test_related_sliced_subquery",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试直接属于 SubqueryTests 类，并测试包含子查询的查询。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 `__in` 操作符与 Subquery",
+          "基本的模型创建和断言"
+        ],
+        "possible_gap": "该测试侧重于子查询切片功能，可能没有直接调用或检查 Subquery.as_sql() 的原始输出。"
+      },
+      {
+        "test_name": "BasicExpressionsTests.test_uuid_pk_subquery",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试直接使用 `Subquery(...)` 作为过滤条件。",
+        "reusable_parts": [
+          "Subquery 的简单构造：`Subquery(UUID.objects.values('uuid_fk__id'))`",
+          "使用 `__in` 操作符",
+          "基本的查询和断言"
+        ],
+        "possible_gap": "测试没有直接检查生成的 SQL 字符串，而是依赖于 Django ORM 的查询执行结果。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 Subquery 对象，不设置其内部 query.subquery 属性为 True，然后调用其 as_sql 方法。",
+      "evidence": [
+        "Issue 中描述：`q = Subquery(App.objects.all())` 然后 `q.as_sql(...)` 产生错误 SQL。",
+        "Issue 中描述：`q.query.subquery = True` 后，`as_sql` 输出正确。",
+        "源码片段 2 显示 `as_sql` 方法执行 `subquery_sql[1:-1]` 切片操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Subquery.as_sql() 返回的 SQL 字符串缺少首字符和尾字符，例如 `'(ELECT ... FROM \"apps_app)'` 而不是 `'(SELECT ... FROM \"apps_app\")'`。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中提供了错误输出示例：`('(ELECT \"apps_app\".\"id\", \"apps_app\".\"name\" FROM \"apps_app)', ())`。",
+        "Issue 中对比了设置 `q.query.subquery = True` 前后的输出。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Subquery",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 直接报告 Subquery 类的 as_sql 方法问题。"
+      },
+      {
+        "name": "Subquery.as_sql",
+        "kind": "method",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "这是生成错误 SQL 的直接方法。"
+      },
+      {
+        "name": "Query.get_compiler",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 中调用 as_sql 时使用了 `q.query.get_compiler('default')` 作为参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Subquery.as_sql",
+        "lines": "1177-1186",
+        "reason": "源码片段 2 显示该方法对 `subquery_sql` 执行了 `[1:-1]` 切片，这可能是错误移除首尾字符的直接原因。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，Subquery 对象可能在构造后其内部 `query` 对象的 `subquery` 属性已被设置为 True（例如，通过 ORM 的某些内部流程）。",
+        "target_pattern": "创建一个 Subquery 对象，确保其内部 `query.subquery` 属性保持为 False（或未设置），然后直接调用 `as_sql` 方法。",
+        "reason": "Issue 表明当 `query.subquery` 为 False 时，`as_sql` 中的切片逻辑 `subquery_sql[1:-1]` 会错误地应用于未包裹括号的 SQL，导致字符丢失。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常将 Subquery 嵌入到更大的查询中（如 filter、annotate），然后执行整个查询。",
+        "target_pattern": "直接孤立地创建 Subquery 对象并调用其 `as_sql` 方法，传入必要的 compiler 和 connection 参数。",
+        "reason": "Issue 中的复现步骤是直接调用 `as_sql`，这绕过了可能设置 `query.subquery=True` 的 ORM 内部路径。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Subquery.as_sql() 应返回格式正确的 SQL 字符串，子查询部分应被括号正确包裹，不应丢失首尾字符。",
+      "evidence": [
+        "Issue 中展示了设置 `q.query.subquery = True` 后的正确输出：`('(SELECT \"apps_app\".\"id\", \"apps_app\".\"name\" FROM \"apps_app\")', ())`。",
+        "源码片段 1 中 Subquery 类的 `template` 属性为 `'(%(subquery)s)'`，暗示期望输出是括号包裹的子查询。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "`subquery_sql` 变量（在 `as_sql` 方法内）或 `as_sql` 方法的返回值。",
+        "reason": "直接观察 `as_sql` 返回的 SQL 字符串片段，可以确认是否丢失了首尾字符。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`q.as_sql(q.query.get_compiler('default'), connection)` 的返回值。",
+        "reason": "Issue 通过打印此返回值展示了错误。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`q.query.subquery` 属性的值。",
+        "reason": "Issue 表明此属性的状态直接影响 `as_sql` 的输出正确性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `Subquery.as_sql()` 返回的 SQL 字符串中，子查询部分被一对括号正确且完整地包裹，没有丢失字符。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串相等，因为表名、列名可能因测试设置而异。",
+        "reason": "Issue 的核心是 SQL 格式错误（缺失首尾字符），而非具体内容。检查返回的字符串是否以 '(' 开头、以 ')' 结尾，并且内部 SELECT 语句完整，是稳定且对目标的方法。"
+      },
+      {
+        "assertion_goal": "验证在未设置 `query.subquery=True` 的情况下，`as_sql` 返回的 SQL 与设置后的 SQL 在括号包裹上是等价的。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言不相关的参数元组部分。",
+        "reason": "Issue 展示了正确与错误的直接对比，这是最直接的验证方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "在哪些典型的 ORM 使用场景下，`query.subquery` 属性会被自动设置为 True？",
+    "`subquery_sql[1:-1]` 这一行代码的原始意图是什么？它是否假设 `subquery_sql` 已经包含了外层的括号？",
+    "除了直接设置 `query.subquery = True`，是否还有其他修复方式？"
+  ],
+  "raw": {
+    "issue_summary": "Subquery.as_sql() 方法生成无效的 SQL，错误地移除了子查询字符串的首尾字符。",
+    "trigger_condition": {
+      "text": "创建一个 Subquery 对象，不设置其内部 query.subquery 属性为 True，然后调用其 as_sql 方法。",
+      "evidence": [
+        "Issue 中描述：`q = Subquery(App.objects.all())` 然后 `q.as_sql(...)` 产生错误 SQL。",
+        "Issue 中描述：`q.query.subquery = True` 后，`as_sql` 输出正确。",
+        "源码片段 2 显示 `as_sql` 方法执行 `subquery_sql[1:-1]` 切片操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Subquery.as_sql() 返回的 SQL 字符串缺少首字符和尾字符，例如 `'(ELECT ... FROM \"apps_app)'` 而不是 `'(SELECT ... FROM \"apps_app\")'`。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中提供了错误输出示例：`('(ELECT \"apps_app\".\"id\", \"apps_app\".\"name\" FROM \"apps_app)', ())`。",
+        "Issue 中对比了设置 `q.query.subquery = True` 前后的输出。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Subquery.as_sql() 应返回格式正确的 SQL 字符串，子查询部分应被括号正确包裹，不应丢失首尾字符。",
+      "evidence": [
+        "Issue 中展示了设置 `q.query.subquery = True` 后的正确输出：`('(SELECT \"apps_app\".\"id\", \"apps_app\".\"name\" FROM \"apps_app\")', ())`。",
+        "源码片段 1 中 Subquery 类的 `template` 属性为 `'(%(subquery)s)'`，暗示期望输出是括号包裹的子查询。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Subquery",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 直接报告 Subquery 类的 as_sql 方法问题。"
+      },
+      {
+        "name": "Subquery.as_sql",
+        "kind": "method",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "这是生成错误 SQL 的直接方法。"
+      },
+      {
+        "name": "Query.get_compiler",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 中调用 as_sql 时使用了 `q.query.get_compiler('default')` 作为参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Subquery.as_sql",
+        "lines": "1177-1186",
+        "reason": "源码片段 2 显示该方法对 `subquery_sql` 执行了 `[1:-1]` 切片，这可能是错误移除首尾字符的直接原因。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "BasicExpressionsTests.test_aggregate_subquery_annotation",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试使用了 Subquery 类，并检查生成的 SQL。",
+        "reusable_parts": [
+          "导入 Subquery",
+          "使用 Subquery 作为注解的一部分",
+          "使用 `assertNumQueries` 捕获 SQL",
+          "检查 SQL 字符串内容（如 `sql.count('SELECT')`）"
+        ],
+        "possible_gap": "该测试中的 Subquery 可能是在特定上下文（如注解、聚合）中使用的，其内部 query.subquery 属性可能已被正确设置，因此没有触发原始 Issue 中的错误路径。"
+      },
+      {
+        "test_name": "SubqueryTests.test_related_sliced_subquery",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试直接属于 SubqueryTests 类，并测试包含子查询的查询。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 `__in` 操作符与 Subquery",
+          "基本的模型创建和断言"
+        ],
+        "possible_gap": "该测试侧重于子查询切片功能，可能没有直接调用或检查 Subquery.as_sql() 的原始输出。"
+      },
+      {
+        "test_name": "BasicExpressionsTests.test_uuid_pk_subquery",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试直接使用 `Subquery(...)` 作为过滤条件。",
+        "reusable_parts": [
+          "Subquery 的简单构造：`Subquery(UUID.objects.values('uuid_fk__id'))`",
+          "使用 `__in` 操作符",
+          "基本的查询和断言"
+        ],
+        "possible_gap": "测试没有直接检查生成的 SQL 字符串，而是依赖于 Django ORM 的查询执行结果。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，Subquery 对象可能在构造后其内部 `query` 对象的 `subquery` 属性已被设置为 True（例如，通过 ORM 的某些内部流程）。",
+        "target_pattern": "创建一个 Subquery 对象，确保其内部 `query.subquery` 属性保持为 False（或未设置），然后直接调用 `as_sql` 方法。",
+        "reason": "Issue 表明当 `query.subquery` 为 False 时，`as_sql` 中的切片逻辑 `subquery_sql[1:-1]` 会错误地应用于未包裹括号的 SQL，导致字符丢失。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常将 Subquery 嵌入到更大的查询中（如 filter、annotate），然后执行整个查询。",
+        "target_pattern": "直接孤立地创建 Subquery 对象并调用其 `as_sql` 方法，传入必要的 compiler 和 connection 参数。",
+        "reason": "Issue 中的复现步骤是直接调用 `as_sql`，这绕过了可能设置 `query.subquery=True` 的 ORM 内部路径。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "`subquery_sql` 变量（在 `as_sql` 方法内）或 `as_sql` 方法的返回值。",
+        "reason": "直接观察 `as_sql` 返回的 SQL 字符串片段，可以确认是否丢失了首尾字符。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`q.as_sql(q.query.get_compiler('default'), connection)` 的返回值。",
+        "reason": "Issue 通过打印此返回值展示了错误。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "`q.query.subquery` 属性的值。",
+        "reason": "Issue 表明此属性的状态直接影响 `as_sql` 的输出正确性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `Subquery.as_sql()` 返回的 SQL 字符串中，子查询部分被一对括号正确且完整地包裹，没有丢失字符。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串相等，因为表名、列名可能因测试设置而异。",
+        "reason": "Issue 的核心是 SQL 格式错误（缺失首尾字符），而非具体内容。检查返回的字符串是否以 '(' 开头、以 ')' 结尾，并且内部 SELECT 语句完整，是稳定且对目标的方法。"
+      },
+      {
+        "assertion_goal": "验证在未设置 `query.subquery=True` 的情况下，`as_sql` 返回的 SQL 与设置后的 SQL 在括号包裹上是等价的。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言不相关的参数元组部分。",
+        "reason": "Issue 展示了正确与错误的直接对比，这是最直接的验证方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个可用的数据库连接（connection）。可能需要继承自 `django.test.TestCase` 以获取 `connection`。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个简单的模型（如 Issue 中的 `App`）或使用测试套件中已有的模型（如 `Company`, `Employee`）来构建查询集。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要调用 `connection.ops.compiler` 或使用 `query.get_compiler` 来获取 compiler 对象，作为 `as_sql` 的参数。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "在哪些典型的 ORM 使用场景下，`query.subquery` 属性会被自动设置为 True？",
+      "`subquery_sql[1:-1]` 这一行代码的原始意图是什么？它是否假设 `subquery_sql` 已经包含了外层的括号？",
+      "除了直接设置 `query.subquery = True`，是否还有其他修复方式？"
+    ]
+  }
+}

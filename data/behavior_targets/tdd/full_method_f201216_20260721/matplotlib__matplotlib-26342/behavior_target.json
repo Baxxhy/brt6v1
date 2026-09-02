@@ -1,0 +1,296 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-26342",
+  "issue_summary": "Cartopy 在 contour labeling 时通过直接修改 ContourSet 的 paths 列表来实现路径变换，但 ContourSet 缺少一个 set_paths 方法，导致代码不优雅且可能不安全。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建 ContourSet 对象，例如通过 ax.contour 或 ax.tricontour。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要构造一些简单的路径对象（如 matplotlib.path.Path）用于替换。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_tricontour_path",
+        "test_file": "lib/matplotlib/tests/test_triangulation.py",
+        "why_relevant": "该测试直接调用了 `cs.get_paths()` 来获取路径并验证其内容，与 Issue 中操作路径的场景相似。",
+        "reusable_parts": [
+          "ContourSet 对象 (cs) 的构造",
+          "对 get_paths() 返回值的断言检查",
+          "路径顶点和代码的验证"
+        ],
+        "possible_gap": "该测试仅读取路径，没有涉及修改或替换路径的操作，因此无法触发 set_paths 缺失的问题。"
+      },
+      {
+        "test_name": "test_contour_clip_path",
+        "test_file": "lib/matplotlib/tests/test_contour.py",
+        "why_relevant": "测试创建了 ContourSet 并检查其属性（get_clip_path），展示了 ContourSet 的基本使用和属性访问。",
+        "reusable_parts": [
+          "ContourSet 的创建 (ax.contour)",
+          "对 ContourSet 对象方法的调用"
+        ],
+        "possible_gap": "测试不涉及路径的获取或设置，与 Issue 的核心操作无关。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在需要对 ContourSet 的路径进行替换或修改的场景下，例如 Cartopy 在 contour labeling 时使用特殊变换，直接调用 `cs.get_paths()` 并修改返回的列表。",
+      "evidence": [
+        "Issue 中提到 Cartopy 有一个 workaround，代码片段为 `paths = cs.get_paths(); paths[:] = transformed_paths`。",
+        "源码片段 3 显示 Collection.get_paths 返回 self._paths，直接修改此列表可能影响内部状态。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前没有直接的错误现象（如异常或错误结果），但 Issue 指出代码风格不佳（'doesn’t smell very good'），暗示可能存在潜在风险，如直接修改内部列表可能导致状态不一致。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 原文：'which doesn’t smell very good.'"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "ContourSet",
+        "kind": "class",
+        "source_path": "lib/matplotlib/contour.py",
+        "reason": "Issue 中讨论的 ContourSet 是 contour 操作的核心类，需要为其添加或完善 set_paths 方法。"
+      },
+      {
+        "name": "Collection.get_paths",
+        "kind": "method",
+        "source_path": "lib/matplotlib/collections.py",
+        "reason": "Issue 中当前 workaround 使用了 get_paths 来获取内部路径列表。"
+      },
+      {
+        "name": "Collection.set_paths",
+        "kind": "method",
+        "source_path": "lib/matplotlib/collections.py",
+        "reason": "Issue 期望通过 set_paths 方法来替换路径，但当前该方法抛出 NotImplementedError。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/collections.py",
+        "object": "Collection.set_paths",
+        "lines": "209-210",
+        "reason": "该方法当前抛出 NotImplementedError，是导致无法优雅替换路径的直接原因。"
+      },
+      {
+        "path": "lib/matplotlib/contour.py",
+        "object": "ContourSet",
+        "lines": "",
+        "reason": "ContourSet 继承自 Collection，可能需要覆盖或实现 set_paths 方法以支持路径替换。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相似测试中，通常只调用 `cs.get_paths()` 来读取路径进行验证。",
+        "target_pattern": "在获取路径列表后，尝试修改该列表（如 `paths[:] = new_paths`）或直接调用 `cs.set_paths(new_paths)`。",
+        "reason": "Issue 的核心是替换路径的操作，而当前测试仅读取路径。变异为修改操作可能触发因 set_paths 缺失而导致的问题（如状态不一致或 NotImplementedError）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中 ContourSet 的路径在创建后保持不变。",
+        "target_pattern": "创建 ContourSet 后，构造一组新的变换后的路径，并尝试替换原始路径。",
+        "reason": "模拟 Cartopy 中 contour labeling 的 workaround，这是触发 Issue 描述场景的关键。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ContourSet 或其基类应提供一个 set_paths 方法，允许安全地替换路径集合，而不是让用户直接修改内部列表。",
+      "evidence": [
+        "Issue 中提出的解决方案：'cs.set_paths(transformed_paths)'。",
+        "源码片段 2 显示 Collection 类中 set_paths 方法当前抛出 NotImplementedError，表明这是一个预期的接口但未实现。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `cs.set_paths(some_paths)` 时是否抛出 NotImplementedError。",
+        "reason": "如果 set_paths 方法未正确实现，调用时会抛出异常，这是 Issue 隐含的当前缺陷。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在通过 `paths = cs.get_paths(); paths[:] = new_paths` 修改后，检查 `cs.get_paths()` 返回的列表内容是否确实被更新，以及 ContourSet 的后续行为（如绘制）是否正常。",
+        "reason": "直接修改内部列表可能导致状态不一致，观察修改后的状态可以验证这种操作的风险。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 ContourSet 支持通过一个方法（如 set_paths）安全地替换其路径集合。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的路径列表相等，因为路径内容可能因变换而复杂。避免断言 NotImplementedError 被抛出（因为修复后不应抛出）。",
+        "reason": "修复后，set_paths 调用不应抛出异常，且替换后的路径应能被正确获取。断言应关注接口的可用性和替换操作的成功，而非具体路径数据。"
+      },
+      {
+        "assertion_goal": "验证通过 set_paths 替换路径后，通过 get_paths 获取的路径与设置的一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "直接比较路径对象身份（id），应比较路径列表的内容。",
+        "reason": "这是 set_paths 方法的基本功能，确保设置和获取的一致性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "当前 ContourSet 或其基类是否在其他地方有 set_paths 的部分实现或子类实现。",
+    "直接修改 `cs.get_paths()` 返回的列表在哪些具体情况下会导致问题（除了代码风格）。",
+    "修复后的 set_paths 方法具体应如何实现（例如，是否应复制输入路径，如何处理无效输入）。"
+  ],
+  "raw": {
+    "issue_summary": "Cartopy 在 contour labeling 时通过直接修改 ContourSet 的 paths 列表来实现路径变换，但 ContourSet 缺少一个 set_paths 方法，导致代码不优雅且可能不安全。",
+    "trigger_condition": {
+      "text": "在需要对 ContourSet 的路径进行替换或修改的场景下，例如 Cartopy 在 contour labeling 时使用特殊变换，直接调用 `cs.get_paths()` 并修改返回的列表。",
+      "evidence": [
+        "Issue 中提到 Cartopy 有一个 workaround，代码片段为 `paths = cs.get_paths(); paths[:] = transformed_paths`。",
+        "源码片段 3 显示 Collection.get_paths 返回 self._paths，直接修改此列表可能影响内部状态。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前没有直接的错误现象（如异常或错误结果），但 Issue 指出代码风格不佳（'doesn’t smell very good'），暗示可能存在潜在风险，如直接修改内部列表可能导致状态不一致。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 原文：'which doesn’t smell very good.'"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "ContourSet 或其基类应提供一个 set_paths 方法，允许安全地替换路径集合，而不是让用户直接修改内部列表。",
+      "evidence": [
+        "Issue 中提出的解决方案：'cs.set_paths(transformed_paths)'。",
+        "源码片段 2 显示 Collection 类中 set_paths 方法当前抛出 NotImplementedError，表明这是一个预期的接口但未实现。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ContourSet",
+        "kind": "class",
+        "source_path": "lib/matplotlib/contour.py",
+        "reason": "Issue 中讨论的 ContourSet 是 contour 操作的核心类，需要为其添加或完善 set_paths 方法。"
+      },
+      {
+        "name": "Collection.get_paths",
+        "kind": "method",
+        "source_path": "lib/matplotlib/collections.py",
+        "reason": "Issue 中当前 workaround 使用了 get_paths 来获取内部路径列表。"
+      },
+      {
+        "name": "Collection.set_paths",
+        "kind": "method",
+        "source_path": "lib/matplotlib/collections.py",
+        "reason": "Issue 期望通过 set_paths 方法来替换路径，但当前该方法抛出 NotImplementedError。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/collections.py",
+        "object": "Collection.set_paths",
+        "lines": "209-210",
+        "reason": "该方法当前抛出 NotImplementedError，是导致无法优雅替换路径的直接原因。"
+      },
+      {
+        "path": "lib/matplotlib/contour.py",
+        "object": "ContourSet",
+        "lines": "",
+        "reason": "ContourSet 继承自 Collection，可能需要覆盖或实现 set_paths 方法以支持路径替换。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_tricontour_path",
+        "test_file": "lib/matplotlib/tests/test_triangulation.py",
+        "why_relevant": "该测试直接调用了 `cs.get_paths()` 来获取路径并验证其内容，与 Issue 中操作路径的场景相似。",
+        "reusable_parts": [
+          "ContourSet 对象 (cs) 的构造",
+          "对 get_paths() 返回值的断言检查",
+          "路径顶点和代码的验证"
+        ],
+        "possible_gap": "该测试仅读取路径，没有涉及修改或替换路径的操作，因此无法触发 set_paths 缺失的问题。"
+      },
+      {
+        "test_name": "test_contour_clip_path",
+        "test_file": "lib/matplotlib/tests/test_contour.py",
+        "why_relevant": "测试创建了 ContourSet 并检查其属性（get_clip_path），展示了 ContourSet 的基本使用和属性访问。",
+        "reusable_parts": [
+          "ContourSet 的创建 (ax.contour)",
+          "对 ContourSet 对象方法的调用"
+        ],
+        "possible_gap": "测试不涉及路径的获取或设置，与 Issue 的核心操作无关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在相似测试中，通常只调用 `cs.get_paths()` 来读取路径进行验证。",
+        "target_pattern": "在获取路径列表后，尝试修改该列表（如 `paths[:] = new_paths`）或直接调用 `cs.set_paths(new_paths)`。",
+        "reason": "Issue 的核心是替换路径的操作，而当前测试仅读取路径。变异为修改操作可能触发因 set_paths 缺失而导致的问题（如状态不一致或 NotImplementedError）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中 ContourSet 的路径在创建后保持不变。",
+        "target_pattern": "创建 ContourSet 后，构造一组新的变换后的路径，并尝试替换原始路径。",
+        "reason": "模拟 Cartopy 中 contour labeling 的 workaround，这是触发 Issue 描述场景的关键。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 `cs.set_paths(some_paths)` 时是否抛出 NotImplementedError。",
+        "reason": "如果 set_paths 方法未正确实现，调用时会抛出异常，这是 Issue 隐含的当前缺陷。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在通过 `paths = cs.get_paths(); paths[:] = new_paths` 修改后，检查 `cs.get_paths()` 返回的列表内容是否确实被更新，以及 ContourSet 的后续行为（如绘制）是否正常。",
+        "reason": "直接修改内部列表可能导致状态不一致，观察修改后的状态可以验证这种操作的风险。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 ContourSet 支持通过一个方法（如 set_paths）安全地替换其路径集合。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的路径列表相等，因为路径内容可能因变换而复杂。避免断言 NotImplementedError 被抛出（因为修复后不应抛出）。",
+        "reason": "修复后，set_paths 调用不应抛出异常，且替换后的路径应能被正确获取。断言应关注接口的可用性和替换操作的成功，而非具体路径数据。"
+      },
+      {
+        "assertion_goal": "验证通过 set_paths 替换路径后，通过 get_paths 获取的路径与设置的一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "直接比较路径对象身份（id），应比较路径列表的内容。",
+        "reason": "这是 set_paths 方法的基本功能，确保设置和获取的一致性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建 ContourSet 对象，例如通过 ax.contour 或 ax.tricontour。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要构造一些简单的路径对象（如 matplotlib.path.Path）用于替换。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "当前 ContourSet 或其基类是否在其他地方有 set_paths 的部分实现或子类实现。",
+      "直接修改 `cs.get_paths()` 返回的列表在哪些具体情况下会导致问题（除了代码风格）。",
+      "修复后的 set_paths 方法具体应如何实现（例如，是否应复制输入路径，如何处理无效输入）。"
+    ]
+  }
+}

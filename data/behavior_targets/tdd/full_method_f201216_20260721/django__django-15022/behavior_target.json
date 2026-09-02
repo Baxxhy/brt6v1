@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15022",
+  "issue_summary": "在 Django admin changelist 搜索时，每个搜索词会导致额外的 JOIN 操作，当搜索词较多时可能造成查询性能问题甚至停滞。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建类似 Issue 描述的 Client 和 ClientOffice 模型及其关联数据，以模拟真实场景。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 和 override_settings(ROOT_URLCONF=...)，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要模拟 admin 请求，使用 RequestFactory 和超级用户，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ChangeListTests.test_multiple_search_fields",
+        "test_file": "tests/admin_changelist/tests.py",
+        "why_relevant": "该测试直接测试 admin changelist 的多字段搜索功能，包括跨关系（FK, reverse FK, many-to-many）搜索，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类结构 (ChangeListTests)",
+          "使用 ModelAdmin 和 search_fields 的配置模式",
+          "通过 factory.get 模拟 admin 请求",
+          "使用 get_changelist_instance 获取查询集",
+          "使用 queryset.count() 进行断言"
+        ],
+        "possible_gap": "当前测试使用的搜索词数量较少（如 'Duo Concert' 两个词），可能不足以触发 Issue 中描述的因多个单词（>3）导致 JOIN 过多和性能停滞的问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django admin 中，对一个配置了跨关系 search_fields（例如 'clientoffice__name'）的 ModelAdmin 进行搜索，且搜索查询包含多个单词（例如超过 3 个）。",
+      "evidence": [
+        "Issue 描述：'search_fields = (\\'name\\', \\'name2\\', \\'contact_person\\', \\'clientoffice__name\\', \\'clientoffice__name2\\')'",
+        "Issue 描述：'if we try searching for clients in admin by a search query containig several words (>3), got django/admin stalled.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "admin 界面停滞或无响应，可能由于生成的 SQL 查询包含不必要的 JOIN 导致性能低下。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述：'got django/admin stalled.'",
+        "Issue 描述：'The problem is going to be that each word in the search query leads to additional JOIN in final SQL query'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelAdmin.get_search_results",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 涉及 admin changelist 搜索，该方法是处理搜索逻辑的核心。"
+      },
+      {
+        "name": "admin.ModelAdmin",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中配置了 ClientAdmin，它是 ModelAdmin 的子类，search_fields 是其属性。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 提到 'qs = qs.filter(...) pattern' 是导致每个搜索词产生额外 JOIN 的原因。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin.get_search_results",
+        "lines": "",
+        "reason": "该方法是 admin 中构建搜索查询集的核心，可能负责处理多个搜索词和跨关系字段，导致重复 JOIN。"
+      },
+      {
+        "path": "django/contrib/admin/views/main.py",
+        "object": "ChangeList.get_queryset",
+        "lines": "",
+        "reason": "ChangeList 负责为 admin changelist 构建最终查询集，可能涉及搜索查询的构建。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用较短的搜索字符串（如 'Duo Concert'）。",
+        "target_pattern": "使用包含多个单词（例如超过 3 个）的搜索字符串，且这些单词可能匹配跨关系的 search_fields。",
+        "reason": "Issue 明确指出当搜索查询包含多个单词（>3）时会触发问题，因为每个词可能导致一个额外的 JOIN。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中 search_fields 可能包含跨关系字段，但模型和字段组合是测试专用的。",
+        "target_pattern": "将 search_fields 配置为类似 Issue 中的模式，即包含多个跨关系字段（如 'clientoffice__name', 'clientoffice__name2'）。",
+        "reason": "Issue 的触发依赖于 search_fields 包含跨关系字段，这会导致 JOIN 的产生。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 admin changelist 中进行多词搜索时，生成的 SQL 查询应高效，避免不必要的 JOIN 操作，确保响应正常。",
+      "evidence": [
+        "Issue 描述暗示了问题在于不必要的 JOIN，因此修复后应消除这些不必要的 JOIN。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串（例如通过 str(queryset.query) 或 connection.queries）。",
+        "reason": "Issue 的核心是 SQL 查询包含不必要的 JOIN，观察生成的 SQL 可以确认 JOIN 的数量是否随搜索词增加而异常增长。"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "查询执行时间或查询集构建时间。",
+        "reason": "Issue 描述了 admin 停滞，观测性能可以确认是否因复杂查询导致响应缓慢。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于包含多个单词的搜索查询，生成的 SQL 查询中的 JOIN 子句数量是合理的（例如，不会为每个搜索词都产生一个独立的、不必要的 JOIN 到同一张表）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 SQL 字符串相等。",
+        "reason": "Issue 是关于 SQL 结构（JOIN 数量）的效率问题，而非精确的 SQL 输出。断言应关注 JOIN 模式，而不是脆弱的完整 SQL 字符串。"
+      },
+      {
+        "assertion_goal": "验证搜索功能仍能返回正确的结果（功能正确性）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言不相关的模型实例数量。",
+        "reason": "在修复性能问题的同时，必须确保搜索的语义正确性保持不变。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致额外 JOIN 的确切代码位置和逻辑（例如，是在 get_search_results 中重复应用 filter，还是在构建查询时未能去重）。",
+    "修复后的正确 SQL 查询结构具体应该是怎样的（例如，JOIN 应该出现多少次）。",
+    "除了 JOIN 数量，是否还有其他因素（如数据库优化）导致 admin 停滞。"
+  ],
+  "raw": {
+    "issue_summary": "在 Django admin changelist 搜索时，每个搜索词会导致额外的 JOIN 操作，当搜索词较多时可能造成查询性能问题甚至停滞。",
+    "trigger_condition": {
+      "text": "在 Django admin 中，对一个配置了跨关系 search_fields（例如 'clientoffice__name'）的 ModelAdmin 进行搜索，且搜索查询包含多个单词（例如超过 3 个）。",
+      "evidence": [
+        "Issue 描述：'search_fields = (\\'name\\', \\'name2\\', \\'contact_person\\', \\'clientoffice__name\\', \\'clientoffice__name2\\')'",
+        "Issue 描述：'if we try searching for clients in admin by a search query containig several words (>3), got django/admin stalled.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "admin 界面停滞或无响应，可能由于生成的 SQL 查询包含不必要的 JOIN 导致性能低下。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述：'got django/admin stalled.'",
+        "Issue 描述：'The problem is going to be that each word in the search query leads to additional JOIN in final SQL query'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 admin changelist 中进行多词搜索时，生成的 SQL 查询应高效，避免不必要的 JOIN 操作，确保响应正常。",
+      "evidence": [
+        "Issue 描述暗示了问题在于不必要的 JOIN，因此修复后应消除这些不必要的 JOIN。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "ModelAdmin.get_search_results",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 涉及 admin changelist 搜索，该方法是处理搜索逻辑的核心。"
+      },
+      {
+        "name": "admin.ModelAdmin",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中配置了 ClientAdmin，它是 ModelAdmin 的子类，search_fields 是其属性。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 提到 'qs = qs.filter(...) pattern' 是导致每个搜索词产生额外 JOIN 的原因。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "ModelAdmin.get_search_results",
+        "lines": "",
+        "reason": "该方法是 admin 中构建搜索查询集的核心，可能负责处理多个搜索词和跨关系字段，导致重复 JOIN。"
+      },
+      {
+        "path": "django/contrib/admin/views/main.py",
+        "object": "ChangeList.get_queryset",
+        "lines": "",
+        "reason": "ChangeList 负责为 admin changelist 构建最终查询集，可能涉及搜索查询的构建。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ChangeListTests.test_multiple_search_fields",
+        "test_file": "tests/admin_changelist/tests.py",
+        "why_relevant": "该测试直接测试 admin changelist 的多字段搜索功能，包括跨关系（FK, reverse FK, many-to-many）搜索，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类结构 (ChangeListTests)",
+          "使用 ModelAdmin 和 search_fields 的配置模式",
+          "通过 factory.get 模拟 admin 请求",
+          "使用 get_changelist_instance 获取查询集",
+          "使用 queryset.count() 进行断言"
+        ],
+        "possible_gap": "当前测试使用的搜索词数量较少（如 'Duo Concert' 两个词），可能不足以触发 Issue 中描述的因多个单词（>3）导致 JOIN 过多和性能停滞的问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用较短的搜索字符串（如 'Duo Concert'）。",
+        "target_pattern": "使用包含多个单词（例如超过 3 个）的搜索字符串，且这些单词可能匹配跨关系的 search_fields。",
+        "reason": "Issue 明确指出当搜索查询包含多个单词（>3）时会触发问题，因为每个词可能导致一个额外的 JOIN。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中 search_fields 可能包含跨关系字段，但模型和字段组合是测试专用的。",
+        "target_pattern": "将 search_fields 配置为类似 Issue 中的模式，即包含多个跨关系字段（如 'clientoffice__name', 'clientoffice__name2'）。",
+        "reason": "Issue 的触发依赖于 search_fields 包含跨关系字段，这会导致 JOIN 的产生。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串（例如通过 str(queryset.query) 或 connection.queries）。",
+        "reason": "Issue 的核心是 SQL 查询包含不必要的 JOIN，观察生成的 SQL 可以确认 JOIN 的数量是否随搜索词增加而异常增长。"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "查询执行时间或查询集构建时间。",
+        "reason": "Issue 描述了 admin 停滞，观测性能可以确认是否因复杂查询导致响应缓慢。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于包含多个单词的搜索查询，生成的 SQL 查询中的 JOIN 子句数量是合理的（例如，不会为每个搜索词都产生一个独立的、不必要的 JOIN 到同一张表）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、具体的 SQL 字符串相等。",
+        "reason": "Issue 是关于 SQL 结构（JOIN 数量）的效率问题，而非精确的 SQL 输出。断言应关注 JOIN 模式，而不是脆弱的完整 SQL 字符串。"
+      },
+      {
+        "assertion_goal": "验证搜索功能仍能返回正确的结果（功能正确性）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言不相关的模型实例数量。",
+        "reason": "在修复性能问题的同时，必须确保搜索的语义正确性保持不变。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建类似 Issue 描述的 Client 和 ClientOffice 模型及其关联数据，以模拟真实场景。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 和 override_settings(ROOT_URLCONF=...)，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要模拟 admin 请求，使用 RequestFactory 和超级用户，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致额外 JOIN 的确切代码位置和逻辑（例如，是在 get_search_results 中重复应用 filter，还是在构建查询时未能去重）。",
+      "修复后的正确 SQL 查询结构具体应该是怎样的（例如，JOIN 应该出现多少次）。",
+      "除了 JOIN 数量，是否还有其他因素（如数据库优化）导致 admin 停滞。"
+    ]
+  }
+}

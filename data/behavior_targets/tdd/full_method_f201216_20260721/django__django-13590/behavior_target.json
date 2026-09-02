@@ -1,0 +1,296 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13590",
+  "issue_summary": "Django 3.0 中，将命名元组作为 __range 查询集过滤器的参数会引发 TypeError 异常，而 2.2 版本中正常工作。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和至少一个具有数值字段的模型（例如 `IntegerField`）作为测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 `collections.namedtuple` 或 `typing.NamedTuple` 创建一个简单的二元命名元组类。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试数据库配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_named_values_list_with_fields",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试涉及 Django 中命名元组（`named=True` 产生的 Row 类）的使用，展示了如何构造和使用类似命名元组的对象。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "Number 模型 fixture 的导入和使用",
+          "使用 `values_list(..., named=True)` 生成命名结果",
+          "对结果 `_fields` 和属性访问的断言风格"
+        ],
+        "possible_gap": "该测试是关于 `values_list` 查询结果的，而不是关于将命名元组作为查询 *输入* 参数传递给 `__range` 过滤器。"
+      },
+      {
+        "test_name": "test_deconstructible_tuple",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试处理了元组（包括嵌套的）的“解构”和比较，与 `resolve_lookup_value` 中处理元组内容的逻辑有概念上的相似性。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "对元组内容进行深入处理的测试思路"
+        ],
+        "possible_gap": "该测试位于 migrations 模块，与查询过滤逻辑的上下文完全不同。它不涉及 QuerySet 过滤器或 `resolve_lookup_value` 方法。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用一个命名元组（例如一个包含两个元素的命名元组）作为 QuerySet 的 __range 过滤器的参数。",
+      "evidence": [
+        "Issue 描述：'This project passes named 2-tuples as arguments to range queryset filters.'",
+        "Issue 描述：'This works fine on 2.2. On 3.0 it causes the following error: TypeError: __new__() missing 1 required positional argument: 'far'.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: __new__() missing 1 required positional argument: 'far'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'On 3.0 it causes the following error: TypeError: __new__() missing 1 required positional argument: 'far'.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.sql.query.Query.resolve_lookup_value",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 明确指出问题发生在这个方法内部，它处理查询过滤器中的值，包括元组。"
+      },
+      {
+        "name": "__range",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 提到 named tuples used as arguments to __range。这是触发问题的查询过滤器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.resolve_lookup_value",
+        "lines": "1072-1084",
+        "reason": "Issue 描述和检索到的源码片段 1 完全匹配。Issue 指出该方法在处理命名元组时，尝试用迭代器构造新元组导致错误。源码片段 1 第 1080 行显示 `return type(value)(... for sub_value in value)`，这正是问题所在。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用普通值（如整数、字符串）或普通元组作为查询参数。",
+        "target_pattern": "使用一个自定义的命名元组类（例如 collections.namedtuple 或 typing.NamedTuple 创建的类）的实例作为 `__range` 过滤器的参数。",
+        "reason": "Issue 明确指出，当输入是命名元组类型时，`type(value)(iterator)` 的构造方式会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用 `filter(some_field__range=(start, end))`。",
+        "target_pattern": "调用 `filter(some_field__range=named_tuple_instance)`，其中 `named_tuple_instance` 是一个二元命名元组。",
+        "reason": "这是触发缺陷的直接 API 调用方式。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "命名元组应能像普通元组一样，成功作为 __range 过滤器的参数，不引发异常，并正确执行范围查询。",
+      "evidence": [
+        "Issue 描述：'This works fine on 2.2.'",
+        "Issue 描述暗示了修复方向：'The fix is to * expand the contents of the iterator into the constructor.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `QuerySet.filter(...)` 时捕获的异常。",
+        "reason": "Issue 描述的错误现象就是 TypeError 异常。观测是否抛出此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "传递给 `__range` 的参数的 `type(value)`，以及在 `resolve_lookup_value` 内部尝试构造的新对象的类型。",
+        "reason": "问题的核心是 `type(value)`（命名元组类）无法用迭代器初始化。观察类型有助于理解执行路径。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功执行过滤后 QuerySet 的结果（例如 `.count()` 或列表），与使用普通元组作为参数的预期结果进行对比。",
+        "reason": "修复后，使用命名元组应产生与使用普通元组相同的结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用命名元组作为 `__range` 参数时，查询应正常执行，不引发 TypeError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因命名元组字段名不同而变化。",
+        "reason": "Issue 的核心是异常的发生。一个稳定的断言是验证在特定条件下 *不* 引发 TypeError（修复后），或者验证引发了 TypeError（复现缺陷时）。初始复现测试的目标是触发异常。"
+      },
+      {
+        "assertion_goal": "使用命名元组与使用解包后的普通元组进行相同查询，应得到相同的结果集。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言底层生成的原始 SQL 字符串完全相等。",
+        "reason": "这验证了功能正确性，而不依赖于可能变化的 SQL 生成细节。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 `far` 参数名是来自一个特定的命名元组示例，还是通用的错误信息的一部分？",
+    "除了 `__range` 查找，其他接受元组作为参数的查询查找（如 `__in`）是否也存在同样问题？Issue 只提到了 `__range`。",
+    "Django 2.2 和 3.0 之间 `resolve_lookup_value` 方法的具体变化是什么？需要确认问题是否确实由该方法引入。",
+    "修复的确切代码变更（例如，是 `type(value)(*iterator)` 还是 `type(value)(*value)` 或其他形式）在分析时未知。"
+  ],
+  "raw": {
+    "issue_summary": "Django 3.0 中，将命名元组作为 __range 查询集过滤器的参数会引发 TypeError 异常，而 2.2 版本中正常工作。",
+    "trigger_condition": {
+      "text": "使用一个命名元组（例如一个包含两个元素的命名元组）作为 QuerySet 的 __range 过滤器的参数。",
+      "evidence": [
+        "Issue 描述：'This project passes named 2-tuples as arguments to range queryset filters.'",
+        "Issue 描述：'This works fine on 2.2. On 3.0 it causes the following error: TypeError: __new__() missing 1 required positional argument: 'far'.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: __new__() missing 1 required positional argument: 'far'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'On 3.0 it causes the following error: TypeError: __new__() missing 1 required positional argument: 'far'.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "命名元组应能像普通元组一样，成功作为 __range 过滤器的参数，不引发异常，并正确执行范围查询。",
+      "evidence": [
+        "Issue 描述：'This works fine on 2.2.'",
+        "Issue 描述暗示了修复方向：'The fix is to * expand the contents of the iterator into the constructor.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.sql.query.Query.resolve_lookup_value",
+        "kind": "method",
+        "source_path": "django/db/models/sql/query.py",
+        "reason": "Issue 明确指出问题发生在这个方法内部，它处理查询过滤器中的值，包括元组。"
+      },
+      {
+        "name": "__range",
+        "kind": "unknown",
+        "source_path": "",
+        "reason": "Issue 提到 named tuples used as arguments to __range。这是触发问题的查询过滤器。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.resolve_lookup_value",
+        "lines": "1072-1084",
+        "reason": "Issue 描述和检索到的源码片段 1 完全匹配。Issue 指出该方法在处理命名元组时，尝试用迭代器构造新元组导致错误。源码片段 1 第 1080 行显示 `return type(value)(... for sub_value in value)`，这正是问题所在。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_named_values_list_with_fields",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试涉及 Django 中命名元组（`named=True` 产生的 Row 类）的使用，展示了如何构造和使用类似命名元组的对象。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "Number 模型 fixture 的导入和使用",
+          "使用 `values_list(..., named=True)` 生成命名结果",
+          "对结果 `_fields` 和属性访问的断言风格"
+        ],
+        "possible_gap": "该测试是关于 `values_list` 查询结果的，而不是关于将命名元组作为查询 *输入* 参数传递给 `__range` 过滤器。"
+      },
+      {
+        "test_name": "test_deconstructible_tuple",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试处理了元组（包括嵌套的）的“解构”和比较，与 `resolve_lookup_value` 中处理元组内容的逻辑有概念上的相似性。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "对元组内容进行深入处理的测试思路"
+        ],
+        "possible_gap": "该测试位于 migrations 模块，与查询过滤逻辑的上下文完全不同。它不涉及 QuerySet 过滤器或 `resolve_lookup_value` 方法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用普通值（如整数、字符串）或普通元组作为查询参数。",
+        "target_pattern": "使用一个自定义的命名元组类（例如 collections.namedtuple 或 typing.NamedTuple 创建的类）的实例作为 `__range` 过滤器的参数。",
+        "reason": "Issue 明确指出，当输入是命名元组类型时，`type(value)(iterator)` 的构造方式会失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用 `filter(some_field__range=(start, end))`。",
+        "target_pattern": "调用 `filter(some_field__range=named_tuple_instance)`，其中 `named_tuple_instance` 是一个二元命名元组。",
+        "reason": "这是触发缺陷的直接 API 调用方式。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `QuerySet.filter(...)` 时捕获的异常。",
+        "reason": "Issue 描述的错误现象就是 TypeError 异常。观测是否抛出此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "传递给 `__range` 的参数的 `type(value)`，以及在 `resolve_lookup_value` 内部尝试构造的新对象的类型。",
+        "reason": "问题的核心是 `type(value)`（命名元组类）无法用迭代器初始化。观察类型有助于理解执行路径。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功执行过滤后 QuerySet 的结果（例如 `.count()` 或列表），与使用普通元组作为参数的预期结果进行对比。",
+        "reason": "修复后，使用命名元组应产生与使用普通元组相同的结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用命名元组作为 `__range` 参数时，查询应正常执行，不引发 TypeError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因命名元组字段名不同而变化。",
+        "reason": "Issue 的核心是异常的发生。一个稳定的断言是验证在特定条件下 *不* 引发 TypeError（修复后），或者验证引发了 TypeError（复现缺陷时）。初始复现测试的目标是触发异常。"
+      },
+      {
+        "assertion_goal": "使用命名元组与使用解包后的普通元组进行相同查询，应得到相同的结果集。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言底层生成的原始 SQL 字符串完全相等。",
+        "reason": "这验证了功能正确性，而不依赖于可能变化的 SQL 生成细节。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和至少一个具有数值字段的模型（例如 `IntegerField`）作为测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 `collections.namedtuple` 或 `typing.NamedTuple` 创建一个简单的二元命名元组类。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试数据库配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 `far` 参数名是来自一个特定的命名元组示例，还是通用的错误信息的一部分？",
+      "除了 `__range` 查找，其他接受元组作为参数的查询查找（如 `__in`）是否也存在同样问题？Issue 只提到了 `__range`。",
+      "Django 2.2 和 3.0 之间 `resolve_lookup_value` 方法的具体变化是什么？需要确认问题是否确实由该方法引入。",
+      "修复的确切代码变更（例如，是 `type(value)(*iterator)` 还是 `type(value)(*value)` 或其他形式）在分析时未知。"
+    ]
+  }
+}

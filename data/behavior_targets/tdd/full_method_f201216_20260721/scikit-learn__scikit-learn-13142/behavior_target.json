@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13142",
+  "issue_summary": "GaussianMixture 在 n_init>1 时，fit_predict 和 predict 返回的聚类标签不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要生成随机测试数据 X（例如使用 numpy.random.randn）。可能需要设置 random_state 以确保测试可重复性。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest.mark.filterwarnings 来忽略可能出现的未收敛警告。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_gaussian_mixture_fit_predict",
+        "test_file": "sklearn/mixture/tests/test_gaussian_mixture.py",
+        "why_relevant": "该测试直接验证 fit_predict(X) 是否等价于 fit(X).predict(X)，与 Issue 的核心验证目标一致。",
+        "reusable_parts": [
+          "GaussianMixture 对象的构造和初始化",
+          "使用 RandomData 生成测试数据",
+          "assert_array_equal 断言风格",
+          "adjusted_rand_score 评估聚类质量"
+        ],
+        "possible_gap": "该测试没有设置 n_init 参数（使用默认值 1），因此无法触发 Issue 中描述的 n_init>1 时的缺陷。"
+      },
+      {
+        "test_name": "test_multiple_init",
+        "test_file": "sklearn/mixture/tests/test_gaussian_mixture.py",
+        "why_relevant": "该测试专门测试了 n_init=5 的情况，关注多次初始化的效果。",
+        "reusable_parts": [
+          "设置 n_init=5 的 GaussianMixture 对象构造",
+          "使用随机数据生成"
+        ],
+        "possible_gap": "该测试只比较了模型评分（score），没有比较 fit_predict 和 predict 的标签一致性。"
+      },
+      {
+        "test_name": "test_gaussian_mixture_predict_predict_proba",
+        "test_file": "sklearn/mixture/tests/test_gaussian_mixture.py",
+        "why_relevant": "该测试验证了 predict 和 predict_proba 结果的一致性，并检查了未拟合时的错误提示，涉及 predict 方法的行为。",
+        "reusable_parts": [
+          "GaussianMixture 对象的构造和拟合",
+          "predict 方法的调用",
+          "assert_array_equal 断言风格"
+        ],
+        "possible_gap": "该测试没有涉及 fit_predict，也没有设置 n_init>1。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 GaussianMixture 模型，设置 n_init 参数大于 1（例如 n_init=5），对同一数据集 X 分别调用 fit_predict(X) 和 predict(X)。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 中展示了当 n_init=5 时，c1 = gm.fit_predict(X) 和 c2 = gm.predict(X) 的结果不同。",
+        "Issue 描述明确指出问题发生在 `n_init` is specified in GaussianMixture。",
+        "相关测试 test_gaussian_mixture_fit_predict 没有设置 n_init，因此没有捕获此问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "fit_predict(X) 和 predict(X) 返回的聚类标签数组不相等。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 的 Actual Results 中显示了 assert_array_equal(c1,c2) 失败，并打印了两个不同的数组。",
+        "Issue 描述提到 results of fit_predict(X) and predict(X) are often different。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "GaussianMixture",
+        "kind": "class",
+        "source_path": "sklearn/mixture/gaussian_mixture.py",
+        "reason": "Issue 报告的问题直接涉及 GaussianMixture 类的行为。"
+      },
+      {
+        "name": "GaussianMixture.fit_predict",
+        "kind": "method",
+        "source_path": "sklearn/base.py",
+        "reason": "Issue 的核心是 fit_predict 方法的行为与 predict 方法不一致。"
+      },
+      {
+        "name": "GaussianMixture.predict",
+        "kind": "method",
+        "source_path": "sklearn/mixture/gaussian_mixture.py",
+        "reason": "Issue 的核心是 predict 方法的行为与 fit_predict 方法不一致。"
+      },
+      {
+        "name": "GaussianMixture.fit",
+        "kind": "method",
+        "source_path": "sklearn/mixture/gaussian_mixture.py",
+        "reason": "fit_predict 内部调用了 fit，且 Issue 的复现步骤涉及模型拟合。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/mixture/gaussian_mixture.py",
+        "object": "GaussianMixture",
+        "lines": "434-755",
+        "reason": "这是 GaussianMixture 类的主要实现，包含 fit、predict 等方法。问题可能在于 fit_predict 或 predict 的内部逻辑，特别是当 n_init>1 时，模型状态（如 means_, weights_, covariances_）的保存或选择可能不一致。"
+      },
+      {
+        "path": "sklearn/base.py",
+        "object": "ClusterMixin.fit_predict",
+        "lines": "338-357",
+        "reason": "这是 fit_predict 的默认实现（self.fit(X); return self.labels_）。如果 GaussianMixture 没有重写此方法，则问题可能在于 fit 后 self.labels_ 的设置与后续 predict 计算所用的模型参数不一致。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试 test_gaussian_mixture_fit_predict 中构造 GaussianMixture 时没有显式设置 n_init（使用默认值 1）。",
+        "target_pattern": "在构造 GaussianMixture 时显式设置 n_init 参数大于 1（例如 n_init=5）。",
+        "reason": "Issue 明确指出问题在 n_init>1 时出现，这是触发缺陷的关键配置变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试 test_gaussian_mixture_fit_predict 中，分别对两个深拷贝的对象调用 f.fit(X).predict(X) 和 g.fit_predict(X)。",
+        "target_pattern": "对同一个 GaussianMixture 对象实例，先调用 fit_predict(X)，再调用 predict(X)。",
+        "reason": "Issue 的复现代码是在同一个对象上连续调用 fit_predict 和 predict，这更直接地反映了实际使用场景和潜在的状态不一致问题。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于同一个已拟合的 GaussianMixture 模型实例，fit_predict(X) 返回的聚类标签应与后续调用 predict(X) 返回的标签一致。",
+      "evidence": [
+        "Issue 的 Expected Results 表明期望没有异常，即断言通过。",
+        "相关测试 test_gaussian_mixture_fit_predict 的注释和断言表明其目标是检查 fit_predict(X) 是否等价于 fit(X).predict(X)。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "gm.fit_predict(X) 的返回值与 gm.predict(X) 的返回值。",
+        "reason": "直接比较两个方法返回的标签数组是否相等是判断 Issue 是否触发的核心。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 fit_predict 后模型内部状态（如 means_, weights_, covariances_）与调用 predict 时使用的状态。",
+        "reason": "不一致的标签可能源于 fit_predict 和 predict 所基于的模型参数（如均值、权重）不同。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对同一数据集 X，同一 GaussianMixture 模型实例的 fit_predict(X) 返回值与 predict(X) 返回值完全相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的随机数据生成过程或具体的聚类标签值，因为随机初始化可能导致不同的合法聚类结果。应断言两个调用结果的一致性，而非与某个固定结果的相等。",
+        "reason": "Issue 的核心是内部一致性，而不是与某个黄金标准的匹配。使用 assert_array_equal 直接比较两个数组是稳定且与 Issue 对齐的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切根源是在 fit_predict 的默认实现中，还是在 GaussianMixture 对 fit 或 predict 的具体实现中。",
+    "当 n_init>1 时，是 fit_predict 保存的 labels_ 不正确，还是 predict 方法使用了与 fit 最终选择不同的模型参数进行计算。",
+    "除了 n_init>1，是否还有其他条件（如 warm_start、特定的 covariance_type）会影响此缺陷的触发。"
+  ],
+  "raw": {
+    "issue_summary": "GaussianMixture 在 n_init>1 时，fit_predict 和 predict 返回的聚类标签不一致。",
+    "trigger_condition": {
+      "text": "使用 GaussianMixture 模型，设置 n_init 参数大于 1（例如 n_init=5），对同一数据集 X 分别调用 fit_predict(X) 和 predict(X)。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 中展示了当 n_init=5 时，c1 = gm.fit_predict(X) 和 c2 = gm.predict(X) 的结果不同。",
+        "Issue 描述明确指出问题发生在 `n_init` is specified in GaussianMixture。",
+        "相关测试 test_gaussian_mixture_fit_predict 没有设置 n_init，因此没有捕获此问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "fit_predict(X) 和 predict(X) 返回的聚类标签数组不相等。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 的 Actual Results 中显示了 assert_array_equal(c1,c2) 失败，并打印了两个不同的数组。",
+        "Issue 描述提到 results of fit_predict(X) and predict(X) are often different。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于同一个已拟合的 GaussianMixture 模型实例，fit_predict(X) 返回的聚类标签应与后续调用 predict(X) 返回的标签一致。",
+      "evidence": [
+        "Issue 的 Expected Results 表明期望没有异常，即断言通过。",
+        "相关测试 test_gaussian_mixture_fit_predict 的注释和断言表明其目标是检查 fit_predict(X) 是否等价于 fit(X).predict(X)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "GaussianMixture",
+        "kind": "class",
+        "source_path": "sklearn/mixture/gaussian_mixture.py",
+        "reason": "Issue 报告的问题直接涉及 GaussianMixture 类的行为。"
+      },
+      {
+        "name": "GaussianMixture.fit_predict",
+        "kind": "method",
+        "source_path": "sklearn/base.py",
+        "reason": "Issue 的核心是 fit_predict 方法的行为与 predict 方法不一致。"
+      },
+      {
+        "name": "GaussianMixture.predict",
+        "kind": "method",
+        "source_path": "sklearn/mixture/gaussian_mixture.py",
+        "reason": "Issue 的核心是 predict 方法的行为与 fit_predict 方法不一致。"
+      },
+      {
+        "name": "GaussianMixture.fit",
+        "kind": "method",
+        "source_path": "sklearn/mixture/gaussian_mixture.py",
+        "reason": "fit_predict 内部调用了 fit，且 Issue 的复现步骤涉及模型拟合。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/mixture/gaussian_mixture.py",
+        "object": "GaussianMixture",
+        "lines": "434-755",
+        "reason": "这是 GaussianMixture 类的主要实现，包含 fit、predict 等方法。问题可能在于 fit_predict 或 predict 的内部逻辑，特别是当 n_init>1 时，模型状态（如 means_, weights_, covariances_）的保存或选择可能不一致。"
+      },
+      {
+        "path": "sklearn/base.py",
+        "object": "ClusterMixin.fit_predict",
+        "lines": "338-357",
+        "reason": "这是 fit_predict 的默认实现（self.fit(X); return self.labels_）。如果 GaussianMixture 没有重写此方法，则问题可能在于 fit 后 self.labels_ 的设置与后续 predict 计算所用的模型参数不一致。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_gaussian_mixture_fit_predict",
+        "test_file": "sklearn/mixture/tests/test_gaussian_mixture.py",
+        "why_relevant": "该测试直接验证 fit_predict(X) 是否等价于 fit(X).predict(X)，与 Issue 的核心验证目标一致。",
+        "reusable_parts": [
+          "GaussianMixture 对象的构造和初始化",
+          "使用 RandomData 生成测试数据",
+          "assert_array_equal 断言风格",
+          "adjusted_rand_score 评估聚类质量"
+        ],
+        "possible_gap": "该测试没有设置 n_init 参数（使用默认值 1），因此无法触发 Issue 中描述的 n_init>1 时的缺陷。"
+      },
+      {
+        "test_name": "test_multiple_init",
+        "test_file": "sklearn/mixture/tests/test_gaussian_mixture.py",
+        "why_relevant": "该测试专门测试了 n_init=5 的情况，关注多次初始化的效果。",
+        "reusable_parts": [
+          "设置 n_init=5 的 GaussianMixture 对象构造",
+          "使用随机数据生成"
+        ],
+        "possible_gap": "该测试只比较了模型评分（score），没有比较 fit_predict 和 predict 的标签一致性。"
+      },
+      {
+        "test_name": "test_gaussian_mixture_predict_predict_proba",
+        "test_file": "sklearn/mixture/tests/test_gaussian_mixture.py",
+        "why_relevant": "该测试验证了 predict 和 predict_proba 结果的一致性，并检查了未拟合时的错误提示，涉及 predict 方法的行为。",
+        "reusable_parts": [
+          "GaussianMixture 对象的构造和拟合",
+          "predict 方法的调用",
+          "assert_array_equal 断言风格"
+        ],
+        "possible_gap": "该测试没有涉及 fit_predict，也没有设置 n_init>1。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试 test_gaussian_mixture_fit_predict 中构造 GaussianMixture 时没有显式设置 n_init（使用默认值 1）。",
+        "target_pattern": "在构造 GaussianMixture 时显式设置 n_init 参数大于 1（例如 n_init=5）。",
+        "reason": "Issue 明确指出问题在 n_init>1 时出现，这是触发缺陷的关键配置变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试 test_gaussian_mixture_fit_predict 中，分别对两个深拷贝的对象调用 f.fit(X).predict(X) 和 g.fit_predict(X)。",
+        "target_pattern": "对同一个 GaussianMixture 对象实例，先调用 fit_predict(X)，再调用 predict(X)。",
+        "reason": "Issue 的复现代码是在同一个对象上连续调用 fit_predict 和 predict，这更直接地反映了实际使用场景和潜在的状态不一致问题。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "gm.fit_predict(X) 的返回值与 gm.predict(X) 的返回值。",
+        "reason": "直接比较两个方法返回的标签数组是否相等是判断 Issue 是否触发的核心。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 fit_predict 后模型内部状态（如 means_, weights_, covariances_）与调用 predict 时使用的状态。",
+        "reason": "不一致的标签可能源于 fit_predict 和 predict 所基于的模型参数（如均值、权重）不同。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对同一数据集 X，同一 GaussianMixture 模型实例的 fit_predict(X) 返回值与 predict(X) 返回值完全相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的随机数据生成过程或具体的聚类标签值，因为随机初始化可能导致不同的合法聚类结果。应断言两个调用结果的一致性，而非与某个固定结果的相等。",
+        "reason": "Issue 的核心是内部一致性，而不是与某个黄金标准的匹配。使用 assert_array_equal 直接比较两个数组是稳定且与 Issue 对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要生成随机测试数据 X（例如使用 numpy.random.randn）。可能需要设置 random_state 以确保测试可重复性。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest.mark.filterwarnings 来忽略可能出现的未收敛警告。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切根源是在 fit_predict 的默认实现中，还是在 GaussianMixture 对 fit 或 predict 的具体实现中。",
+      "当 n_init>1 时，是 fit_predict 保存的 labels_ 不正确，还是 predict 方法使用了与 fit 最终选择不同的模型参数进行计算。",
+      "除了 n_init>1，是否还有其他条件（如 warm_start、特定的 covariance_type）会影响此缺陷的触发。"
+    ]
+  }
+}

@@ -1,0 +1,274 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12184",
+  "issue_summary": "Django 3.0 中，带有可选参数的 URL 正则表达式在匹配时，向视图函数传递了错误的参数数量，导致 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 项目配置，包括 `ROOT_URLCONF` 指向一个定义了问题 URL 模式和视图函数的模块。可以使用 `override_settings`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 `SimpleTestCase` 或 `TestCase`，因为涉及 URL 解析和可能的视图调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个模拟的 `HttpRequest` 对象，作为调用视图函数的第一个参数。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SimplifiedURLTests.test_re_path_with_optional_parameter",
+        "test_file": "tests/urlpatterns/tests.py",
+        "why_relevant": "该测试直接针对 `re_path` 与可选参数进行测试，URL 模式结构（`(?P<arg2>\\d+)/)?`）与 Issue 中的模式（`(?P<format>(html|json|xml))?`）高度相似。",
+        "reusable_parts": [
+          "测试类结构 `@override_settings` 和 `SimpleTestCase`",
+          "使用 `resolve(url)` 解析 URL 并检查 `match.kwargs` 的模式",
+          "使用 `self.subTest` 进行参数化测试的框架"
+        ],
+        "possible_gap": "该测试只检查了 `resolve` 解析出的 `kwargs` 是否正确，但没有实际调用视图函数。Issue 中的错误发生在视图函数被调用时（`wrapped_callback`）。因此，测试缺少从解析结果到实际视图调用的验证步骤。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 `re_path` 定义包含可选命名捕获组的 URL 模式（例如 `(?P<format>(html|json|xml))?`），并访问该 URL 的可选参数缺失的路径（例如 `/module/`）。",
+      "evidence": [
+        "Issue 中描述了 URLConf 使用 `re_path(r'^module/(?P<format>(html|json|xml))?/?$', ...)` 和访问 `/module/` 时出错。",
+        "相关测试 1 展示了 `re_path` 与可选参数 `(?P<arg2>\\d+)/)?` 的测试用例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "视图函数被调用时收到 3 个位置参数，但函数定义只接受 1 到 2 个，导致 `TypeError: modules() takes from 1 to 2 positional arguments but 3 were given`。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的异常堆栈跟踪和错误信息。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.urls.re_path",
+        "kind": "function",
+        "source_path": "django/urls/conf.py",
+        "reason": "Issue 中触发问题的 URL 模式使用 `re_path` 定义。源码片段 1 显示了其定义。"
+      },
+      {
+        "name": "django.urls.resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 使用 `resolve` 来测试 URL 解析，这是理解 URL 模式如何匹配并生成参数的关键 API。"
+      },
+      {
+        "name": "django.shortcuts.render",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中的视图函数最终调用 `render`。虽然源码片段 2 是模板标签的 `render` 方法，但视图函数中的 `render` 是相关调用目标。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/urls/conf.py",
+        "object": "re_path",
+        "lines": "77-77",
+        "reason": "`re_path` 是定义问题 URL 模式的入口点，它使用了 `RegexPattern`。问题可能在于 `RegexPattern` 在处理可选命名组时，生成或传递给视图的参数字典不正确。"
+      },
+      {
+        "path": "",
+        "object": "RegexPattern",
+        "lines": "",
+        "reason": "`re_path` 内部使用 `RegexPattern`。Issue 表明从 Django 2.2 到 3.0 的行为发生了变化，问题很可能在 `RegexPattern` 或其相关类的匹配逻辑中，导致可选参数缺失时传递了错误的 `callback_args` 或 `callback_kwargs`。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，输入 URL 是完整的（如 `/regex_optional/1/2/`）或缺少可选参数（如 `/regex_optional/1/`），并通过 `resolve` 检查解析结果。",
+        "target_pattern": "需要变异为：1) 使用与 Issue 中类似的 URL 模式（包含可选命名组），2) 访问缺少可选参数的 URL 路径，3) 不仅解析 URL，还要模拟或实际调用关联的视图函数，并传递解析出的参数。",
+        "reason": "Issue 的错误发生在视图调用阶段，而不仅仅是 URL 解析。变异需要将测试焦点从解析 (`resolve`) 延伸到调用 (`wrapped_callback`)，以触发参数数量不匹配的 TypeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试模式：`resolve(url)` -> 检查 `match.kwargs`。",
+        "target_pattern": "目标模式：`resolve(url)` -> 获取 `match.func` (视图函数) -> 使用 `match.args` 和 `match.kwargs` 调用该函数。",
+        "reason": "为了复现 Issue，必须执行完整的请求处理链中视图函数被调用的那一步，这正是错误发生的地方。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当访问缺少可选命名参数的 URL 时，视图函数应被正确调用，其参数数量与函数签名匹配（例如，只传递 `request` 参数，并使用默认值 `format='html'`）。",
+      "evidence": [
+        "Issue 提到该用例在 Django 2.2 及之前版本运行正常，视图函数定义为 `def modules(request, format='html'):`，暗示这是期望行为。",
+        "相关测试 1 中，对于可选参数缺失的 URL `/regex_optional/1/`，解析出的 `kwargs` 为 `{'arg1': '1'}`，表明期望行为是只传递存在的参数。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在尝试调用 `match.func(request, *match.args, **match.kwargs)` 时捕获的异常类型和消息。",
+        "reason": "Issue 的核心错误是 `TypeError`，指出参数数量不匹配。观测调用视图函数时是否抛出此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用视图函数后的返回值（例如 HttpResponse 对象），或调用前 `match.args` 和 `match.kwargs` 的内容。",
+        "reason": "在修复后的行为中，视图应被成功调用并返回响应。观测返回值可以确认正确行为。同时，观测解析出的参数有助于理解错误根源（例如，`args` 是否非空或 `kwargs` 是否包含意外键）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当访问缺少可选命名参数的 URL 时，关联的视图函数应被成功调用，不抛出 `TypeError`（关于参数数量）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的异常消息字符串完全一致，或断言视图函数内部逻辑的返回值内容。",
+        "reason": "Issue 明确报告了 `TypeError`。在缺陷状态下，断言会抛出此异常；在修复后，断言应改为不抛出异常（或正常返回）。使用 `assertRaises` 或 `assertNotRaises` 可以稳定地捕获这一行为变化。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致参数数量错误的精确代码位置（是 `RegexPattern.match`，还是 `URLResolver`，或是 `get_callable` 过程中的某个环节）尚不确定。",
+    "除了 `re_path`，`path` 或其他 URL 模式定义方式是否也存在同样问题？Issue 只提到了 `re_path`。",
+    "错误传递的第三个位置参数具体是什么？是 `None`、空字符串，还是其他值？"
+  ],
+  "raw": {
+    "issue_summary": "Django 3.0 中，带有可选参数的 URL 正则表达式在匹配时，向视图函数传递了错误的参数数量，导致 TypeError。",
+    "trigger_condition": {
+      "text": "使用 `re_path` 定义包含可选命名捕获组的 URL 模式（例如 `(?P<format>(html|json|xml))?`），并访问该 URL 的可选参数缺失的路径（例如 `/module/`）。",
+      "evidence": [
+        "Issue 中描述了 URLConf 使用 `re_path(r'^module/(?P<format>(html|json|xml))?/?$', ...)` 和访问 `/module/` 时出错。",
+        "相关测试 1 展示了 `re_path` 与可选参数 `(?P<arg2>\\d+)/)?` 的测试用例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "视图函数被调用时收到 3 个位置参数，但函数定义只接受 1 到 2 个，导致 `TypeError: modules() takes from 1 to 2 positional arguments but 3 were given`。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的异常堆栈跟踪和错误信息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当访问缺少可选命名参数的 URL 时，视图函数应被正确调用，其参数数量与函数签名匹配（例如，只传递 `request` 参数，并使用默认值 `format='html'`）。",
+      "evidence": [
+        "Issue 提到该用例在 Django 2.2 及之前版本运行正常，视图函数定义为 `def modules(request, format='html'):`，暗示这是期望行为。",
+        "相关测试 1 中，对于可选参数缺失的 URL `/regex_optional/1/`，解析出的 `kwargs` 为 `{'arg1': '1'}`，表明期望行为是只传递存在的参数。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.urls.re_path",
+        "kind": "function",
+        "source_path": "django/urls/conf.py",
+        "reason": "Issue 中触发问题的 URL 模式使用 `re_path` 定义。源码片段 1 显示了其定义。"
+      },
+      {
+        "name": "django.urls.resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 使用 `resolve` 来测试 URL 解析，这是理解 URL 模式如何匹配并生成参数的关键 API。"
+      },
+      {
+        "name": "django.shortcuts.render",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中的视图函数最终调用 `render`。虽然源码片段 2 是模板标签的 `render` 方法，但视图函数中的 `render` 是相关调用目标。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/urls/conf.py",
+        "object": "re_path",
+        "lines": "77-77",
+        "reason": "`re_path` 是定义问题 URL 模式的入口点，它使用了 `RegexPattern`。问题可能在于 `RegexPattern` 在处理可选命名组时，生成或传递给视图的参数字典不正确。"
+      },
+      {
+        "path": "",
+        "object": "RegexPattern",
+        "lines": "",
+        "reason": "`re_path` 内部使用 `RegexPattern`。Issue 表明从 Django 2.2 到 3.0 的行为发生了变化，问题很可能在 `RegexPattern` 或其相关类的匹配逻辑中，导致可选参数缺失时传递了错误的 `callback_args` 或 `callback_kwargs`。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SimplifiedURLTests.test_re_path_with_optional_parameter",
+        "test_file": "tests/urlpatterns/tests.py",
+        "why_relevant": "该测试直接针对 `re_path` 与可选参数进行测试，URL 模式结构（`(?P<arg2>\\d+)/)?`）与 Issue 中的模式（`(?P<format>(html|json|xml))?`）高度相似。",
+        "reusable_parts": [
+          "测试类结构 `@override_settings` 和 `SimpleTestCase`",
+          "使用 `resolve(url)` 解析 URL 并检查 `match.kwargs` 的模式",
+          "使用 `self.subTest` 进行参数化测试的框架"
+        ],
+        "possible_gap": "该测试只检查了 `resolve` 解析出的 `kwargs` 是否正确，但没有实际调用视图函数。Issue 中的错误发生在视图函数被调用时（`wrapped_callback`）。因此，测试缺少从解析结果到实际视图调用的验证步骤。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，输入 URL 是完整的（如 `/regex_optional/1/2/`）或缺少可选参数（如 `/regex_optional/1/`），并通过 `resolve` 检查解析结果。",
+        "target_pattern": "需要变异为：1) 使用与 Issue 中类似的 URL 模式（包含可选命名组），2) 访问缺少可选参数的 URL 路径，3) 不仅解析 URL，还要模拟或实际调用关联的视图函数，并传递解析出的参数。",
+        "reason": "Issue 的错误发生在视图调用阶段，而不仅仅是 URL 解析。变异需要将测试焦点从解析 (`resolve`) 延伸到调用 (`wrapped_callback`)，以触发参数数量不匹配的 TypeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试模式：`resolve(url)` -> 检查 `match.kwargs`。",
+        "target_pattern": "目标模式：`resolve(url)` -> 获取 `match.func` (视图函数) -> 使用 `match.args` 和 `match.kwargs` 调用该函数。",
+        "reason": "为了复现 Issue，必须执行完整的请求处理链中视图函数被调用的那一步，这正是错误发生的地方。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在尝试调用 `match.func(request, *match.args, **match.kwargs)` 时捕获的异常类型和消息。",
+        "reason": "Issue 的核心错误是 `TypeError`，指出参数数量不匹配。观测调用视图函数时是否抛出此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功调用视图函数后的返回值（例如 HttpResponse 对象），或调用前 `match.args` 和 `match.kwargs` 的内容。",
+        "reason": "在修复后的行为中，视图应被成功调用并返回响应。观测返回值可以确认正确行为。同时，观测解析出的参数有助于理解错误根源（例如，`args` 是否非空或 `kwargs` 是否包含意外键）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当访问缺少可选命名参数的 URL 时，关联的视图函数应被成功调用，不抛出 `TypeError`（关于参数数量）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的异常消息字符串完全一致，或断言视图函数内部逻辑的返回值内容。",
+        "reason": "Issue 明确报告了 `TypeError`。在缺陷状态下，断言会抛出此异常；在修复后，断言应改为不抛出异常（或正常返回）。使用 `assertRaises` 或 `assertNotRaises` 可以稳定地捕获这一行为变化。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 项目配置，包括 `ROOT_URLCONF` 指向一个定义了问题 URL 模式和视图函数的模块。可以使用 `override_settings`。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 `SimpleTestCase` 或 `TestCase`，因为涉及 URL 解析和可能的视图调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个模拟的 `HttpRequest` 对象，作为调用视图函数的第一个参数。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致参数数量错误的精确代码位置（是 `RegexPattern.match`，还是 `URLResolver`，或是 `get_callable` 过程中的某个环节）尚不确定。",
+      "除了 `re_path`，`path` 或其他 URL 模式定义方式是否也存在同样问题？Issue 只提到了 `re_path`。",
+      "错误传递的第三个位置参数具体是什么？是 `None`、空字符串，还是其他值？"
+    ]
+  }
+}

@@ -1,0 +1,372 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15629",
+  "issue_summary": "当主键字段使用 db_collation 时，外键字段的 ALTER TABLE 语句没有继承相同的 collation，导致 MySQL 外键约束创建失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 TransactionTestCase 或类似的测试基类，并支持数据库 schema 操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置测试数据库为 MySQL（或支持 collation 和 foreign keys 的数据库），并使用 skipUnlessDBFeature 装饰器检查 supports_collation_on_charfield 和 supports_foreign_keys。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义测试模型，其中包含带有 db_collation 的主键字段，以及引用它的外键字段。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SchemaTests.test_alter_primary_key_db_collation",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "该测试直接测试了修改主键字段的 db_collation，并检查了修改后列的 collation。",
+        "reusable_parts": [
+          "使用 connection.schema_editor()",
+          "使用 alter_field 方法",
+          "使用 get_column_collation 辅助函数",
+          "skipUnlessDBFeature(\"supports_collation_on_charfield\") 装饰器"
+        ],
+        "possible_gap": "该测试只检查了单个模型（Thing）的主键列 collation，没有涉及引用该主键的外键字段，因此无法复现外键约束创建失败的问题。"
+      },
+      {
+        "test_name": "SchemaTests.test_alter_field_db_collation",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "测试了修改普通 CharField 的 db_collation，展示了 alter_field 与 collation 的基本交互。",
+        "reusable_parts": [
+          "创建模型、修改字段、检查列 collation 的模式",
+          "使用 test_collations 获取非默认 collation"
+        ],
+        "possible_gap": "测试的是非主键字段，不涉及外键关系，因此无法触发主键 collation 传播到外键的问题。"
+      },
+      {
+        "test_name": "OperationTests.test_alter_field_pk_fk",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试专门测试了修改主键字段时，指向它的外键字段类型是否同步更改，与 Issue 中“主键变化影响外键”的场景高度相似。",
+        "reusable_parts": [
+          "使用 AlterField 操作",
+          "使用 assertIdTypeEqualsFkType 辅助函数检查主键和外键类型一致性",
+          "检查外键约束是否存在",
+          "涉及多对多关系的中间表外键"
+        ],
+        "possible_gap": "该测试检查的是字段类型（如 AutoField 到 FloatField）的同步，而不是 collation 属性的同步。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个已存在的主键字段（例如 ShortUUIDField）添加 db_collation 属性，并运行 makemigrations/migrate，该主键被其他模型的外键引用。",
+      "evidence": [
+        "Issue 中描述了使用 db_collation 的 ShortUUIDField 作为主键，并且有 OneToOneField 和 ForeignKey 引用它。",
+        "Issue 中展示了运行 makemigrations 后生成的 SQL，其中外键字段的 MODIFY 语句缺少 COLLATE 子句。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行迁移时，ADD CONSTRAINT 语句失败，因为主键和外键的 collation 不匹配。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中明确指出 ADD CONSTRAINT queries fail，并给出了错误和正确的 SQL 对比。",
+        "Issue 总结：\"The collation of the pk must match the collation of the fk otherwise an error will occur.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.backends.base.schema.BaseDatabaseSchemaEditor.alter_field",
+        "kind": "method",
+        "source_path": "django/db/backends/base/schema.py",
+        "reason": "Issue 涉及迁移时字段的修改，特别是主键和外键字段的 collation 传播，这很可能在 schema editor 的 alter_field 方法中处理。"
+      },
+      {
+        "name": "django.db.models.fields.related.ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及外键字段，其定义和数据库约束创建与 ForeignKey 类相关。"
+      },
+      {
+        "name": "django.db.migrations.operations.AlterField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations.py",
+        "reason": "Issue 通过 makemigrations 触发，AlterField 操作可能负责生成修改字段的 SQL。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/schema.py",
+        "object": "BaseDatabaseSchemaEditor._alter_field",
+        "lines": "",
+        "reason": "处理字段修改（包括主键和外键）并生成 SQL 的核心逻辑可能在此方法中，可能遗漏了对外键字段 collation 的同步设置。"
+      },
+      {
+        "path": "django/db/backends/mysql/schema.py",
+        "object": "DatabaseSchemaEditor",
+        "lines": "",
+        "reason": "Issue 特定于 MySQL 的外键约束错误，MySQL 后端的 schema editor 可能负责生成包含 COLLATE 的 ALTER TABLE 语句。"
+      },
+      {
+        "path": "django/db/migrations/operations.py",
+        "object": "AlterField.database_forwards",
+        "lines": "",
+        "reason": "该操作执行数据库层面的字段修改，可能未正确处理主键 collation 变化对外键字段的影响。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_alter_primary_key_db_collation 中，只修改一个独立模型的主键字段。",
+        "target_pattern": "需要创建至少两个模型：一个模型（如 Account）的主键字段带有 db_collation，另一个模型（如 Address）的外键引用该主键。然后修改主键字段的 collation。",
+        "reason": "Issue 的触发需要存在外键引用关系，并且修改的是被引用的主键字段。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试使用 test_collations 获取一个非默认 collation。",
+        "target_pattern": "确保使用的 collation（如 utf8_bin）在测试数据库（MySQL）中支持，并且主键和外键字段都是字符类型（如 varchar）。",
+        "reason": "Issue 发生在 MySQL 上，且 collation 不匹配导致外键约束错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用 editor.alter_field 修改单个字段。",
+        "target_pattern": "可能需要通过 migrations 框架（如使用 AlterField 操作）来触发完整的迁移流程，以模拟 makemigrations/migrate 的场景。",
+        "reason": "Issue 是通过运行 makemigrations 触发的，可能涉及迁移操作对依赖关系的处理。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当修改主键字段的 collation 时，所有引用该主键的外键字段的 ALTER TABLE 语句也应包含相同的 collation 设置，以确保外键约束可以成功创建。",
+      "evidence": [
+        "Issue 中给出了正确的 SQL 示例，其中外键字段的 MODIFY 语句包含了 COLLATE `utf8_bin`。",
+        "Issue 说明在后者情况下 ADD CONSTRAINT 语句运行无错误。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 editor.alter_field 或 operation.database_forwards 执行期间，通过捕获或记录生成的 SQL 语句。",
+        "reason": "Issue 的核心是生成的 SQL 语句中缺少 COLLATE 子句，直接观察 SQL 可以确认问题。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在执行迁移操作（如 editor.alter_field）后，尝试执行外键约束创建或验证约束是否存在时捕获的异常。",
+        "reason": "如果 collation 不匹配，外键约束创建会失败并抛出数据库异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "修改前后，外键字段的 db_parameters 或 db_type 属性，特别是其 collation 设置。",
+        "reason": "可以检查外键字段的数据库参数是否正确地继承了主键字段的 collation。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在修改了主键字段的 collation 后，所有引用该主键的外键字段的 MODIFY 语句也包含了相同的 COLLATE 子句。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串。",
+        "reason": "SQL 语句的具体格式（如表名、约束名）可能因环境而异，但 COLLATE 子句的存在是稳定的特征。"
+      },
+      {
+        "assertion_goal": "验证外键约束可以成功创建（例如，通过检查约束是否存在或执行相关操作不抛出异常）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言不相关的数据库状态。",
+        "reason": "修复后，ADD CONSTRAINT 不应失败。在缺陷存在时，断言会抛出异常；修复后，断言应改为不抛出异常或约束存在。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在迁移操作（AlterField）中，还是在数据库后端的 schema editor（如 MySQL）中，亦或是在字段本身的定义传播逻辑中。",
+    "除了 ForeignKey 和 OneToOneField，ManyToManyField 的中间表外键是否也会受此影响。",
+    "当主键字段不是通过 AlterField 修改，而是通过其他方式（如 CreateModel 时指定）引入 db_collation 时，是否也存在同样的问题。",
+    "是否所有支持 collation 的数据库后端（如 PostgreSQL）都会出现此问题，还是仅限 MySQL。"
+  ],
+  "raw": {
+    "issue_summary": "当主键字段使用 db_collation 时，外键字段的 ALTER TABLE 语句没有继承相同的 collation，导致 MySQL 外键约束创建失败。",
+    "trigger_condition": {
+      "text": "对一个已存在的主键字段（例如 ShortUUIDField）添加 db_collation 属性，并运行 makemigrations/migrate，该主键被其他模型的外键引用。",
+      "evidence": [
+        "Issue 中描述了使用 db_collation 的 ShortUUIDField 作为主键，并且有 OneToOneField 和 ForeignKey 引用它。",
+        "Issue 中展示了运行 makemigrations 后生成的 SQL，其中外键字段的 MODIFY 语句缺少 COLLATE 子句。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行迁移时，ADD CONSTRAINT 语句失败，因为主键和外键的 collation 不匹配。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中明确指出 ADD CONSTRAINT queries fail，并给出了错误和正确的 SQL 对比。",
+        "Issue 总结：\"The collation of the pk must match the collation of the fk otherwise an error will occur.\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当修改主键字段的 collation 时，所有引用该主键的外键字段的 ALTER TABLE 语句也应包含相同的 collation 设置，以确保外键约束可以成功创建。",
+      "evidence": [
+        "Issue 中给出了正确的 SQL 示例，其中外键字段的 MODIFY 语句包含了 COLLATE `utf8_bin`。",
+        "Issue 说明在后者情况下 ADD CONSTRAINT 语句运行无错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.backends.base.schema.BaseDatabaseSchemaEditor.alter_field",
+        "kind": "method",
+        "source_path": "django/db/backends/base/schema.py",
+        "reason": "Issue 涉及迁移时字段的修改，特别是主键和外键字段的 collation 传播，这很可能在 schema editor 的 alter_field 方法中处理。"
+      },
+      {
+        "name": "django.db.models.fields.related.ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及外键字段，其定义和数据库约束创建与 ForeignKey 类相关。"
+      },
+      {
+        "name": "django.db.migrations.operations.AlterField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations.py",
+        "reason": "Issue 通过 makemigrations 触发，AlterField 操作可能负责生成修改字段的 SQL。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/schema.py",
+        "object": "BaseDatabaseSchemaEditor._alter_field",
+        "lines": "",
+        "reason": "处理字段修改（包括主键和外键）并生成 SQL 的核心逻辑可能在此方法中，可能遗漏了对外键字段 collation 的同步设置。"
+      },
+      {
+        "path": "django/db/backends/mysql/schema.py",
+        "object": "DatabaseSchemaEditor",
+        "lines": "",
+        "reason": "Issue 特定于 MySQL 的外键约束错误，MySQL 后端的 schema editor 可能负责生成包含 COLLATE 的 ALTER TABLE 语句。"
+      },
+      {
+        "path": "django/db/migrations/operations.py",
+        "object": "AlterField.database_forwards",
+        "lines": "",
+        "reason": "该操作执行数据库层面的字段修改，可能未正确处理主键 collation 变化对外键字段的影响。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SchemaTests.test_alter_primary_key_db_collation",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "该测试直接测试了修改主键字段的 db_collation，并检查了修改后列的 collation。",
+        "reusable_parts": [
+          "使用 connection.schema_editor()",
+          "使用 alter_field 方法",
+          "使用 get_column_collation 辅助函数",
+          "skipUnlessDBFeature(\"supports_collation_on_charfield\") 装饰器"
+        ],
+        "possible_gap": "该测试只检查了单个模型（Thing）的主键列 collation，没有涉及引用该主键的外键字段，因此无法复现外键约束创建失败的问题。"
+      },
+      {
+        "test_name": "SchemaTests.test_alter_field_db_collation",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "测试了修改普通 CharField 的 db_collation，展示了 alter_field 与 collation 的基本交互。",
+        "reusable_parts": [
+          "创建模型、修改字段、检查列 collation 的模式",
+          "使用 test_collations 获取非默认 collation"
+        ],
+        "possible_gap": "测试的是非主键字段，不涉及外键关系，因此无法触发主键 collation 传播到外键的问题。"
+      },
+      {
+        "test_name": "OperationTests.test_alter_field_pk_fk",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试专门测试了修改主键字段时，指向它的外键字段类型是否同步更改，与 Issue 中“主键变化影响外键”的场景高度相似。",
+        "reusable_parts": [
+          "使用 AlterField 操作",
+          "使用 assertIdTypeEqualsFkType 辅助函数检查主键和外键类型一致性",
+          "检查外键约束是否存在",
+          "涉及多对多关系的中间表外键"
+        ],
+        "possible_gap": "该测试检查的是字段类型（如 AutoField 到 FloatField）的同步，而不是 collation 属性的同步。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_alter_primary_key_db_collation 中，只修改一个独立模型的主键字段。",
+        "target_pattern": "需要创建至少两个模型：一个模型（如 Account）的主键字段带有 db_collation，另一个模型（如 Address）的外键引用该主键。然后修改主键字段的 collation。",
+        "reason": "Issue 的触发需要存在外键引用关系，并且修改的是被引用的主键字段。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试使用 test_collations 获取一个非默认 collation。",
+        "target_pattern": "确保使用的 collation（如 utf8_bin）在测试数据库（MySQL）中支持，并且主键和外键字段都是字符类型（如 varchar）。",
+        "reason": "Issue 发生在 MySQL 上，且 collation 不匹配导致外键约束错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用 editor.alter_field 修改单个字段。",
+        "target_pattern": "可能需要通过 migrations 框架（如使用 AlterField 操作）来触发完整的迁移流程，以模拟 makemigrations/migrate 的场景。",
+        "reason": "Issue 是通过运行 makemigrations 触发的，可能涉及迁移操作对依赖关系的处理。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 editor.alter_field 或 operation.database_forwards 执行期间，通过捕获或记录生成的 SQL 语句。",
+        "reason": "Issue 的核心是生成的 SQL 语句中缺少 COLLATE 子句，直接观察 SQL 可以确认问题。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在执行迁移操作（如 editor.alter_field）后，尝试执行外键约束创建或验证约束是否存在时捕获的异常。",
+        "reason": "如果 collation 不匹配，外键约束创建会失败并抛出数据库异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "修改前后，外键字段的 db_parameters 或 db_type 属性，特别是其 collation 设置。",
+        "reason": "可以检查外键字段的数据库参数是否正确地继承了主键字段的 collation。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在修改了主键字段的 collation 后，所有引用该主键的外键字段的 MODIFY 语句也包含了相同的 COLLATE 子句。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的 SQL 字符串。",
+        "reason": "SQL 语句的具体格式（如表名、约束名）可能因环境而异，但 COLLATE 子句的存在是稳定的特征。"
+      },
+      {
+        "assertion_goal": "验证外键约束可以成功创建（例如，通过检查约束是否存在或执行相关操作不抛出异常）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言不相关的数据库状态。",
+        "reason": "修复后，ADD CONSTRAINT 不应失败。在缺陷存在时，断言会抛出异常；修复后，断言应改为不抛出异常或约束存在。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TransactionTestCase 或类似的测试基类，并支持数据库 schema 操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置测试数据库为 MySQL（或支持 collation 和 foreign keys 的数据库），并使用 skipUnlessDBFeature 装饰器检查 supports_collation_on_charfield 和 supports_foreign_keys。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义测试模型，其中包含带有 db_collation 的主键字段，以及引用它的外键字段。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在迁移操作（AlterField）中，还是在数据库后端的 schema editor（如 MySQL）中，亦或是在字段本身的定义传播逻辑中。",
+      "除了 ForeignKey 和 OneToOneField，ManyToManyField 的中间表外键是否也会受此影响。",
+      "当主键字段不是通过 AlterField 修改，而是通过其他方式（如 CreateModel 时指定）引入 db_collation 时，是否也存在同样的问题。",
+      "是否所有支持 collation 的数据库后端（如 PostgreSQL）都会出现此问题，还是仅限 MySQL。"
+    ]
+  }
+}

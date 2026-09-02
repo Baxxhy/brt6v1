@@ -1,0 +1,294 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16667",
+  "issue_summary": "SelectDateWidget 在处理超大整数年份时可能抛出 OverflowError 导致服务器崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 SelectDateWidget 和必要的测试基类（如 WidgetTest）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个 SelectDateWidget 实例，或使用测试类中已有的 self.widget。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 Django 的测试环境下运行，以正确加载格式设置等。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SelectDateWidgetTest.test_value_from_datadict",
+        "test_file": "tests/forms_tests/widget_tests/test_selectdatewidget.py",
+        "why_relevant": "它直接测试 value_from_datadict 方法，构造了数据字典并调用该方法，与触发缺陷的路径一致。",
+        "reusable_parts": [
+          "测试类 SelectDateWidgetTest",
+          "使用 self.widget",
+          "构造 data 字典的方式",
+          "调用 self.widget.value_from_datadict(data, {}, name) 的模式",
+          "使用 self.assertEqual 进行断言"
+        ],
+        "possible_gap": "现有测试用例只使用了正常、空字符串或 None 值，没有测试超大整数输入，因此不会触发 OverflowError。"
+      },
+      {
+        "test_name": "SelectDateWidgetTest.test_custom_input_format",
+        "test_file": "tests/forms_tests/widget_tests/test_selectdatewidget.py",
+        "why_relevant": "它也测试 value_from_datadict 方法，并展示了如何构造包含年、月、日字段的数据字典。",
+        "reusable_parts": [
+          "使用 SelectDateWidget 实例",
+          "使用字典推导式构造 data: {'field_year': value, ...}",
+          "调用 w.value_from_datadict(data, {}, 'field')",
+          "assertEqual 断言"
+        ],
+        "possible_gap": "测试用例中的年份值很小（如 '0001', '1899'），不会触发整数溢出。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "用户通过 GET 或 POST 请求向使用 SelectDateWidget 的表单字段提交超大整数值（例如年份大于 sys.maxsize），例如 my_date_year=1234567821345678。",
+      "evidence": [
+        "Issue 中给出了触发 URL：http://127.0.0.1:8000/repro/?my_date_day=1&my_date_month=1&my_date_year=1234567821345678",
+        "Issue 描述：'When large integers (larger than sys.maxsize) are supplied to date's constructor it will throw an OverflowError'",
+        "源码片段 2 显示 value_from_datadict 方法直接对 y, m, d 调用 int() 并传入 datetime.date()"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在调用 datetime.date(int(y), int(m), int(d)) 时抛出 OverflowError: signed integer is greater than maximum 或 Python int too large to convert to C long，导致服务器内部错误。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 显示：'OverflowError: signed integer is greater than maximum'",
+        "Issue 中的示例：'datetime.date(sys.maxsize+1, 3, 4)' 抛出 OverflowError"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SelectDateWidget.value_from_datadict",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 明确指出缺陷发生在该方法内，它直接处理用户输入并调用 datetime.date()。"
+      },
+      {
+        "name": "datetime.date",
+        "kind": "function",
+        "source_path": "",
+        "reason": "抛出 OverflowError 的直接原因是 datetime.date 构造函数无法处理过大的整数。"
+      },
+      {
+        "name": "forms.DateField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 中的示例使用了 DateField 与 SelectDateWidget，DateField 的验证流程会调用 widget 的 value_from_datadict。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/widgets.py",
+        "object": "SelectDateWidget.value_from_datadict",
+        "lines": "1149-1165",
+        "reason": "源码片段 2 显示该方法直接对用户输入的 y, m, d 字符串调用 int() 并传入 datetime.date()，没有捕获 OverflowError。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 data 字典的值为小整数字符串（如 '2000', '12', '1'）或空字符串。",
+        "target_pattern": "将 data 字典中 year 字段的值改为一个大于 sys.maxsize 的整数字符串（如 '1234567821345678'）。",
+        "reason": "Issue 表明超大整数年份会触发 datetime.date 构造函数中的 OverflowError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试用例通常提供年、月、日三个字段的值。",
+        "target_pattern": "确保年、月、日三个字段都提供值（不为 None 或空字符串），以进入执行 datetime.date(int(y), int(m), int(d)) 的代码分支。",
+        "reason": "源码片段 2 显示，只有当 y, m, d 都不为 None 时，才会尝试创建 datetime.date 对象。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "SelectDateWidget 应能优雅地处理超大整数值，可能通过验证、截断或返回错误信息，而不是抛出未捕获的 OverflowError 导致服务器崩溃。",
+      "evidence": [
+        "Issue 暗示问题在于 'without guarding against a possible OverflowError'",
+        "相关测试 1 和 2 显示 value_from_datadict 方法通常处理字符串并返回格式化日期或伪 ISO 字符串，表明其设计应处理各种输入"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 widget.value_from_datadict(data, {}, name) 时是否抛出 OverflowError。",
+        "reason": "Issue 的核心错误现象就是 OverflowError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "widget.value_from_datadict 在遇到超大整数输入时的返回值（如果异常被捕获或处理）。",
+        "reason": "观察方法是否返回了错误指示（如伪 ISO 字符串）或正常返回，以判断行为是否符合预期。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当提供超大整数年份时，SelectDateWidget.value_from_datadict 不应抛出 OverflowError，而应进行适当的错误处理（例如返回伪 ISO 字符串或引发更合适的验证错误）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回的完整日期字符串完全等于某个特定值，因为具体的错误处理方式（如返回格式）可能未在 Issue 中明确。",
+        "reason": "Issue 明确指出当前行为会抛出 OverflowError，修复后应不再抛出此异常。因此，测试应验证调用不会引发 OverflowError，或者会引发更合适的异常（如 ValueError）。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后的具体预期行为是什么？是应该返回一个伪 ISO 字符串（如 '1234567821345678-1-1'），还是应该引发一个不同的异常（如 ValueError）？Issue 没有明确说明。",
+    "除了年份，月份和日期字段是否也可能传入超大整数并导致类似问题？Issue 主要关注年份，但源码对三个字段都调用了 int()。",
+    "sys.maxsize 的确切值是多少，以及在不同平台上（32位/64位）的行为是否一致？"
+  ],
+  "raw": {
+    "issue_summary": "SelectDateWidget 在处理超大整数年份时可能抛出 OverflowError 导致服务器崩溃。",
+    "trigger_condition": {
+      "text": "用户通过 GET 或 POST 请求向使用 SelectDateWidget 的表单字段提交超大整数值（例如年份大于 sys.maxsize），例如 my_date_year=1234567821345678。",
+      "evidence": [
+        "Issue 中给出了触发 URL：http://127.0.0.1:8000/repro/?my_date_day=1&my_date_month=1&my_date_year=1234567821345678",
+        "Issue 描述：'When large integers (larger than sys.maxsize) are supplied to date's constructor it will throw an OverflowError'",
+        "源码片段 2 显示 value_from_datadict 方法直接对 y, m, d 调用 int() 并传入 datetime.date()"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在调用 datetime.date(int(y), int(m), int(d)) 时抛出 OverflowError: signed integer is greater than maximum 或 Python int too large to convert to C long，导致服务器内部错误。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 显示：'OverflowError: signed integer is greater than maximum'",
+        "Issue 中的示例：'datetime.date(sys.maxsize+1, 3, 4)' 抛出 OverflowError"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "SelectDateWidget 应能优雅地处理超大整数值，可能通过验证、截断或返回错误信息，而不是抛出未捕获的 OverflowError 导致服务器崩溃。",
+      "evidence": [
+        "Issue 暗示问题在于 'without guarding against a possible OverflowError'",
+        "相关测试 1 和 2 显示 value_from_datadict 方法通常处理字符串并返回格式化日期或伪 ISO 字符串，表明其设计应处理各种输入"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "SelectDateWidget.value_from_datadict",
+        "kind": "method",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 明确指出缺陷发生在该方法内，它直接处理用户输入并调用 datetime.date()。"
+      },
+      {
+        "name": "datetime.date",
+        "kind": "function",
+        "source_path": "",
+        "reason": "抛出 OverflowError 的直接原因是 datetime.date 构造函数无法处理过大的整数。"
+      },
+      {
+        "name": "forms.DateField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 中的示例使用了 DateField 与 SelectDateWidget，DateField 的验证流程会调用 widget 的 value_from_datadict。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/widgets.py",
+        "object": "SelectDateWidget.value_from_datadict",
+        "lines": "1149-1165",
+        "reason": "源码片段 2 显示该方法直接对用户输入的 y, m, d 字符串调用 int() 并传入 datetime.date()，没有捕获 OverflowError。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SelectDateWidgetTest.test_value_from_datadict",
+        "test_file": "tests/forms_tests/widget_tests/test_selectdatewidget.py",
+        "why_relevant": "它直接测试 value_from_datadict 方法，构造了数据字典并调用该方法，与触发缺陷的路径一致。",
+        "reusable_parts": [
+          "测试类 SelectDateWidgetTest",
+          "使用 self.widget",
+          "构造 data 字典的方式",
+          "调用 self.widget.value_from_datadict(data, {}, name) 的模式",
+          "使用 self.assertEqual 进行断言"
+        ],
+        "possible_gap": "现有测试用例只使用了正常、空字符串或 None 值，没有测试超大整数输入，因此不会触发 OverflowError。"
+      },
+      {
+        "test_name": "SelectDateWidgetTest.test_custom_input_format",
+        "test_file": "tests/forms_tests/widget_tests/test_selectdatewidget.py",
+        "why_relevant": "它也测试 value_from_datadict 方法，并展示了如何构造包含年、月、日字段的数据字典。",
+        "reusable_parts": [
+          "使用 SelectDateWidget 实例",
+          "使用字典推导式构造 data: {'field_year': value, ...}",
+          "调用 w.value_from_datadict(data, {}, 'field')",
+          "assertEqual 断言"
+        ],
+        "possible_gap": "测试用例中的年份值很小（如 '0001', '1899'），不会触发整数溢出。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 data 字典的值为小整数字符串（如 '2000', '12', '1'）或空字符串。",
+        "target_pattern": "将 data 字典中 year 字段的值改为一个大于 sys.maxsize 的整数字符串（如 '1234567821345678'）。",
+        "reason": "Issue 表明超大整数年份会触发 datetime.date 构造函数中的 OverflowError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试用例通常提供年、月、日三个字段的值。",
+        "target_pattern": "确保年、月、日三个字段都提供值（不为 None 或空字符串），以进入执行 datetime.date(int(y), int(m), int(d)) 的代码分支。",
+        "reason": "源码片段 2 显示，只有当 y, m, d 都不为 None 时，才会尝试创建 datetime.date 对象。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 widget.value_from_datadict(data, {}, name) 时是否抛出 OverflowError。",
+        "reason": "Issue 的核心错误现象就是 OverflowError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "widget.value_from_datadict 在遇到超大整数输入时的返回值（如果异常被捕获或处理）。",
+        "reason": "观察方法是否返回了错误指示（如伪 ISO 字符串）或正常返回，以判断行为是否符合预期。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当提供超大整数年份时，SelectDateWidget.value_from_datadict 不应抛出 OverflowError，而应进行适当的错误处理（例如返回伪 ISO 字符串或引发更合适的验证错误）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回的完整日期字符串完全等于某个特定值，因为具体的错误处理方式（如返回格式）可能未在 Issue 中明确。",
+        "reason": "Issue 明确指出当前行为会抛出 OverflowError，修复后应不再抛出此异常。因此，测试应验证调用不会引发 OverflowError，或者会引发更合适的异常（如 ValueError）。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 SelectDateWidget 和必要的测试基类（如 WidgetTest）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一个 SelectDateWidget 实例，或使用测试类中已有的 self.widget。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 Django 的测试环境下运行，以正确加载格式设置等。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "修复后的具体预期行为是什么？是应该返回一个伪 ISO 字符串（如 '1234567821345678-1-1'），还是应该引发一个不同的异常（如 ValueError）？Issue 没有明确说明。",
+      "除了年份，月份和日期字段是否也可能传入超大整数并导致类似问题？Issue 主要关注年份，但源码对三个字段都调用了 int()。",
+      "sys.maxsize 的确切值是多少，以及在不同平台上（32位/64位）的行为是否一致？"
+    ]
+  }
+}

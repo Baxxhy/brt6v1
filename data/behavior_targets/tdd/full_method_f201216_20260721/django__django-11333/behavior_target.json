@@ -1,0 +1,360 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11333",
+  "issue_summary": "当 set_urlconf 尚未调用时，多次调用 get_resolver 可能无意中构造多个 URLResolver 实例，导致昂贵的 _populate 被重复执行。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TestCase，并可能使用 @override_settings 来设置 ROOT_URLCONF。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个简单的 HTTP 请求来触发 set_urlconf，可以使用 Django 测试客户端（self.client.get('/')）或直接调用 get_response/set_urlconf。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要确保测试在干净的环境中运行，没有其他测试或 setup 提前污染了线程的 _urlconfs 状态。可能需要隔离测试或手动清理状态。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ResolverTests.test_resolver_reverse",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它直接调用了 get_resolver 并使用了其返回的 resolver 进行 reverse 操作，展示了 get_resolver 和 reverse 的正常使用模式。",
+        "reusable_parts": [
+          "导入 get_resolver",
+          "使用 get_resolver('urlpatterns_reverse.named_urls') 构造 resolver",
+          "调用 resolver.reverse 并断言结果"
+        ],
+        "possible_gap": "该测试在单个测试方法内只调用了一次 get_resolver，且显式传入了 urlconf 字符串，没有模拟 Issue 中描述的“在 set_urlconf 调用前后使用不同参数调用 get_resolver”的场景。"
+      },
+      {
+        "test_name": "ResolverTests.test_populate_concurrency",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它直接测试了 URLResolver._populate 方法，并涉及线程局部变量 _local.populating，这与 _populate 的重复执行控制机制相关。",
+        "reusable_parts": [
+          "直接构造 URLResolver 实例",
+          "操作 resolver._local.populating 状态",
+          "调用 resolver._populate 方法"
+        ],
+        "possible_gap": "该测试关注的是并发调用下的线程安全，而非 Issue 关注的因 get_resolver 缓存参数不同导致的重复构造问题。"
+      },
+      {
+        "test_name": "ResolverMatchTests.test_resolver_match_on_request",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它通过 self.client.get 发起请求，这会触发请求处理链，包括 BaseHandler.get_response 中对 set_urlconf 的调用，模拟了“请求处理后”的状态。",
+        "reusable_parts": [
+          "使用 @override_settings",
+          "使用 self.client.get 模拟请求",
+          "检查请求后的 resolver_match 属性"
+        ],
+        "possible_gap": "该测试没有在请求前显式调用 get_resolver 或 reverse，因此没有组合出“请求前后各调用一次”的完整缺陷触发路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 set_urlconf 被调用（例如通过第一个请求）之前和之后，调用 get_resolver（或其调用者如 reverse），且两次调用时 urlconf 参数不同（第一次为 None，第二次为 settings.ROOT_URLCONF）。",
+      "evidence": [
+        "Issue 描述：'If reverse (or anything else using get_resolver) is called both before (e.g. at import time) and after a request is handled, get_resolver will be called with different values. Initially it will be called with None, and later if will be called with settings.ROOT_URLCONF, because request handling calls set_urlconf.'",
+        "源码片段 1 显示 get_resolver 在 urlconf 为 None 时使用 settings.ROOT_URLCONF。",
+        "源码片段 5 显示 get_response 会调用 set_urlconf(settings.ROOT_URLCONF)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "性能浪费：URLResolver._populate 被多次调用，导致重复计算和缓存，消耗额外内存和 CPU。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述：'Multiple URLResolvers may be constructed... resulting in multiple expensive calls to URLResolver._populate.'",
+        "'In an application with a large number of routes, URLResolver._populate can be expensive, so calling it twice and storing those caches twice is wasteful.'",
+        "源码片段 4 展示了 _populate 方法的复杂性。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.urls.resolvers.get_resolver",
+        "kind": "function",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 的核心是此函数可能因参数不同而返回不同的缓存实例，导致重复构造。"
+      },
+      {
+        "name": "django.urls.resolvers.URLResolver._populate",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "这是被重复调用的昂贵操作，是性能问题的直接来源。"
+      },
+      {
+        "name": "django.urls.base.set_urlconf",
+        "kind": "function",
+        "source_path": "django/urls/base.py",
+        "reason": "它的调用时机（首次请求时）影响了 get_resolver 的默认参数值。"
+      },
+      {
+        "name": "django.urls.resolvers.URLResolver.reverse",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 提到 reverse 是 get_resolver 的常见调用者，可能触发该问题。"
+      },
+      {
+        "name": "django.core.handlers.base.BaseHandler.get_response",
+        "kind": "method",
+        "source_path": "django/core/handlers/base.py",
+        "reason": "它内部调用了 set_urlconf，是改变线程 URL 配置的关键点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/urls/resolvers.py",
+        "object": "get_resolver",
+        "lines": "67-70",
+        "reason": "该函数在 urlconf 为 None 时，内部将 urlconf 赋值为 settings.ROOT_URLCONF，但此赋值发生在 lru_cache 装饰的函数体内部。这意味着调用 get_resolver(None) 和 get_resolver(settings.ROOT_URLCONF) 会被缓存视为两个不同的调用，导致创建两个不同的 URLResolver 实例。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常在单个测试方法或 setup 中调用一次 get_resolver，并传入固定的 urlconf 字符串。",
+        "target_pattern": "在测试中，先在没有调用 set_urlconf 的情况下（模拟导入时）调用 get_resolver(None) 或 reverse（内部调用 get_resolver(None)），然后模拟一个请求（触发 set_urlconf），之后再调用 get_resolver(settings.ROOT_URLCONF) 或 reverse。",
+        "reason": "Issue 明确指出缺陷触发路径是 get_resolver 在 set_urlconf 调用前后被以不同参数调用。此变异模拟了该时序和参数变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试通常使用 @override_settings(ROOT_URLCONF=...) 来设置 URL 配置。",
+        "target_pattern": "保持使用 @override_settings，但在测试方法内部，在触发请求前，确保线程的 _urlconfs 状态是默认的（即 set_urlconf 未被调用）。这可能需要确保测试类或方法不继承可能提前设置 URLconf 的上下文。",
+        "reason": "为了复现“set_urlconf 尚未调用”的初始状态，需要控制线程的 URL 配置状态。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于相同的 urlconf（特别是默认的 settings.ROOT_URLCONF），get_resolver 应返回相同的 URLResolver 实例（或至少避免重复的 _populate 计算），无论 set_urlconf 是否已被调用。",
+      "evidence": [
+        "Issue 描述隐含了期望：'My proposed solution is just to modify get_resolver to look up settings.ROOT_URLCONF before the memoized function call.' 这表明期望 get_resolver 的缓存机制能更早地统一参数，避免因参数不同（None vs ROOT_URLCONF）而创建不同实例。",
+        "源码片段 1 显示 get_resolver 使用了 functools.lru_cache（根据 Issue 描述），这暗示了其设计意图是缓存。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "cache",
+        "expression_hint": "两次调用 get_resolver 返回的 URLResolver 对象的 id() 或是否 is 同一个对象。",
+        "reason": "如果缺陷存在，get_resolver(None) 和 get_resolver(settings.ROOT_URLCONF) 可能返回两个不同的对象，尽管它们最终代表相同的 urlconf。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "URLResolver 实例的 _populated 属性值，或者在调用 _populate 前后实例内部字典（如 _reverse_dict）的变化次数/状态。",
+        "reason": "可以观察 _populate 是否被重复执行（例如，通过检查 _populated 是否从 False 变为 True 多次，或者 _reverse_dict 是否被重复填充）。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "线程局部变量 _urlconfs.value 的值在 set_urlconf 调用前后的变化。",
+        "reason": "这有助于确认“set_urlconf 尚未调用”的初始状态和请求后的状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于相同的有效 urlconf（ROOT_URLCONF），无论是否显式传入，get_resolver 返回的应是同一个对象（或至少 _populate 不应被重复执行）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 URL 解析结果，因为这与性能问题的核心（对象标识/重复计算）无关。",
+        "reason": "Issue 的核心是对象重复构造和计算浪费，因此断言对象身份或关键状态（如 _populated）的稳定性更直接。"
+      },
+      {
+        "assertion_goal": "验证在模拟的缺陷触发路径中，昂贵的 _populate 操作只发生了一次（或少于预期次数）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言 _populate 方法内部复杂数据结构的完整内容。",
+        "reason": "性能问题的直接表现是重复计算，计数或状态比较可以稳定地反映这一点。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "get_resolver 函数上具体的 lru_cache 装饰器参数（如 maxsize）在提供的代码片段中未显示，但其存在性由 Issue 描述确认。",
+    "URLResolver._populate 方法具体在何时被首次调用（惰性加载时机）。可能是在 URLResolver 构造时，还是在首次调用 reverse/resolve 时？这会影响观测点的插入位置。",
+    "在真实的 Django 应用启动和请求处理流程中，除了 reverse，还有哪些常见的 get_resolver 调用点可能在 set_urlconf 前被触发？",
+    "线程局部变量 _urlconfs 的初始默认值是什么？如何可靠地在测试中模拟“set_urlconf 尚未调用”的状态？"
+  ],
+  "raw": {
+    "issue_summary": "当 set_urlconf 尚未调用时，多次调用 get_resolver 可能无意中构造多个 URLResolver 实例，导致昂贵的 _populate 被重复执行。",
+    "trigger_condition": {
+      "text": "在 set_urlconf 被调用（例如通过第一个请求）之前和之后，调用 get_resolver（或其调用者如 reverse），且两次调用时 urlconf 参数不同（第一次为 None，第二次为 settings.ROOT_URLCONF）。",
+      "evidence": [
+        "Issue 描述：'If reverse (or anything else using get_resolver) is called both before (e.g. at import time) and after a request is handled, get_resolver will be called with different values. Initially it will be called with None, and later if will be called with settings.ROOT_URLCONF, because request handling calls set_urlconf.'",
+        "源码片段 1 显示 get_resolver 在 urlconf 为 None 时使用 settings.ROOT_URLCONF。",
+        "源码片段 5 显示 get_response 会调用 set_urlconf(settings.ROOT_URLCONF)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "性能浪费：URLResolver._populate 被多次调用，导致重复计算和缓存，消耗额外内存和 CPU。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述：'Multiple URLResolvers may be constructed... resulting in multiple expensive calls to URLResolver._populate.'",
+        "'In an application with a large number of routes, URLResolver._populate can be expensive, so calling it twice and storing those caches twice is wasteful.'",
+        "源码片段 4 展示了 _populate 方法的复杂性。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于相同的 urlconf（特别是默认的 settings.ROOT_URLCONF），get_resolver 应返回相同的 URLResolver 实例（或至少避免重复的 _populate 计算），无论 set_urlconf 是否已被调用。",
+      "evidence": [
+        "Issue 描述隐含了期望：'My proposed solution is just to modify get_resolver to look up settings.ROOT_URLCONF before the memoized function call.' 这表明期望 get_resolver 的缓存机制能更早地统一参数，避免因参数不同（None vs ROOT_URLCONF）而创建不同实例。",
+        "源码片段 1 显示 get_resolver 使用了 functools.lru_cache（根据 Issue 描述），这暗示了其设计意图是缓存。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.urls.resolvers.get_resolver",
+        "kind": "function",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 的核心是此函数可能因参数不同而返回不同的缓存实例，导致重复构造。"
+      },
+      {
+        "name": "django.urls.resolvers.URLResolver._populate",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "这是被重复调用的昂贵操作，是性能问题的直接来源。"
+      },
+      {
+        "name": "django.urls.base.set_urlconf",
+        "kind": "function",
+        "source_path": "django/urls/base.py",
+        "reason": "它的调用时机（首次请求时）影响了 get_resolver 的默认参数值。"
+      },
+      {
+        "name": "django.urls.resolvers.URLResolver.reverse",
+        "kind": "method",
+        "source_path": "django/urls/resolvers.py",
+        "reason": "Issue 提到 reverse 是 get_resolver 的常见调用者，可能触发该问题。"
+      },
+      {
+        "name": "django.core.handlers.base.BaseHandler.get_response",
+        "kind": "method",
+        "source_path": "django/core/handlers/base.py",
+        "reason": "它内部调用了 set_urlconf，是改变线程 URL 配置的关键点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/urls/resolvers.py",
+        "object": "get_resolver",
+        "lines": "67-70",
+        "reason": "该函数在 urlconf 为 None 时，内部将 urlconf 赋值为 settings.ROOT_URLCONF，但此赋值发生在 lru_cache 装饰的函数体内部。这意味着调用 get_resolver(None) 和 get_resolver(settings.ROOT_URLCONF) 会被缓存视为两个不同的调用，导致创建两个不同的 URLResolver 实例。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ResolverTests.test_resolver_reverse",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它直接调用了 get_resolver 并使用了其返回的 resolver 进行 reverse 操作，展示了 get_resolver 和 reverse 的正常使用模式。",
+        "reusable_parts": [
+          "导入 get_resolver",
+          "使用 get_resolver('urlpatterns_reverse.named_urls') 构造 resolver",
+          "调用 resolver.reverse 并断言结果"
+        ],
+        "possible_gap": "该测试在单个测试方法内只调用了一次 get_resolver，且显式传入了 urlconf 字符串，没有模拟 Issue 中描述的“在 set_urlconf 调用前后使用不同参数调用 get_resolver”的场景。"
+      },
+      {
+        "test_name": "ResolverTests.test_populate_concurrency",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它直接测试了 URLResolver._populate 方法，并涉及线程局部变量 _local.populating，这与 _populate 的重复执行控制机制相关。",
+        "reusable_parts": [
+          "直接构造 URLResolver 实例",
+          "操作 resolver._local.populating 状态",
+          "调用 resolver._populate 方法"
+        ],
+        "possible_gap": "该测试关注的是并发调用下的线程安全，而非 Issue 关注的因 get_resolver 缓存参数不同导致的重复构造问题。"
+      },
+      {
+        "test_name": "ResolverMatchTests.test_resolver_match_on_request",
+        "test_file": "tests/urlpatterns_reverse/tests.py",
+        "why_relevant": "它通过 self.client.get 发起请求，这会触发请求处理链，包括 BaseHandler.get_response 中对 set_urlconf 的调用，模拟了“请求处理后”的状态。",
+        "reusable_parts": [
+          "使用 @override_settings",
+          "使用 self.client.get 模拟请求",
+          "检查请求后的 resolver_match 属性"
+        ],
+        "possible_gap": "该测试没有在请求前显式调用 get_resolver 或 reverse，因此没有组合出“请求前后各调用一次”的完整缺陷触发路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常在单个测试方法或 setup 中调用一次 get_resolver，并传入固定的 urlconf 字符串。",
+        "target_pattern": "在测试中，先在没有调用 set_urlconf 的情况下（模拟导入时）调用 get_resolver(None) 或 reverse（内部调用 get_resolver(None)），然后模拟一个请求（触发 set_urlconf），之后再调用 get_resolver(settings.ROOT_URLCONF) 或 reverse。",
+        "reason": "Issue 明确指出缺陷触发路径是 get_resolver 在 set_urlconf 调用前后被以不同参数调用。此变异模拟了该时序和参数变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试通常使用 @override_settings(ROOT_URLCONF=...) 来设置 URL 配置。",
+        "target_pattern": "保持使用 @override_settings，但在测试方法内部，在触发请求前，确保线程的 _urlconfs 状态是默认的（即 set_urlconf 未被调用）。这可能需要确保测试类或方法不继承可能提前设置 URLconf 的上下文。",
+        "reason": "为了复现“set_urlconf 尚未调用”的初始状态，需要控制线程的 URL 配置状态。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "cache",
+        "expression_hint": "两次调用 get_resolver 返回的 URLResolver 对象的 id() 或是否 is 同一个对象。",
+        "reason": "如果缺陷存在，get_resolver(None) 和 get_resolver(settings.ROOT_URLCONF) 可能返回两个不同的对象，尽管它们最终代表相同的 urlconf。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "URLResolver 实例的 _populated 属性值，或者在调用 _populate 前后实例内部字典（如 _reverse_dict）的变化次数/状态。",
+        "reason": "可以观察 _populate 是否被重复执行（例如，通过检查 _populated 是否从 False 变为 True 多次，或者 _reverse_dict 是否被重复填充）。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "线程局部变量 _urlconfs.value 的值在 set_urlconf 调用前后的变化。",
+        "reason": "这有助于确认“set_urlconf 尚未调用”的初始状态和请求后的状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对于相同的有效 urlconf（ROOT_URLCONF），无论是否显式传入，get_resolver 返回的应是同一个对象（或至少 _populate 不应被重复执行）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 URL 解析结果，因为这与性能问题的核心（对象标识/重复计算）无关。",
+        "reason": "Issue 的核心是对象重复构造和计算浪费，因此断言对象身份或关键状态（如 _populated）的稳定性更直接。"
+      },
+      {
+        "assertion_goal": "验证在模拟的缺陷触发路径中，昂贵的 _populate 操作只发生了一次（或少于预期次数）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言 _populate 方法内部复杂数据结构的完整内容。",
+        "reason": "性能问题的直接表现是重复计算，计数或状态比较可以稳定地反映这一点。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TestCase，并可能使用 @override_settings 来设置 ROOT_URLCONF。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟一个简单的 HTTP 请求来触发 set_urlconf，可以使用 Django 测试客户端（self.client.get('/')）或直接调用 get_response/set_urlconf。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要确保测试在干净的环境中运行，没有其他测试或 setup 提前污染了线程的 _urlconfs 状态。可能需要隔离测试或手动清理状态。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "get_resolver 函数上具体的 lru_cache 装饰器参数（如 maxsize）在提供的代码片段中未显示，但其存在性由 Issue 描述确认。",
+      "URLResolver._populate 方法具体在何时被首次调用（惰性加载时机）。可能是在 URLResolver 构造时，还是在首次调用 reverse/resolve 时？这会影响观测点的插入位置。",
+      "在真实的 Django 应用启动和请求处理流程中，除了 reverse，还有哪些常见的 get_resolver 调用点可能在 set_urlconf 前被触发？",
+      "线程局部变量 _urlconfs 的初始默认值是什么？如何可靠地在测试中模拟“set_urlconf 尚未调用”的状态？"
+    ]
+  }
+}

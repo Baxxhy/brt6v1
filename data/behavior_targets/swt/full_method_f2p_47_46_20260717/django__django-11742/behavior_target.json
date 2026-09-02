@@ -1,0 +1,306 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11742",
+  "issue_summary": "Field.max_length 没有检查是否足以容纳 choices 中最长的值，导致保存超长值时可能未被及时发现。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TestCase 来运行模型字段的验证测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要定义简单的模型或直接测试 CharField 实例，无需数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ValidationTests.test_enum_choices_invalid_input",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "它测试了带有 choices 和 max_length 的 CharField 的验证行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "导入 models 和 SimpleTestCase",
+          "使用 CharField(choices=..., max_length=...) 构造字段",
+          "使用 assertRaises(ValidationError) 进行验证"
+        ],
+        "possible_gap": "当前测试关注无效输入（不在 choices 中），而 Issue 关注 choices 中的值长度超过 max_length。"
+      },
+      {
+        "test_name": "ValidationTests.test_charfield_with_choices_raises_error_on_invalid_choice",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "它测试了带有 choices 的 CharField 对无效选择的验证，验证框架与 Issue 相关。",
+        "reusable_parts": [
+          "CharField 构造与 choices 参数",
+          "使用 clean 方法进行验证",
+          "assertRaises(ValidationError) 模式"
+        ],
+        "possible_gap": "它没有涉及 max_length 与 choices 值长度的比较。"
+      },
+      {
+        "test_name": "TestCharField.test_max_length_passed_to_formfield",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "它直接测试了 CharField 的 max_length 属性，展示了如何访问和断言该属性。",
+        "reusable_parts": [
+          "CharField 构造与 max_length 参数",
+          "使用 formfield() 方法",
+          "assertEqual 检查属性值"
+        ],
+        "possible_gap": "它没有涉及 choices 参数，且测试的是属性传递而非验证逻辑。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 CharField，其 max_length 小于 choices 列表中某个选项值的长度，然后尝试使用该选项值进行验证或保存。",
+      "evidence": [
+        "Issue 描述指出，当尝试保存一个值超过 max_length 的记录时，错误才被发现。",
+        "相关测试 1 和 3 展示了使用 choices 和 max_length 的 CharField 验证场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当尝试保存一个值超过 max_length 的记录时，可能引发错误或数据截断，但在此之前（例如在字段定义或验证时）没有明确的检查或警告。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述指出，错误通常在保存时才发现，暗示在定义或早期验证阶段缺乏检查。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.CharField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 直接涉及 CharField 的 max_length 和 choices 属性。"
+      },
+      {
+        "name": "CharField.clean",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 1 和 3 使用 clean 方法进行验证，这可能涉及 max_length 和 choices 的检查。"
+      },
+      {
+        "name": "CharField.formfield",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 4 涉及 max_length 传递给表单字段，可能与整体验证流程相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "CharField",
+        "lines": "",
+        "reason": "CharField 是处理 max_length 和 choices 的核心类，初始化或验证逻辑可能缺少对两者一致性的检查。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field",
+        "lines": "",
+        "reason": "作为基类，可能包含 choices 和 max_length 相关的通用验证逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在相关测试 1 中，max_length=1 且 choices 值长度可能为 1（例如 'a'）。",
+        "target_pattern": "设置 max_length 小于 choices 中某个选项值的长度，例如 max_length=2，choices 中包含 'abc'。",
+        "reason": "这种配置可能触发缺失的检查，因为当前代码可能允许这种不一致的定义。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 3 使用 clean 方法验证一个不在 choices 中的值。",
+        "target_pattern": "使用 clean 方法验证一个在 choices 中但长度超过 max_length 的值。",
+        "reason": "这模拟了 Issue 中描述的保存超长值场景，可能暴露验证逻辑的缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在定义 CharField 时，如果指定了 choices，应该确保 max_length 足以容纳 choices 中最长的值，否则应尽早（例如在字段初始化或验证时）引发错误或警告。",
+      "evidence": [
+        "Issue 描述建议添加检查以确保 max_length 足够长，这暗示了修复后的正确行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 CharField.clean() 或尝试保存模型时，观察是否抛出 ValidationError 或其他异常。",
+        "reason": "Issue 暗示在保存时才发现错误，因此观察早期验证或保存时的异常能判断检查是否缺失。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察 CharField 实例化后，其 max_length 属性与 choices 中最长值的长度关系。",
+        "reason": "这有助于确认不一致的配置是否被允许，以及是否触发了内部检查。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 max_length 小于 choices 中最长值的长度时，在字段初始化或早期验证时应引发错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的完整错误消息字符串，因为修复可能调整消息内容。",
+        "reason": "Issue 的核心是缺失检查，因此断言会引发异常（如 ValidationError）是稳定且对齐的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "具体的错误触发点是在 CharField 初始化时、clean() 验证时，还是在模型保存时？",
+    "修复后应该抛出什么具体的异常类型（例如 ValidationError、ValueError）？",
+    "检查是否应该同时考虑 choices 的显示值（第二个元素）还是仅考虑实际值（第一个元素）？"
+  ],
+  "raw": {
+    "issue_summary": "Field.max_length 没有检查是否足以容纳 choices 中最长的值，导致保存超长值时可能未被及时发现。",
+    "trigger_condition": {
+      "text": "创建一个 CharField，其 max_length 小于 choices 列表中某个选项值的长度，然后尝试使用该选项值进行验证或保存。",
+      "evidence": [
+        "Issue 描述指出，当尝试保存一个值超过 max_length 的记录时，错误才被发现。",
+        "相关测试 1 和 3 展示了使用 choices 和 max_length 的 CharField 验证场景。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当尝试保存一个值超过 max_length 的记录时，可能引发错误或数据截断，但在此之前（例如在字段定义或验证时）没有明确的检查或警告。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述指出，错误通常在保存时才发现，暗示在定义或早期验证阶段缺乏检查。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "在定义 CharField 时，如果指定了 choices，应该确保 max_length 足以容纳 choices 中最长的值，否则应尽早（例如在字段初始化或验证时）引发错误或警告。",
+      "evidence": [
+        "Issue 描述建议添加检查以确保 max_length 足够长，这暗示了修复后的正确行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.CharField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 直接涉及 CharField 的 max_length 和 choices 属性。"
+      },
+      {
+        "name": "CharField.clean",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 1 和 3 使用 clean 方法进行验证，这可能涉及 max_length 和 choices 的检查。"
+      },
+      {
+        "name": "CharField.formfield",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 4 涉及 max_length 传递给表单字段，可能与整体验证流程相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "CharField",
+        "lines": "",
+        "reason": "CharField 是处理 max_length 和 choices 的核心类，初始化或验证逻辑可能缺少对两者一致性的检查。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field",
+        "lines": "",
+        "reason": "作为基类，可能包含 choices 和 max_length 相关的通用验证逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ValidationTests.test_enum_choices_invalid_input",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "它测试了带有 choices 和 max_length 的 CharField 的验证行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "导入 models 和 SimpleTestCase",
+          "使用 CharField(choices=..., max_length=...) 构造字段",
+          "使用 assertRaises(ValidationError) 进行验证"
+        ],
+        "possible_gap": "当前测试关注无效输入（不在 choices 中），而 Issue 关注 choices 中的值长度超过 max_length。"
+      },
+      {
+        "test_name": "ValidationTests.test_charfield_with_choices_raises_error_on_invalid_choice",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "它测试了带有 choices 的 CharField 对无效选择的验证，验证框架与 Issue 相关。",
+        "reusable_parts": [
+          "CharField 构造与 choices 参数",
+          "使用 clean 方法进行验证",
+          "assertRaises(ValidationError) 模式"
+        ],
+        "possible_gap": "它没有涉及 max_length 与 choices 值长度的比较。"
+      },
+      {
+        "test_name": "TestCharField.test_max_length_passed_to_formfield",
+        "test_file": "tests/model_fields/test_charfield.py",
+        "why_relevant": "它直接测试了 CharField 的 max_length 属性，展示了如何访问和断言该属性。",
+        "reusable_parts": [
+          "CharField 构造与 max_length 参数",
+          "使用 formfield() 方法",
+          "assertEqual 检查属性值"
+        ],
+        "possible_gap": "它没有涉及 choices 参数，且测试的是属性传递而非验证逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在相关测试 1 中，max_length=1 且 choices 值长度可能为 1（例如 'a'）。",
+        "target_pattern": "设置 max_length 小于 choices 中某个选项值的长度，例如 max_length=2，choices 中包含 'abc'。",
+        "reason": "这种配置可能触发缺失的检查，因为当前代码可能允许这种不一致的定义。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 3 使用 clean 方法验证一个不在 choices 中的值。",
+        "target_pattern": "使用 clean 方法验证一个在 choices 中但长度超过 max_length 的值。",
+        "reason": "这模拟了 Issue 中描述的保存超长值场景，可能暴露验证逻辑的缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 CharField.clean() 或尝试保存模型时，观察是否抛出 ValidationError 或其他异常。",
+        "reason": "Issue 暗示在保存时才发现错误，因此观察早期验证或保存时的异常能判断检查是否缺失。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察 CharField 实例化后，其 max_length 属性与 choices 中最长值的长度关系。",
+        "reason": "这有助于确认不一致的配置是否被允许，以及是否触发了内部检查。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 max_length 小于 choices 中最长值的长度时，在字段初始化或早期验证时应引发错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的完整错误消息字符串，因为修复可能调整消息内容。",
+        "reason": "Issue 的核心是缺失检查，因此断言会引发异常（如 ValidationError）是稳定且对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或 TestCase 来运行模型字段的验证测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要定义简单的模型或直接测试 CharField 实例，无需数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "具体的错误触发点是在 CharField 初始化时、clean() 验证时，还是在模型保存时？",
+      "修复后应该抛出什么具体的异常类型（例如 ValidationError、ValueError）？",
+      "检查是否应该同时考虑 choices 的显示值（第二个元素）还是仅考虑实际值（第一个元素）？"
+    ]
+  }
+}

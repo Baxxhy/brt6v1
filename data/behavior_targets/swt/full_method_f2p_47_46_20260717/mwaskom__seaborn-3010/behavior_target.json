@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "mwaskom__seaborn-3010",
+  "issue_summary": "PolyFit 统计变换在处理包含缺失值（None）的数据时，会因 numpy.polyfit 内部线性代数错误而崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要构造包含 None 或 np.nan 值的 pandas Series 或 DataFrame 作为输入数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用与 tests/_stats/test_regression.py 中类似的 df fixture 作为基础，然后修改其值以包含缺失值。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试可能需要导入 seaborn.objects 作为 so，以复现 Issue 中的高层调用。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestPolyFit.test_no_grouper",
+        "test_file": "tests/_stats/test_regression.py",
+        "why_relevant": "它直接测试了 PolyFit 类的基本功能，包括数据准备、调用和结果验证。",
+        "reusable_parts": [
+          "PolyFit 对象的构造 (PolyFit(order=1, gridsize=100))",
+          "GroupBy 对象的构造",
+          "PolyFit 的调用方式",
+          "使用 assert_array_equal 和 assert_array_almost_equal 进行结果断言"
+        ],
+        "possible_gap": "测试使用的 df fixture 可能不包含缺失值，因此不会触发缺陷。"
+      },
+      {
+        "test_name": "TestLinearPlotter.test_dropna",
+        "test_file": "tests/test_regression.py",
+        "why_relevant": "它测试了另一个回归相关模块 (LinearPlotter) 对缺失值的处理逻辑（dropna），这可能为 PolyFit 的修复提供参考模式。",
+        "reusable_parts": [
+          "处理包含缺失值列 (y_na) 的 DataFrame fixture 的构造",
+          "对 dropna 方法调用前后数据列的断言模式"
+        ],
+        "possible_gap": "测试的是不同的类 (LinearPlotter)，而非 PolyFit 本身。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 so.Plot 绘制数据，其中 x 或 y 数据序列包含 None 值，并应用了 so.PolyFit() 统计变换。",
+      "evidence": [
+        "Issue 中的示例代码：so.Plot([1, 2, 3, None, 4], [1, 2, 3, 4, 5]).add(so.Line(), so.PolyFit())",
+        "源码片段 5 显示 PolyFit._fit_predict 直接调用 np.polyfit(x, y, self.order)，其中 x 和 y 来自 data[\"x\"] 和 data[\"y\"]。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 np.polyfit 时抛出 LinAlgError: SVD did not converge in Linear Least Squares 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 显示错误最终源于 numpy.linalg.linalg._raise_linalgerror_lstsq 抛出的 LinAlgError。",
+        "Traceback 指向 seaborn/_stats/regression.py 第 30 行：p = np.polyfit(x, y, self.order)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "seaborn._stats.regression.PolyFit",
+        "kind": "class",
+        "source_path": "seaborn/_stats/regression.py",
+        "reason": "这是引发缺陷的统计变换类。"
+      },
+      {
+        "name": "seaborn._stats.regression.PolyFit._fit_predict",
+        "kind": "method",
+        "source_path": "seaborn/_stats/regression.py",
+        "reason": "该方法直接调用了有问题的 np.polyfit。"
+      },
+      {
+        "name": "seaborn._core.Plot.add",
+        "kind": "method",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "Issue 中触发缺陷的 API 调用链起点。"
+      },
+      {
+        "name": "seaborn._marks.Line",
+        "kind": "class",
+        "source_path": "seaborn/_marks/line.py",
+        "reason": "Issue 示例中与 PolyFit 一起使用的标记。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "seaborn/_stats/regression.py",
+        "object": "PolyFit._fit_predict",
+        "lines": "22-34",
+        "reason": "该方法直接从 data 中提取 x 和 y 并传递给 np.polyfit，没有对数据中的 None 或 NaN 进行预处理或检查。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 4 中使用的是常规数值 DataFrame（df fixture）。",
+        "target_pattern": "在 x 或 y 数据列中引入 None 或 np.nan 值。",
+        "reason": "Issue 表明包含 None 的输入会触发 np.polyfit 内部的线性代数错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 PolyFit(...)(df, ...)。",
+        "target_pattern": "通过 Plot.add(so.Line(), so.PolyFit()) 的完整绘图 API 链来调用。",
+        "reason": "Issue 中的缺陷是通过高层绘图 API 触发的，可能涉及不同的数据流处理。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "PolyFit 应能稳健地处理包含缺失值的数据，例如在拟合前自动过滤掉无效数据点，或优雅地处理 numpy 无法拟合的情况，而不是崩溃。",
+      "evidence": [
+        "相关测试 3 (TestLinearPlotter.test_dropna) 展示了类似模块 (LinearPlotter) 通过 dropna 方法处理缺失值的行为。",
+        "相关测试 2 (TestCategoricalStatPlotter.test_single_layer_stats_with_missing_data) 展示了其他统计模块对缺失数据返回 NaN 的处理模式。",
+        "Issue 标题 \"PolyFit is not robust to missing data\" 暗示了期望的稳健性。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 PolyFit._fit_predict 或 np.polyfit 时是否抛出 LinAlgError 或其他异常。",
+        "reason": "Issue 的核心错误现象是 LinAlgError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "PolyFit._fit_predict 返回的 DataFrame 的列、形状或内容，特别是当输入包含缺失值时。",
+        "reason": "观察在缺陷路径下该方法是否返回了有效结果、空结果或错误结果。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "传递给 np.polyfit 的 x 和 y 数组在调用前的状态（是否包含 NaN/None）。",
+        "reason": "缺陷的直接原因是 np.polyfit 收到了包含无效值的数据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当输入数据包含缺失值时，PolyFit 不应抛出 LinAlgError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为 numpy 版本可能导致细微差异。",
+        "reason": "修复后，代码应能处理缺失数据而不崩溃。断言不应抛出特定异常（如 LinAlgError）是核心目标。"
+      },
+      {
+        "assertion_goal": "PolyFit 在处理包含缺失值的数据后，应产生某种合理的输出（如过滤后的拟合结果、NaN 或空结果），而不是崩溃。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言输出 DataFrame 的精确数值，因为拟合结果可能因缺失值处理方式而异。",
+        "reason": "断言返回对象的类型（如 DataFrame）和基本结构，确保流程完成，而非验证具体数值。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "PolyFit 在修复后处理缺失值的具体行为是什么？是静默过滤缺失点，返回部分结果，返回全 NaN 结果，还是引发一个更友好的警告/错误？",
+    "除了 None，np.nan 是否也会触发相同的缺陷？",
+    "缺陷是否只与 x 数据中的缺失值有关，还是 y 数据中的缺失值也会触发？",
+    "是否所有 order 参数值都会触发此问题，还是特定 order 值更敏感？"
+  ],
+  "raw": {
+    "issue_summary": "PolyFit 统计变换在处理包含缺失值（None）的数据时，会因 numpy.polyfit 内部线性代数错误而崩溃。",
+    "trigger_condition": {
+      "text": "使用 so.Plot 绘制数据，其中 x 或 y 数据序列包含 None 值，并应用了 so.PolyFit() 统计变换。",
+      "evidence": [
+        "Issue 中的示例代码：so.Plot([1, 2, 3, None, 4], [1, 2, 3, 4, 5]).add(so.Line(), so.PolyFit())",
+        "源码片段 5 显示 PolyFit._fit_predict 直接调用 np.polyfit(x, y, self.order)，其中 x 和 y 来自 data[\"x\"] 和 data[\"y\"]。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 np.polyfit 时抛出 LinAlgError: SVD did not converge in Linear Least Squares 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 显示错误最终源于 numpy.linalg.linalg._raise_linalgerror_lstsq 抛出的 LinAlgError。",
+        "Traceback 指向 seaborn/_stats/regression.py 第 30 行：p = np.polyfit(x, y, self.order)。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "PolyFit 应能稳健地处理包含缺失值的数据，例如在拟合前自动过滤掉无效数据点，或优雅地处理 numpy 无法拟合的情况，而不是崩溃。",
+      "evidence": [
+        "相关测试 3 (TestLinearPlotter.test_dropna) 展示了类似模块 (LinearPlotter) 通过 dropna 方法处理缺失值的行为。",
+        "相关测试 2 (TestCategoricalStatPlotter.test_single_layer_stats_with_missing_data) 展示了其他统计模块对缺失数据返回 NaN 的处理模式。",
+        "Issue 标题 \"PolyFit is not robust to missing data\" 暗示了期望的稳健性。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "seaborn._stats.regression.PolyFit",
+        "kind": "class",
+        "source_path": "seaborn/_stats/regression.py",
+        "reason": "这是引发缺陷的统计变换类。"
+      },
+      {
+        "name": "seaborn._stats.regression.PolyFit._fit_predict",
+        "kind": "method",
+        "source_path": "seaborn/_stats/regression.py",
+        "reason": "该方法直接调用了有问题的 np.polyfit。"
+      },
+      {
+        "name": "seaborn._core.Plot.add",
+        "kind": "method",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "Issue 中触发缺陷的 API 调用链起点。"
+      },
+      {
+        "name": "seaborn._marks.Line",
+        "kind": "class",
+        "source_path": "seaborn/_marks/line.py",
+        "reason": "Issue 示例中与 PolyFit 一起使用的标记。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "seaborn/_stats/regression.py",
+        "object": "PolyFit._fit_predict",
+        "lines": "22-34",
+        "reason": "该方法直接从 data 中提取 x 和 y 并传递给 np.polyfit，没有对数据中的 None 或 NaN 进行预处理或检查。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestPolyFit.test_no_grouper",
+        "test_file": "tests/_stats/test_regression.py",
+        "why_relevant": "它直接测试了 PolyFit 类的基本功能，包括数据准备、调用和结果验证。",
+        "reusable_parts": [
+          "PolyFit 对象的构造 (PolyFit(order=1, gridsize=100))",
+          "GroupBy 对象的构造",
+          "PolyFit 的调用方式",
+          "使用 assert_array_equal 和 assert_array_almost_equal 进行结果断言"
+        ],
+        "possible_gap": "测试使用的 df fixture 可能不包含缺失值，因此不会触发缺陷。"
+      },
+      {
+        "test_name": "TestLinearPlotter.test_dropna",
+        "test_file": "tests/test_regression.py",
+        "why_relevant": "它测试了另一个回归相关模块 (LinearPlotter) 对缺失值的处理逻辑（dropna），这可能为 PolyFit 的修复提供参考模式。",
+        "reusable_parts": [
+          "处理包含缺失值列 (y_na) 的 DataFrame fixture 的构造",
+          "对 dropna 方法调用前后数据列的断言模式"
+        ],
+        "possible_gap": "测试的是不同的类 (LinearPlotter)，而非 PolyFit 本身。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 4 中使用的是常规数值 DataFrame（df fixture）。",
+        "target_pattern": "在 x 或 y 数据列中引入 None 或 np.nan 值。",
+        "reason": "Issue 表明包含 None 的输入会触发 np.polyfit 内部的线性代数错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 PolyFit(...)(df, ...)。",
+        "target_pattern": "通过 Plot.add(so.Line(), so.PolyFit()) 的完整绘图 API 链来调用。",
+        "reason": "Issue 中的缺陷是通过高层绘图 API 触发的，可能涉及不同的数据流处理。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 PolyFit._fit_predict 或 np.polyfit 时是否抛出 LinAlgError 或其他异常。",
+        "reason": "Issue 的核心错误现象是 LinAlgError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "PolyFit._fit_predict 返回的 DataFrame 的列、形状或内容，特别是当输入包含缺失值时。",
+        "reason": "观察在缺陷路径下该方法是否返回了有效结果、空结果或错误结果。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "传递给 np.polyfit 的 x 和 y 数组在调用前的状态（是否包含 NaN/None）。",
+        "reason": "缺陷的直接原因是 np.polyfit 收到了包含无效值的数据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当输入数据包含缺失值时，PolyFit 不应抛出 LinAlgError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为 numpy 版本可能导致细微差异。",
+        "reason": "修复后，代码应能处理缺失数据而不崩溃。断言不应抛出特定异常（如 LinAlgError）是核心目标。"
+      },
+      {
+        "assertion_goal": "PolyFit 在处理包含缺失值的数据后，应产生某种合理的输出（如过滤后的拟合结果、NaN 或空结果），而不是崩溃。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言输出 DataFrame 的精确数值，因为拟合结果可能因缺失值处理方式而异。",
+        "reason": "断言返回对象的类型（如 DataFrame）和基本结构，确保流程完成，而非验证具体数值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要构造包含 None 或 np.nan 值的 pandas Series 或 DataFrame 作为输入数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用与 tests/_stats/test_regression.py 中类似的 df fixture 作为基础，然后修改其值以包含缺失值。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试可能需要导入 seaborn.objects 作为 so，以复现 Issue 中的高层调用。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "PolyFit 在修复后处理缺失值的具体行为是什么？是静默过滤缺失点，返回部分结果，返回全 NaN 结果，还是引发一个更友好的警告/错误？",
+      "除了 None，np.nan 是否也会触发相同的缺陷？",
+      "缺陷是否只与 x 数据中的缺失值有关，还是 y 数据中的缺失值也会触发？",
+      "是否所有 order 参数值都会触发此问题，还是特定 order 值更敏感？"
+    ]
+  }
+}

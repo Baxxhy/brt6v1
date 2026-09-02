@@ -1,0 +1,328 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11133",
+  "issue_summary": "HttpResponse 无法正确处理 memoryview 对象作为内容输入，导致其 content 属性返回错误的字节表示。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要使用 unittest.TestCase 或 django.test.SimpleTestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要数据库或特殊配置，因为 Issue 的核心是内存对象的处理。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_non_string_content",
+        "test_file": "tests/httpwrappers/tests.py",
+        "why_relevant": "该测试直接验证 HttpResponse 对非字符串内容（如整数）的处理，与当前 Issue 主题（处理非字符串的 memoryview）高度相似。",
+        "reusable_parts": [
+          "HttpResponseTests 测试类结构",
+          "使用 `HttpResponse(非字符串)` 的构造模式",
+          "使用 `self.assertEqual(r.content, b'...')` 的断言风格"
+        ],
+        "possible_gap": "该测试未覆盖 memoryview 类型，且可能依赖整数到字符串的隐式转换路径，与 memoryview 的处理路径不同。"
+      },
+      {
+        "test_name": "test_iter_content",
+        "test_file": "tests/httpwrappers/tests.py",
+        "why_relevant": "该测试验证了 HttpResponse 对可迭代内容（包括列表、迭代器）的处理，展示了内容拼接逻辑，可能与 memoryview 的底层数据提取有关。",
+        "reusable_parts": [
+          "使用 `HttpResponse(iterable)` 的构造模式",
+          "多次访问 `.content` 属性的测试模式",
+          "`.write()` 方法的调用"
+        ],
+        "possible_gap": "该测试主要关注可迭代对象的拼接，未测试单一 memoryview 对象作为内容的情况。"
+      },
+      {
+        "test_name": "test_generator_cache",
+        "test_file": "tests/responses/tests.py",
+        "why_relevant": "该测试验证了 HttpResponse 对生成器内容的缓存和序列化，涉及 content 属性的计算，与 memoryview 内容的序列化问题相关。",
+        "reusable_parts": [
+          "使用生成器作为 content 参数的构造模式",
+          "断言 `response.content` 等于预期字节串"
+        ],
+        "possible_gap": "该测试关注生成器耗尽和缓存，不涉及 memoryview 类型。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 memoryview 对象作为参数构造 HttpResponse 实例，或将其赋值给 HttpResponse 实例的 content 属性。",
+      "evidence": [
+        "Issue 中展示了 `HttpResponse(memoryview(b\"My Content\"))` 的调用。",
+        "Issue 描述了从 PostgreSQL 数据库获取的 BinaryField 内容可能是 memoryview 对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HttpResponse 实例的 content 属性返回了 memoryview 对象的字符串表示（如 `b'<memory at 0x7fcc47ab2648>'`），而不是其底层数据的字节表示（如 `b'My Content'`）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 `response.content` 的输出为 `b'<memory at 0x7fcc47ab2648>'`，而期望是 `b'My Content'`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.http.response.HttpResponse",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 直接报告了 HttpResponse 类在处理 memoryview 内容时的问题。"
+      },
+      {
+        "name": "HttpResponse.__init__",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 中通过构造函数传递 memoryview 对象触发了问题。"
+      },
+      {
+        "name": "HttpResponse.content",
+        "kind": "property",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 中通过访问 content 属性观察到了错误输出，且源码显示 content 属性 getter 通过 `b''.join(self._container)` 计算返回值。"
+      },
+      {
+        "name": "HttpResponse.content.setter",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "相关测试表明可以通过设置 content 属性来改变响应内容，Issue 场景也可能涉及此操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/http/response.py",
+        "object": "HttpResponse",
+        "lines": "278-341",
+        "reason": "这是 HttpResponse 类的定义文件，其 `__init__` 方法或内部处理逻辑可能未正确转换 memoryview 对象。"
+      },
+      {
+        "path": "django/http/response.py",
+        "object": "HttpResponse.content (getter)",
+        "lines": "306-307",
+        "reason": "content 属性的 getter 方法 `b''.join(self._container)` 可能无法正确处理 `_container` 中存储的 memoryview 对象。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用整数（如 `12345`）、字符串列表（如 `['abc', 'def']`）、生成器作为 HttpResponse 的输入。",
+        "target_pattern": "使用 memoryview 对象作为 HttpResponse 的输入，例如 `memoryview(b\"test data\")`。",
+        "reason": "Issue 表明 memoryview 输入会触发错误的内容表示，而现有测试未覆盖此输入类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中直接传递非字符串对象给 HttpResponse 构造函数或 content 属性。",
+        "target_pattern": "传递 memoryview 对象给 HttpResponse 构造函数或 content 属性。",
+        "reason": "Issue 的核心是 memoryview 作为 content 参数时未被正确处理。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "HttpResponse 应能正确处理 memoryview 对象，其 content 属性应返回 memoryview 对象所引用的底层数据的字节表示。",
+      "evidence": [
+        "Issue 中明确表达了期望：\"I am expecting b'My Content'\"。",
+        "相关测试表明 HttpResponse 应能一致地处理非字符串内容（如整数、列表、生成器），并将其转换为正确的字节。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`response.content` 的返回值",
+        "reason": "Issue 中通过比较 `response.content` 的实际输出与期望字节串来识别问题。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "`type(content)` 在传入 HttpResponse 之前，以及 `type(item)` 对于 `self._container` 中的元素",
+        "reason": "需要确认输入是 memoryview 类型，并观察内部容器如何处理该类型。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "`repr(response.content)` 或 `repr(item)` 对于 `self._container` 中的元素",
+        "reason": "Issue 中错误输出是 memoryview 对象的 repr 形式，观测 repr 有助于诊断。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 memoryview 对象构造 HttpResponse 时，其 `.content` 属性等于 memoryview 所引用数据的字节表示。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串相等，或断言 content 属性是 memoryview 类型。",
+        "reason": "Issue 的期望是 content 返回底层字节数据，而非 memoryview 对象的字符串表示。断言字节相等直接对应修复目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "memoryview 对象是直接作为 `__init__` 的 `content` 参数传递，还是先被放入容器（如列表）再传递？",
+    "错误是发生在 `__init__` 时对内容的处理，还是发生在 `content` 属性 getter 的 `b''.join(self._container)` 调用时？",
+    "除了 memoryview，其他 buffer-like 对象（如 bytearray, array.array）是否也存在同样问题？"
+  ],
+  "raw": {
+    "issue_summary": "HttpResponse 无法正确处理 memoryview 对象作为内容输入，导致其 content 属性返回错误的字节表示。",
+    "trigger_condition": {
+      "text": "使用 memoryview 对象作为参数构造 HttpResponse 实例，或将其赋值给 HttpResponse 实例的 content 属性。",
+      "evidence": [
+        "Issue 中展示了 `HttpResponse(memoryview(b\"My Content\"))` 的调用。",
+        "Issue 描述了从 PostgreSQL 数据库获取的 BinaryField 内容可能是 memoryview 对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HttpResponse 实例的 content 属性返回了 memoryview 对象的字符串表示（如 `b'<memory at 0x7fcc47ab2648>'`），而不是其底层数据的字节表示（如 `b'My Content'`）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 `response.content` 的输出为 `b'<memory at 0x7fcc47ab2648>'`，而期望是 `b'My Content'`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "HttpResponse 应能正确处理 memoryview 对象，其 content 属性应返回 memoryview 对象所引用的底层数据的字节表示。",
+      "evidence": [
+        "Issue 中明确表达了期望：\"I am expecting b'My Content'\"。",
+        "相关测试表明 HttpResponse 应能一致地处理非字符串内容（如整数、列表、生成器），并将其转换为正确的字节。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.http.response.HttpResponse",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 直接报告了 HttpResponse 类在处理 memoryview 内容时的问题。"
+      },
+      {
+        "name": "HttpResponse.__init__",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 中通过构造函数传递 memoryview 对象触发了问题。"
+      },
+      {
+        "name": "HttpResponse.content",
+        "kind": "property",
+        "source_path": "django/http/response.py",
+        "reason": "Issue 中通过访问 content 属性观察到了错误输出，且源码显示 content 属性 getter 通过 `b''.join(self._container)` 计算返回值。"
+      },
+      {
+        "name": "HttpResponse.content.setter",
+        "kind": "method",
+        "source_path": "django/http/response.py",
+        "reason": "相关测试表明可以通过设置 content 属性来改变响应内容，Issue 场景也可能涉及此操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/http/response.py",
+        "object": "HttpResponse",
+        "lines": "278-341",
+        "reason": "这是 HttpResponse 类的定义文件，其 `__init__` 方法或内部处理逻辑可能未正确转换 memoryview 对象。"
+      },
+      {
+        "path": "django/http/response.py",
+        "object": "HttpResponse.content (getter)",
+        "lines": "306-307",
+        "reason": "content 属性的 getter 方法 `b''.join(self._container)` 可能无法正确处理 `_container` 中存储的 memoryview 对象。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_non_string_content",
+        "test_file": "tests/httpwrappers/tests.py",
+        "why_relevant": "该测试直接验证 HttpResponse 对非字符串内容（如整数）的处理，与当前 Issue 主题（处理非字符串的 memoryview）高度相似。",
+        "reusable_parts": [
+          "HttpResponseTests 测试类结构",
+          "使用 `HttpResponse(非字符串)` 的构造模式",
+          "使用 `self.assertEqual(r.content, b'...')` 的断言风格"
+        ],
+        "possible_gap": "该测试未覆盖 memoryview 类型，且可能依赖整数到字符串的隐式转换路径，与 memoryview 的处理路径不同。"
+      },
+      {
+        "test_name": "test_iter_content",
+        "test_file": "tests/httpwrappers/tests.py",
+        "why_relevant": "该测试验证了 HttpResponse 对可迭代内容（包括列表、迭代器）的处理，展示了内容拼接逻辑，可能与 memoryview 的底层数据提取有关。",
+        "reusable_parts": [
+          "使用 `HttpResponse(iterable)` 的构造模式",
+          "多次访问 `.content` 属性的测试模式",
+          "`.write()` 方法的调用"
+        ],
+        "possible_gap": "该测试主要关注可迭代对象的拼接，未测试单一 memoryview 对象作为内容的情况。"
+      },
+      {
+        "test_name": "test_generator_cache",
+        "test_file": "tests/responses/tests.py",
+        "why_relevant": "该测试验证了 HttpResponse 对生成器内容的缓存和序列化，涉及 content 属性的计算，与 memoryview 内容的序列化问题相关。",
+        "reusable_parts": [
+          "使用生成器作为 content 参数的构造模式",
+          "断言 `response.content` 等于预期字节串"
+        ],
+        "possible_gap": "该测试关注生成器耗尽和缓存，不涉及 memoryview 类型。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用整数（如 `12345`）、字符串列表（如 `['abc', 'def']`）、生成器作为 HttpResponse 的输入。",
+        "target_pattern": "使用 memoryview 对象作为 HttpResponse 的输入，例如 `memoryview(b\"test data\")`。",
+        "reason": "Issue 表明 memoryview 输入会触发错误的内容表示，而现有测试未覆盖此输入类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中直接传递非字符串对象给 HttpResponse 构造函数或 content 属性。",
+        "target_pattern": "传递 memoryview 对象给 HttpResponse 构造函数或 content 属性。",
+        "reason": "Issue 的核心是 memoryview 作为 content 参数时未被正确处理。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "`response.content` 的返回值",
+        "reason": "Issue 中通过比较 `response.content` 的实际输出与期望字节串来识别问题。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "`type(content)` 在传入 HttpResponse 之前，以及 `type(item)` 对于 `self._container` 中的元素",
+        "reason": "需要确认输入是 memoryview 类型，并观察内部容器如何处理该类型。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "`repr(response.content)` 或 `repr(item)` 对于 `self._container` 中的元素",
+        "reason": "Issue 中错误输出是 memoryview 对象的 repr 形式，观测 repr 有助于诊断。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 memoryview 对象构造 HttpResponse 时，其 `.content` 属性等于 memoryview 所引用数据的字节表示。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串相等，或断言 content 属性是 memoryview 类型。",
+        "reason": "Issue 的期望是 content 返回底层字节数据，而非 memoryview 对象的字符串表示。断言字节相等直接对应修复目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要使用 unittest.TestCase 或 django.test.SimpleTestCase 作为测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要数据库或特殊配置，因为 Issue 的核心是内存对象的处理。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "memoryview 对象是直接作为 `__init__` 的 `content` 参数传递，还是先被放入容器（如列表）再传递？",
+      "错误是发生在 `__init__` 时对内容的处理，还是发生在 `content` 属性 getter 的 `b''.join(self._container)` 调用时？",
+      "除了 memoryview，其他 buffer-like 对象（如 bytearray, array.array）是否也存在同样问题？"
+    ]
+  }
+}

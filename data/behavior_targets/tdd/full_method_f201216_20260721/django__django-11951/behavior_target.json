@@ -1,0 +1,296 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11951",
+  "issue_summary": "bulk_create 方法的 batch_size 参数覆盖了数据库兼容的最大批次大小计算，导致可能超过数据库限制。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 类，并可能涉及数据库操作。可能需要创建简单的模型（如 TwoFields）作为测试对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置或模拟特定的数据库后端特征（如 max_query_params）以控制 max_batch_size 的计算结果。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "BulkCreateTests.test_explicit_batch_size",
+        "test_file": "tests/bulk_create/tests.py",
+        "why_relevant": "该测试直接调用了 bulk_create 并传入不同的 batch_size 参数，是测试 batch_size 行为的起点。",
+        "reusable_parts": [
+          "TwoFields 模型对象的构造",
+          "bulk_create 的调用方式",
+          "使用 assertEqual 验证对象数量"
+        ],
+        "possible_gap": "该测试仅验证了不同 batch_size 下对象都能成功创建，但没有测试当 batch_size 超过数据库限制时是否会出现问题或是否被正确限制。"
+      },
+      {
+        "test_name": "BulkCreateTests.test_explicit_batch_size_efficiency",
+        "test_file": "tests/bulk_create/tests.py",
+        "why_relevant": "该测试关注 bulk_create 的查询效率，与批次大小控制相关。",
+        "reusable_parts": [
+          "使用 assertNumQueries 断言查询次数",
+          "批量创建大量对象"
+        ],
+        "possible_gap": "测试假设传入的 batch_size 就是实际使用的批次大小，没有验证其是否被数据库限制所调整。"
+      },
+      {
+        "test_name": "OperationsTests.test_bulk_batch_size",
+        "test_file": "tests/backends/oracle/test_operations.py",
+        "why_relevant": "该测试展示了数据库后端如何计算 bulk_batch_size，这是修复中需要引入的关键计算。",
+        "reusable_parts": [
+          "connection.ops.bulk_batch_size 的调用方式",
+          "对不同字段数量下计算结果的验证"
+        ],
+        "possible_gap": "这是一个特定于 Oracle 后端的测试，需要适配到通用测试中，并且没有与 bulk_create 集成。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 bulk_create 方法时，传入的 batch_size 参数值大于数据库后端计算出的最大兼容批次大小（max_batch_size）。",
+      "evidence": [
+        "Issue 描述指出 batch_size 参数覆盖了兼容批次大小计算，并建议采用与 bulk_update 类似的 min(batch_size, max_batch_size) 逻辑。",
+        "源码片段 1 中 bulk_create 方法接收 batch_size 参数，但没有与 max_batch_size 取最小值的逻辑。",
+        "源码片段 2 中 bulk_update 方法明确计算 max_batch_size 并与 batch_size 取最小值。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 batch_size 超过数据库限制时，可能导致数据库查询参数过多错误或性能问题，但 Issue 未明确描述具体错误现象。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 通过对比 bulk_update 的正确实现，暗示 bulk_create 可能因批次过大导致数据库错误或效率低下。",
+        "相关测试 5 显示 Oracle 等数据库有最大查询参数限制，需要计算合适的批次大小。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.bulk_create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接报告此方法存在缺陷，batch_size 参数处理不当。"
+      },
+      {
+        "name": "QuerySet.bulk_update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 将其作为正确实现的参考，用于对比和修复 bulk_create。"
+      },
+      {
+        "name": "connections[self.db].ops.bulk_batch_size",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于计算数据库兼容的最大批次大小，在 bulk_update 中被调用，应是 bulk_create 修复的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_create",
+        "lines": "438-500",
+        "reason": "Issue 指出该方法的 batch_size 参数处理逻辑有缺陷，缺少与 max_batch_size 取最小值的步骤。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中传入一个固定的、较小的 batch_size 值（如 1, 2, 3, 50）。",
+        "target_pattern": "传入一个非常大的 batch_size 值（例如 10000），使其明显超过数据库后端计算出的 max_batch_size。",
+        "reason": "为了触发 batch_size 覆盖 max_batch_size 计算的缺陷路径，需要让传入值大于限制。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试通常在默认数据库配置下运行。",
+        "target_pattern": "使用一个具有较低 max_query_params 限制的数据库后端（如 Oracle 模拟环境），以产生较小的 max_batch_size。",
+        "reason": "更容易让传入的 batch_size 超过 max_batch_size，从而暴露缺陷。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "bulk_create 方法应确保实际使用的批次大小不超过数据库后端计算出的最大兼容批次大小（max_batch_size）。",
+      "evidence": [
+        "Issue 建议在 bulk_create 中使用与 bulk_update 相同的逻辑：batch_size = min(batch_size, max_batch_size) if batch_size else max_batch_size。",
+        "源码片段 2 中 bulk_update 方法展示了正确的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在执行 bulk_create 期间捕获的 SQL 查询语句数量或结构。",
+        "reason": "如果 batch_size 没有被正确限制，可能会观察到单次查询参数过多或查询次数与预期不符。"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "实际执行的数据库查询次数（例如通过 connection.queries 或 assertNumQueries）。",
+        "reason": "实际查询次数可以间接反映内部使用的实际批次大小是否被正确限制。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当传入的 batch_size 大于数据库限制时，实际执行的查询批次不会超过限制（例如查询次数合理，或没有引发数据库错误）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 SQL 字符串或精确的查询次数，因为不同数据库后端的具体限制可能不同。",
+        "reason": "更稳定的断言是验证行为符合预期（即批次大小被限制），而不是依赖于特定数据库的精确输出。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "不同数据库后端（如 SQLite, PostgreSQL, Oracle）计算出的 max_batch_size 具体是多少，以及触发缺陷的确切阈值。",
+    "当 batch_size 超过限制时，具体会引发什么类型的数据库错误（如参数过多）还是仅性能下降，Issue 未明确说明。",
+    "bulk_create 内部调用 _batched_insert 时，batch_size 参数是如何被使用的，需要进一步代码分析。"
+  ],
+  "raw": {
+    "issue_summary": "bulk_create 方法的 batch_size 参数覆盖了数据库兼容的最大批次大小计算，导致可能超过数据库限制。",
+    "trigger_condition": {
+      "text": "调用 bulk_create 方法时，传入的 batch_size 参数值大于数据库后端计算出的最大兼容批次大小（max_batch_size）。",
+      "evidence": [
+        "Issue 描述指出 batch_size 参数覆盖了兼容批次大小计算，并建议采用与 bulk_update 类似的 min(batch_size, max_batch_size) 逻辑。",
+        "源码片段 1 中 bulk_create 方法接收 batch_size 参数，但没有与 max_batch_size 取最小值的逻辑。",
+        "源码片段 2 中 bulk_update 方法明确计算 max_batch_size 并与 batch_size 取最小值。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 batch_size 超过数据库限制时，可能导致数据库查询参数过多错误或性能问题，但 Issue 未明确描述具体错误现象。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 通过对比 bulk_update 的正确实现，暗示 bulk_create 可能因批次过大导致数据库错误或效率低下。",
+        "相关测试 5 显示 Oracle 等数据库有最大查询参数限制，需要计算合适的批次大小。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "bulk_create 方法应确保实际使用的批次大小不超过数据库后端计算出的最大兼容批次大小（max_batch_size）。",
+      "evidence": [
+        "Issue 建议在 bulk_create 中使用与 bulk_update 相同的逻辑：batch_size = min(batch_size, max_batch_size) if batch_size else max_batch_size。",
+        "源码片段 2 中 bulk_update 方法展示了正确的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.bulk_create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接报告此方法存在缺陷，batch_size 参数处理不当。"
+      },
+      {
+        "name": "QuerySet.bulk_update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 将其作为正确实现的参考，用于对比和修复 bulk_create。"
+      },
+      {
+        "name": "connections[self.db].ops.bulk_batch_size",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于计算数据库兼容的最大批次大小，在 bulk_update 中被调用，应是 bulk_create 修复的一部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_create",
+        "lines": "438-500",
+        "reason": "Issue 指出该方法的 batch_size 参数处理逻辑有缺陷，缺少与 max_batch_size 取最小值的步骤。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "BulkCreateTests.test_explicit_batch_size",
+        "test_file": "tests/bulk_create/tests.py",
+        "why_relevant": "该测试直接调用了 bulk_create 并传入不同的 batch_size 参数，是测试 batch_size 行为的起点。",
+        "reusable_parts": [
+          "TwoFields 模型对象的构造",
+          "bulk_create 的调用方式",
+          "使用 assertEqual 验证对象数量"
+        ],
+        "possible_gap": "该测试仅验证了不同 batch_size 下对象都能成功创建，但没有测试当 batch_size 超过数据库限制时是否会出现问题或是否被正确限制。"
+      },
+      {
+        "test_name": "BulkCreateTests.test_explicit_batch_size_efficiency",
+        "test_file": "tests/bulk_create/tests.py",
+        "why_relevant": "该测试关注 bulk_create 的查询效率，与批次大小控制相关。",
+        "reusable_parts": [
+          "使用 assertNumQueries 断言查询次数",
+          "批量创建大量对象"
+        ],
+        "possible_gap": "测试假设传入的 batch_size 就是实际使用的批次大小，没有验证其是否被数据库限制所调整。"
+      },
+      {
+        "test_name": "OperationsTests.test_bulk_batch_size",
+        "test_file": "tests/backends/oracle/test_operations.py",
+        "why_relevant": "该测试展示了数据库后端如何计算 bulk_batch_size，这是修复中需要引入的关键计算。",
+        "reusable_parts": [
+          "connection.ops.bulk_batch_size 的调用方式",
+          "对不同字段数量下计算结果的验证"
+        ],
+        "possible_gap": "这是一个特定于 Oracle 后端的测试，需要适配到通用测试中，并且没有与 bulk_create 集成。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中传入一个固定的、较小的 batch_size 值（如 1, 2, 3, 50）。",
+        "target_pattern": "传入一个非常大的 batch_size 值（例如 10000），使其明显超过数据库后端计算出的 max_batch_size。",
+        "reason": "为了触发 batch_size 覆盖 max_batch_size 计算的缺陷路径，需要让传入值大于限制。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试通常在默认数据库配置下运行。",
+        "target_pattern": "使用一个具有较低 max_query_params 限制的数据库后端（如 Oracle 模拟环境），以产生较小的 max_batch_size。",
+        "reason": "更容易让传入的 batch_size 超过 max_batch_size，从而暴露缺陷。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在执行 bulk_create 期间捕获的 SQL 查询语句数量或结构。",
+        "reason": "如果 batch_size 没有被正确限制，可能会观察到单次查询参数过多或查询次数与预期不符。"
+      },
+      {
+        "kind": "performance",
+        "expression_hint": "实际执行的数据库查询次数（例如通过 connection.queries 或 assertNumQueries）。",
+        "reason": "实际查询次数可以间接反映内部使用的实际批次大小是否被正确限制。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当传入的 batch_size 大于数据库限制时，实际执行的查询批次不会超过限制（例如查询次数合理，或没有引发数据库错误）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 SQL 字符串或精确的查询次数，因为不同数据库后端的具体限制可能不同。",
+        "reason": "更稳定的断言是验证行为符合预期（即批次大小被限制），而不是依赖于特定数据库的精确输出。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 类，并可能涉及数据库操作。可能需要创建简单的模型（如 TwoFields）作为测试对象。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置或模拟特定的数据库后端特征（如 max_query_params）以控制 max_batch_size 的计算结果。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "不同数据库后端（如 SQLite, PostgreSQL, Oracle）计算出的 max_batch_size 具体是多少，以及触发缺陷的确切阈值。",
+      "当 batch_size 超过限制时，具体会引发什么类型的数据库错误（如参数过多）还是仅性能下降，Issue 未明确说明。",
+      "bulk_create 内部调用 _batched_insert 时，batch_size 参数是如何被使用的，需要进一步代码分析。"
+    ]
+  }
+}

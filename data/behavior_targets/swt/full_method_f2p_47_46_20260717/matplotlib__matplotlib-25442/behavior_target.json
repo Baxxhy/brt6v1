@@ -1,0 +1,364 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-25442",
+  "issue_summary": "结合 matplotlib 3.7.1 和 mplcursor 点击数据点后触发 AttributeError: 'NoneType' object has no attribute 'canvas'。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 QtAgg 后端，并可能模拟 GUI 事件循环。考虑使用适当的测试标记（如 @pytest.mark.backend('QtAgg')）和 mock 或非阻塞模式运行 show()。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 mplcursors 库（如果测试环境中可用），或模拟其行为以触发相关事件回调。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "参考相关测试中创建散点图和模拟鼠标事件的模式。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_picking_does_not_stale",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "该测试涉及散点图的拾取（picking）和事件处理，与 Issue 中点击数据点触发事件的场景相似。",
+        "reusable_parts": [
+          "创建散点图：ax.scatter([0], [0], [1000], picker=True)",
+          "模拟鼠标事件：mouse_event = SimpleNamespace(...)",
+          "调用 fig.pick(mouse_event)",
+          "使用 assert 检查状态（fig.stale）"
+        ],
+        "possible_gap": "该测试模拟鼠标事件并调用 fig.pick，但 Issue 涉及的是通过 mplcursors 和 GUI 交互（点击）触发的事件链，且错误发生在 offsetbox 模块的释放（release）回调中。测试没有使用 mplcursors，也没有触发 on_release 路径。"
+      },
+      {
+        "test_name": "test_scatter_3d_projection_conservation",
+        "test_file": "lib/mpl_toolkits/mplot3d/tests/test_art3d.py",
+        "why_relevant": "该测试创建散点图，模拟鼠标事件（MouseEvent），并检查 contains 和索引，涉及交互和事件处理。",
+        "reusable_parts": [
+          "创建散点图：scatter_collection = ax.scatter(x, x, x)",
+          "创建鼠标事件：event = MouseEvent(...)",
+          "检查拾取结果：contains, ind = scatter_collection.contains(event)",
+          "使用 assert 验证结果"
+        ],
+        "possible_gap": "该测试在 3D 投影上下文中，使用自定义的 MouseEvent 并直接调用 contains 方法。Issue 错误涉及 mplcursors 和 offsetbox.DraggableBase 的生命周期管理（ref_artist.figure 为 None），测试没有覆盖这个回调链。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 matplotlib 3.7.1，创建散点图，调用 mplcursors.cursor()，然后点击几个数据点。",
+      "evidence": [
+        "Issue 中提供了复现代码：import numpy as np; import matplotlib.pyplot as plt; import mplcursors as mpl; x = np.arange(1, 11); y1 = x; plt.scatter(x,y1); mpl.cursor(); plt.show()",
+        "Issue 描述：'If you combine mplcursor and matplotlib 3.7.1, you'll get an `AttributeError: 'NoneType' object has no attribute 'canvas'` after clicking a few data points.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "点击数据点后抛出 AttributeError: 'NoneType' object has no attribute 'canvas'，后续选择新数据点会重复触发相同 traceback。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的 traceback，错误指向 offsetbox.py 文件中的 canvas 属性访问。",
+        "Traceback 显示：'AttributeError: 'NoneType' object has no attribute 'canvas' at line 1517 in offsetbox.py'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.scatter",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中用于创建散点图，是触发场景的一部分。"
+      },
+      {
+        "name": "mplcursors.cursor",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 复现代码中调用，与 matplotlib 交互时触发错误。"
+      },
+      {
+        "name": "plt.show",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中调用，启动 GUI 事件循环，是交互发生的必要条件。"
+      },
+      {
+        "name": "DraggableBase.on_release",
+        "kind": "method",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Traceback 显示错误发生在 on_release 方法中，是错误传播路径的一部分。"
+      },
+      {
+        "name": "DraggableBase._check_still_parented",
+        "kind": "method",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Traceback 显示 on_release 调用了 _check_still_parented，后者可能调用了 disconnect。"
+      },
+      {
+        "name": "DraggableBase.disconnect",
+        "kind": "method",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Traceback 显示 _check_still_parented 可能调用 disconnect，而 disconnect 中访问了 self.canvas。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/offsetbox.py",
+        "object": "DraggableBase",
+        "lines": "1543-1568",
+        "reason": "Traceback 指向 offsetbox.py 的 on_release、_check_still_parented 和 disconnect 方法，错误发生在访问 self.canvas 时，表明 self.ref_artist.figure 可能为 None，导致 canvas 属性访问失败。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用 fig.pick 或 scatter_collection.contains 来模拟拾取。",
+        "target_pattern": "需要模拟通过 mplcursors 附加的交互，触发完整的事件链（包括 press、release），最终导致 DraggableBase.on_release 被调用。",
+        "reason": "Issue 错误发生在 on_release 回调中，需要触发该回调路径。仅模拟拾取可能不足以触发完整的拖放/释放生命周期。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中散点图集合（scatter collection）和图形（figure）保持有效引用。",
+        "target_pattern": "需要使 DraggableBase.ref_artist.figure 在某个时刻变为 None（可能在事件处理过程中被清理或分离）。",
+        "reason": "Traceback 表明 self.ref_artist.figure 为 None，导致 canvas 属性访问失败。需要复现导致此状态变化的操作序列。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试通常使用默认或测试后端。",
+        "target_pattern": "使用与 Issue 相同的后端（QtAgg）和 matplotlib 版本（3.7.1）。",
+        "reason": "Issue 明确指出在 matplotlib 3.7.1 和 QtAgg 后端下出现，且 3.7.0 正常，表明版本和后端是触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "点击数据点后不应抛出 AttributeError，交互功能应正常工作，无终端错误输出。",
+      "evidence": [
+        "Issue 中 'Expected outcome' 部分：'No terminal output'",
+        "Issue 中 'Additional information' 部分：'Using matplotlib 3.7.0 or lower works fine.' 表明在旧版本中行为正常。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获 AttributeError 并检查错误消息是否包含 'NoneType' object has no attribute 'canvas'。",
+        "reason": "Issue 的核心错误是 AttributeError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在事件回调（如 on_release）中检查 self.ref_artist.figure 的值。",
+        "reason": "Traceback 表明错误源于 ref_artist.figure 为 None，观测此状态有助于理解缺陷触发时机。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "检查是否有任何与图形生命周期或艺术家（artist）分离相关的警告。",
+        "reason": "图形或艺术家被意外清理可能导致 ref_artist.figure 为 None。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在模拟点击数据点操作后，不应抛出 AttributeError: 'NoneType' object has no attribute 'canvas'。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的 traceback 字符串或行号，因为它们可能因版本或环境变化而改变。",
+        "reason": "Issue 的核心是特定异常不应出现。检查错误消息片段比检查完整字符串更稳定。"
+      },
+      {
+        "assertion_goal": "事件处理回调（如 on_release）应能正常执行而不因 None 引用而中断。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的内部属性值（如 ref_artist.figure 的确切对象 ID），除非它们对语义至关重要。",
+        "reason": "修复后，回调应能安全处理可能的状态（包括 figure 存在与否），而不崩溃。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "mplcursors.cursor() 内部如何与 matplotlib 的 DraggableBase 交互的具体细节。",
+    "导致 ref_artist.figure 变为 None 的确切操作序列（是点击特定次数？还是特定顺序？）。",
+    "是否需要在测试中实际打开 GUI 窗口，或者可以通过编程方式模拟完整的事件序列。",
+    "matplotlib 3.7.1 相对于 3.7.0 在 offsetbox 或相关模块中的具体变化是什么。"
+  ],
+  "raw": {
+    "issue_summary": "结合 matplotlib 3.7.1 和 mplcursor 点击数据点后触发 AttributeError: 'NoneType' object has no attribute 'canvas'。",
+    "trigger_condition": {
+      "text": "使用 matplotlib 3.7.1，创建散点图，调用 mplcursors.cursor()，然后点击几个数据点。",
+      "evidence": [
+        "Issue 中提供了复现代码：import numpy as np; import matplotlib.pyplot as plt; import mplcursors as mpl; x = np.arange(1, 11); y1 = x; plt.scatter(x,y1); mpl.cursor(); plt.show()",
+        "Issue 描述：'If you combine mplcursor and matplotlib 3.7.1, you'll get an `AttributeError: 'NoneType' object has no attribute 'canvas'` after clicking a few data points.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "点击数据点后抛出 AttributeError: 'NoneType' object has no attribute 'canvas'，后续选择新数据点会重复触发相同 traceback。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的 traceback，错误指向 offsetbox.py 文件中的 canvas 属性访问。",
+        "Traceback 显示：'AttributeError: 'NoneType' object has no attribute 'canvas' at line 1517 in offsetbox.py'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "点击数据点后不应抛出 AttributeError，交互功能应正常工作，无终端错误输出。",
+      "evidence": [
+        "Issue 中 'Expected outcome' 部分：'No terminal output'",
+        "Issue 中 'Additional information' 部分：'Using matplotlib 3.7.0 or lower works fine.' 表明在旧版本中行为正常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.scatter",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中用于创建散点图，是触发场景的一部分。"
+      },
+      {
+        "name": "mplcursors.cursor",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 复现代码中调用，与 matplotlib 交互时触发错误。"
+      },
+      {
+        "name": "plt.show",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中调用，启动 GUI 事件循环，是交互发生的必要条件。"
+      },
+      {
+        "name": "DraggableBase.on_release",
+        "kind": "method",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Traceback 显示错误发生在 on_release 方法中，是错误传播路径的一部分。"
+      },
+      {
+        "name": "DraggableBase._check_still_parented",
+        "kind": "method",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Traceback 显示 on_release 调用了 _check_still_parented，后者可能调用了 disconnect。"
+      },
+      {
+        "name": "DraggableBase.disconnect",
+        "kind": "method",
+        "source_path": "lib/matplotlib/offsetbox.py",
+        "reason": "Traceback 显示 _check_still_parented 可能调用 disconnect，而 disconnect 中访问了 self.canvas。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/offsetbox.py",
+        "object": "DraggableBase",
+        "lines": "1543-1568",
+        "reason": "Traceback 指向 offsetbox.py 的 on_release、_check_still_parented 和 disconnect 方法，错误发生在访问 self.canvas 时，表明 self.ref_artist.figure 可能为 None，导致 canvas 属性访问失败。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_picking_does_not_stale",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "该测试涉及散点图的拾取（picking）和事件处理，与 Issue 中点击数据点触发事件的场景相似。",
+        "reusable_parts": [
+          "创建散点图：ax.scatter([0], [0], [1000], picker=True)",
+          "模拟鼠标事件：mouse_event = SimpleNamespace(...)",
+          "调用 fig.pick(mouse_event)",
+          "使用 assert 检查状态（fig.stale）"
+        ],
+        "possible_gap": "该测试模拟鼠标事件并调用 fig.pick，但 Issue 涉及的是通过 mplcursors 和 GUI 交互（点击）触发的事件链，且错误发生在 offsetbox 模块的释放（release）回调中。测试没有使用 mplcursors，也没有触发 on_release 路径。"
+      },
+      {
+        "test_name": "test_scatter_3d_projection_conservation",
+        "test_file": "lib/mpl_toolkits/mplot3d/tests/test_art3d.py",
+        "why_relevant": "该测试创建散点图，模拟鼠标事件（MouseEvent），并检查 contains 和索引，涉及交互和事件处理。",
+        "reusable_parts": [
+          "创建散点图：scatter_collection = ax.scatter(x, x, x)",
+          "创建鼠标事件：event = MouseEvent(...)",
+          "检查拾取结果：contains, ind = scatter_collection.contains(event)",
+          "使用 assert 验证结果"
+        ],
+        "possible_gap": "该测试在 3D 投影上下文中，使用自定义的 MouseEvent 并直接调用 contains 方法。Issue 错误涉及 mplcursors 和 offsetbox.DraggableBase 的生命周期管理（ref_artist.figure 为 None），测试没有覆盖这个回调链。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用 fig.pick 或 scatter_collection.contains 来模拟拾取。",
+        "target_pattern": "需要模拟通过 mplcursors 附加的交互，触发完整的事件链（包括 press、release），最终导致 DraggableBase.on_release 被调用。",
+        "reason": "Issue 错误发生在 on_release 回调中，需要触发该回调路径。仅模拟拾取可能不足以触发完整的拖放/释放生命周期。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中散点图集合（scatter collection）和图形（figure）保持有效引用。",
+        "target_pattern": "需要使 DraggableBase.ref_artist.figure 在某个时刻变为 None（可能在事件处理过程中被清理或分离）。",
+        "reason": "Traceback 表明 self.ref_artist.figure 为 None，导致 canvas 属性访问失败。需要复现导致此状态变化的操作序列。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试通常使用默认或测试后端。",
+        "target_pattern": "使用与 Issue 相同的后端（QtAgg）和 matplotlib 版本（3.7.1）。",
+        "reason": "Issue 明确指出在 matplotlib 3.7.1 和 QtAgg 后端下出现，且 3.7.0 正常，表明版本和后端是触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获 AttributeError 并检查错误消息是否包含 'NoneType' object has no attribute 'canvas'。",
+        "reason": "Issue 的核心错误是 AttributeError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在事件回调（如 on_release）中检查 self.ref_artist.figure 的值。",
+        "reason": "Traceback 表明错误源于 ref_artist.figure 为 None，观测此状态有助于理解缺陷触发时机。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "检查是否有任何与图形生命周期或艺术家（artist）分离相关的警告。",
+        "reason": "图形或艺术家被意外清理可能导致 ref_artist.figure 为 None。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在模拟点击数据点操作后，不应抛出 AttributeError: 'NoneType' object has no attribute 'canvas'。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的 traceback 字符串或行号，因为它们可能因版本或环境变化而改变。",
+        "reason": "Issue 的核心是特定异常不应出现。检查错误消息片段比检查完整字符串更稳定。"
+      },
+      {
+        "assertion_goal": "事件处理回调（如 on_release）应能正常执行而不因 None 引用而中断。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言具体的内部属性值（如 ref_artist.figure 的确切对象 ID），除非它们对语义至关重要。",
+        "reason": "修复后，回调应能安全处理可能的状态（包括 figure 存在与否），而不崩溃。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 QtAgg 后端，并可能模拟 GUI 事件循环。考虑使用适当的测试标记（如 @pytest.mark.backend('QtAgg')）和 mock 或非阻塞模式运行 show()。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 mplcursors 库（如果测试环境中可用），或模拟其行为以触发相关事件回调。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "参考相关测试中创建散点图和模拟鼠标事件的模式。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "mplcursors.cursor() 内部如何与 matplotlib 的 DraggableBase 交互的具体细节。",
+      "导致 ref_artist.figure 变为 None 的确切操作序列（是点击特定次数？还是特定顺序？）。",
+      "是否需要在测试中实际打开 GUI 窗口，或者可以通过编程方式模拟完整的事件序列。",
+      "matplotlib 3.7.1 相对于 3.7.0 在 offsetbox 或相关模块中的具体变化是什么。"
+    ]
+  }
+}

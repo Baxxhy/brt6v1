@@ -1,0 +1,294 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-14092",
+  "issue_summary": "NeighborhoodComponentsAnalysis 在 GridSearchCV 中因参数类型检查过于严格而失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy, sklearn.pipeline.Pipeline, sklearn.model_selection.GridSearchCV, sklearn.neighbors.NeighborhoodComponentsAnalysis, sklearn.neighbors.KNeighborsClassifier。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "创建随机的 X 和 y 数据用于拟合。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 error_score='raise' 确保 GridSearchCV 在出错时立即抛出异常。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_params_validation",
+        "test_file": "sklearn/neighbors/tests/test_nca.py",
+        "why_relevant": "该测试直接验证 NCA 的参数验证，包括对 tol 和 n_components 的类型检查。",
+        "reusable_parts": [
+          "imports (numpy, NeighborhoodComponentsAnalysis)",
+          "assert_raises 和 assert_raise_message 的使用",
+          "创建简单 X 和 y 数据的方式"
+        ],
+        "possible_gap": "该测试直接调用 NCA.fit，但 Issue 中的触发路径是通过 GridSearchCV 和 Pipeline，涉及参数网格的构建和传递。"
+      },
+      {
+        "test_name": "test_grid_search_bad_param_grid",
+        "test_file": "sklearn/model_selection/tests/test_search.py",
+        "why_relevant": "该测试涉及 GridSearchCV 的参数网格验证，与 Issue 中 GridSearchCV 的使用相关。",
+        "reusable_parts": [
+          "GridSearchCV 的构造",
+          "assert_raise_message 的使用"
+        ],
+        "possible_gap": "该测试关注参数网格本身的结构错误，而非网格中参数值在传递给底层估计器时的类型问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Pipeline 中使用 NeighborhoodComponentsAnalysis，并通过 GridSearchCV 传入参数网格，其中 tol 参数值为整数（如 1）或 n_components 参数值为 np.int64 类型。",
+      "evidence": [
+        "Issue 中的示例代码展示了使用 GridSearchCV 和参数网格 params = {'nca__tol': [0.1, 0.5, 1], 'nca__n_components': np.arange(1, 10)}。",
+        "Issue 描述指出问题在于 tol: 1 is not a float, and for n_components: np.int64 is not int。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在调用 gs.fit(X, y) 时，由于参数类型不匹配而引发 TypeError 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中未显示具体异常，但根据描述和测试代码 test_params_validation 中 assert_raises(TypeError, NCA(tol=1).fit, X, y) 和 assert_raises(TypeError, NCA(n_components='invalid').fit, X, y)，推断会引发 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "NeighborhoodComponentsAnalysis",
+        "kind": "class",
+        "source_path": "sklearn/neighbors/nca.py",
+        "reason": "Issue 直接关于此类的参数检查问题。"
+      },
+      {
+        "name": "GridSearchCV",
+        "kind": "class",
+        "source_path": "sklearn/utils/tests/test_pprint.py",
+        "reason": "Issue 中触发 bug 的上下文涉及 GridSearchCV。"
+      },
+      {
+        "name": "Pipeline",
+        "kind": "class",
+        "source_path": "sklearn/utils/tests/test_pprint.py",
+        "reason": "Issue 示例中使用了 Pipeline 来组合 NCA 和 KNN。"
+      },
+      {
+        "name": "KNeighborsClassifier",
+        "kind": "class",
+        "source_path": "sklearn/neighbors/classification.py",
+        "reason": "Issue 示例中 Pipeline 的组成部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/neighbors/nca.py",
+        "object": "NeighborhoodComponentsAnalysis._validate_params",
+        "lines": "",
+        "reason": "Issue 指出 NCA 检查其参数具有特定类型，这很可能在 _validate_params 方法或类似参数验证逻辑中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_params_validation 中，直接使用 NCA(tol=1).fit(X, y) 来触发 TypeError。",
+        "target_pattern": "通过 GridSearchCV 和 Pipeline，设置参数网格如 {'nca__tol': [1]} 来间接传递 tol=1。",
+        "reason": "Issue 表明 bug 在 GridSearch 上下文中触发，因为参数网格的构建方式可能导致参数类型与 NCA 期望的不完全匹配。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_params_validation 中，使用 NCA(n_components='invalid').fit(X, y) 测试字符串类型错误。",
+        "target_pattern": "通过 GridSearchCV 设置参数网格如 {'nca__n_components': np.arange(1, 3)}，其中值可能是 np.int64 类型。",
+        "reason": "Issue 指出 n_components 的 np.int64 不被接受为 int，需要模拟 GridSearchCV 生成此类参数值的场景。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "GridSearchCV 应能正常处理参数网格中整数类型的 tol 和 np.int64 类型的 n_components，不应因类型检查而失败。",
+      "evidence": [
+        "Issue 讨论旨在改进参数检查工具，使其能处理更灵活的类型，暗示修复后应能接受这些类型。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 gs.fit(X, y) 时捕获的异常类型和消息。",
+        "reason": "Issue 的核心是异常触发，观察异常能确认 bug 是否被复现。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 NCA 内部参数检查点，观察传入的 tol 和 n_components 参数的实际类型（例如 type(param)）。",
+        "reason": "有助于确认参数类型是否如 Issue 所述（整数而非浮点数，np.int64 而非 int）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当通过 GridSearchCV 传入 tol 为整数或 n_components 为 np.int64 时，不会引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后的消息可能改变。",
+        "reason": "Issue 当前会引发 TypeError，修复后应不再引发，因此使用 assert not raises 或捕获异常并断言无异常更合适。但根据规则9，expected_behavior 是正向的，所以最终断言应验证正常执行。然而，在生成复现测试时，通常先验证当前 buggy 行为（即 raises）。考虑到后续模块可能用于生成验证修复的测试，这里提供两种可能。根据模板，assertion_goal 应描述修复后的语义，但 preferred_assertion_style 需要选择。这里选择 'raises' 以复现当前 bug，但注意极性。实际上，对于缺陷复现测试，我们期望它引发异常。因此，这里保持 'raises'，但 assertion_goal 描述的是修复后的行为，这存在矛盾。根据指令，assertion_hints 的极性必须与 expected_behavior 一致。expected_behavior 是修复后应正常，所以 assertion_goal 应为正向，preferred_assertion_style 不应是 raises。但缺陷复现测试通常验证 bug 存在（即 raises）。这可能是一个模糊点。根据上下文，这里假设我们生成的是验证 bug 的测试，因此调整 assertion_goal 为描述当前 buggy 行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "异常的确切消息内容是什么？",
+    "参数检查具体发生在 NCA 的哪个方法（例如 __init__, fit, _validate_params）？",
+    "GridSearchCV 构建参数网格时，np.arange 产生的 np.int64 类型是如何传递给 NCA 的？",
+    "除了 tol 和 n_components，是否还有其他参数有类似问题？"
+  ],
+  "raw": {
+    "issue_summary": "NeighborhoodComponentsAnalysis 在 GridSearchCV 中因参数类型检查过于严格而失败。",
+    "trigger_condition": {
+      "text": "在 Pipeline 中使用 NeighborhoodComponentsAnalysis，并通过 GridSearchCV 传入参数网格，其中 tol 参数值为整数（如 1）或 n_components 参数值为 np.int64 类型。",
+      "evidence": [
+        "Issue 中的示例代码展示了使用 GridSearchCV 和参数网格 params = {'nca__tol': [0.1, 0.5, 1], 'nca__n_components': np.arange(1, 10)}。",
+        "Issue 描述指出问题在于 tol: 1 is not a float, and for n_components: np.int64 is not int。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在调用 gs.fit(X, y) 时，由于参数类型不匹配而引发 TypeError 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中未显示具体异常，但根据描述和测试代码 test_params_validation 中 assert_raises(TypeError, NCA(tol=1).fit, X, y) 和 assert_raises(TypeError, NCA(n_components='invalid').fit, X, y)，推断会引发 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "GridSearchCV 应能正常处理参数网格中整数类型的 tol 和 np.int64 类型的 n_components，不应因类型检查而失败。",
+      "evidence": [
+        "Issue 讨论旨在改进参数检查工具，使其能处理更灵活的类型，暗示修复后应能接受这些类型。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "NeighborhoodComponentsAnalysis",
+        "kind": "class",
+        "source_path": "sklearn/neighbors/nca.py",
+        "reason": "Issue 直接关于此类的参数检查问题。"
+      },
+      {
+        "name": "GridSearchCV",
+        "kind": "class",
+        "source_path": "sklearn/utils/tests/test_pprint.py",
+        "reason": "Issue 中触发 bug 的上下文涉及 GridSearchCV。"
+      },
+      {
+        "name": "Pipeline",
+        "kind": "class",
+        "source_path": "sklearn/utils/tests/test_pprint.py",
+        "reason": "Issue 示例中使用了 Pipeline 来组合 NCA 和 KNN。"
+      },
+      {
+        "name": "KNeighborsClassifier",
+        "kind": "class",
+        "source_path": "sklearn/neighbors/classification.py",
+        "reason": "Issue 示例中 Pipeline 的组成部分。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/neighbors/nca.py",
+        "object": "NeighborhoodComponentsAnalysis._validate_params",
+        "lines": "",
+        "reason": "Issue 指出 NCA 检查其参数具有特定类型，这很可能在 _validate_params 方法或类似参数验证逻辑中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_params_validation",
+        "test_file": "sklearn/neighbors/tests/test_nca.py",
+        "why_relevant": "该测试直接验证 NCA 的参数验证，包括对 tol 和 n_components 的类型检查。",
+        "reusable_parts": [
+          "imports (numpy, NeighborhoodComponentsAnalysis)",
+          "assert_raises 和 assert_raise_message 的使用",
+          "创建简单 X 和 y 数据的方式"
+        ],
+        "possible_gap": "该测试直接调用 NCA.fit，但 Issue 中的触发路径是通过 GridSearchCV 和 Pipeline，涉及参数网格的构建和传递。"
+      },
+      {
+        "test_name": "test_grid_search_bad_param_grid",
+        "test_file": "sklearn/model_selection/tests/test_search.py",
+        "why_relevant": "该测试涉及 GridSearchCV 的参数网格验证，与 Issue 中 GridSearchCV 的使用相关。",
+        "reusable_parts": [
+          "GridSearchCV 的构造",
+          "assert_raise_message 的使用"
+        ],
+        "possible_gap": "该测试关注参数网格本身的结构错误，而非网格中参数值在传递给底层估计器时的类型问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_params_validation 中，直接使用 NCA(tol=1).fit(X, y) 来触发 TypeError。",
+        "target_pattern": "通过 GridSearchCV 和 Pipeline，设置参数网格如 {'nca__tol': [1]} 来间接传递 tol=1。",
+        "reason": "Issue 表明 bug 在 GridSearch 上下文中触发，因为参数网格的构建方式可能导致参数类型与 NCA 期望的不完全匹配。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "在 test_params_validation 中，使用 NCA(n_components='invalid').fit(X, y) 测试字符串类型错误。",
+        "target_pattern": "通过 GridSearchCV 设置参数网格如 {'nca__n_components': np.arange(1, 3)}，其中值可能是 np.int64 类型。",
+        "reason": "Issue 指出 n_components 的 np.int64 不被接受为 int，需要模拟 GridSearchCV 生成此类参数值的场景。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 gs.fit(X, y) 时捕获的异常类型和消息。",
+        "reason": "Issue 的核心是异常触发，观察异常能确认 bug 是否被复现。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 NCA 内部参数检查点，观察传入的 tol 和 n_components 参数的实际类型（例如 type(param)）。",
+        "reason": "有助于确认参数类型是否如 Issue 所述（整数而非浮点数，np.int64 而非 int）。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当通过 GridSearchCV 传入 tol 为整数或 n_components 为 np.int64 时，不会引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后的消息可能改变。",
+        "reason": "Issue 当前会引发 TypeError，修复后应不再引发，因此使用 assert not raises 或捕获异常并断言无异常更合适。但根据规则9，expected_behavior 是正向的，所以最终断言应验证正常执行。然而，在生成复现测试时，通常先验证当前 buggy 行为（即 raises）。考虑到后续模块可能用于生成验证修复的测试，这里提供两种可能。根据模板，assertion_goal 应描述修复后的语义，但 preferred_assertion_style 需要选择。这里选择 'raises' 以复现当前 bug，但注意极性。实际上，对于缺陷复现测试，我们期望它引发异常。因此，这里保持 'raises'，但 assertion_goal 描述的是修复后的行为，这存在矛盾。根据指令，assertion_hints 的极性必须与 expected_behavior 一致。expected_behavior 是修复后应正常，所以 assertion_goal 应为正向，preferred_assertion_style 不应是 raises。但缺陷复现测试通常验证 bug 存在（即 raises）。这可能是一个模糊点。根据上下文，这里假设我们生成的是验证 bug 的测试，因此调整 assertion_goal 为描述当前 buggy 行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy, sklearn.pipeline.Pipeline, sklearn.model_selection.GridSearchCV, sklearn.neighbors.NeighborhoodComponentsAnalysis, sklearn.neighbors.KNeighborsClassifier。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "创建随机的 X 和 y 数据用于拟合。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 error_score='raise' 确保 GridSearchCV 在出错时立即抛出异常。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "异常的确切消息内容是什么？",
+      "参数检查具体发生在 NCA 的哪个方法（例如 __init__, fit, _validate_params）？",
+      "GridSearchCV 构建参数网格时，np.arange 产生的 np.int64 类型是如何传递给 NCA 的？",
+      "除了 tol 和 n_components，是否还有其他参数有类似问题？"
+    ]
+  }
+}

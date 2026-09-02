@@ -1,0 +1,356 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12209",
+  "issue_summary": "当主键字段有默认值且模型实例保存时显式指定了主键值时，Django 3.0 的行为从 INSERT+UPDATE 变为两次 INSERT，导致第二次失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个具有 UUIDField(primary_key=True, default=uuid4) 和另一个字段（如 CharField）的测试模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用支持事务的 TestCase（如 django.test.TestCase）以确保测试隔离。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库以观察 SQL 查询（例如使用 connection.queries）。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UpdateOrCreateTestsWithManualPKs.test_create_with_duplicate_primary_key",
+        "test_file": "tests/get_or_create/tests.py",
+        "why_relevant": "测试了当指定已存在主键时的行为（引发 IntegrityError），涉及主键冲突场景。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "使用 ManualPrimaryKeyTest 模型",
+          "assertRaises(IntegrityError)",
+          "assertEqual 验证数据未变"
+        ],
+        "possible_gap": "该测试使用 update_or_create 方法，而非直接调用模型实例的 save() 方法；且主键字段可能没有默认值。"
+      },
+      {
+        "test_name": "TestAsPrimaryKey.test_uuid_pk_on_bulk_create",
+        "test_file": "tests/model_fields/test_uuid.py",
+        "why_relevant": "测试了 UUID 作为主键的模型创建，涉及主键生成和保存。",
+        "reusable_parts": [
+          "PrimaryKeyUUIDModel 模型",
+          "UUIDField 作为主键",
+          "bulk_create 和 filter/exists 断言"
+        ],
+        "possible_gap": "测试 focus 在 bulk_create，而非单个实例的 save() 行为；且未测试显式设置已存在主键值的情况。"
+      },
+      {
+        "test_name": "CreateDefaultSiteTests.test_save_another",
+        "test_file": "tests/sites_tests/tests.py",
+        "why_relevant": "测试了在保存一个具有显式 ID 的对象后立即保存另一个对象，涉及序列重置和主键处理。",
+        "reusable_parts": [
+          "Site 模型",
+          "直接调用 .save() 方法",
+          "数据库序列处理上下文"
+        ],
+        "possible_gap": "测试 focus 在序列数据库（PostgreSQL/Oracle），且 Site 模型的主键可能没有默认值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个具有默认主键（如 UUIDField(default=uuid4)）的模型实例，然后使用相同主键值创建另一个实例并调用 save()。",
+      "evidence": [
+        "Issue 中描述了 s0 = Sample.objects.create(); s1 = Sample(pk=s0.pk, name='Test 1'); s1.save() 的步骤。",
+        "Issue 提到如果从 id 字段移除 default=uuid4，行为也会改变。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 Django 3.0 中，s1.save() 导致第二次 INSERT 操作（通常会因主键冲突而失败），而在 Django 2.2 及更早版本中，这会导致 INSERT 后跟 UPDATE。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 明确指出：'In Django 2.2 and earlier, the following commands would result in an INSERT followed by an UPDATE: ... However, in Django 3.0, this results in two INSERTs (naturally the second one fails).'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Sample.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心操作是调用模型实例的 save() 方法。"
+      },
+      {
+        "name": "Sample.objects.create",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于创建初始对象 s0。"
+      },
+      {
+        "name": "models.UUIDField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中模型的主键字段类型。"
+      },
+      {
+        "name": "models.CharField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中模型的另一个字段。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/base.py",
+        "object": "Model.save_base",
+        "lines": "",
+        "reason": "负责决定是执行 INSERT 还是 UPDATE 的核心逻辑，Issue 提到与 ticket #29260 相关，该 ticket 可能涉及 save 逻辑。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field",
+        "lines": "",
+        "reason": "主键字段的默认值处理可能影响实例是否被视为“已存在”。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中创建新对象时通常不显式设置主键，或设置一个全新的主键值。",
+        "target_pattern": "创建新对象时，显式设置其主键值为一个已存在于数据库中的值（来自另一个对象）。",
+        "reason": "Issue 表明，当对象具有显式主键值且该值已存在时，save() 的行为发生了变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用没有默认值的主键字段。",
+        "target_pattern": "使用具有默认值（如 default=uuid4）的主键字段。",
+        "reason": "Issue 指出，当主键字段有默认值时行为会改变，且移除 default=uuid4 也会改变行为。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当保存一个显式设置了主键值（该值已存在于数据库中）且主键字段有默认值的模型实例时，应执行 UPDATE 操作而非 INSERT 操作，以保持向后兼容性。",
+      "evidence": [
+        "Issue 中推测：'Perhaps the intention was to only change the behaviour if an explicit pk value was not set on the model instance being saved? (At least, that would be more backwards-compatible behaviour...)'",
+        "Issue 描述了 Django 2.2 及更早版本的预期行为（INSERT 后 UPDATE）。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 s1.save() 调用期间执行的 SQL 查询（INSERT 或 UPDATE）。",
+        "reason": "Issue 的核心是 SQL 操作顺序从 INSERT+UPDATE 变为两次 INSERT。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "s1.save() 是否引发 IntegrityError（或其他数据库异常）。",
+        "reason": "第二次 INSERT 预期会因主键冲突而失败。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "s1.save() 调用前后，数据库中具有给定主键的对象的 name 字段值。",
+        "reason": "在预期行为（UPDATE）下，name 应更新；在错误行为（INSERT 失败）下，name 应保持不变或引发异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当保存一个具有已存在主键值的实例时，数据库中的相应记录被更新（而非插入失败或创建重复项）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 SQL 查询字符串，因为具体 SQL 可能因数据库后端而异。",
+        "reason": "Issue 关注的是语义行为（UPDATE vs INSERT），而非具体的 SQL 实现。"
+      },
+      {
+        "assertion_goal": "验证保存操作未引发 IntegrityError（在修复后的预期行为下）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言异常消息的完整文本，除非 Issue 明确给出。",
+        "reason": "当前错误行为会导致 IntegrityError；修复后应正常完成。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切源码位置（仅从提供的检索片段无法直接定位）。",
+    "除了 UUIDField，其他具有默认值的主键字段类型（如 AutoField 与默认值）是否也受影响。",
+    "loaddata 命令的具体影响细节（仅从 Issue 提及，但未提供具体复现步骤）。",
+    "Django 3.0 中引入此行为变化的具体代码变更。"
+  ],
+  "raw": {
+    "issue_summary": "当主键字段有默认值且模型实例保存时显式指定了主键值时，Django 3.0 的行为从 INSERT+UPDATE 变为两次 INSERT，导致第二次失败。",
+    "trigger_condition": {
+      "text": "创建一个具有默认主键（如 UUIDField(default=uuid4)）的模型实例，然后使用相同主键值创建另一个实例并调用 save()。",
+      "evidence": [
+        "Issue 中描述了 s0 = Sample.objects.create(); s1 = Sample(pk=s0.pk, name='Test 1'); s1.save() 的步骤。",
+        "Issue 提到如果从 id 字段移除 default=uuid4，行为也会改变。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 Django 3.0 中，s1.save() 导致第二次 INSERT 操作（通常会因主键冲突而失败），而在 Django 2.2 及更早版本中，这会导致 INSERT 后跟 UPDATE。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 明确指出：'In Django 2.2 and earlier, the following commands would result in an INSERT followed by an UPDATE: ... However, in Django 3.0, this results in two INSERTs (naturally the second one fails).'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当保存一个显式设置了主键值（该值已存在于数据库中）且主键字段有默认值的模型实例时，应执行 UPDATE 操作而非 INSERT 操作，以保持向后兼容性。",
+      "evidence": [
+        "Issue 中推测：'Perhaps the intention was to only change the behaviour if an explicit pk value was not set on the model instance being saved? (At least, that would be more backwards-compatible behaviour...)'",
+        "Issue 描述了 Django 2.2 及更早版本的预期行为（INSERT 后 UPDATE）。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Sample.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心操作是调用模型实例的 save() 方法。"
+      },
+      {
+        "name": "Sample.objects.create",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于创建初始对象 s0。"
+      },
+      {
+        "name": "models.UUIDField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中模型的主键字段类型。"
+      },
+      {
+        "name": "models.CharField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中模型的另一个字段。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/base.py",
+        "object": "Model.save_base",
+        "lines": "",
+        "reason": "负责决定是执行 INSERT 还是 UPDATE 的核心逻辑，Issue 提到与 ticket #29260 相关，该 ticket 可能涉及 save 逻辑。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field",
+        "lines": "",
+        "reason": "主键字段的默认值处理可能影响实例是否被视为“已存在”。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UpdateOrCreateTestsWithManualPKs.test_create_with_duplicate_primary_key",
+        "test_file": "tests/get_or_create/tests.py",
+        "why_relevant": "测试了当指定已存在主键时的行为（引发 IntegrityError），涉及主键冲突场景。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "使用 ManualPrimaryKeyTest 模型",
+          "assertRaises(IntegrityError)",
+          "assertEqual 验证数据未变"
+        ],
+        "possible_gap": "该测试使用 update_or_create 方法，而非直接调用模型实例的 save() 方法；且主键字段可能没有默认值。"
+      },
+      {
+        "test_name": "TestAsPrimaryKey.test_uuid_pk_on_bulk_create",
+        "test_file": "tests/model_fields/test_uuid.py",
+        "why_relevant": "测试了 UUID 作为主键的模型创建，涉及主键生成和保存。",
+        "reusable_parts": [
+          "PrimaryKeyUUIDModel 模型",
+          "UUIDField 作为主键",
+          "bulk_create 和 filter/exists 断言"
+        ],
+        "possible_gap": "测试 focus 在 bulk_create，而非单个实例的 save() 行为；且未测试显式设置已存在主键值的情况。"
+      },
+      {
+        "test_name": "CreateDefaultSiteTests.test_save_another",
+        "test_file": "tests/sites_tests/tests.py",
+        "why_relevant": "测试了在保存一个具有显式 ID 的对象后立即保存另一个对象，涉及序列重置和主键处理。",
+        "reusable_parts": [
+          "Site 模型",
+          "直接调用 .save() 方法",
+          "数据库序列处理上下文"
+        ],
+        "possible_gap": "测试 focus 在序列数据库（PostgreSQL/Oracle），且 Site 模型的主键可能没有默认值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中创建新对象时通常不显式设置主键，或设置一个全新的主键值。",
+        "target_pattern": "创建新对象时，显式设置其主键值为一个已存在于数据库中的值（来自另一个对象）。",
+        "reason": "Issue 表明，当对象具有显式主键值且该值已存在时，save() 的行为发生了变化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用没有默认值的主键字段。",
+        "target_pattern": "使用具有默认值（如 default=uuid4）的主键字段。",
+        "reason": "Issue 指出，当主键字段有默认值时行为会改变，且移除 default=uuid4 也会改变行为。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 s1.save() 调用期间执行的 SQL 查询（INSERT 或 UPDATE）。",
+        "reason": "Issue 的核心是 SQL 操作顺序从 INSERT+UPDATE 变为两次 INSERT。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "s1.save() 是否引发 IntegrityError（或其他数据库异常）。",
+        "reason": "第二次 INSERT 预期会因主键冲突而失败。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "s1.save() 调用前后，数据库中具有给定主键的对象的 name 字段值。",
+        "reason": "在预期行为（UPDATE）下，name 应更新；在错误行为（INSERT 失败）下，name 应保持不变或引发异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当保存一个具有已存在主键值的实例时，数据库中的相应记录被更新（而非插入失败或创建重复项）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 SQL 查询字符串，因为具体 SQL 可能因数据库后端而异。",
+        "reason": "Issue 关注的是语义行为（UPDATE vs INSERT），而非具体的 SQL 实现。"
+      },
+      {
+        "assertion_goal": "验证保存操作未引发 IntegrityError（在修复后的预期行为下）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言异常消息的完整文本，除非 Issue 明确给出。",
+        "reason": "当前错误行为会导致 IntegrityError；修复后应正常完成。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个具有 UUIDField(primary_key=True, default=uuid4) 和另一个字段（如 CharField）的测试模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用支持事务的 TestCase（如 django.test.TestCase）以确保测试隔离。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库以观察 SQL 查询（例如使用 connection.queries）。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切源码位置（仅从提供的检索片段无法直接定位）。",
+      "除了 UUIDField，其他具有默认值的主键字段类型（如 AutoField 与默认值）是否也受影响。",
+      "loaddata 命令的具体影响细节（仅从 Issue 提及，但未提供具体复现步骤）。",
+      "Django 3.0 中引入此行为变化的具体代码变更。"
+    ]
+  }
+}

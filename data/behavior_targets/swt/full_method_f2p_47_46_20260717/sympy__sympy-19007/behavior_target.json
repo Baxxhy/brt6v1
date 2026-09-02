@@ -1,0 +1,282 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-19007",
+  "issue_summary": "BlockMatrix 在索引访问时错误地简化了表达式，导致可能来自不同子块的元素被错误地表示为仅来自第一个子块。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 和相关的矩阵表达式类（MatrixSymbol, BlockMatrix, symbols）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在现有的测试类中运行，或者作为一个独立的测试函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_BlockMatrix",
+        "test_file": "sympy/matrices/expressions/tests/test_blockmatrix.py",
+        "why_relevant": "它测试了 BlockMatrix 的基本操作，包括形状、转置和乘法，并使用了 MatrixSymbol 和符号维度。",
+        "reusable_parts": [
+          "imports (MatrixSymbol, BlockMatrix, symbols)",
+          "使用符号维度 (n, m, k, l)",
+          "BlockMatrix 的构造",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试没有使用符号索引（如 i）访问 BlockMatrix 的元素，而这正是触发缺陷的条件。"
+      },
+      {
+        "test_name": "test_indexing",
+        "test_file": "sympy/matrices/expressions/tests/test_matexpr.py",
+        "why_relevant": "它直接测试了 MatrixSymbol 的索引访问，包括使用符号索引（如 l, k）。",
+        "reusable_parts": [
+          "MatrixSymbol 的索引访问语法 A[i, j]",
+          "使用符号索引"
+        ],
+        "possible_gap": "它测试的是普通 MatrixSymbol，而不是 BlockMatrix。需要将索引访问模式应用到 BlockMatrix 上。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个包含不同大小矩阵符号的 BlockMatrix，并使用一个符号索引（如 i）访问其元素。",
+      "evidence": [
+        "Issue 中代码：C = BlockMatrix([[A], [B]]) 和 C[i, 0]"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "C[i, 0] 被错误地简化为 (A)[i, 0]，而实际上该元素可能来自 A 或 B，具体取决于 i 的值。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 输出：C[i, 0] is (A)[i, 0] 和 Issue 描述：`(A)[i, 0]` is the wrong here."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BlockMatrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 中创建了 BlockMatrix 对象，其索引行为是问题的核心。"
+      },
+      {
+        "name": "__getitem__",
+        "kind": "method",
+        "source_path": "sympy/matrices/expressions/matexpr.py",
+        "reason": "源码片段 4 显示 MatrixExpr.__getitem__ 最终调用 _entry(i, j)，这是索引访问的入口。"
+      },
+      {
+        "name": "_entry",
+        "kind": "method",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "BlockMatrix 的 _entry 方法（在源码片段 3 中列出）负责计算特定索引的元素，可能是缺陷所在。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/expressions/blockmatrix.py",
+        "object": "BlockMatrix._entry",
+        "lines": "",
+        "reason": "该方法负责计算 BlockMatrix 在给定索引处的元素表达式，可能错误地简化了涉及符号索引的表达式。"
+      },
+      {
+        "path": "sympy/matrices/expressions/matexpr.py",
+        "object": "MatrixExpr.__getitem__",
+        "lines": "285-318",
+        "reason": "这是所有 MatrixExpr 索引访问的通用方法，它调用 _entry，可能与缺陷的触发路径相关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中通常使用具体整数索引（如 A[1,2]）或已知符号（如 A[l, k]）访问 MatrixSymbol。",
+        "target_pattern": "使用 BlockMatrix 和符号索引（如 C[i, 0]）进行访问，其中索引 i 是符号，且 BlockMatrix 包含多个不同大小的子块。",
+        "reason": "Issue 表明，当使用符号索引访问由多个子块组成的 BlockMatrix 时，会触发错误的简化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常使用方阵或规则形状的 BlockMatrix。",
+        "target_pattern": "创建非方阵的 BlockMatrix，其子块在索引维度上大小不同（如 [[A], [B]]，其中 A 是 1x1，B 是 n x 1）。",
+        "reason": "Issue 中的 BlockMatrix 在行方向上有两个不同高度的子块，这可能是触发错误简化逻辑的条件。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "C[i, 0] 的表达式应正确反映其可能来自 A 或 B，不应被过早简化为仅来自 A。",
+      "evidence": [
+        "Issue 描述：`C[i, 0]` should not be simplified as that element may come from either `A` or `B`."
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "C[i, 0] 的返回值（一个 SymPy 表达式）",
+        "reason": "Issue 的核心是返回的表达式错误。观察其形式（是否错误地简化为仅 (A)[i, 0]）可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(C[i, 0]) 或 str(C[i, 0])",
+        "reason": "Issue 通过 pprint 显示了错误的输出。观察字符串表示可以方便地与预期行为对比。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "C[i, 0] 的表达式不应等于 (A)[i, 0]，并且应包含对索引 i 和子块边界的条件逻辑。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的字符串相等，因为具体的正确表达式形式可能复杂且未在 Issue 中指定。",
+        "reason": "Issue 明确指出 (A)[i, 0] 是错误的。断言返回值不包含这个错误的简化片段是稳定且与 Issue 对齐的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "BlockMatrix._entry 方法的确切实现逻辑和导致错误简化的具体代码位置。",
+    "修复后 C[i, 0] 的正确表达式具体应该是什么形式（例如，是否应为 Piecewise 或其他结构）。",
+    "该缺陷是否也影响其他类型的索引（如切片）或其他 BlockMatrix 配置。"
+  ],
+  "raw": {
+    "issue_summary": "BlockMatrix 在索引访问时错误地简化了表达式，导致可能来自不同子块的元素被错误地表示为仅来自第一个子块。",
+    "trigger_condition": {
+      "text": "创建一个包含不同大小矩阵符号的 BlockMatrix，并使用一个符号索引（如 i）访问其元素。",
+      "evidence": [
+        "Issue 中代码：C = BlockMatrix([[A], [B]]) 和 C[i, 0]"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "C[i, 0] 被错误地简化为 (A)[i, 0]，而实际上该元素可能来自 A 或 B，具体取决于 i 的值。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 输出：C[i, 0] is (A)[i, 0] 和 Issue 描述：`(A)[i, 0]` is the wrong here."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "C[i, 0] 的表达式应正确反映其可能来自 A 或 B，不应被过早简化为仅来自 A。",
+      "evidence": [
+        "Issue 描述：`C[i, 0]` should not be simplified as that element may come from either `A` or `B`."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BlockMatrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "Issue 中创建了 BlockMatrix 对象，其索引行为是问题的核心。"
+      },
+      {
+        "name": "__getitem__",
+        "kind": "method",
+        "source_path": "sympy/matrices/expressions/matexpr.py",
+        "reason": "源码片段 4 显示 MatrixExpr.__getitem__ 最终调用 _entry(i, j)，这是索引访问的入口。"
+      },
+      {
+        "name": "_entry",
+        "kind": "method",
+        "source_path": "sympy/matrices/expressions/blockmatrix.py",
+        "reason": "BlockMatrix 的 _entry 方法（在源码片段 3 中列出）负责计算特定索引的元素，可能是缺陷所在。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/expressions/blockmatrix.py",
+        "object": "BlockMatrix._entry",
+        "lines": "",
+        "reason": "该方法负责计算 BlockMatrix 在给定索引处的元素表达式，可能错误地简化了涉及符号索引的表达式。"
+      },
+      {
+        "path": "sympy/matrices/expressions/matexpr.py",
+        "object": "MatrixExpr.__getitem__",
+        "lines": "285-318",
+        "reason": "这是所有 MatrixExpr 索引访问的通用方法，它调用 _entry，可能与缺陷的触发路径相关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_BlockMatrix",
+        "test_file": "sympy/matrices/expressions/tests/test_blockmatrix.py",
+        "why_relevant": "它测试了 BlockMatrix 的基本操作，包括形状、转置和乘法，并使用了 MatrixSymbol 和符号维度。",
+        "reusable_parts": [
+          "imports (MatrixSymbol, BlockMatrix, symbols)",
+          "使用符号维度 (n, m, k, l)",
+          "BlockMatrix 的构造",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试没有使用符号索引（如 i）访问 BlockMatrix 的元素，而这正是触发缺陷的条件。"
+      },
+      {
+        "test_name": "test_indexing",
+        "test_file": "sympy/matrices/expressions/tests/test_matexpr.py",
+        "why_relevant": "它直接测试了 MatrixSymbol 的索引访问，包括使用符号索引（如 l, k）。",
+        "reusable_parts": [
+          "MatrixSymbol 的索引访问语法 A[i, j]",
+          "使用符号索引"
+        ],
+        "possible_gap": "它测试的是普通 MatrixSymbol，而不是 BlockMatrix。需要将索引访问模式应用到 BlockMatrix 上。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中通常使用具体整数索引（如 A[1,2]）或已知符号（如 A[l, k]）访问 MatrixSymbol。",
+        "target_pattern": "使用 BlockMatrix 和符号索引（如 C[i, 0]）进行访问，其中索引 i 是符号，且 BlockMatrix 包含多个不同大小的子块。",
+        "reason": "Issue 表明，当使用符号索引访问由多个子块组成的 BlockMatrix 时，会触发错误的简化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试通常使用方阵或规则形状的 BlockMatrix。",
+        "target_pattern": "创建非方阵的 BlockMatrix，其子块在索引维度上大小不同（如 [[A], [B]]，其中 A 是 1x1，B 是 n x 1）。",
+        "reason": "Issue 中的 BlockMatrix 在行方向上有两个不同高度的子块，这可能是触发错误简化逻辑的条件。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "C[i, 0] 的返回值（一个 SymPy 表达式）",
+        "reason": "Issue 的核心是返回的表达式错误。观察其形式（是否错误地简化为仅 (A)[i, 0]）可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "repr(C[i, 0]) 或 str(C[i, 0])",
+        "reason": "Issue 通过 pprint 显示了错误的输出。观察字符串表示可以方便地与预期行为对比。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "C[i, 0] 的表达式不应等于 (A)[i, 0]，并且应包含对索引 i 和子块边界的条件逻辑。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的字符串相等，因为具体的正确表达式形式可能复杂且未在 Issue 中指定。",
+        "reason": "Issue 明确指出 (A)[i, 0] 是错误的。断言返回值不包含这个错误的简化片段是稳定且与 Issue 对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 和相关的矩阵表达式类（MatrixSymbol, BlockMatrix, symbols）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在现有的测试类中运行，或者作为一个独立的测试函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "BlockMatrix._entry 方法的确切实现逻辑和导致错误简化的具体代码位置。",
+      "修复后 C[i, 0] 的正确表达式具体应该是什么形式（例如，是否应为 Piecewise 或其他结构）。",
+      "该缺陷是否也影响其他类型的索引（如切片）或其他 BlockMatrix 配置。"
+    ]
+  }
+}

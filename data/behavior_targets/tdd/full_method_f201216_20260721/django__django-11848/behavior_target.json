@@ -1,0 +1,216 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11848",
+  "issue_summary": "parse_http_date 对两位数年份的处理逻辑不符合 RFC 7231 规范，应基于当前年份动态判断而非硬编码阈值。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 parse_http_date、datetime 和 calendar 模块。测试应放在 HttpDateProcessingTests 类中。可能需要模拟或获取当前系统日期以计算动态 50 年窗口。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_parsing_rfc850",
+        "test_file": "tests/utils_tests/test_http.py",
+        "why_relevant": "它测试 parse_http_date 对 RFC850 格式（包含两位数年）的解析，与 Issue 直接相关。",
+        "reusable_parts": [
+          "导入 parse_http_date",
+          "使用 parse_http_date 并断言返回的时间戳对应正确的 datetime 对象",
+          "测试类 HttpDateProcessingTests 和 unittest.TestCase 框架"
+        ],
+        "possible_gap": "它使用的测试日期 '06-Nov-94' 在当前硬编码逻辑下（94+1900=1994）恰好是正确的，但无法触发超过 50 年窗口的动态解释问题。"
+      },
+      {
+        "test_name": "test_parsing_year_less_than_70",
+        "test_file": "tests/utils_tests/test_http.py",
+        "why_relevant": "它专门测试两位数年（小于 70）的解析，展示了当前硬编码逻辑的行为。",
+        "reusable_parts": [
+          "导入 parse_http_date",
+          "使用 parse_http_date 并断言返回的时间戳对应正确的 datetime 对象",
+          "测试类 HttpDateProcessingTests 和 unittest.TestCase 框架"
+        ],
+        "possible_gap": "它测试的是年份 '0037'（当前逻辑下为 2037），但根据 Issue，在动态 50 年窗口下，如果当前年份是 2090，年份 '37' 可能应解释为 1937 而非 2037。该测试未覆盖这种动态比较场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 parse_http_date 解析一个 RFC850 格式的日期字符串，其两位数年份距离当前年份超过 50 年（例如，在当前年份为 2024 年时，解析年份为 '74' 的日期）。",
+      "evidence": [
+        "Issue 提到 RFC 7231 规定：对于两位数年，如果日期看起来超过未来 50 年，必须解释为过去具有相同末两位的最近年份。",
+        "源码片段 1 显示当前逻辑是硬编码的：year < 70 则加 2000，否则加 1900。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "parse_http_date 返回的时间戳（纪元秒数）对应的年份错误，不符合 RFC 7231 的动态 50 年窗口规则。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 指出当前逻辑硬编码 0-69 为 2000-2069，70-99 为 1970-1999，而不是与当前年份比较。",
+        "相关测试 2 展示了当前对年份 37 的处理（加 2000 到 2037），这可能在 50 年窗口规则下不正确。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "parse_http_date",
+        "kind": "function",
+        "source_path": "django/utils/http.py",
+        "reason": "Issue 直接报告此函数的两位数年检查不正确，是缺陷的核心所在。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/http.py",
+        "object": "parse_http_date",
+        "lines": "158-191",
+        "reason": "源码片段 1 中包含硬编码的两位数年处理逻辑（year < 70 则加 2000，否则加 1900），这与 Issue 描述的问题直接对应。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的固定日期字符串，如 'Sunday, 06-Nov-94 08:49:37 GMT' 或 'Sun Nov  6 08:49:37 0037'。",
+        "target_pattern": "构造一个日期字符串，其两位数年基于当前系统日期计算，使得该年份距离当前年份超过 50 年（例如，当前是 2024 年，使用年份 '74' 应解释为 1974 而非 2074）。",
+        "reason": "当前硬编码逻辑会将 '74' 固定解释为 1974。但在动态 50 年窗口下，如果当前是 2024 年，2074 距离超过 50 年，所以 '74' 应解释为 1974（与硬编码结果一致，不会触发 bug）。需要构造一个日期，使得硬编码逻辑与动态窗口逻辑产生不同结果。例如，当前是 2090 年时，年份 '37' 硬编码为 2037，但动态窗口（超过未来50年）应解释为 1937。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "parse_http_date 应遵循 RFC 7231，对两位数年使用基于当前年份的动态 50 年窗口进行解释，返回正确的时间戳。",
+      "evidence": [
+        "Issue 引用了 RFC 7231 的规范：对于两位数年，如果日期看起来超过未来 50 年，必须解释为过去具有相同末两位的最近年份。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "parse_http_date 返回的整数时间戳，以及通过 datetime.utcfromtimestamp(parsed) 转换后的 datetime 对象的年份属性。",
+        "reason": "Issue 的核心是返回的时间戳对应的年份错误。观察解析后的年份值可以直接判断是否符合动态 50 年窗口规则。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 parse_http_date 对给定两位数年日期字符串解析后得到的年份，符合基于当前年份的动态 50 年窗口规则。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 datetime 对象与一个固定值相等，因为正确的年份依赖于动态的当前日期。应断言解析出的年份等于根据规则计算出的预期年份。",
+        "reason": "Issue 的期望行为是遵循动态规则，而非固定映射。断言计算出的预期年份更稳定，且直接对应规范要求。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 未明确给出触发 bug 的具体日期示例。需要基于当前系统日期计算一个能暴露硬编码逻辑与动态规则差异的测试用例。",
+    "RFC 7231 的动态 50 年窗口具体实现细节（例如，如何定义“当前年份”）在 Issue 和现有代码中未明确说明。",
+    "现有测试是否覆盖了 RFC1123 和 ASCTIME 格式的两位数年解析？Issue 主要提及 RFC850，但源码处理逻辑是通用的。"
+  ],
+  "raw": {
+    "issue_summary": "parse_http_date 对两位数年份的处理逻辑不符合 RFC 7231 规范，应基于当前年份动态判断而非硬编码阈值。",
+    "trigger_condition": {
+      "text": "使用 parse_http_date 解析一个 RFC850 格式的日期字符串，其两位数年份距离当前年份超过 50 年（例如，在当前年份为 2024 年时，解析年份为 '74' 的日期）。",
+      "evidence": [
+        "Issue 提到 RFC 7231 规定：对于两位数年，如果日期看起来超过未来 50 年，必须解释为过去具有相同末两位的最近年份。",
+        "源码片段 1 显示当前逻辑是硬编码的：year < 70 则加 2000，否则加 1900。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "parse_http_date 返回的时间戳（纪元秒数）对应的年份错误，不符合 RFC 7231 的动态 50 年窗口规则。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 指出当前逻辑硬编码 0-69 为 2000-2069，70-99 为 1970-1999，而不是与当前年份比较。",
+        "相关测试 2 展示了当前对年份 37 的处理（加 2000 到 2037），这可能在 50 年窗口规则下不正确。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "parse_http_date 应遵循 RFC 7231，对两位数年使用基于当前年份的动态 50 年窗口进行解释，返回正确的时间戳。",
+      "evidence": [
+        "Issue 引用了 RFC 7231 的规范：对于两位数年，如果日期看起来超过未来 50 年，必须解释为过去具有相同末两位的最近年份。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "parse_http_date",
+        "kind": "function",
+        "source_path": "django/utils/http.py",
+        "reason": "Issue 直接报告此函数的两位数年检查不正确，是缺陷的核心所在。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/http.py",
+        "object": "parse_http_date",
+        "lines": "158-191",
+        "reason": "源码片段 1 中包含硬编码的两位数年处理逻辑（year < 70 则加 2000，否则加 1900），这与 Issue 描述的问题直接对应。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_parsing_rfc850",
+        "test_file": "tests/utils_tests/test_http.py",
+        "why_relevant": "它测试 parse_http_date 对 RFC850 格式（包含两位数年）的解析，与 Issue 直接相关。",
+        "reusable_parts": [
+          "导入 parse_http_date",
+          "使用 parse_http_date 并断言返回的时间戳对应正确的 datetime 对象",
+          "测试类 HttpDateProcessingTests 和 unittest.TestCase 框架"
+        ],
+        "possible_gap": "它使用的测试日期 '06-Nov-94' 在当前硬编码逻辑下（94+1900=1994）恰好是正确的，但无法触发超过 50 年窗口的动态解释问题。"
+      },
+      {
+        "test_name": "test_parsing_year_less_than_70",
+        "test_file": "tests/utils_tests/test_http.py",
+        "why_relevant": "它专门测试两位数年（小于 70）的解析，展示了当前硬编码逻辑的行为。",
+        "reusable_parts": [
+          "导入 parse_http_date",
+          "使用 parse_http_date 并断言返回的时间戳对应正确的 datetime 对象",
+          "测试类 HttpDateProcessingTests 和 unittest.TestCase 框架"
+        ],
+        "possible_gap": "它测试的是年份 '0037'（当前逻辑下为 2037），但根据 Issue，在动态 50 年窗口下，如果当前年份是 2090，年份 '37' 可能应解释为 1937 而非 2037。该测试未覆盖这种动态比较场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的固定日期字符串，如 'Sunday, 06-Nov-94 08:49:37 GMT' 或 'Sun Nov  6 08:49:37 0037'。",
+        "target_pattern": "构造一个日期字符串，其两位数年基于当前系统日期计算，使得该年份距离当前年份超过 50 年（例如，当前是 2024 年，使用年份 '74' 应解释为 1974 而非 2074）。",
+        "reason": "当前硬编码逻辑会将 '74' 固定解释为 1974。但在动态 50 年窗口下，如果当前是 2024 年，2074 距离超过 50 年，所以 '74' 应解释为 1974（与硬编码结果一致，不会触发 bug）。需要构造一个日期，使得硬编码逻辑与动态窗口逻辑产生不同结果。例如，当前是 2090 年时，年份 '37' 硬编码为 2037，但动态窗口（超过未来50年）应解释为 1937。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "parse_http_date 返回的整数时间戳，以及通过 datetime.utcfromtimestamp(parsed) 转换后的 datetime 对象的年份属性。",
+        "reason": "Issue 的核心是返回的时间戳对应的年份错误。观察解析后的年份值可以直接判断是否符合动态 50 年窗口规则。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 parse_http_date 对给定两位数年日期字符串解析后得到的年份，符合基于当前年份的动态 50 年窗口规则。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 datetime 对象与一个固定值相等，因为正确的年份依赖于动态的当前日期。应断言解析出的年份等于根据规则计算出的预期年份。",
+        "reason": "Issue 的期望行为是遵循动态规则，而非固定映射。断言计算出的预期年份更稳定，且直接对应规范要求。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 parse_http_date、datetime 和 calendar 模块。测试应放在 HttpDateProcessingTests 类中。可能需要模拟或获取当前系统日期以计算动态 50 年窗口。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 未明确给出触发 bug 的具体日期示例。需要基于当前系统日期计算一个能暴露硬编码逻辑与动态规则差异的测试用例。",
+      "RFC 7231 的动态 50 年窗口具体实现细节（例如，如何定义“当前年份”）在 Issue 和现有代码中未明确说明。",
+      "现有测试是否覆盖了 RFC1123 和 ASCTIME 格式的两位数年解析？Issue 主要提及 RFC850，但源码处理逻辑是通用的。"
+    ]
+  }
+}

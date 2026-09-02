@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11910",
+  "issue_summary": "当重命名一个作为外键引用目标的主键字段时，迁移生成的 AlterField 操作中的 to_field 参数错误地指向了旧字段名。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用迁移测试框架，如 OperationTestBase 或 TestCase 的子类，并利用 ProjectState, ModelState, MigrationQuestioner 等工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置包含至少两个模型的场景：一个模型（ModelA）包含一个将被重命名的字段（最好是主键），另一个模型（ModelB）包含一个指向 ModelA 且使用 `to_field` 参数的外键。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或直接调用迁移自动检测逻辑 (get_changes) 或直接应用操作 (apply_operations)。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_rename_field_foreign_key_to_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试直接针对“重命名字段且该字段被外键通过 to_field 引用”的场景，与 Issue 描述高度匹配。它测试了迁移自动检测是否能正确生成 RenameField 操作并更新外键引用。",
+        "reusable_parts": [
+          "使用 ModelState 构建 before/after 状态的方法",
+          "MigrationQuestioner 的用法",
+          "assertNumberMigrations 和 assertOperationTypes/Attributes 的断言模式",
+          "外键定义中 to_field 参数的设置方式"
+        ],
+        "possible_gap": "该测试是一个“正确行为”测试，它断言 to_field 会被正确更新。它本身不会触发 Issue 中描述的 bug（to_field 未更新）。需要修改其输入或操作来复现缺陷。"
+      },
+      {
+        "test_name": "test_rename_referenced_field_state_forward",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试直接验证 RenameField.state_forwards 方法是否能正确更新引用该字段的外键（ForeignKey 和 ForeignObject）的内部状态（如 remote_field.field_name, to_fields）。这是 Issue 核心问题的底层操作。",
+        "reusable_parts": [
+          "使用 ProjectState 和 ModelState 手动构建模型状态",
+          "直接调用 operation.state_forwards",
+          "断言检查更新后的外键属性（remote_field.field_name, to_fields）",
+          "同时处理 ForeignKey 和 ForeignObject 的场景"
+        ],
+        "possible_gap": "这是一个单元测试，测试的是 state_forwards 的逻辑。Issue 可能发生在迁移文件生成（autodetector）或迁移操作序列化/反序列化阶段，而不仅仅是状态前向传播。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个模型（ModelA）的主键字段进行重命名（RenameField），该字段被另一个模型（ModelB）的外键通过 to_field 参数引用，然后生成或应用包含 RenameField 和后续 AlterField 的迁移。",
+      "evidence": [
+        "Issue 描述：ModelA.field_wrong 被重命名为 field_fixed，ModelB 有一个外键指向 ModelA 且使用了 to_field 参数。迁移操作显示 RenameField 后，AlterField 中的 to_field 参数值仍然是旧字段名 'field_wrong'。",
+        "相关测试 1 (test_rename_field_foreign_key_to_field) 展示了类似的重命名场景，但该测试期望 to_field 被正确更新。",
+        "相关测试 5 (test_rename_referenced_field_state_forward) 展示了 RenameField.state_forwards 应该更新相关外键的 remote_field.field_name、from_fields 和 to_fields。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "迁移文件中的 AlterField 操作的 to_field 参数值未更新，仍然指向重命名前的旧字段名。这可能导致数据库约束错误或运行时查询错误。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中提供的迁移代码片段：AlterField 操作的 to_field='field_wrong'，而期望应该是 to_field='field_fixed'。",
+        "相关测试 1 的断言表明，在重命名后，外键的 to_field 属性应该被更新为新的字段名 ('renamed_field')。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.RenameField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 的核心操作是重命名字段，RenameField 类负责处理重命名逻辑，其 state_forwards 或 reduce 方法可能未正确处理 to_field 的更新。"
+      },
+      {
+        "name": "migrations.AlterField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 中迁移包含一个 AlterField 操作，其 to_field 参数值错误。AlterField 的生成或反序列化可能存在问题。"
+      },
+      {
+        "name": "ModelState",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试大量使用 ModelState 来构建模型状态，这是迁移系统内部表示模型的方式，与字段引用更新密切相关。"
+      },
+      {
+        "name": "Autodetector",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 和 4 在 AutodetectorTests 中，测试迁移自动检测逻辑。Issue 可能涉及迁移自动检测生成错误操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "RenameField",
+        "lines": "274-402",
+        "reason": "RenameField 操作负责更新模型状态。Issue 表明在重命名被引用的主键字段后，相关外键的 to_field 引用未更新，这可能源于 RenameField.state_forwards 或相关的引用更新逻辑不完善。"
+      },
+      {
+        "path": "django/db/migrations/autodetector.py",
+        "object": "MigrationAutodetector",
+        "lines": "",
+        "reason": "迁移文件是由 autodetector 生成的。它可能未能正确识别重命名字段对外键 to_field 参数的影响，从而生成了错误的 AlterField 操作。相关测试 1 直接测试了 autodetector 在此场景下的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，重命名字段（field -> renamed_field）和外键 to_field 更新是作为同一个迁移检测场景的一部分，且断言 to_field 被正确更新。",
+        "target_pattern": "模拟 Issue 场景：先有一个包含 to_field 引用的外键，然后重命名被引用的字段。变异点在于让测试检查生成的迁移操作中 AlterField 的 to_field 参数值，或者检查在应用 RenameField 后，相关外键的 state 是否立即被正确更新。当前测试只断言了操作类型和属性，未深入检查 to_field 参数值。",
+        "reason": "Issue 表明在特定操作序列下，to_field 参数未被更新。可能需要在测试中更精确地检查迁移操作对象的具体参数，或模拟迁移文件序列化/反序列化的过程。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 5 直接调用 operation.state_forwards 并检查结果状态。",
+        "target_pattern": "在调用 state_forwards 后，不仅检查目标模型的字段，还检查所有引用该字段的其他模型的外键/字段对象的 to_field/field_name 属性是否同步更新。Issue 可能暗示在某些条件下（如字段是主键），更新链不完整。",
+        "reason": "测试 5 已经做了类似检查并成功。可能需要构造更复杂的模型关系（如多层外键引用，或主键被重命名）来触发缺陷路径。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当重命名一个被其他模型的外键（通过 to_field 参数）引用的字段时，迁移系统应自动更新相关外键定义中的 to_field 参数值，使其指向新的字段名。",
+      "evidence": [
+        "相关测试 1 的 after 状态中，外键的 to_field 参数被设置为 'renamed_field'，表明这是期望的行为。",
+        "相关测试 5 展示了 RenameField.state_forwards 操作成功更新了相关外键和 ForeignObject 的 to_fields 属性为 'renamed'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在应用 RenameField 操作（通过 state_forwards 或 apply_operations）后，观察被影响的外键字段的 `remote_field.field_name` 属性以及其定义中的 `to_field` 参数值。",
+        "reason": "Issue 的核心是 to_field 引用未更新。直接观测相关外键对象的这些属性可以判断状态更新是否正确。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察由 MigrationAutodetector 生成的迁移操作列表，特别是 AlterField 操作的 `to_field` 关键字参数值。",
+        "reason": "Issue 中展示的错误现象直接体现在生成的迁移代码中。检查生成的 operation 对象可以确认 bug 是否被触发。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "观察迁移操作序列化（deconstruct）后的输出，特别是 AlterField 操作的参数。",
+        "reason": "迁移文件是序列化的结果。Bug 可能出现在序列化或反序列化过程中，导致 to_field 值被错误地保持。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在重命名被引用的字段后，相关外键的 `to_field` 引用（或 `remote_field.field_name`）应更新为新字段名。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的迁移操作字符串或完整的 repr。避免依赖可能变化的内部表示细节。",
+        "reason": "直接比较更新后的属性值与期望的新字段名，这是稳定且与 Issue 语义直接对齐的断言。"
+      },
+      {
+        "assertion_goal": "由 autodetector 为外键字段生成的 AlterField（或类似）操作，其 `to_field` 参数应等于新字段名。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个操作列表的顺序或数量，除非这与 to_field 更新直接相关。",
+        "reason": "Issue 明确指出了生成的迁移代码中 to_field 参数错误。断言操作对象的属性可以精确捕捉此问题。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只发生在被重命名字段是主键（primary_key=True）时？Issue 示例使用了主键，但原理可能适用于任何被 to_field 引用的唯一字段。",
+    "缺陷触发的确切阶段：是在 MigrationAutodetector 生成操作时，在 RenameField.state_forwards 中，在操作序列化/反序列化时，还是在多个操作（RenameField 后跟 AlterField）的交互中？",
+    "是否只有在外键的 `to_field` 参数显式设置时才会触发？如果使用默认主键引用呢？",
+    "相关的 `AlterField` 操作是自动生成的，还是 Issue 作者手动添加以展示问题？这影响复现时是测试自动检测还是测试特定操作序列。"
+  ],
+  "raw": {
+    "issue_summary": "当重命名一个作为外键引用目标的主键字段时，迁移生成的 AlterField 操作中的 to_field 参数错误地指向了旧字段名。",
+    "trigger_condition": {
+      "text": "对一个模型（ModelA）的主键字段进行重命名（RenameField），该字段被另一个模型（ModelB）的外键通过 to_field 参数引用，然后生成或应用包含 RenameField 和后续 AlterField 的迁移。",
+      "evidence": [
+        "Issue 描述：ModelA.field_wrong 被重命名为 field_fixed，ModelB 有一个外键指向 ModelA 且使用了 to_field 参数。迁移操作显示 RenameField 后，AlterField 中的 to_field 参数值仍然是旧字段名 'field_wrong'。",
+        "相关测试 1 (test_rename_field_foreign_key_to_field) 展示了类似的重命名场景，但该测试期望 to_field 被正确更新。",
+        "相关测试 5 (test_rename_referenced_field_state_forward) 展示了 RenameField.state_forwards 应该更新相关外键的 remote_field.field_name、from_fields 和 to_fields。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "迁移文件中的 AlterField 操作的 to_field 参数值未更新，仍然指向重命名前的旧字段名。这可能导致数据库约束错误或运行时查询错误。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中提供的迁移代码片段：AlterField 操作的 to_field='field_wrong'，而期望应该是 to_field='field_fixed'。",
+        "相关测试 1 的断言表明，在重命名后，外键的 to_field 属性应该被更新为新的字段名 ('renamed_field')。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当重命名一个被其他模型的外键（通过 to_field 参数）引用的字段时，迁移系统应自动更新相关外键定义中的 to_field 参数值，使其指向新的字段名。",
+      "evidence": [
+        "相关测试 1 的 after 状态中，外键的 to_field 参数被设置为 'renamed_field'，表明这是期望的行为。",
+        "相关测试 5 展示了 RenameField.state_forwards 操作成功更新了相关外键和 ForeignObject 的 to_fields 属性为 'renamed'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.RenameField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 的核心操作是重命名字段，RenameField 类负责处理重命名逻辑，其 state_forwards 或 reduce 方法可能未正确处理 to_field 的更新。"
+      },
+      {
+        "name": "migrations.AlterField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 中迁移包含一个 AlterField 操作，其 to_field 参数值错误。AlterField 的生成或反序列化可能存在问题。"
+      },
+      {
+        "name": "ModelState",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试大量使用 ModelState 来构建模型状态，这是迁移系统内部表示模型的方式，与字段引用更新密切相关。"
+      },
+      {
+        "name": "Autodetector",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 和 4 在 AutodetectorTests 中，测试迁移自动检测逻辑。Issue 可能涉及迁移自动检测生成错误操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "RenameField",
+        "lines": "274-402",
+        "reason": "RenameField 操作负责更新模型状态。Issue 表明在重命名被引用的主键字段后，相关外键的 to_field 引用未更新，这可能源于 RenameField.state_forwards 或相关的引用更新逻辑不完善。"
+      },
+      {
+        "path": "django/db/migrations/autodetector.py",
+        "object": "MigrationAutodetector",
+        "lines": "",
+        "reason": "迁移文件是由 autodetector 生成的。它可能未能正确识别重命名字段对外键 to_field 参数的影响，从而生成了错误的 AlterField 操作。相关测试 1 直接测试了 autodetector 在此场景下的行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_rename_field_foreign_key_to_field",
+        "test_file": "tests/migrations/test_autodetector.py",
+        "why_relevant": "该测试直接针对“重命名字段且该字段被外键通过 to_field 引用”的场景，与 Issue 描述高度匹配。它测试了迁移自动检测是否能正确生成 RenameField 操作并更新外键引用。",
+        "reusable_parts": [
+          "使用 ModelState 构建 before/after 状态的方法",
+          "MigrationQuestioner 的用法",
+          "assertNumberMigrations 和 assertOperationTypes/Attributes 的断言模式",
+          "外键定义中 to_field 参数的设置方式"
+        ],
+        "possible_gap": "该测试是一个“正确行为”测试，它断言 to_field 会被正确更新。它本身不会触发 Issue 中描述的 bug（to_field 未更新）。需要修改其输入或操作来复现缺陷。"
+      },
+      {
+        "test_name": "test_rename_referenced_field_state_forward",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试直接验证 RenameField.state_forwards 方法是否能正确更新引用该字段的外键（ForeignKey 和 ForeignObject）的内部状态（如 remote_field.field_name, to_fields）。这是 Issue 核心问题的底层操作。",
+        "reusable_parts": [
+          "使用 ProjectState 和 ModelState 手动构建模型状态",
+          "直接调用 operation.state_forwards",
+          "断言检查更新后的外键属性（remote_field.field_name, to_fields）",
+          "同时处理 ForeignKey 和 ForeignObject 的场景"
+        ],
+        "possible_gap": "这是一个单元测试，测试的是 state_forwards 的逻辑。Issue 可能发生在迁移文件生成（autodetector）或迁移操作序列化/反序列化阶段，而不仅仅是状态前向传播。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，重命名字段（field -> renamed_field）和外键 to_field 更新是作为同一个迁移检测场景的一部分，且断言 to_field 被正确更新。",
+        "target_pattern": "模拟 Issue 场景：先有一个包含 to_field 引用的外键，然后重命名被引用的字段。变异点在于让测试检查生成的迁移操作中 AlterField 的 to_field 参数值，或者检查在应用 RenameField 后，相关外键的 state 是否立即被正确更新。当前测试只断言了操作类型和属性，未深入检查 to_field 参数值。",
+        "reason": "Issue 表明在特定操作序列下，to_field 参数未被更新。可能需要在测试中更精确地检查迁移操作对象的具体参数，或模拟迁移文件序列化/反序列化的过程。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 5 直接调用 operation.state_forwards 并检查结果状态。",
+        "target_pattern": "在调用 state_forwards 后，不仅检查目标模型的字段，还检查所有引用该字段的其他模型的外键/字段对象的 to_field/field_name 属性是否同步更新。Issue 可能暗示在某些条件下（如字段是主键），更新链不完整。",
+        "reason": "测试 5 已经做了类似检查并成功。可能需要构造更复杂的模型关系（如多层外键引用，或主键被重命名）来触发缺陷路径。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "在应用 RenameField 操作（通过 state_forwards 或 apply_operations）后，观察被影响的外键字段的 `remote_field.field_name` 属性以及其定义中的 `to_field` 参数值。",
+        "reason": "Issue 的核心是 to_field 引用未更新。直接观测相关外键对象的这些属性可以判断状态更新是否正确。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察由 MigrationAutodetector 生成的迁移操作列表，特别是 AlterField 操作的 `to_field` 关键字参数值。",
+        "reason": "Issue 中展示的错误现象直接体现在生成的迁移代码中。检查生成的 operation 对象可以确认 bug 是否被触发。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "观察迁移操作序列化（deconstruct）后的输出，特别是 AlterField 操作的参数。",
+        "reason": "迁移文件是序列化的结果。Bug 可能出现在序列化或反序列化过程中，导致 to_field 值被错误地保持。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在重命名被引用的字段后，相关外键的 `to_field` 引用（或 `remote_field.field_name`）应更新为新字段名。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的迁移操作字符串或完整的 repr。避免依赖可能变化的内部表示细节。",
+        "reason": "直接比较更新后的属性值与期望的新字段名，这是稳定且与 Issue 语义直接对齐的断言。"
+      },
+      {
+        "assertion_goal": "由 autodetector 为外键字段生成的 AlterField（或类似）操作，其 `to_field` 参数应等于新字段名。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个操作列表的顺序或数量，除非这与 to_field 更新直接相关。",
+        "reason": "Issue 明确指出了生成的迁移代码中 to_field 参数错误。断言操作对象的属性可以精确捕捉此问题。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用迁移测试框架，如 OperationTestBase 或 TestCase 的子类，并利用 ProjectState, ModelState, MigrationQuestioner 等工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置包含至少两个模型的场景：一个模型（ModelA）包含一个将被重命名的字段（最好是主键），另一个模型（ModelB）包含一个指向 ModelA 且使用 `to_field` 参数的外键。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或直接调用迁移自动检测逻辑 (get_changes) 或直接应用操作 (apply_operations)。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只发生在被重命名字段是主键（primary_key=True）时？Issue 示例使用了主键，但原理可能适用于任何被 to_field 引用的唯一字段。",
+      "缺陷触发的确切阶段：是在 MigrationAutodetector 生成操作时，在 RenameField.state_forwards 中，在操作序列化/反序列化时，还是在多个操作（RenameField 后跟 AlterField）的交互中？",
+      "是否只有在外键的 `to_field` 参数显式设置时才会触发？如果使用默认主键引用呢？",
+      "相关的 `AlterField` 操作是自动生成的，还是 Issue 作者手动添加以展示问题？这影响复现时是测试自动检测还是测试特定操作序列。"
+    ]
+  }
+}

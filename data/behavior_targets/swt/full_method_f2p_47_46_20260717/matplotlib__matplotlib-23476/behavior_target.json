@@ -1,0 +1,366 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-23476",
+  "issue_summary": "在 M1 Mac 上，图形反序列化后 DPI 值翻倍，多次循环会导致溢出错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 BytesIO 作为内存缓冲区进行序列化，避免文件 I/O。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置或模拟 MacOSX 后端环境以触发特定于平台的缺陷。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试可能需要在一个循环中执行多次序列化/反序列化操作。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_simple",
+        "test_file": "lib/matplotlib/tests/test_pickle.py",
+        "why_relevant": "该测试直接对图形进行序列化和反序列化操作，与 Issue 的核心操作相同。",
+        "reusable_parts": [
+          "imports (pickle, BytesIO, plt, np)",
+          "使用 pickle.dump 和 pickle.load 的基本模式",
+          "图形创建 (plt.figure)"
+        ],
+        "possible_gap": "该测试没有检查反序列化后图形的 DPI 属性，也没有在 M1 Mac 的特定环境下运行。"
+      },
+      {
+        "test_name": "test_unpickle_canvas",
+        "test_file": "lib/matplotlib/tests/test_pickle.py",
+        "why_relevant": "该测试专门验证图形反序列化后画布不为 None，关注反序列化后的状态。",
+        "reusable_parts": [
+          "使用 BytesIO 进行内存序列化的模式",
+          "断言反序列化后对象属性的模式 (assert fig2.canvas is not None)"
+        ],
+        "possible_gap": "该测试没有检查 DPI 值，也没有模拟多次序列化/反序列化循环。"
+      },
+      {
+        "test_name": "test_change_dpi",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "该测试直接操作和断言图形的 DPI 属性及其对渲染器尺寸的影响。",
+        "reusable_parts": [
+          "访问和断言 fig.dpi 的模式",
+          "使用 fig.draw_without_rendering() 来触发状态更新"
+        ],
+        "possible_gap": "该测试不涉及序列化/反序列化操作。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 M1 Mac 上使用 MacOSX 后端，创建一个图形，对其进行 pickle 序列化和反序列化操作。",
+      "evidence": [
+        "Issue 中的代码展示了创建图形、序列化、反序列化的完整步骤。",
+        "Issue 描述此问题仅发生在 M1 MacBooks 上，且与 Python 版本无关。",
+        "Issue 中实际输出显示每次循环 DPI 值翻倍。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "图形反序列化后，其 DPI 值变为原来的两倍。多次循环后 DPI 值指数增长，最终在创建画布时引发 OverflowError。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中实际输出显示 DPI 值从 200.0 开始，每次循环后翻倍。",
+        "Issue 中堆栈跟踪显示在 backend_macosx.py 的 FigureCanvas.__init__ 中抛出 OverflowError: signed integer is greater than maximum。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.figure.Figure.__setstate__",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "Issue 堆栈跟踪显示反序列化时调用了此方法，它是 pickle 加载过程的关键。"
+      },
+      {
+        "name": "matplotlib.backend_bases._Backend.new_figure_manager_given_figure",
+        "kind": "class_function",
+        "source_path": "lib/matplotlib/backend_bases.py",
+        "reason": "Issue 堆栈跟踪显示 __setstate__ 调用了此方法，用于在反序列化后重新创建图形管理器。"
+      },
+      {
+        "name": "matplotlib.pyplot.figure",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 中用于创建初始图形的函数，是测试的起点。"
+      },
+      {
+        "name": "pickle.dump",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于序列化图形的标准库函数。"
+      },
+      {
+        "name": "pickle.load",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于反序列化图形的标准库函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/figure.py",
+        "object": "Figure.__setstate__",
+        "lines": "3035-3059",
+        "reason": "Issue 堆栈跟踪指向此方法，它是反序列化时恢复图形状态的关键，可能与 DPI 值的错误恢复有关。"
+      },
+      {
+        "path": "lib/matplotlib/backends/backend_macosx.py",
+        "object": "FigureCanvas.__init__",
+        "lines": "",
+        "reason": "Issue 堆栈跟踪显示最终溢出错误发生在此处，可能与传入的 DPI 值过大有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，图形创建后直接进行序列化/反序列化，通常只操作一次。",
+        "target_pattern": "对同一个图形对象进行多次连续的序列化和反序列化操作（循环）。",
+        "reason": "Issue 表明 DPI 翻倍在每次反序列化后发生，循环操作能放大该效应并最终导致溢出。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试通常在默认或通用后端环境下运行。",
+        "target_pattern": "在 MacOSX 后端环境下运行测试（模拟 M1 Mac 条件）。",
+        "reason": "Issue 明确指出问题仅发生在 M1 Mac 的 MacOSX 后端上。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "图形反序列化后，其 DPI 值应保持不变，与序列化前一致。",
+      "evidence": [
+        "Issue 中预期输出显示 DPI 值在所有循环中保持为 200.0。",
+        "相关测试 test_subfigure_dpi 表明 DPI 值应在相关图形间保持一致。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "fig.dpi 或 fig.get_dpi() 在每次序列化/反序列化循环前后的值。",
+        "reason": "DPI 值的翻倍是问题的直接表现，观察其变化可以确认缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "反序列化后图形对象的内部状态，特别是与画布或渲染器相关的属性。",
+        "reason": "DPI 翻倍可能与图形状态在 __setstate__ 中恢复不正确有关。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在多次循环后，创建画布时是否抛出 OverflowError。",
+        "reason": "DPI 值过大最终会导致溢出错误，这是缺陷的严重表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "图形反序列化后，其 DPI 值应与序列化前相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的图形对象相等或复杂的内部状态相等。",
+        "reason": "DPI 值是问题的核心，直接比较其数值是否保持不变是稳定且与 Issue 对齐的断言。"
+      },
+      {
+        "assertion_goal": "多次序列化/反序列化循环后，DPI 值应保持恒定，不会翻倍。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言循环中每次 DPI 的精确翻倍倍数，因为这可能依赖于具体实现。",
+        "reason": "断言 DPI 值在循环中不增长，更能捕捉到“翻倍”这一错误模式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切根源是在 __setstate__ 中，还是在后端特定的画布初始化代码中。",
+    "DPI 翻倍是否与图形对象的其他属性（如尺寸）的序列化/反序列化有关。",
+    "除了 M1 Mac 的 MacOSX 后端，其他平台或后端是否也存在此问题。",
+    "修复后，DPI 值在反序列化时是应该从序列化状态中读取，还是应该根据某些规则重新计算。"
+  ],
+  "raw": {
+    "issue_summary": "在 M1 Mac 上，图形反序列化后 DPI 值翻倍，多次循环会导致溢出错误。",
+    "trigger_condition": {
+      "text": "在 M1 Mac 上使用 MacOSX 后端，创建一个图形，对其进行 pickle 序列化和反序列化操作。",
+      "evidence": [
+        "Issue 中的代码展示了创建图形、序列化、反序列化的完整步骤。",
+        "Issue 描述此问题仅发生在 M1 MacBooks 上，且与 Python 版本无关。",
+        "Issue 中实际输出显示每次循环 DPI 值翻倍。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "图形反序列化后，其 DPI 值变为原来的两倍。多次循环后 DPI 值指数增长，最终在创建画布时引发 OverflowError。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中实际输出显示 DPI 值从 200.0 开始，每次循环后翻倍。",
+        "Issue 中堆栈跟踪显示在 backend_macosx.py 的 FigureCanvas.__init__ 中抛出 OverflowError: signed integer is greater than maximum。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "图形反序列化后，其 DPI 值应保持不变，与序列化前一致。",
+      "evidence": [
+        "Issue 中预期输出显示 DPI 值在所有循环中保持为 200.0。",
+        "相关测试 test_subfigure_dpi 表明 DPI 值应在相关图形间保持一致。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.figure.Figure.__setstate__",
+        "kind": "method",
+        "source_path": "lib/matplotlib/figure.py",
+        "reason": "Issue 堆栈跟踪显示反序列化时调用了此方法，它是 pickle 加载过程的关键。"
+      },
+      {
+        "name": "matplotlib.backend_bases._Backend.new_figure_manager_given_figure",
+        "kind": "class_function",
+        "source_path": "lib/matplotlib/backend_bases.py",
+        "reason": "Issue 堆栈跟踪显示 __setstate__ 调用了此方法，用于在反序列化后重新创建图形管理器。"
+      },
+      {
+        "name": "matplotlib.pyplot.figure",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 中用于创建初始图形的函数，是测试的起点。"
+      },
+      {
+        "name": "pickle.dump",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于序列化图形的标准库函数。"
+      },
+      {
+        "name": "pickle.load",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于反序列化图形的标准库函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/figure.py",
+        "object": "Figure.__setstate__",
+        "lines": "3035-3059",
+        "reason": "Issue 堆栈跟踪指向此方法，它是反序列化时恢复图形状态的关键，可能与 DPI 值的错误恢复有关。"
+      },
+      {
+        "path": "lib/matplotlib/backends/backend_macosx.py",
+        "object": "FigureCanvas.__init__",
+        "lines": "",
+        "reason": "Issue 堆栈跟踪显示最终溢出错误发生在此处，可能与传入的 DPI 值过大有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_simple",
+        "test_file": "lib/matplotlib/tests/test_pickle.py",
+        "why_relevant": "该测试直接对图形进行序列化和反序列化操作，与 Issue 的核心操作相同。",
+        "reusable_parts": [
+          "imports (pickle, BytesIO, plt, np)",
+          "使用 pickle.dump 和 pickle.load 的基本模式",
+          "图形创建 (plt.figure)"
+        ],
+        "possible_gap": "该测试没有检查反序列化后图形的 DPI 属性，也没有在 M1 Mac 的特定环境下运行。"
+      },
+      {
+        "test_name": "test_unpickle_canvas",
+        "test_file": "lib/matplotlib/tests/test_pickle.py",
+        "why_relevant": "该测试专门验证图形反序列化后画布不为 None，关注反序列化后的状态。",
+        "reusable_parts": [
+          "使用 BytesIO 进行内存序列化的模式",
+          "断言反序列化后对象属性的模式 (assert fig2.canvas is not None)"
+        ],
+        "possible_gap": "该测试没有检查 DPI 值，也没有模拟多次序列化/反序列化循环。"
+      },
+      {
+        "test_name": "test_change_dpi",
+        "test_file": "lib/matplotlib/tests/test_figure.py",
+        "why_relevant": "该测试直接操作和断言图形的 DPI 属性及其对渲染器尺寸的影响。",
+        "reusable_parts": [
+          "访问和断言 fig.dpi 的模式",
+          "使用 fig.draw_without_rendering() 来触发状态更新"
+        ],
+        "possible_gap": "该测试不涉及序列化/反序列化操作。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，图形创建后直接进行序列化/反序列化，通常只操作一次。",
+        "target_pattern": "对同一个图形对象进行多次连续的序列化和反序列化操作（循环）。",
+        "reason": "Issue 表明 DPI 翻倍在每次反序列化后发生，循环操作能放大该效应并最终导致溢出。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试通常在默认或通用后端环境下运行。",
+        "target_pattern": "在 MacOSX 后端环境下运行测试（模拟 M1 Mac 条件）。",
+        "reason": "Issue 明确指出问题仅发生在 M1 Mac 的 MacOSX 后端上。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "fig.dpi 或 fig.get_dpi() 在每次序列化/反序列化循环前后的值。",
+        "reason": "DPI 值的翻倍是问题的直接表现，观察其变化可以确认缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "反序列化后图形对象的内部状态，特别是与画布或渲染器相关的属性。",
+        "reason": "DPI 翻倍可能与图形状态在 __setstate__ 中恢复不正确有关。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在多次循环后，创建画布时是否抛出 OverflowError。",
+        "reason": "DPI 值过大最终会导致溢出错误，这是缺陷的严重表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "图形反序列化后，其 DPI 值应与序列化前相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的图形对象相等或复杂的内部状态相等。",
+        "reason": "DPI 值是问题的核心，直接比较其数值是否保持不变是稳定且与 Issue 对齐的断言。"
+      },
+      {
+        "assertion_goal": "多次序列化/反序列化循环后，DPI 值应保持恒定，不会翻倍。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言循环中每次 DPI 的精确翻倍倍数，因为这可能依赖于具体实现。",
+        "reason": "断言 DPI 值在循环中不增长，更能捕捉到“翻倍”这一错误模式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 BytesIO 作为内存缓冲区进行序列化，避免文件 I/O。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置或模拟 MacOSX 后端环境以触发特定于平台的缺陷。",
+        "source": "issue",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试可能需要在一个循环中执行多次序列化/反序列化操作。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切根源是在 __setstate__ 中，还是在后端特定的画布初始化代码中。",
+      "DPI 翻倍是否与图形对象的其他属性（如尺寸）的序列化/反序列化有关。",
+      "除了 M1 Mac 的 MacOSX 后端，其他平台或后端是否也存在此问题。",
+      "修复后，DPI 值在反序列化时是应该从序列化状态中读取，还是应该根据某些规则重新计算。"
+    ]
+  }
+}

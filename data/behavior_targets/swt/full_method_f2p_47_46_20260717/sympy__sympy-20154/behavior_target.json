@@ -1,0 +1,270 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-20154",
+  "issue_summary": "partitions() 迭代器重复使用相同的输出字典，导致直接收集结果时出现意外行为。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.utilities.iterables.partitions。测试可能在一个普通的测试函数中运行，无需特殊 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_partitions",
+        "test_file": "sympy/utilities/tests/test_iterables.py",
+        "why_relevant": "该测试直接测试 partitions() 函数，包含了多种参数组合的调用和结果验证。",
+        "reusable_parts": [
+          "对 partitions() 函数的各种调用方式（如 partitions(6, k=2), partitions(8, k=4, m=3)）",
+          "使用 list() 收集迭代器结果的模式",
+          "assert 风格（使用列表推导式和 .copy() 进行比较）"
+        ],
+        "possible_gap": "该测试已经通过使用 .copy() 规避了问题，因此它本身不会触发缺陷。需要变异以直接使用迭代器返回的字典而不进行复制。"
+      },
+      {
+        "test_name": "test_uniq",
+        "test_file": "sympy/utilities/tests/test_iterables.py",
+        "why_relevant": "该测试的第一条 assert 使用了 partitions(4) 作为 uniq 的输入，并使用了 .copy()。",
+        "reusable_parts": [
+          "partitions(4) 的调用",
+          "与 uniq 函数结合使用的模式"
+        ],
+        "possible_gap": "测试同样使用了 .copy()，没有暴露重用字典的问题。"
+      },
+      {
+        "test_name": "test_F6",
+        "test_file": "sympy/utilities/tests/test_wester.py",
+        "why_relevant": "该测试直接使用 [p.copy() for p in partitions(4)] 并断言结果。",
+        "reusable_parts": [
+          "partitions(4) 的调用和结果收集模式"
+        ],
+        "possible_gap": "测试使用了 .copy()，因此不会触发缺陷。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 partitions() 函数（可能带有参数如 n, k, m, size）并直接收集其迭代结果（例如使用 list()），或在迭代过程中存储或修改返回的字典。",
+      "evidence": [
+        "Issue 中提到 'something as simple as list(partitions()) will give an apparently wrong result'。",
+        "相关测试 1、2、3 中，在收集 partitions 结果时都使用了 .copy() 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "直接收集 partitions() 的迭代结果（如 list(partitions(...))）会得到一个包含多个相同字典引用的列表，导致所有元素指向同一个字典对象，从而得到看似错误的结果。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述 'list(partitions()) will give an apparently wrong result' 和 'It can lead to much more subtle bugs if the partitions are used in a nontrivial way'。",
+        "相关测试 1、2、3 在 assert 中均使用了 p.copy() 或 i.copy()，暗示直接使用 p 或 i 可能有问题。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.utilities.iterables.partitions",
+        "kind": "function",
+        "source_path": "sympy/utilities/iterables.py",
+        "reason": "Issue 直接讨论 partitions() 函数的行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/iterables.py",
+        "object": "partitions",
+        "lines": "",
+        "reason": "Issue 明确指出 partitions() 迭代器重复使用输出字典。iCoRe 检索的源码片段 1 指向了相关文件，但未提供具体行号。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在测试中，收集 partitions() 结果时使用列表推导式并调用 .copy() 方法，例如 [p.copy() for p in partitions(6, k=2)]。",
+        "target_pattern": "移除 .copy() 调用，直接收集迭代器返回的字典，例如 list(partitions(6, k=2)) 或 [p for p in partitions(6, k=2)]。",
+        "reason": "Issue 明确指出 list(partitions()) 会产生错误结果。移除 .copy() 将使测试直接面对字典重用问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常将 partitions() 的结果（经过 .copy()）用于相等性比较或作为其他函数的输入。",
+        "target_pattern": "将 partitions() 的原始迭代结果（不复制）直接传递给依赖字典独立性的操作，例如存储到列表后修改其中一个字典，或传递给需要唯一性判断的函数（如 uniq）。",
+        "reason": "Issue 提到 'It can lead to much more subtle bugs if the partitions are used in a nontrivial way'。直接使用原始字典可以模拟这种非平凡用法。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "partitions() 迭代器每次 yield 应该返回一个独立的字典对象，使得收集到的结果列表中的每个字典都是不同的实例，互不影响。",
+      "evidence": [
+        "Issue 提问者认为 'It shouldn't be that much of a performance loss to copy the dictionary before yielding it'，暗示期望的行为是每次 yield 一个副本。",
+        "相关测试 1、2、3 的 assert 逻辑都基于对 partitions() 返回的字典进行 .copy() 后的结果进行验证，这间接反映了期望的、独立字典的语义。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "list(partitions(...)) 的结果列表。观察列表中各个元素的 id() 或使用 'is' 运算符判断它们是否是同一个对象。",
+        "reason": "缺陷的核心是返回的字典对象被重用。观察返回列表的元素身份（identity）可以直接验证问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在迭代 partitions() 并修改其中一个返回的字典后，观察之前收集到的其他字典的内容是否也随之改变。",
+        "reason": "如果字典被重用，修改一个会影响所有看似独立的条目，这是错误行为的直接表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 partitions() 迭代器返回的连续字典对象是彼此独立的（不是同一个对象）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言完整的字典列表与某个硬编码列表完全相等，因为字典重用可能导致这种相等性测试在某些情况下偶然通过（如果所有字典内容恰好相同）。",
+        "reason": "Issue 的核心是对象身份（identity）问题，而非值（value）问题。断言独立性更稳定且直接对准缺陷。"
+      },
+      {
+        "assertion_goal": "验证直接收集 partitions() 迭代结果（不使用 .copy()）得到的列表，其元素在修改其中一个时不会影响其他元素。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免依赖于 partitions() 输出顺序或具体字典内容的完整断言，除非顺序和内容是确定且与缺陷无关的。",
+        "reason": "这种断言能捕捉到由字典重用导致的微妙状态污染错误，与 Issue 描述的 'subtle bugs' 相符。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "partitions() 函数内部实现字典重用的具体机制和位置未知。",
+    "除了 list() 收集，还有哪些特定的 'nontrivial way' 使用 partitions() 会触发更微妙的 bug。",
+    "docstring 中提到的 caveat 具体内容是什么。"
+  ],
+  "raw": {
+    "issue_summary": "partitions() 迭代器重复使用相同的输出字典，导致直接收集结果时出现意外行为。",
+    "trigger_condition": {
+      "text": "调用 partitions() 函数（可能带有参数如 n, k, m, size）并直接收集其迭代结果（例如使用 list()），或在迭代过程中存储或修改返回的字典。",
+      "evidence": [
+        "Issue 中提到 'something as simple as list(partitions()) will give an apparently wrong result'。",
+        "相关测试 1、2、3 中，在收集 partitions 结果时都使用了 .copy() 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "直接收集 partitions() 的迭代结果（如 list(partitions(...))）会得到一个包含多个相同字典引用的列表，导致所有元素指向同一个字典对象，从而得到看似错误的结果。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述 'list(partitions()) will give an apparently wrong result' 和 'It can lead to much more subtle bugs if the partitions are used in a nontrivial way'。",
+        "相关测试 1、2、3 在 assert 中均使用了 p.copy() 或 i.copy()，暗示直接使用 p 或 i 可能有问题。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "partitions() 迭代器每次 yield 应该返回一个独立的字典对象，使得收集到的结果列表中的每个字典都是不同的实例，互不影响。",
+      "evidence": [
+        "Issue 提问者认为 'It shouldn't be that much of a performance loss to copy the dictionary before yielding it'，暗示期望的行为是每次 yield 一个副本。",
+        "相关测试 1、2、3 的 assert 逻辑都基于对 partitions() 返回的字典进行 .copy() 后的结果进行验证，这间接反映了期望的、独立字典的语义。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.utilities.iterables.partitions",
+        "kind": "function",
+        "source_path": "sympy/utilities/iterables.py",
+        "reason": "Issue 直接讨论 partitions() 函数的行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/iterables.py",
+        "object": "partitions",
+        "lines": "",
+        "reason": "Issue 明确指出 partitions() 迭代器重复使用输出字典。iCoRe 检索的源码片段 1 指向了相关文件，但未提供具体行号。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_partitions",
+        "test_file": "sympy/utilities/tests/test_iterables.py",
+        "why_relevant": "该测试直接测试 partitions() 函数，包含了多种参数组合的调用和结果验证。",
+        "reusable_parts": [
+          "对 partitions() 函数的各种调用方式（如 partitions(6, k=2), partitions(8, k=4, m=3)）",
+          "使用 list() 收集迭代器结果的模式",
+          "assert 风格（使用列表推导式和 .copy() 进行比较）"
+        ],
+        "possible_gap": "该测试已经通过使用 .copy() 规避了问题，因此它本身不会触发缺陷。需要变异以直接使用迭代器返回的字典而不进行复制。"
+      },
+      {
+        "test_name": "test_uniq",
+        "test_file": "sympy/utilities/tests/test_iterables.py",
+        "why_relevant": "该测试的第一条 assert 使用了 partitions(4) 作为 uniq 的输入，并使用了 .copy()。",
+        "reusable_parts": [
+          "partitions(4) 的调用",
+          "与 uniq 函数结合使用的模式"
+        ],
+        "possible_gap": "测试同样使用了 .copy()，没有暴露重用字典的问题。"
+      },
+      {
+        "test_name": "test_F6",
+        "test_file": "sympy/utilities/tests/test_wester.py",
+        "why_relevant": "该测试直接使用 [p.copy() for p in partitions(4)] 并断言结果。",
+        "reusable_parts": [
+          "partitions(4) 的调用和结果收集模式"
+        ],
+        "possible_gap": "测试使用了 .copy()，因此不会触发缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "在测试中，收集 partitions() 结果时使用列表推导式并调用 .copy() 方法，例如 [p.copy() for p in partitions(6, k=2)]。",
+        "target_pattern": "移除 .copy() 调用，直接收集迭代器返回的字典，例如 list(partitions(6, k=2)) 或 [p for p in partitions(6, k=2)]。",
+        "reason": "Issue 明确指出 list(partitions()) 会产生错误结果。移除 .copy() 将使测试直接面对字典重用问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常将 partitions() 的结果（经过 .copy()）用于相等性比较或作为其他函数的输入。",
+        "target_pattern": "将 partitions() 的原始迭代结果（不复制）直接传递给依赖字典独立性的操作，例如存储到列表后修改其中一个字典，或传递给需要唯一性判断的函数（如 uniq）。",
+        "reason": "Issue 提到 'It can lead to much more subtle bugs if the partitions are used in a nontrivial way'。直接使用原始字典可以模拟这种非平凡用法。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "list(partitions(...)) 的结果列表。观察列表中各个元素的 id() 或使用 'is' 运算符判断它们是否是同一个对象。",
+        "reason": "缺陷的核心是返回的字典对象被重用。观察返回列表的元素身份（identity）可以直接验证问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在迭代 partitions() 并修改其中一个返回的字典后，观察之前收集到的其他字典的内容是否也随之改变。",
+        "reason": "如果字典被重用，修改一个会影响所有看似独立的条目，这是错误行为的直接表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 partitions() 迭代器返回的连续字典对象是彼此独立的（不是同一个对象）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言完整的字典列表与某个硬编码列表完全相等，因为字典重用可能导致这种相等性测试在某些情况下偶然通过（如果所有字典内容恰好相同）。",
+        "reason": "Issue 的核心是对象身份（identity）问题，而非值（value）问题。断言独立性更稳定且直接对准缺陷。"
+      },
+      {
+        "assertion_goal": "验证直接收集 partitions() 迭代结果（不使用 .copy()）得到的列表，其元素在修改其中一个时不会影响其他元素。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免依赖于 partitions() 输出顺序或具体字典内容的完整断言，除非顺序和内容是确定且与缺陷无关的。",
+        "reason": "这种断言能捕捉到由字典重用导致的微妙状态污染错误，与 Issue 描述的 'subtle bugs' 相符。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.utilities.iterables.partitions。测试可能在一个普通的测试函数中运行，无需特殊 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "partitions() 函数内部实现字典重用的具体机制和位置未知。",
+      "除了 list() 收集，还有哪些特定的 'nontrivial way' 使用 partitions() 会触发更微妙的 bug。",
+      "docstring 中提到的 caveat 具体内容是什么。"
+    ]
+  }
+}

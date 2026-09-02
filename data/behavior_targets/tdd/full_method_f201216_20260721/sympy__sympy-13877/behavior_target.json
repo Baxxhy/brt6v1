@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-13877",
+  "issue_summary": "计算特定符号矩阵的行列式时，Bareiss算法内部比较NaN导致TypeError异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入sympy和符号变量a",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用Python标准测试框架或pytest",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_determinant",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "包含det()和_eval_det_bareiss的测试，测试了符号矩阵的行列式计算",
+        "reusable_parts": [
+          "Matrix构造",
+          "det()调用",
+          "符号变量x,y,z的使用",
+          "assert比较行列式结果"
+        ],
+        "possible_gap": "现有测试使用简单符号矩阵，未测试Issue中i + a*j形式的复杂符号矩阵，且未测试n>=5的情况"
+      },
+      {
+        "test_name": "test_det",
+        "test_file": "sympy/matrices/expressions/tests/test_determinant.py",
+        "why_relevant": "测试det()函数的基本功能",
+        "reusable_parts": [
+          "det()导入和调用",
+          "assert风格"
+        ],
+        "possible_gap": "测试主要针对数值矩阵，未深入测试符号矩阵的特殊情况"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用det()计算n=5或更大的特定符号矩阵行列式，矩阵元素为i + a*j形式，其中a是符号变量，i和j是整数索引。",
+      "evidence": [
+        "Issue中f(5)返回nan，f(6)抛出TypeError",
+        "Issue中矩阵构造：Matrix([[i + a*j for i in range(n)] for j in range(n)])"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "计算f(5)返回nan，计算f(6)抛出TypeError: Invalid NaN comparison异常，堆栈跟踪显示在factor_terms中的比较操作触发。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中f(5)返回nan",
+        "Issue中f(6)抛出TypeError: Invalid NaN comparison",
+        "堆栈跟踪指向sympy/core/exprtools.py第1171行"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "det",
+        "kind": "method",
+        "source_path": "sympy/matrices/matrices.py",
+        "reason": "Issue中直接调用的行列式计算函数"
+      },
+      {
+        "name": "_eval_det_bareiss",
+        "kind": "method",
+        "source_path": "sympy/matrices/matrices.py",
+        "reason": "det()默认使用的Bareiss算法实现，Issue堆栈显示在此函数内"
+      },
+      {
+        "name": "Matrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/dense.py",
+        "reason": "Issue中构造矩阵的类"
+      },
+      {
+        "name": "cancel",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue堆栈中出现的函数，在Bareiss算法中调用"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/matrices.py",
+        "object": "_eval_det_bareiss",
+        "lines": "165-216",
+        "reason": "Issue堆栈显示异常发生在Bareiss算法执行过程中，特别是entry函数和cancel调用"
+      },
+      {
+        "path": "sympy/matrices/matrices.py",
+        "object": "bareiss（嵌套函数）",
+        "lines": "187-214",
+        "reason": "递归Bareiss算法的核心实现，包含entry函数定义"
+      },
+      {
+        "path": "sympy/core/exprtools.py",
+        "object": "factor_terms",
+        "lines": "",
+        "reason": "Issue堆栈显示异常最终在factor_terms函数中触发NaN比较"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_determinant中使用简单符号矩阵如Matrix(((x, 1), (y, 2*y)))",
+        "target_pattern": "使用Issue中特定构造：Matrix([[i + a*j for i in range(n)] for j in range(n)])，其中n>=5",
+        "reason": "Issue显示n=5时返回nan，n=6时抛出异常，需要测试更大的符号矩阵",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_determinant中显式指定method='bareiss'",
+        "target_pattern": "使用默认method或显式指定method='bareiss'",
+        "reason": "Issue中det()使用默认方法（即bareiss），需要确保测试使用相同算法",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "det()应能正确计算符号矩阵的行列式，返回有效的符号表达式或数值结果，不应抛出Invalid NaN comparison异常。",
+      "evidence": [
+        "Issue中f(1)-f(4)都能正常计算",
+        "相关测试3显示det()应支持符号矩阵计算",
+        "Issue提问者质疑Bareiss算法对符号矩阵的有效性"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用det()时的异常捕获，特别是TypeError: Invalid NaN comparison",
+        "reason": "Issue的核心错误现象是抛出此异常"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "det()的返回值，检查是否为nan或有效表达式",
+        "reason": "Issue中f(5)返回nan，这是错误的前兆"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Bareiss算法内部中间表达式的类型和值",
+        "reason": "异常发生在表达式比较中，需要观察中间表达式是否产生NaN"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "det()应返回有效的符号表达式而非nan或抛出异常",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的符号表达式字符串相等",
+        "reason": "符号表达式化简可能变化，但不应包含nan或抛出异常"
+      },
+      {
+        "assertion_goal": "计算应正常完成而不抛出TypeError",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言特定异常消息的完整字符串",
+        "reason": "Issue显示当前会抛出TypeError，修复后不应抛出"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Bareiss算法是否确实不适用于此类符号矩阵，或者只是实现有bug",
+    "除了n=5和6，其他n值是否也会有问题",
+    "修复后行列式的正确表达式应该是什么",
+    "是否其他det方法（如berkowitz, lu）能正确处理此矩阵"
+  ],
+  "raw": {
+    "issue_summary": "计算特定符号矩阵的行列式时，Bareiss算法内部比较NaN导致TypeError异常。",
+    "trigger_condition": {
+      "text": "使用det()计算n=5或更大的特定符号矩阵行列式，矩阵元素为i + a*j形式，其中a是符号变量，i和j是整数索引。",
+      "evidence": [
+        "Issue中f(5)返回nan，f(6)抛出TypeError",
+        "Issue中矩阵构造：Matrix([[i + a*j for i in range(n)] for j in range(n)])"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "计算f(5)返回nan，计算f(6)抛出TypeError: Invalid NaN comparison异常，堆栈跟踪显示在factor_terms中的比较操作触发。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中f(5)返回nan",
+        "Issue中f(6)抛出TypeError: Invalid NaN comparison",
+        "堆栈跟踪指向sympy/core/exprtools.py第1171行"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "det()应能正确计算符号矩阵的行列式，返回有效的符号表达式或数值结果，不应抛出Invalid NaN comparison异常。",
+      "evidence": [
+        "Issue中f(1)-f(4)都能正常计算",
+        "相关测试3显示det()应支持符号矩阵计算",
+        "Issue提问者质疑Bareiss算法对符号矩阵的有效性"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "det",
+        "kind": "method",
+        "source_path": "sympy/matrices/matrices.py",
+        "reason": "Issue中直接调用的行列式计算函数"
+      },
+      {
+        "name": "_eval_det_bareiss",
+        "kind": "method",
+        "source_path": "sympy/matrices/matrices.py",
+        "reason": "det()默认使用的Bareiss算法实现，Issue堆栈显示在此函数内"
+      },
+      {
+        "name": "Matrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/dense.py",
+        "reason": "Issue中构造矩阵的类"
+      },
+      {
+        "name": "cancel",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue堆栈中出现的函数，在Bareiss算法中调用"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/matrices.py",
+        "object": "_eval_det_bareiss",
+        "lines": "165-216",
+        "reason": "Issue堆栈显示异常发生在Bareiss算法执行过程中，特别是entry函数和cancel调用"
+      },
+      {
+        "path": "sympy/matrices/matrices.py",
+        "object": "bareiss（嵌套函数）",
+        "lines": "187-214",
+        "reason": "递归Bareiss算法的核心实现，包含entry函数定义"
+      },
+      {
+        "path": "sympy/core/exprtools.py",
+        "object": "factor_terms",
+        "lines": "",
+        "reason": "Issue堆栈显示异常最终在factor_terms函数中触发NaN比较"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_determinant",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "包含det()和_eval_det_bareiss的测试，测试了符号矩阵的行列式计算",
+        "reusable_parts": [
+          "Matrix构造",
+          "det()调用",
+          "符号变量x,y,z的使用",
+          "assert比较行列式结果"
+        ],
+        "possible_gap": "现有测试使用简单符号矩阵，未测试Issue中i + a*j形式的复杂符号矩阵，且未测试n>=5的情况"
+      },
+      {
+        "test_name": "test_det",
+        "test_file": "sympy/matrices/expressions/tests/test_determinant.py",
+        "why_relevant": "测试det()函数的基本功能",
+        "reusable_parts": [
+          "det()导入和调用",
+          "assert风格"
+        ],
+        "possible_gap": "测试主要针对数值矩阵，未深入测试符号矩阵的特殊情况"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_determinant中使用简单符号矩阵如Matrix(((x, 1), (y, 2*y)))",
+        "target_pattern": "使用Issue中特定构造：Matrix([[i + a*j for i in range(n)] for j in range(n)])，其中n>=5",
+        "reason": "Issue显示n=5时返回nan，n=6时抛出异常，需要测试更大的符号矩阵",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_determinant中显式指定method='bareiss'",
+        "target_pattern": "使用默认method或显式指定method='bareiss'",
+        "reason": "Issue中det()使用默认方法（即bareiss），需要确保测试使用相同算法",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用det()时的异常捕获，特别是TypeError: Invalid NaN comparison",
+        "reason": "Issue的核心错误现象是抛出此异常"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "det()的返回值，检查是否为nan或有效表达式",
+        "reason": "Issue中f(5)返回nan，这是错误的前兆"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Bareiss算法内部中间表达式的类型和值",
+        "reason": "异常发生在表达式比较中，需要观察中间表达式是否产生NaN"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "det()应返回有效的符号表达式而非nan或抛出异常",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的符号表达式字符串相等",
+        "reason": "符号表达式化简可能变化，但不应包含nan或抛出异常"
+      },
+      {
+        "assertion_goal": "计算应正常完成而不抛出TypeError",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言特定异常消息的完整字符串",
+        "reason": "Issue显示当前会抛出TypeError，修复后不应抛出"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入sympy和符号变量a",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用Python标准测试框架或pytest",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Bareiss算法是否确实不适用于此类符号矩阵，或者只是实现有bug",
+      "除了n=5和6，其他n值是否也会有问题",
+      "修复后行列式的正确表达式应该是什么",
+      "是否其他det方法（如berkowitz, lu）能正确处理此矩阵"
+    ]
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-24334",
+  "issue_summary": "Axes.set_xticks/Axis.set_ticks 仅在传递 labels 参数时验证 kwargs，但即使未传递 labels 也应验证 kwargs 是否为有效的 Text 属性。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建图形和坐标轴对象，例如使用 plt.subplots()。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 用于断言异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_set_ticks_with_labels",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "它测试了 set_xticks 与 labels 和 kwargs 一起使用的情况，展示了正常用法。",
+        "reusable_parts": [
+          "imports",
+          "figures fixture",
+          "ax.set_xticks calls with labels and kwargs"
+        ],
+        "possible_gap": "它只测试了 labels 被传递且 kwargs 有效的情况，没有测试 labels 为 None 时无效 kwargs 的行为。"
+      },
+      {
+        "test_name": "test_extra_kwargs_raise",
+        "test_file": "lib/matplotlib/tests/test_scale.py",
+        "why_relevant": "它测试了另一个 API (set_yscale) 在传递无效额外 kwargs 时引发 TypeError，展示了验证额外参数的测试模式。",
+        "reusable_parts": [
+          "pytest.raises(TypeError) pattern",
+          "fig, ax = plt.subplots() setup"
+        ],
+        "possible_gap": "它测试的是不同的 API，但断言风格和错误类型可能相似。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Axis.set_ticks 或 Axes.set_xticks 时，不传递 labels 参数，但传递了无效的 kwargs（例如 xticklabels）。",
+      "evidence": [
+        "Issue 描述：'ax.set_xticks([0, 1], xticklabels=[\"a\", \"b\"])', the incorrect `xticklabels` silently do nothing; they are not even validated (because `labels` has not been passed)。",
+        "源码片段 1 显示 set_ticks 仅在 labels is not None 时调用 set_ticklabels(labels, minor=minor, **kwargs)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "无效的 kwargs 被静默忽略，没有引发任何错误或警告。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 描述：'the incorrect `xticklabels` silently do nothing; they are not even validated'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Axis.set_ticks",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "这是 Issue 直接报告缺陷的方法。"
+      },
+      {
+        "name": "Axes.set_xticks",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 标题提到 Axes.set_xticks，通常调用 Axis.set_ticks。"
+      },
+      {
+        "name": "Text",
+        "kind": "class",
+        "source_path": "lib/matplotlib/text.py",
+        "reason": "kwargs 应被验证为 Text 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axis.py",
+        "object": "Axis.set_ticks",
+        "lines": "1990-2027",
+        "reason": "该方法仅在 labels is not None 时才将 kwargs 传递给 set_ticklabels，否则 kwargs 被忽略且未验证。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试 test_set_ticks_with_labels 中，调用 ax.set_xticks(ticks, labels, **kwargs) 时 labels 不为 None。",
+        "target_pattern": "调用 ax.set_xticks(ticks, **kwargs) 时 labels 为 None（即省略），但 kwargs 包含无效键（如 xticklabels）。",
+        "reason": "根据 Issue，当 labels 未传递时，无效 kwargs 不会被验证，这是缺陷触发的条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [
+      {
+        "rule": "positive_example_polarity",
+        "severity": "hard",
+        "protected_inputs": [
+          "a",
+          "b"
+        ],
+        "instruction": "Inputs explicitly described by the Issue as accepted, parsed, or successful must not be used as invalid inputs and must not be placed inside assertRaises/pytest.raises.",
+        "evidence": [
+          "Issue describes 'a' on a successful/accepted path.",
+          "Issue describes 'b' on a successful/accepted path."
+        ]
+      }
+    ],
+    "audit_warnings": [
+      "Derived polarity audit: do not reinterpret successful Issue example(s) 'a', 'b' as invalid trigger inputs."
+    ]
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论是否传递 labels 参数，传递给 set_ticks 的 kwargs 都应被验证是否为有效的 Text 属性，无效时应引发错误。",
+      "evidence": [
+        "Issue 中提议：'We should at least check that `kwargs` are valid Text properties in all cases; we could even consider making any kwargs an error if `labels` is not set'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 ax.set_xticks([0, 1], xticklabels=['a', 'b']) 时是否引发 TypeError 或类似异常。",
+        "reason": "修复后，无效的 kwargs 应引发错误，因此观察是否出现异常是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "调用后是否产生任何警告（例如关于未使用参数的警告）。",
+        "reason": "Issue 提到当前行为是静默忽略，如果修复可能先引入警告，但最终目标是引发错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当调用 set_ticks 且 labels 为 None 但传递了无效 kwargs 时，应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本或实现中变化。",
+        "reason": "Issue 期望验证 kwargs，无效时应报错，因此断言引发 TypeError 是稳定且与预期行为对齐的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后具体会引发哪种异常（TypeError, ValueError, 或其他）？",
+    "是否所有无效的 kwargs 键都会引发错误，还是只针对某些特定键（如 xticklabels）？",
+    "验证是否仅检查 kwargs 键是否为 Text 属性，还是也检查值类型？"
+  ],
+  "raw": {
+    "issue_summary": "Axes.set_xticks/Axis.set_ticks 仅在传递 labels 参数时验证 kwargs，但即使未传递 labels 也应验证 kwargs 是否为有效的 Text 属性。",
+    "trigger_condition": {
+      "text": "调用 Axis.set_ticks 或 Axes.set_xticks 时，不传递 labels 参数，但传递了无效的 kwargs（例如 xticklabels）。",
+      "evidence": [
+        "Issue 描述：'ax.set_xticks([0, 1], xticklabels=[\"a\", \"b\"])', the incorrect `xticklabels` silently do nothing; they are not even validated (because `labels` has not been passed)。",
+        "源码片段 1 显示 set_ticks 仅在 labels is not None 时调用 set_ticklabels(labels, minor=minor, **kwargs)。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "无效的 kwargs 被静默忽略，没有引发任何错误或警告。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 描述：'the incorrect `xticklabels` silently do nothing; they are not even validated'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论是否传递 labels 参数，传递给 set_ticks 的 kwargs 都应被验证是否为有效的 Text 属性，无效时应引发错误。",
+      "evidence": [
+        "Issue 中提议：'We should at least check that `kwargs` are valid Text properties in all cases; we could even consider making any kwargs an error if `labels` is not set'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Axis.set_ticks",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axis.py",
+        "reason": "这是 Issue 直接报告缺陷的方法。"
+      },
+      {
+        "name": "Axes.set_xticks",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 标题提到 Axes.set_xticks，通常调用 Axis.set_ticks。"
+      },
+      {
+        "name": "Text",
+        "kind": "class",
+        "source_path": "lib/matplotlib/text.py",
+        "reason": "kwargs 应被验证为 Text 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axis.py",
+        "object": "Axis.set_ticks",
+        "lines": "1990-2027",
+        "reason": "该方法仅在 labels is not None 时才将 kwargs 传递给 set_ticklabels，否则 kwargs 被忽略且未验证。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_set_ticks_with_labels",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "它测试了 set_xticks 与 labels 和 kwargs 一起使用的情况，展示了正常用法。",
+        "reusable_parts": [
+          "imports",
+          "figures fixture",
+          "ax.set_xticks calls with labels and kwargs"
+        ],
+        "possible_gap": "它只测试了 labels 被传递且 kwargs 有效的情况，没有测试 labels 为 None 时无效 kwargs 的行为。"
+      },
+      {
+        "test_name": "test_extra_kwargs_raise",
+        "test_file": "lib/matplotlib/tests/test_scale.py",
+        "why_relevant": "它测试了另一个 API (set_yscale) 在传递无效额外 kwargs 时引发 TypeError，展示了验证额外参数的测试模式。",
+        "reusable_parts": [
+          "pytest.raises(TypeError) pattern",
+          "fig, ax = plt.subplots() setup"
+        ],
+        "possible_gap": "它测试的是不同的 API，但断言风格和错误类型可能相似。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试 test_set_ticks_with_labels 中，调用 ax.set_xticks(ticks, labels, **kwargs) 时 labels 不为 None。",
+        "target_pattern": "调用 ax.set_xticks(ticks, **kwargs) 时 labels 为 None（即省略），但 kwargs 包含无效键（如 xticklabels）。",
+        "reason": "根据 Issue，当 labels 未传递时，无效 kwargs 不会被验证，这是缺陷触发的条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 ax.set_xticks([0, 1], xticklabels=['a', 'b']) 时是否引发 TypeError 或类似异常。",
+        "reason": "修复后，无效的 kwargs 应引发错误，因此观察是否出现异常是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "调用后是否产生任何警告（例如关于未使用参数的警告）。",
+        "reason": "Issue 提到当前行为是静默忽略，如果修复可能先引入警告，但最终目标是引发错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当调用 set_ticks 且 labels 为 None 但传递了无效 kwargs 时，应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本或实现中变化。",
+        "reason": "Issue 期望验证 kwargs，无效时应报错，因此断言引发 TypeError 是稳定且与预期行为对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建图形和坐标轴对象，例如使用 plt.subplots()。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 用于断言异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后具体会引发哪种异常（TypeError, ValueError, 或其他）？",
+      "是否所有无效的 kwargs 键都会引发错误，还是只针对某些特定键（如 xticklabels）？",
+      "验证是否仅检查 kwargs 键是否为 Text 属性，还是也检查值类型？"
+    ]
+  }
+}

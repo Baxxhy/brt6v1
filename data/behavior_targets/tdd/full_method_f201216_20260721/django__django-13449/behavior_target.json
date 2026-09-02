@@ -1,0 +1,352 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13449",
+  "issue_summary": "在 SQLite 数据库上，对 DecimalField 使用 Lag() 窗口函数会生成错误的 SQL 语法，导致 OperationalError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用支持 OVER 子句的数据库后端，并在测试中配置为 SQLite。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个包含 DecimalField 的测试模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以使用数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lag",
+        "test_file": "tests/expressions_window/tests.py",
+        "why_relevant": "该测试直接使用了 Lag 和 Window 函数，并验证了查询结果，是生成缺陷复现测试的良好起点。",
+        "reusable_parts": [
+          "测试类结构 (WindowFunctionTests)",
+          "使用 Window 和 Lag 的基本模式",
+          "assertQuerysetEqual 断言风格",
+          "数据库特性检查 @skipUnlessDBFeature('supports_over_clause')"
+        ],
+        "possible_gap": "该测试使用 FloatField (salary) 作为 Lag 的目标字段，而 Issue 中的缺陷特定于 DecimalField。"
+      },
+      {
+        "test_name": "test_decimal_field",
+        "test_file": "tests/field_deconstruction/tests.py",
+        "why_relevant": "该测试涉及 DecimalField 的构造和属性，有助于理解 DecimalField 的配置。",
+        "reusable_parts": [
+          "DecimalField 的实例化方式 (max_digits, decimal_places)"
+        ],
+        "possible_gap": "该测试不涉及数据库查询或窗口函数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 SQLite 数据库，模型包含一个 DecimalField 字段，对该字段使用 Lag 窗口函数进行查询注解，且未显式指定 output_field。",
+      "evidence": [
+        "Issue 中提供了包含 DecimalField 的模型定义和查询代码。",
+        "Issue 指出当 lagged field 是 DecimalField 时失败，而对 FloatField 使用 Lag 则工作正常。",
+        "Issue 提到通过添加 output_field=FloatField() 可以覆盖此问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 OperationalError: near \"OVER\": syntax error。生成的 SQL 中 CAST 语句错误地只包裹了 LAG 函数，而非整个窗口表达式。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中包含了完整的异常堆栈跟踪。",
+        "Issue 中展示了错误的生成 SQL 查询：SELECT ... CAST(LAG(...) AS NUMERIC) OVER ...。",
+        "Issue 分析认为 CAST 语句应在整个表达式直到 \"w\" 别名。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Lag",
+        "kind": "class",
+        "source_path": "django/db/models/functions/window.py",
+        "reason": "Issue 的核心是使用 Lag 函数时出现问题。"
+      },
+      {
+        "name": "Window",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中 Lag 被用作 Window 表达式的参数。"
+      },
+      {
+        "name": "DecimalField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 明确指出问题仅发生在 lagged field 是 DecimalField 时。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 的查询中使用了 F 对象进行 partition_by 和 order_by。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/functions/window.py",
+        "object": "Lag",
+        "lines": "",
+        "reason": "Lag 函数或其父类 LagLeadFunction 可能未正确处理 DecimalField 类型的输出字段转换。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Window",
+        "lines": "",
+        "reason": "Window 类的 as_sql 方法或其模板可能在与包含 DecimalField 的表达式组合时，生成了错误的 CAST 语句位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_lag 中对 FloatField (salary) 使用 Lag。",
+        "target_pattern": "对 DecimalField 使用 Lag。",
+        "reason": "Issue 明确指出缺陷仅在 lagged field 是 DecimalField 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试可能使用默认或多种数据库后端。",
+        "target_pattern": "将数据库后端配置为 SQLite。",
+        "reason": "Issue 中的错误发生在 SQLite 数据库上，且错误与 SQLite 的 SQL 语法生成有关。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 Lag 可能未显式指定 output_field。",
+        "target_pattern": "保持 Lag 不指定 output_field（即使用默认推断）。",
+        "reason": "Issue 表明当 Lag 未指定 output_field 且目标字段为 DecimalField 时，会触发缺陷。显式指定 output_field 是变通方法。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对 DecimalField 使用 Lag 窗口函数应生成语法正确的 SQL 查询，并成功执行，返回预期的结果。",
+      "evidence": [
+        "Issue 暗示了正确的 SQL 语法应为 CAST(整个窗口表达式 AS NUMERIC) 或类似形式。",
+        "Issue 提到对 FloatField 使用 Lag 可以正常工作，表明这是 DecimalField 特有的问题。",
+        "Issue 中用户通过指定 output_field 找到了一个可行的变通方法，表明期望的行为是无需此变通即可工作。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串（例如 str(q.query) 或通过查询日志获取）。",
+        "reason": "Issue 的核心是生成的 SQL 语法错误，观察 SQL 可以确认 CAST 语句的位置是否正确。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询时是否抛出 OperationalError 及其消息。",
+        "reason": "Issue 中观察到的直接错误现象是 OperationalError: near \"OVER\": syntax error。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询执行后的结果或异常。",
+        "reason": "最终需要验证查询是否能成功执行并返回数据，而不是抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对 DecimalField 使用 Lag 的查询不会抛出 OperationalError 或语法错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的、具体的 SQL 字符串。",
+        "reason": "Issue 表明当前行为会抛出异常，修复后应不再抛出。断言不抛出特定异常比断言具体 SQL 更稳定。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 查询中 CAST 语句（如果存在）应正确包裹整个窗口表达式，或语法正确。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等。",
+        "reason": "Issue 指出了错误的 SQL 模式（CAST 只包裹 LAG）。可以断言 SQL 不包含该错误模式，或包含更合理的模式（如 CAST 包裹整个表达式）。但具体修复后的 SQL 格式不确定，所以断言风格需灵活。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后正确的 SQL 语法具体是什么（例如 CAST 的确切位置和范围）。",
+    "缺陷是否也存在于其他数据库后端（如 PostgreSQL、MySQL），还是 SQLite 特有。",
+    "除了 DecimalField，其他需要特殊类型转换的字段（如 DurationField）是否也有类似问题。",
+    "缺陷的确切根源是在 Lag、Window 还是更深层的 SQL 编译逻辑中。"
+  ],
+  "raw": {
+    "issue_summary": "在 SQLite 数据库上，对 DecimalField 使用 Lag() 窗口函数会生成错误的 SQL 语法，导致 OperationalError。",
+    "trigger_condition": {
+      "text": "使用 SQLite 数据库，模型包含一个 DecimalField 字段，对该字段使用 Lag 窗口函数进行查询注解，且未显式指定 output_field。",
+      "evidence": [
+        "Issue 中提供了包含 DecimalField 的模型定义和查询代码。",
+        "Issue 指出当 lagged field 是 DecimalField 时失败，而对 FloatField 使用 Lag 则工作正常。",
+        "Issue 提到通过添加 output_field=FloatField() 可以覆盖此问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 OperationalError: near \"OVER\": syntax error。生成的 SQL 中 CAST 语句错误地只包裹了 LAG 函数，而非整个窗口表达式。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中包含了完整的异常堆栈跟踪。",
+        "Issue 中展示了错误的生成 SQL 查询：SELECT ... CAST(LAG(...) AS NUMERIC) OVER ...。",
+        "Issue 分析认为 CAST 语句应在整个表达式直到 \"w\" 别名。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对 DecimalField 使用 Lag 窗口函数应生成语法正确的 SQL 查询，并成功执行，返回预期的结果。",
+      "evidence": [
+        "Issue 暗示了正确的 SQL 语法应为 CAST(整个窗口表达式 AS NUMERIC) 或类似形式。",
+        "Issue 提到对 FloatField 使用 Lag 可以正常工作，表明这是 DecimalField 特有的问题。",
+        "Issue 中用户通过指定 output_field 找到了一个可行的变通方法，表明期望的行为是无需此变通即可工作。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Lag",
+        "kind": "class",
+        "source_path": "django/db/models/functions/window.py",
+        "reason": "Issue 的核心是使用 Lag 函数时出现问题。"
+      },
+      {
+        "name": "Window",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中 Lag 被用作 Window 表达式的参数。"
+      },
+      {
+        "name": "DecimalField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 明确指出问题仅发生在 lagged field 是 DecimalField 时。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 的查询中使用了 F 对象进行 partition_by 和 order_by。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/functions/window.py",
+        "object": "Lag",
+        "lines": "",
+        "reason": "Lag 函数或其父类 LagLeadFunction 可能未正确处理 DecimalField 类型的输出字段转换。"
+      },
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Window",
+        "lines": "",
+        "reason": "Window 类的 as_sql 方法或其模板可能在与包含 DecimalField 的表达式组合时，生成了错误的 CAST 语句位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lag",
+        "test_file": "tests/expressions_window/tests.py",
+        "why_relevant": "该测试直接使用了 Lag 和 Window 函数，并验证了查询结果，是生成缺陷复现测试的良好起点。",
+        "reusable_parts": [
+          "测试类结构 (WindowFunctionTests)",
+          "使用 Window 和 Lag 的基本模式",
+          "assertQuerysetEqual 断言风格",
+          "数据库特性检查 @skipUnlessDBFeature('supports_over_clause')"
+        ],
+        "possible_gap": "该测试使用 FloatField (salary) 作为 Lag 的目标字段，而 Issue 中的缺陷特定于 DecimalField。"
+      },
+      {
+        "test_name": "test_decimal_field",
+        "test_file": "tests/field_deconstruction/tests.py",
+        "why_relevant": "该测试涉及 DecimalField 的构造和属性，有助于理解 DecimalField 的配置。",
+        "reusable_parts": [
+          "DecimalField 的实例化方式 (max_digits, decimal_places)"
+        ],
+        "possible_gap": "该测试不涉及数据库查询或窗口函数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_lag 中对 FloatField (salary) 使用 Lag。",
+        "target_pattern": "对 DecimalField 使用 Lag。",
+        "reason": "Issue 明确指出缺陷仅在 lagged field 是 DecimalField 时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试可能使用默认或多种数据库后端。",
+        "target_pattern": "将数据库后端配置为 SQLite。",
+        "reason": "Issue 中的错误发生在 SQLite 数据库上，且错误与 SQLite 的 SQL 语法生成有关。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 Lag 可能未显式指定 output_field。",
+        "target_pattern": "保持 Lag 不指定 output_field（即使用默认推断）。",
+        "reason": "Issue 表明当 Lag 未指定 output_field 且目标字段为 DecimalField 时，会触发缺陷。显式指定 output_field 是变通方法。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串（例如 str(q.query) 或通过查询日志获取）。",
+        "reason": "Issue 的核心是生成的 SQL 语法错误，观察 SQL 可以确认 CAST 语句的位置是否正确。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询时是否抛出 OperationalError 及其消息。",
+        "reason": "Issue 中观察到的直接错误现象是 OperationalError: near \"OVER\": syntax error。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询执行后的结果或异常。",
+        "reason": "最终需要验证查询是否能成功执行并返回数据，而不是抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对 DecimalField 使用 Lag 的查询不会抛出 OperationalError 或语法错误。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的、具体的 SQL 字符串。",
+        "reason": "Issue 表明当前行为会抛出异常，修复后应不再抛出。断言不抛出特定异常比断言具体 SQL 更稳定。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 查询中 CAST 语句（如果存在）应正确包裹整个窗口表达式，或语法正确。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等。",
+        "reason": "Issue 指出了错误的 SQL 模式（CAST 只包裹 LAG）。可以断言 SQL 不包含该错误模式，或包含更合理的模式（如 CAST 包裹整个表达式）。但具体修复后的 SQL 格式不确定，所以断言风格需灵活。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用支持 OVER 子句的数据库后端，并在测试中配置为 SQLite。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建一个包含 DecimalField 的测试模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以使用数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "修复后正确的 SQL 语法具体是什么（例如 CAST 的确切位置和范围）。",
+      "缺陷是否也存在于其他数据库后端（如 PostgreSQL、MySQL），还是 SQLite 特有。",
+      "除了 DecimalField，其他需要特殊类型转换的字段（如 DurationField）是否也有类似问题。",
+      "缺陷的确切根源是在 Lag、Window 还是更深层的 SQL 编译逻辑中。"
+    ]
+  }
+}

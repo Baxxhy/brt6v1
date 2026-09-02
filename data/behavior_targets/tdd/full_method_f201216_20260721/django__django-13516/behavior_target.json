@@ -1,0 +1,328 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13516",
+  "issue_summary": "管理命令中 self.stdout/stderr 的 flush() 方法在长时间迁移过程中无法实时输出信息。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 MigrationTestBase 测试基类，它提供了数据库迁移测试的基础设施。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 MIGRATION_MODULES 设置指向包含迁移的模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟长时间迁移操作，例如通过添加 sleep 或大量数据操作。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_migrate",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "直接测试 migrate 命令的基本用法，包含输出验证。",
+        "reusable_parts": [
+          "call_command 调用方式",
+          "stdout=io.StringIO() 设置",
+          "assertIn 验证输出片段"
+        ],
+        "possible_gap": "当前测试验证的是迁移结束后的完整输出，没有验证实时输出顺序。"
+      },
+      {
+        "test_name": "test_custom_stdout",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "测试自定义命令的 stdout 处理，涉及 BaseCommand.stdout 的使用。",
+        "reusable_parts": [
+          "BaseCommand 子类定义",
+          "stdout 参数传递",
+          "call_command 调用"
+        ],
+        "possible_gap": "测试的是简单输出，没有测试 flush() 行为或长时间操作。"
+      },
+      {
+        "test_name": "test_migrate_plan",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "测试 migrate --plan 的输出，涉及迁移命令的输出捕获。",
+        "reusable_parts": [
+          "stdout=io.StringIO() 设置",
+          "call_command 参数配置",
+          "输出验证"
+        ],
+        "possible_gap": "测试的是计划输出，不是实际迁移执行的输出。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "运行一个长时间的数据迁移命令（如 migrate），该命令在迁移过程中会调用 flush() 方法。",
+      "evidence": [
+        "Issue 描述中提到 'flush() is notably called during migrate command' 和 'a long migration effectively prints to stderr no relevant information up until the end'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "迁移命令的输出被缓冲，直到迁移结束后才一次性打印，导致在长时间迁移过程中看不到实时进度信息。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述中展示了实际输出顺序：先打印 'Operations to perform:' 和 'Running migrations:'，然后长时间无输出，最后在迁移结束时才打印 'Applying myapp.0002_auto_20200817_1030... OK'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中都用它来调用 migrate 命令，是触发缺陷的主要入口。"
+      },
+      {
+        "name": "BaseCommand.stdout",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出 self.stdout/stderr 的 flush() 方法有问题。"
+      },
+      {
+        "name": "MigrationExecutor.migrate",
+        "kind": "method",
+        "source_path": "django/db/migrations/executor.py",
+        "reason": "这是执行迁移的核心方法，可能包含输出逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/executor.py",
+        "object": "MigrationExecutor.migrate",
+        "lines": "82-125",
+        "reason": "这是迁移执行的核心方法，可能负责输出迁移进度信息。"
+      },
+      {
+        "path": "",
+        "object": "BaseCommand 或其子类的输出处理逻辑",
+        "lines": "",
+        "reason": "Issue 明确指出是管理命令中 self.stdout/stderr 的 flush() 问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中调用 call_command 后立即获取完整输出进行验证。",
+        "target_pattern": "在迁移执行过程中（如通过回调或线程）实时检查输出缓冲区的内容。",
+        "reason": "Issue 的核心是输出缓冲问题，需要验证迁移过程中的实时输出。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用默认或简单配置运行迁移。",
+        "target_pattern": "配置一个包含长时间迁移操作的场景（如大量数据迁移）。",
+        "reason": "缓冲问题在长时间操作中更明显，需要模拟实际迁移耗时。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移命令的输出应该实时刷新，在迁移操作开始时就能看到 'Applying myapp.0002_auto_20200817_1030...' 这样的信息。",
+      "evidence": [
+        "Issue 的 'Expected behavior:' 部分描述了期望的输出顺序：'Applying myapp.0002_auto_20200817_1030...' 应该在迁移工作开始时就输出，然后是工作过程，最后是 'OK'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "stdout.getvalue() 在不同时间点的内容",
+        "reason": "Issue 的关键是输出顺序错误，需要观察迁移开始、进行中和结束时的输出内容。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "stdout 缓冲区的状态（如是否为空、内容增长）",
+        "reason": "可以判断输出是否被缓冲而没有实时刷新。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 'Applying <migration_name>...' 在迁移操作开始时就出现在输出中。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "验证完整的、精确的输出字符串，因为具体迁移名称可能变化。",
+        "reason": "Issue 关注的是输出时机，而不是具体内容，使用片段匹配更稳定。"
+      },
+      {
+        "assertion_goal": "验证迁移开始时的输出不包含最终的 'OK' 状态。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "依赖于具体的迁移名称或完整输出顺序。",
+        "reason": "可以间接证明输出是分阶段进行的，而不是一次性缓冲到最后。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "flush() 方法具体在迁移流程的哪个位置被调用。",
+    "是所有的管理命令都有这个问题，还是特定于 migrate 命令。",
+    "输出缓冲是发生在 Python 层面还是更低层（如操作系统）。",
+    "修复后期望的具体输出格式和时机细节。"
+  ],
+  "raw": {
+    "issue_summary": "管理命令中 self.stdout/stderr 的 flush() 方法在长时间迁移过程中无法实时输出信息。",
+    "trigger_condition": {
+      "text": "运行一个长时间的数据迁移命令（如 migrate），该命令在迁移过程中会调用 flush() 方法。",
+      "evidence": [
+        "Issue 描述中提到 'flush() is notably called during migrate command' 和 'a long migration effectively prints to stderr no relevant information up until the end'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "迁移命令的输出被缓冲，直到迁移结束后才一次性打印，导致在长时间迁移过程中看不到实时进度信息。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述中展示了实际输出顺序：先打印 'Operations to perform:' 和 'Running migrations:'，然后长时间无输出，最后在迁移结束时才打印 'Applying myapp.0002_auto_20200817_1030... OK'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移命令的输出应该实时刷新，在迁移操作开始时就能看到 'Applying myapp.0002_auto_20200817_1030...' 这样的信息。",
+      "evidence": [
+        "Issue 的 'Expected behavior:' 部分描述了期望的输出顺序：'Applying myapp.0002_auto_20200817_1030...' 应该在迁移工作开始时就输出，然后是工作过程，最后是 'OK'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中都用它来调用 migrate 命令，是触发缺陷的主要入口。"
+      },
+      {
+        "name": "BaseCommand.stdout",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出 self.stdout/stderr 的 flush() 方法有问题。"
+      },
+      {
+        "name": "MigrationExecutor.migrate",
+        "kind": "method",
+        "source_path": "django/db/migrations/executor.py",
+        "reason": "这是执行迁移的核心方法，可能包含输出逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/executor.py",
+        "object": "MigrationExecutor.migrate",
+        "lines": "82-125",
+        "reason": "这是迁移执行的核心方法，可能负责输出迁移进度信息。"
+      },
+      {
+        "path": "",
+        "object": "BaseCommand 或其子类的输出处理逻辑",
+        "lines": "",
+        "reason": "Issue 明确指出是管理命令中 self.stdout/stderr 的 flush() 问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_migrate",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "直接测试 migrate 命令的基本用法，包含输出验证。",
+        "reusable_parts": [
+          "call_command 调用方式",
+          "stdout=io.StringIO() 设置",
+          "assertIn 验证输出片段"
+        ],
+        "possible_gap": "当前测试验证的是迁移结束后的完整输出，没有验证实时输出顺序。"
+      },
+      {
+        "test_name": "test_custom_stdout",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "测试自定义命令的 stdout 处理，涉及 BaseCommand.stdout 的使用。",
+        "reusable_parts": [
+          "BaseCommand 子类定义",
+          "stdout 参数传递",
+          "call_command 调用"
+        ],
+        "possible_gap": "测试的是简单输出，没有测试 flush() 行为或长时间操作。"
+      },
+      {
+        "test_name": "test_migrate_plan",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "测试 migrate --plan 的输出，涉及迁移命令的输出捕获。",
+        "reusable_parts": [
+          "stdout=io.StringIO() 设置",
+          "call_command 参数配置",
+          "输出验证"
+        ],
+        "possible_gap": "测试的是计划输出，不是实际迁移执行的输出。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中调用 call_command 后立即获取完整输出进行验证。",
+        "target_pattern": "在迁移执行过程中（如通过回调或线程）实时检查输出缓冲区的内容。",
+        "reason": "Issue 的核心是输出缓冲问题，需要验证迁移过程中的实时输出。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试使用默认或简单配置运行迁移。",
+        "target_pattern": "配置一个包含长时间迁移操作的场景（如大量数据迁移）。",
+        "reason": "缓冲问题在长时间操作中更明显，需要模拟实际迁移耗时。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "order",
+        "expression_hint": "stdout.getvalue() 在不同时间点的内容",
+        "reason": "Issue 的关键是输出顺序错误，需要观察迁移开始、进行中和结束时的输出内容。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "stdout 缓冲区的状态（如是否为空、内容增长）",
+        "reason": "可以判断输出是否被缓冲而没有实时刷新。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 'Applying <migration_name>...' 在迁移操作开始时就出现在输出中。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "验证完整的、精确的输出字符串，因为具体迁移名称可能变化。",
+        "reason": "Issue 关注的是输出时机，而不是具体内容，使用片段匹配更稳定。"
+      },
+      {
+        "assertion_goal": "验证迁移开始时的输出不包含最终的 'OK' 状态。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "依赖于具体的迁移名称或完整输出顺序。",
+        "reason": "可以间接证明输出是分阶段进行的，而不是一次性缓冲到最后。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 MigrationTestBase 测试基类，它提供了数据库迁移测试的基础设施。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 MIGRATION_MODULES 设置指向包含迁移的模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟长时间迁移操作，例如通过添加 sleep 或大量数据操作。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "flush() 方法具体在迁移流程的哪个位置被调用。",
+      "是所有的管理命令都有这个问题，还是特定于 migrate 命令。",
+      "输出缓冲是发生在 Python 层面还是更低层（如操作系统）。",
+      "修复后期望的具体输出格式和时机细节。"
+    ]
+  }
+}

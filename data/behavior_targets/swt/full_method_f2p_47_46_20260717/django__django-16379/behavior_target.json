@@ -1,0 +1,392 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16379",
+  "issue_summary": "FileBasedCache.has_key 方法在检查文件存在后打开文件前存在竞态条件，可能导致 FileNotFoundError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 FileBasedCache 后端进行测试。参考 FileBasedCacheTests 使用 @override_settings 设置 CACHES。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时目录作为缓存目录。可以使用 tmp_path fixture 或 tempfile.mkdtemp。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "为了模拟并发，可能需要使用 threading 或 multiprocessing 模块创建多个线程/进程。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "为了确定性地触发竞态，可能需要使用锁、事件或 monkey-patch（如 patch('os.open')）来精确控制执行顺序。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FileBasedCacheTests.test_get_ignores_enoent",
+        "test_file": "tests/cache/tests.py",
+        "why_relevant": "该测试直接验证了 FileBasedCache 在缓存文件被删除（模拟 ENOENT）时的行为，展示了处理文件缺失的预期模式（返回默认值而非抛出异常）。",
+        "reusable_parts": [
+          "FileBasedCache 的测试类装饰器 @override_settings",
+          "cache.set 和 cache._key_to_file 的调用",
+          "使用 os.unlink 手动删除文件来模拟竞态条件",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试针对的是 get 方法，而非 has_key 方法。它模拟的是文件在调用前已被删除，而非在 exists 检查和 open 调用之间被删除的竞态条件。"
+      },
+      {
+        "test_name": "FileStorageTests.test_remove_race_handling",
+        "test_file": "tests/file_storage/tests.py",
+        "why_relevant": "该测试专门处理文件删除的竞态条件，并模拟 FileNotFoundError 异常，展示了 Django 存储层对这类问题的处理模式。",
+        "reusable_parts": [
+          "使用 monkey-patch (os.remove) 来模拟竞态删除",
+          "对 FileNotFoundError 异常的处理和断言",
+          "self.assertFalse(self.storage.exists(...)) 的断言风格"
+        ],
+        "possible_gap": "该测试针对的是不同的存储后端（FileStorage），而非 FileBasedCache。上下文和 API 不同。"
+      },
+      {
+        "test_name": "BaseCacheTests.test_has_key",
+        "test_file": "tests/cache/tests.py",
+        "why_relevant": "这是针对 has_key 方法基本功能的测试，提供了调用 has_key 并断言其返回值的标准模式。",
+        "reusable_parts": [
+          "cache.set 和 cache.has_key 的调用序列",
+          "使用 self.assertIs 对布尔返回值进行断言",
+          "测试无过期和值为 None 的缓存键"
+        ],
+        "possible_gap": "该测试是单线程的，不涉及并发或竞态条件。它验证的是正常情况下的功能，而非缺陷路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "多个线程或进程并发调用 has_key 方法检查同一个已过期或即将被删除的缓存文件。",
+      "evidence": [
+        "Issue 描述：'Between the exists() check and open(), it's possible for the file to be deleted. In fact, the _is_expired() method itself deletes the file if it finds it to be expired. So if many threads race to read an expired cache at once, it's not that unlikely to hit this window.'",
+        "源码片段 2 显示 has_key 先检查 os.path.exists(fname)，然后 with open(fname, \"rb\")。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 FileNotFoundError: [Errno 2] No such file or directory，异常发生在 has_key 方法内的 open 调用处。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的异常堆栈：'FileNotFoundError: [Errno 2] No such file or directory: '/app/var/cache/d729e4cf4ba88cba5a0f48e0396ec48a.djcache' [...] File \"django/core/cache/backends/filebased.py\", line 94, in has_key with open(fname, \"rb\") as f:'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "FileBasedCache.has_key",
+        "kind": "method",
+        "source_path": "django/core/cache/backends/filebased.py",
+        "reason": "Issue 直接报告此方法存在竞态条件缺陷。"
+      },
+      {
+        "name": "FileBasedCache._is_expired",
+        "kind": "method",
+        "source_path": "django/core/cache/backends/filebased.py",
+        "reason": "此方法在发现文件过期时会删除文件，是触发竞态条件的关键环节。"
+      },
+      {
+        "name": "FileBasedCache._key_to_file",
+        "kind": "method",
+        "source_path": "django/core/cache/backends/filebased.py",
+        "reason": "用于将缓存键转换为文件路径，是 has_key 操作的基础。"
+      },
+      {
+        "name": "os.path.exists",
+        "kind": "function",
+        "source_path": "",
+        "reason": "has_key 方法中用于检查文件是否存在，是竞态窗口的起点。"
+      },
+      {
+        "name": "open",
+        "kind": "function",
+        "source_path": "",
+        "reason": "has_key 方法中在 exists 检查后打开文件，是抛出异常的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/cache/backends/filebased.py",
+        "object": "FileBasedCache.has_key",
+        "lines": "91-96",
+        "reason": "Issue 明确指出在 exists() 检查和 open() 调用之间存在竞态窗口。"
+      },
+      {
+        "path": "django/core/cache/backends/filebased.py",
+        "object": "FileBasedCache._is_expired",
+        "lines": "147-159",
+        "reason": "此方法会删除过期文件，当多个线程同时检查同一个过期文件时，一个线程的删除操作可能导致另一个线程的 open 失败。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中缓存文件存在且内容有效（未过期）。",
+        "target_pattern": "缓存文件存在但已过期，并且可能被并发删除。",
+        "reason": "Issue 描述的核心是过期文件在检查期间被删除。需要将测试状态变异为存在一个即将被 _is_expired 删除的文件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "单线程顺序调用 cache.set 和 cache.has_key。",
+        "target_pattern": "多线程/多进程并发调用 cache.has_key（或涉及 has_key 的 add/get_or_set）于同一个键。",
+        "reason": "竞态条件需要并发操作才能触发。需要引入并发调用以模拟 'many threads race' 的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "无模拟或仅模拟文件删除（如 test_get_ignores_enoent 中的 os.unlink）。",
+        "target_pattern": "在 os.path.exists 返回 True 后，但在 open 调用前，模拟文件被删除（例如通过 monkey-patch os.open 或 threading.Timer）。",
+        "reason": "为了确定性地复现竞态窗口，需要精确控制文件在 exists 检查和 open 调用之间的状态变化。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "has_key 方法应能安全处理并发场景，在文件被其他线程/进程删除时，应优雅地返回 False 或重试，而不是抛出 FileNotFoundError。",
+      "evidence": [
+        "Issue 暗示了竞态条件是一个缺陷，需要修复。相关测试 3 (test_get_ignores_enoent) 表明 FileBasedCache 的其他方法（如 get）在文件不存在时应返回默认值而非错误。",
+        "相关测试 4 (test_remove_race_handling) 展示了存储层对文件删除竞态条件的处理期望。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 cache.has_key(key) 或 cache.add(key, ...) 时捕获的 FileNotFoundError 异常及其 traceback。",
+        "reason": "Issue 观察到的直接错误现象就是 FileNotFoundError。观测此异常是判断缺陷是否触发的直接证据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 has_key 调用前后，通过 os.path.exists 检查目标缓存文件 fname 的存在状态。",
+        "reason": "有助于理解竞态发生的时机：文件在调用前存在，但在 open 时消失。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "cache.has_key(key) 的返回值（True/False）。",
+        "reason": "在修复后，即使发生竞态，has_key 也应返回合理的布尔值（很可能是 False）而非抛出异常。观测返回值可以验证修复后的行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在并发场景下，has_key 调用不应抛出 FileNotFoundError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为路径可能变化。",
+        "reason": "Issue 的核心是异常不应发生。使用 assertRaises(FileNotFoundError) 的否定形式（例如使用 context manager 确保不抛出）或捕获异常后断言未发生，可以直接验证缺陷是否被触发或修复。"
+      },
+      {
+        "assertion_goal": "has_key 在文件因竞态消失时应返回 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 has_key 在文件存在时一定返回 True，因为竞态可能导致文件在检查期间被删除。",
+        "reason": "这是修复后应满足的语义：方法应优雅降级。断言返回 False 比断言不抛异常更精确地定义了正确行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后的具体实现策略未知（例如，是使用 try-except 捕获 FileNotFoundError，还是使用原子性操作，或是其他同步机制）。",
+    "除了 has_key，其他方法（如 add, get）中是否也存在类似的竞态条件？Issue 只提到了 has_key 和 add 的调用链。",
+    "在真实并发环境下，触发此缺陷的确切概率和所需的最小线程数不确定。",
+    "_is_expired 方法中 f.close() 和 self._delete(f.name) 的调用是否也是竞态源的一部分？"
+  ],
+  "raw": {
+    "issue_summary": "FileBasedCache.has_key 方法在检查文件存在后打开文件前存在竞态条件，可能导致 FileNotFoundError。",
+    "trigger_condition": {
+      "text": "多个线程或进程并发调用 has_key 方法检查同一个已过期或即将被删除的缓存文件。",
+      "evidence": [
+        "Issue 描述：'Between the exists() check and open(), it's possible for the file to be deleted. In fact, the _is_expired() method itself deletes the file if it finds it to be expired. So if many threads race to read an expired cache at once, it's not that unlikely to hit this window.'",
+        "源码片段 2 显示 has_key 先检查 os.path.exists(fname)，然后 with open(fname, \"rb\")。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 FileNotFoundError: [Errno 2] No such file or directory，异常发生在 has_key 方法内的 open 调用处。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的异常堆栈：'FileNotFoundError: [Errno 2] No such file or directory: '/app/var/cache/d729e4cf4ba88cba5a0f48e0396ec48a.djcache' [...] File \"django/core/cache/backends/filebased.py\", line 94, in has_key with open(fname, \"rb\") as f:'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "has_key 方法应能安全处理并发场景，在文件被其他线程/进程删除时，应优雅地返回 False 或重试，而不是抛出 FileNotFoundError。",
+      "evidence": [
+        "Issue 暗示了竞态条件是一个缺陷，需要修复。相关测试 3 (test_get_ignores_enoent) 表明 FileBasedCache 的其他方法（如 get）在文件不存在时应返回默认值而非错误。",
+        "相关测试 4 (test_remove_race_handling) 展示了存储层对文件删除竞态条件的处理期望。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "FileBasedCache.has_key",
+        "kind": "method",
+        "source_path": "django/core/cache/backends/filebased.py",
+        "reason": "Issue 直接报告此方法存在竞态条件缺陷。"
+      },
+      {
+        "name": "FileBasedCache._is_expired",
+        "kind": "method",
+        "source_path": "django/core/cache/backends/filebased.py",
+        "reason": "此方法在发现文件过期时会删除文件，是触发竞态条件的关键环节。"
+      },
+      {
+        "name": "FileBasedCache._key_to_file",
+        "kind": "method",
+        "source_path": "django/core/cache/backends/filebased.py",
+        "reason": "用于将缓存键转换为文件路径，是 has_key 操作的基础。"
+      },
+      {
+        "name": "os.path.exists",
+        "kind": "function",
+        "source_path": "",
+        "reason": "has_key 方法中用于检查文件是否存在，是竞态窗口的起点。"
+      },
+      {
+        "name": "open",
+        "kind": "function",
+        "source_path": "",
+        "reason": "has_key 方法中在 exists 检查后打开文件，是抛出异常的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/cache/backends/filebased.py",
+        "object": "FileBasedCache.has_key",
+        "lines": "91-96",
+        "reason": "Issue 明确指出在 exists() 检查和 open() 调用之间存在竞态窗口。"
+      },
+      {
+        "path": "django/core/cache/backends/filebased.py",
+        "object": "FileBasedCache._is_expired",
+        "lines": "147-159",
+        "reason": "此方法会删除过期文件，当多个线程同时检查同一个过期文件时，一个线程的删除操作可能导致另一个线程的 open 失败。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FileBasedCacheTests.test_get_ignores_enoent",
+        "test_file": "tests/cache/tests.py",
+        "why_relevant": "该测试直接验证了 FileBasedCache 在缓存文件被删除（模拟 ENOENT）时的行为，展示了处理文件缺失的预期模式（返回默认值而非抛出异常）。",
+        "reusable_parts": [
+          "FileBasedCache 的测试类装饰器 @override_settings",
+          "cache.set 和 cache._key_to_file 的调用",
+          "使用 os.unlink 手动删除文件来模拟竞态条件",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试针对的是 get 方法，而非 has_key 方法。它模拟的是文件在调用前已被删除，而非在 exists 检查和 open 调用之间被删除的竞态条件。"
+      },
+      {
+        "test_name": "FileStorageTests.test_remove_race_handling",
+        "test_file": "tests/file_storage/tests.py",
+        "why_relevant": "该测试专门处理文件删除的竞态条件，并模拟 FileNotFoundError 异常，展示了 Django 存储层对这类问题的处理模式。",
+        "reusable_parts": [
+          "使用 monkey-patch (os.remove) 来模拟竞态删除",
+          "对 FileNotFoundError 异常的处理和断言",
+          "self.assertFalse(self.storage.exists(...)) 的断言风格"
+        ],
+        "possible_gap": "该测试针对的是不同的存储后端（FileStorage），而非 FileBasedCache。上下文和 API 不同。"
+      },
+      {
+        "test_name": "BaseCacheTests.test_has_key",
+        "test_file": "tests/cache/tests.py",
+        "why_relevant": "这是针对 has_key 方法基本功能的测试，提供了调用 has_key 并断言其返回值的标准模式。",
+        "reusable_parts": [
+          "cache.set 和 cache.has_key 的调用序列",
+          "使用 self.assertIs 对布尔返回值进行断言",
+          "测试无过期和值为 None 的缓存键"
+        ],
+        "possible_gap": "该测试是单线程的，不涉及并发或竞态条件。它验证的是正常情况下的功能，而非缺陷路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中缓存文件存在且内容有效（未过期）。",
+        "target_pattern": "缓存文件存在但已过期，并且可能被并发删除。",
+        "reason": "Issue 描述的核心是过期文件在检查期间被删除。需要将测试状态变异为存在一个即将被 _is_expired 删除的文件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "单线程顺序调用 cache.set 和 cache.has_key。",
+        "target_pattern": "多线程/多进程并发调用 cache.has_key（或涉及 has_key 的 add/get_or_set）于同一个键。",
+        "reason": "竞态条件需要并发操作才能触发。需要引入并发调用以模拟 'many threads race' 的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "mock",
+        "current_pattern": "无模拟或仅模拟文件删除（如 test_get_ignores_enoent 中的 os.unlink）。",
+        "target_pattern": "在 os.path.exists 返回 True 后，但在 open 调用前，模拟文件被删除（例如通过 monkey-patch os.open 或 threading.Timer）。",
+        "reason": "为了确定性地复现竞态窗口，需要精确控制文件在 exists 检查和 open 调用之间的状态变化。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 cache.has_key(key) 或 cache.add(key, ...) 时捕获的 FileNotFoundError 异常及其 traceback。",
+        "reason": "Issue 观察到的直接错误现象就是 FileNotFoundError。观测此异常是判断缺陷是否触发的直接证据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 has_key 调用前后，通过 os.path.exists 检查目标缓存文件 fname 的存在状态。",
+        "reason": "有助于理解竞态发生的时机：文件在调用前存在，但在 open 时消失。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "cache.has_key(key) 的返回值（True/False）。",
+        "reason": "在修复后，即使发生竞态，has_key 也应返回合理的布尔值（很可能是 False）而非抛出异常。观测返回值可以验证修复后的行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在并发场景下，has_key 调用不应抛出 FileNotFoundError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为路径可能变化。",
+        "reason": "Issue 的核心是异常不应发生。使用 assertRaises(FileNotFoundError) 的否定形式（例如使用 context manager 确保不抛出）或捕获异常后断言未发生，可以直接验证缺陷是否被触发或修复。"
+      },
+      {
+        "assertion_goal": "has_key 在文件因竞态消失时应返回 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 has_key 在文件存在时一定返回 True，因为竞态可能导致文件在检查期间被删除。",
+        "reason": "这是修复后应满足的语义：方法应优雅降级。断言返回 False 比断言不抛异常更精确地定义了正确行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 FileBasedCache 后端进行测试。参考 FileBasedCacheTests 使用 @override_settings 设置 CACHES。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时目录作为缓存目录。可以使用 tmp_path fixture 或 tempfile.mkdtemp。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "为了模拟并发，可能需要使用 threading 或 multiprocessing 模块创建多个线程/进程。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "为了确定性地触发竞态，可能需要使用锁、事件或 monkey-patch（如 patch('os.open')）来精确控制执行顺序。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "修复后的具体实现策略未知（例如，是使用 try-except 捕获 FileNotFoundError，还是使用原子性操作，或是其他同步机制）。",
+      "除了 has_key，其他方法（如 add, get）中是否也存在类似的竞态条件？Issue 只提到了 has_key 和 add 的调用链。",
+      "在真实并发环境下，触发此缺陷的确切概率和所需的最小线程数不确定。",
+      "_is_expired 方法中 f.close() 和 self._delete(f.name) 的调用是否也是竞态源的一部分？"
+    ]
+  }
+}

@@ -1,0 +1,384 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11603",
+  "issue_summary": "Avg 和 Sum 聚合函数不支持 DISTINCT 参数，导致异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个包含重复值的测试模型（如 AggregateTestModel, Author, Book）作为 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 或 PostgreSQLTestCase（如果测试 PostgreSQL 特定行为，但 Issue 是关于通用支持）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要设置数据库并创建测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_array_agg_distinct_true",
+        "test_file": "tests/postgres_tests/test_aggregates.py",
+        "why_relevant": "展示了 PostgreSQL 特定聚合函数 ArrayAgg 使用 distinct=True 的正确调用方式和断言。",
+        "reusable_parts": [
+          "PostgreSQLTestCase 继承",
+          "AggregateTestModel fixture",
+          "aggregate() 调用模式",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "测试的是 PostgreSQL 特定的 ArrayAgg，而非通用的 Avg/Sum；可能依赖特定数据库后端。"
+      },
+      {
+        "test_name": "test_sum_distinct_aggregate",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "展示了在 distinct() QuerySet 上使用 Sum 聚合的预期行为（对去重项求和）。",
+        "reusable_parts": [
+          "TestCase 继承",
+          "Author 和 Book fixture 设置",
+          "distinct() 与 aggregate() 的链式调用",
+          "对聚合结果值的断言"
+        ],
+        "possible_gap": "测试的是在 distinct QuerySet 上使用 Sum，而不是直接对 Sum 使用 distinct=True 参数。"
+      },
+      {
+        "test_name": "test_annotate_distinct_aggregate",
+        "test_file": "tests/aggregation_regress/tests.py",
+        "why_relevant": "展示了结合 values().distinct() 和 Sum 聚合的复杂场景，验证去重对聚合结果的影响。",
+        "reusable_parts": [
+          "Book fixture",
+          "values().distinct().aggregate() 调用链",
+          "通过数学运算验证聚合结果的断言方式"
+        ],
+        "possible_gap": "同样不是直接对 Sum 使用 distinct=True 参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 QuerySet 的 aggregate() 或 annotate() 中对 Avg 或 Sum 聚合函数使用 distinct=True 参数。",
+      "evidence": [
+        "Issue 提到 'aggregates should be supported for other general aggregates such as Avg and Sum'，并指出之前忽略参数，现在抛出异常。",
+        "相关测试 3 和 4 展示了 Sum 在 distinct QuerySet 上的使用模式。",
+        "相关测试 1 和 2 展示了其他聚合函数（ArrayAgg, StringAgg）使用 distinct=True 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 Avg(..., distinct=True) 或 Sum(..., distinct=True) 时会抛出异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 明确说明 'now throw an exception'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Avg",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 明确指出 Avg 需要支持 DISTINCT。"
+      },
+      {
+        "name": "Sum",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 明确指出 Sum 需要支持 DISTINCT。"
+      },
+      {
+        "name": "Min",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 提到 'could also be applied to Min and Max (although pointless)'。"
+      },
+      {
+        "name": "Max",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 提到 'could also be applied to Min and Max (although pointless)'。"
+      },
+      {
+        "name": "QuerySet.aggregate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "聚合函数通常通过 QuerySet.aggregate() 调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/aggregates.py",
+        "object": "Avg",
+        "lines": "99-101",
+        "reason": "Avg 类定义中可能缺少允许 DISTINCT 的标志或相关逻辑。"
+      },
+      {
+        "path": "django/db/models/aggregates.py",
+        "object": "Sum",
+        "lines": "142-144",
+        "reason": "Sum 类定义中可能缺少允许 DISTINCT 的标志或相关逻辑。"
+      },
+      {
+        "path": "django/db/models/aggregates.py",
+        "object": "Aggregate 基类或相关 mixin",
+        "lines": "",
+        "reason": "DISTINCT 支持可能由基类或 mixin 控制，需要检查是否设置了允许 DISTINCT 的标志。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "Sum('age') 或 Avg('field') 不带 distinct 参数。",
+        "target_pattern": "Sum('age', distinct=True) 或 Avg('field', distinct=True)。",
+        "reason": "Issue 表明当前缺陷是 Avg/Sum 不接受 distinct=True 参数，添加此参数应触发异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "使用支持 DISTINCT 的聚合函数（如 Count，相关测试 5）。",
+        "target_pattern": "使用当前不支持 DISTINCT 的聚合函数（如 Avg, Sum）。",
+        "reason": "将测试中的聚合函数从 Count 替换为 Avg 或 Sum，以暴露它们缺乏 DISTINCT 支持的问题。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Avg 和 Sum 聚合函数应能接受并正确处理 distinct=True 参数，对去重后的值进行聚合计算。",
+      "evidence": [
+        "Issue 标题和描述表明需要 'Add DISTINCT support for Avg and Sum aggregates'。",
+        "相关测试 3 和 4 展示了 Sum 在 distinct QuerySet 上的预期聚合行为（对去重项求和）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 aggregate(Avg('field', distinct=True)) 或 aggregate(Sum('field', distinct=True)) 时捕获的异常。",
+        "reason": "Issue 明确指出当前会抛出异常，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，检查是否包含 'DISTINCT' 关键字。",
+        "reason": "修复后，使用 distinct=True 应生成包含 DISTINCT 的 SQL（如 'AVG(DISTINCT field)'）。观测 SQL 可判断功能是否生效。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "聚合函数调用的返回值或 QuerySet.aggregate() 返回的字典。",
+        "reason": "修复后，聚合结果应正确反映对去重值的计算。观测返回值可验证功能正确性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 distinct=True 的 Avg 或 Sum 聚合调用不应抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能随版本变化。",
+        "reason": "当前缺陷表现为异常，修复后异常应消失。使用 assertNotRaises 或检查无异常更稳定。"
+      },
+      {
+        "assertion_goal": "对包含重复值的数据集，使用 distinct=True 的聚合结果应等于对去重后值的聚合结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的硬编码数值，因为测试数据可能变化。",
+        "reason": "验证 DISTINCT 语义是否正确实现，即聚合函数确实只处理唯一值。可以通过与手动去重后计算的结果比较来断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "异常的具体类型和消息是什么？",
+    "Min 和 Max 是否已经支持 DISTINCT，或者 Issue 只是建议添加（尽管无意义）？",
+    "修复是否仅涉及在 Avg 和 Sum 类上设置一个允许 DISTINCT 的标志，还是需要更复杂的 SQL 生成逻辑？",
+    "DISTINCT 支持是否在所有数据库后端（如 SQLite, MySQL, PostgreSQL）上都以相同方式工作？"
+  ],
+  "raw": {
+    "issue_summary": "Avg 和 Sum 聚合函数不支持 DISTINCT 参数，导致异常。",
+    "trigger_condition": {
+      "text": "在 QuerySet 的 aggregate() 或 annotate() 中对 Avg 或 Sum 聚合函数使用 distinct=True 参数。",
+      "evidence": [
+        "Issue 提到 'aggregates should be supported for other general aggregates such as Avg and Sum'，并指出之前忽略参数，现在抛出异常。",
+        "相关测试 3 和 4 展示了 Sum 在 distinct QuerySet 上的使用模式。",
+        "相关测试 1 和 2 展示了其他聚合函数（ArrayAgg, StringAgg）使用 distinct=True 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 Avg(..., distinct=True) 或 Sum(..., distinct=True) 时会抛出异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 明确说明 'now throw an exception'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Avg 和 Sum 聚合函数应能接受并正确处理 distinct=True 参数，对去重后的值进行聚合计算。",
+      "evidence": [
+        "Issue 标题和描述表明需要 'Add DISTINCT support for Avg and Sum aggregates'。",
+        "相关测试 3 和 4 展示了 Sum 在 distinct QuerySet 上的预期聚合行为（对去重项求和）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Avg",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 明确指出 Avg 需要支持 DISTINCT。"
+      },
+      {
+        "name": "Sum",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 明确指出 Sum 需要支持 DISTINCT。"
+      },
+      {
+        "name": "Min",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 提到 'could also be applied to Min and Max (although pointless)'。"
+      },
+      {
+        "name": "Max",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 提到 'could also be applied to Min and Max (although pointless)'。"
+      },
+      {
+        "name": "QuerySet.aggregate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "聚合函数通常通过 QuerySet.aggregate() 调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/aggregates.py",
+        "object": "Avg",
+        "lines": "99-101",
+        "reason": "Avg 类定义中可能缺少允许 DISTINCT 的标志或相关逻辑。"
+      },
+      {
+        "path": "django/db/models/aggregates.py",
+        "object": "Sum",
+        "lines": "142-144",
+        "reason": "Sum 类定义中可能缺少允许 DISTINCT 的标志或相关逻辑。"
+      },
+      {
+        "path": "django/db/models/aggregates.py",
+        "object": "Aggregate 基类或相关 mixin",
+        "lines": "",
+        "reason": "DISTINCT 支持可能由基类或 mixin 控制，需要检查是否设置了允许 DISTINCT 的标志。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_array_agg_distinct_true",
+        "test_file": "tests/postgres_tests/test_aggregates.py",
+        "why_relevant": "展示了 PostgreSQL 特定聚合函数 ArrayAgg 使用 distinct=True 的正确调用方式和断言。",
+        "reusable_parts": [
+          "PostgreSQLTestCase 继承",
+          "AggregateTestModel fixture",
+          "aggregate() 调用模式",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "测试的是 PostgreSQL 特定的 ArrayAgg，而非通用的 Avg/Sum；可能依赖特定数据库后端。"
+      },
+      {
+        "test_name": "test_sum_distinct_aggregate",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "展示了在 distinct() QuerySet 上使用 Sum 聚合的预期行为（对去重项求和）。",
+        "reusable_parts": [
+          "TestCase 继承",
+          "Author 和 Book fixture 设置",
+          "distinct() 与 aggregate() 的链式调用",
+          "对聚合结果值的断言"
+        ],
+        "possible_gap": "测试的是在 distinct QuerySet 上使用 Sum，而不是直接对 Sum 使用 distinct=True 参数。"
+      },
+      {
+        "test_name": "test_annotate_distinct_aggregate",
+        "test_file": "tests/aggregation_regress/tests.py",
+        "why_relevant": "展示了结合 values().distinct() 和 Sum 聚合的复杂场景，验证去重对聚合结果的影响。",
+        "reusable_parts": [
+          "Book fixture",
+          "values().distinct().aggregate() 调用链",
+          "通过数学运算验证聚合结果的断言方式"
+        ],
+        "possible_gap": "同样不是直接对 Sum 使用 distinct=True 参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "Sum('age') 或 Avg('field') 不带 distinct 参数。",
+        "target_pattern": "Sum('age', distinct=True) 或 Avg('field', distinct=True)。",
+        "reason": "Issue 表明当前缺陷是 Avg/Sum 不接受 distinct=True 参数，添加此参数应触发异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "使用支持 DISTINCT 的聚合函数（如 Count，相关测试 5）。",
+        "target_pattern": "使用当前不支持 DISTINCT 的聚合函数（如 Avg, Sum）。",
+        "reason": "将测试中的聚合函数从 Count 替换为 Avg 或 Sum，以暴露它们缺乏 DISTINCT 支持的问题。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 aggregate(Avg('field', distinct=True)) 或 aggregate(Sum('field', distinct=True)) 时捕获的异常。",
+        "reason": "Issue 明确指出当前会抛出异常，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，检查是否包含 'DISTINCT' 关键字。",
+        "reason": "修复后，使用 distinct=True 应生成包含 DISTINCT 的 SQL（如 'AVG(DISTINCT field)'）。观测 SQL 可判断功能是否生效。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "聚合函数调用的返回值或 QuerySet.aggregate() 返回的字典。",
+        "reason": "修复后，聚合结果应正确反映对去重值的计算。观测返回值可验证功能正确性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 distinct=True 的 Avg 或 Sum 聚合调用不应抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能随版本变化。",
+        "reason": "当前缺陷表现为异常，修复后异常应消失。使用 assertNotRaises 或检查无异常更稳定。"
+      },
+      {
+        "assertion_goal": "对包含重复值的数据集，使用 distinct=True 的聚合结果应等于对去重后值的聚合结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的硬编码数值，因为测试数据可能变化。",
+        "reason": "验证 DISTINCT 语义是否正确实现，即聚合函数确实只处理唯一值。可以通过与手动去重后计算的结果比较来断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个包含重复值的测试模型（如 AggregateTestModel, Author, Book）作为 fixture。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 或 PostgreSQLTestCase（如果测试 PostgreSQL 特定行为，但 Issue 是关于通用支持）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要设置数据库并创建测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "异常的具体类型和消息是什么？",
+      "Min 和 Max 是否已经支持 DISTINCT，或者 Issue 只是建议添加（尽管无意义）？",
+      "修复是否仅涉及在 Avg 和 Sum 类上设置一个允许 DISTINCT 的标志，还是需要更复杂的 SQL 生成逻辑？",
+      "DISTINCT 支持是否在所有数据库后端（如 SQLite, MySQL, PostgreSQL）上都以相同方式工作？"
+    ]
+  }
+}

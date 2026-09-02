@@ -1,0 +1,240 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-7432",
+  "issue_summary": "使用 --runxfail 选项时，pytest.mark.skip 的跳过位置报告错误地指向内部代码而非测试定义位置。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "testdir fixture",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "pytest.mark.skip 装饰器",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestSkip.test_skip_no_reason",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试使用了 @pytest.mark.skip 标记，并检查了跳过报告的输出，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试文件",
+          "使用 @pytest.mark.skip 装饰器",
+          "使用 testdir.runpytest 运行测试",
+          "使用 result.stdout.fnmatch_lines 验证输出"
+        ],
+        "possible_gap": "该测试没有使用 --runxfail 选项，因此无法触发 Issue 中描述的缺陷。"
+      },
+      {
+        "test_name": "TestSkip.test_skip_with_reason",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试也使用了 @pytest.mark.skip 标记，并验证了跳过原因的输出，是测试跳过行为的典型例子。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试文件",
+          "使用 @pytest.mark.skip 装饰器并指定 reason",
+          "使用 testdir.runpytest 运行测试",
+          "使用 result.stdout.fnmatch_lines 验证输出"
+        ],
+        "possible_gap": "该测试没有使用 --runxfail 选项，并且关注的是 reason 而非位置。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "运行带有 @pytest.mark.skip 或 @pytest.mark.skipif 标记的测试，并使用 pytest -rs --runxfail 命令行选项。",
+      "evidence": [
+        "Issue 中描述了使用 @pytest.mark.skip 标记测试，并运行 pytest -rs --runxfail 的场景。",
+        "Issue 中明确提到 'However, adding `pytest -rs --runxfail` breaks this:'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "跳过的测试报告位置从预期的测试文件行号（如 test_it.py:3）变为内部文件行号（如 src/_pytest/skipping.py:238）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中展示了正常输出 'SKIPPED [1] test_it.py:3: unconditional skip' 和错误输出 'SKIPPED [1] src/_pytest/skipping.py:238: unconditional skip'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.mark.skip",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心是关于使用此标记的测试在特定配置下的行为异常。"
+      },
+      {
+        "name": "pytest_runtest_makereport",
+        "kind": "function",
+        "source_path": "src/_pytest/hookspec.py",
+        "reason": "Issue 末尾的提示指出 'the bug is in `src/_pytest/skipping.py`, the `pytest_runtest_makereport` hook.'"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/skipping.py",
+        "object": "pytest_runtest_makereport",
+        "lines": "",
+        "reason": "Issue 末尾的提示明确指出缺陷位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中使用 testdir.runpytest('-rs') 运行。",
+        "target_pattern": "在 runpytest 参数中添加 '--runxfail'，即 testdir.runpytest('-rs', '--runxfail')。",
+        "reason": "Issue 明确指出添加 --runxfail 选项会破坏位置报告。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论是否使用 --runxfail 选项，被 @pytest.mark.skip 标记的测试在报告跳过位置时，都应指向测试定义的文件和行号。",
+      "evidence": [
+        "Issue 中描述了正常行为：'the expected skip location reported should point to the item itself, and this is indeed what happens when running with `pytest -rs`:'。",
+        "Issue 中明确指出 'The `--runxfail` is only about xfail and should not affect this at all.'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "result.stdout 中的文本行，特别是包含 'SKIPPED' 和文件路径的行。",
+        "reason": "Issue 的核心错误现象是输出中报告的文件路径错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证跳过报告的输出行包含测试定义的文件名（如 test_it.py）和行号，而不是内部文件（如 skipping.py）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、包含绝对路径的输出字符串，因为路径可能因环境而异。",
+        "reason": "Issue 关注的是报告位置是否指向用户测试代码，而非内部实现。使用片段匹配更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "src/_pytest/skipping.py 中 pytest_runtest_makereport 函数内部导致此缺陷的具体代码逻辑。",
+    "--runxfail 选项如何具体影响了跳过位置报告的生成流程。"
+  ],
+  "raw": {
+    "issue_summary": "使用 --runxfail 选项时，pytest.mark.skip 的跳过位置报告错误地指向内部代码而非测试定义位置。",
+    "trigger_condition": {
+      "text": "运行带有 @pytest.mark.skip 或 @pytest.mark.skipif 标记的测试，并使用 pytest -rs --runxfail 命令行选项。",
+      "evidence": [
+        "Issue 中描述了使用 @pytest.mark.skip 标记测试，并运行 pytest -rs --runxfail 的场景。",
+        "Issue 中明确提到 'However, adding `pytest -rs --runxfail` breaks this:'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "跳过的测试报告位置从预期的测试文件行号（如 test_it.py:3）变为内部文件行号（如 src/_pytest/skipping.py:238）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中展示了正常输出 'SKIPPED [1] test_it.py:3: unconditional skip' 和错误输出 'SKIPPED [1] src/_pytest/skipping.py:238: unconditional skip'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论是否使用 --runxfail 选项，被 @pytest.mark.skip 标记的测试在报告跳过位置时，都应指向测试定义的文件和行号。",
+      "evidence": [
+        "Issue 中描述了正常行为：'the expected skip location reported should point to the item itself, and this is indeed what happens when running with `pytest -rs`:'。",
+        "Issue 中明确指出 'The `--runxfail` is only about xfail and should not affect this at all.'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pytest.mark.skip",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心是关于使用此标记的测试在特定配置下的行为异常。"
+      },
+      {
+        "name": "pytest_runtest_makereport",
+        "kind": "function",
+        "source_path": "src/_pytest/hookspec.py",
+        "reason": "Issue 末尾的提示指出 'the bug is in `src/_pytest/skipping.py`, the `pytest_runtest_makereport` hook.'"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/skipping.py",
+        "object": "pytest_runtest_makereport",
+        "lines": "",
+        "reason": "Issue 末尾的提示明确指出缺陷位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestSkip.test_skip_no_reason",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试使用了 @pytest.mark.skip 标记，并检查了跳过报告的输出，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试文件",
+          "使用 @pytest.mark.skip 装饰器",
+          "使用 testdir.runpytest 运行测试",
+          "使用 result.stdout.fnmatch_lines 验证输出"
+        ],
+        "possible_gap": "该测试没有使用 --runxfail 选项，因此无法触发 Issue 中描述的缺陷。"
+      },
+      {
+        "test_name": "TestSkip.test_skip_with_reason",
+        "test_file": "testing/test_skipping.py",
+        "why_relevant": "该测试也使用了 @pytest.mark.skip 标记，并验证了跳过原因的输出，是测试跳过行为的典型例子。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建测试文件",
+          "使用 @pytest.mark.skip 装饰器并指定 reason",
+          "使用 testdir.runpytest 运行测试",
+          "使用 result.stdout.fnmatch_lines 验证输出"
+        ],
+        "possible_gap": "该测试没有使用 --runxfail 选项，并且关注的是 reason 而非位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中使用 testdir.runpytest('-rs') 运行。",
+        "target_pattern": "在 runpytest 参数中添加 '--runxfail'，即 testdir.runpytest('-rs', '--runxfail')。",
+        "reason": "Issue 明确指出添加 --runxfail 选项会破坏位置报告。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "result.stdout 中的文本行，特别是包含 'SKIPPED' 和文件路径的行。",
+        "reason": "Issue 的核心错误现象是输出中报告的文件路径错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证跳过报告的输出行包含测试定义的文件名（如 test_it.py）和行号，而不是内部文件（如 skipping.py）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、包含绝对路径的输出字符串，因为路径可能因环境而异。",
+        "reason": "Issue 关注的是报告位置是否指向用户测试代码，而非内部实现。使用片段匹配更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "testdir fixture",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "pytest.mark.skip 装饰器",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "src/_pytest/skipping.py 中 pytest_runtest_makereport 函数内部导致此缺陷的具体代码逻辑。",
+      "--runxfail 选项如何具体影响了跳过位置报告的生成流程。"
+    ]
+  }
+}

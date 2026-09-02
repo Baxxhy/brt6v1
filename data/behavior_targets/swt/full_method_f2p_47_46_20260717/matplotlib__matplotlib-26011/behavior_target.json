@@ -1,0 +1,286 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-26011",
+  "issue_summary": "共享坐标轴的 xlim_changed 回调函数在共享轴触发 xlim 变化时没有被调用。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 unittest.mock.Mock 创建回调函数并连接到轴的 callbacks。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 plt.subplots 创建共享 x 轴的多个子图。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_shared_axes_retick",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试创建了共享 x 轴和 y 轴的子图，并验证了在一个轴上设置刻度会影响所有共享轴的 xlim。它涉及共享轴的同步机制。",
+        "reusable_parts": [
+          "plt.subplots(2, 2, sharex='all', sharey='all') 创建共享轴",
+          "ax.set_xticks 触发 xlim 变化",
+          "assert ax.get_xlim() == ... 验证同步"
+        ],
+        "possible_gap": "该测试只验证了 xlim 的数值同步，没有注册或验证 xlim_changed 回调是否被调用。"
+      },
+      {
+        "test_name": "test_norm_callback",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试演示了如何为 Normalize 对象连接 'changed' 回调并验证回调调用次数。这展示了 matplotlib 中回调系统的通用使用模式。",
+        "reusable_parts": [
+          "callbacks.connect 注册回调",
+          "使用 Mock 对象跟踪调用次数",
+          "assert increment.call_count == ... 验证回调触发"
+        ],
+        "possible_gap": "测试对象是 Normalize 而非 Axes，回调信号是 'changed' 而非 'xlim_changed'。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建共享 x 轴的多个子图（sharex=True），在一个轴上注册 xlim_changed 回调，然后通过另一个共享轴（或主共享轴）调用 set_xlim 改变 x 轴范围。",
+      "evidence": [
+        "Issue 描述：'When an axis is shared with another its registered \"xlim_changed\" callbacks does not get called when the change is induced by a shared axis (via sharex=).'",
+        "Issue 中代码片段显示 set_xlim 在共享轴调用时使用 emit=False。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "注册到共享轴上的 xlim_changed 回调函数没有被执行，而用户期望任何 xlim 变化都应触发这些回调。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'its registered \"xlim_changed\" callbacks does not get called'",
+        "Issue 中代码片段显示 set_xlim 在共享轴调用时使用 emit=False，而 emit 参数控制是否调用 callbacks.process('xlim_changed', self)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.axes.Axes.set_xlim",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_base.py",
+        "reason": "Issue 的核心是关于 set_xlim 方法在处理共享轴时 emit 参数的行为。"
+      },
+      {
+        "name": "matplotlib.cbook.CallbackRegistry.process",
+        "kind": "method",
+        "source_path": "lib/matplotlib/cbook.py",
+        "reason": "用于触发 xlim_changed 回调。"
+      },
+      {
+        "name": "matplotlib.cbook.Grouper.get_siblings",
+        "kind": "method",
+        "source_path": "lib/matplotlib/cbook.py",
+        "reason": "用于获取共享轴列表。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "set_xlim",
+        "lines": "",
+        "reason": "Issue 明确指出该函数在处理共享轴时使用 emit=False 调用其他轴的 set_xlim，导致回调未被触发。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "test_shared_axes_retick 中直接调用 ax.set_xticks 触发 xlim 变化。",
+        "target_pattern": "在共享轴之一上注册 xlim_changed 回调（例如使用 Mock），然后通过另一个共享轴（或主共享轴）调用 set_xlim 来触发变化。",
+        "reason": "Issue 的核心是当变化由共享轴（而非回调注册轴自身）触发时，回调未被调用。需要模拟这种间接触发路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "test_shared_axes_retick 中只检查 xlim 数值的最终状态。",
+        "target_pattern": "在测试中增加对回调调用状态的检查（例如 Mock 的 call_count）。",
+        "reason": "错误现象是回调未被调用，因此需要观测回调的触发状态，而不仅仅是 xlim 的数值结果。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "无论 xlim 变化是由哪个共享轴触发的，所有共享轴的 xlim_changed 回调函数都应该被调用。",
+      "evidence": [
+        "Issue 描述：'It seems like one would at least want to trigger the xlim_changed callbacks as they would be intended to react to any change in axis limits.'",
+        "Issue 中建议将回调调用移到 if emit 语句外。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "注册到轴上的 xlim_changed 回调 Mock 对象的 call_count。",
+        "reason": "Issue 的核心是回调未被调用，因此直接观测回调的调用次数是判断问题是否触发的关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "所有共享轴的 get_xlim() 返回值。",
+        "reason": "需要确认 xlim 变化确实已同步到所有轴，以排除回调未触发是因为变化未传播的可能性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "set_xlim 调用时 emit 参数的值（可能需要通过插桩或 mock 观测）。",
+        "reason": "Issue 指出问题源于共享轴调用 set_xlim 时使用了 emit=False。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当通过一个共享轴改变 xlim 时，所有共享轴（包括变化触发轴和其兄弟轴）上注册的 xlim_changed 回调都应被调用至少一次。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的回调参数细节（如 self 对象），避免脆弱的对象身份比较。",
+        "reason": "Issue 期望回调对任何 xlim 变化做出反应，因此断言回调被调用（call_count > 0）是稳定且直接相关的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到将回调调用移到 if emit 语句外可能解决递归问题，但不确定这是否是唯一或最佳的修复方案。",
+    "不确定在 emit=False 时调用回调是否会对其他现有功能产生副作用。",
+    "不确定除了 set_xlim 之外，其他可能改变 xlim 的操作（如 autoscale, set_xticks）是否也存在相同问题。"
+  ],
+  "raw": {
+    "issue_summary": "共享坐标轴的 xlim_changed 回调函数在共享轴触发 xlim 变化时没有被调用。",
+    "trigger_condition": {
+      "text": "创建共享 x 轴的多个子图（sharex=True），在一个轴上注册 xlim_changed 回调，然后通过另一个共享轴（或主共享轴）调用 set_xlim 改变 x 轴范围。",
+      "evidence": [
+        "Issue 描述：'When an axis is shared with another its registered \"xlim_changed\" callbacks does not get called when the change is induced by a shared axis (via sharex=).'",
+        "Issue 中代码片段显示 set_xlim 在共享轴调用时使用 emit=False。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "注册到共享轴上的 xlim_changed 回调函数没有被执行，而用户期望任何 xlim 变化都应触发这些回调。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'its registered \"xlim_changed\" callbacks does not get called'",
+        "Issue 中代码片段显示 set_xlim 在共享轴调用时使用 emit=False，而 emit 参数控制是否调用 callbacks.process('xlim_changed', self)。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "无论 xlim 变化是由哪个共享轴触发的，所有共享轴的 xlim_changed 回调函数都应该被调用。",
+      "evidence": [
+        "Issue 描述：'It seems like one would at least want to trigger the xlim_changed callbacks as they would be intended to react to any change in axis limits.'",
+        "Issue 中建议将回调调用移到 if emit 语句外。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "matplotlib.axes.Axes.set_xlim",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_base.py",
+        "reason": "Issue 的核心是关于 set_xlim 方法在处理共享轴时 emit 参数的行为。"
+      },
+      {
+        "name": "matplotlib.cbook.CallbackRegistry.process",
+        "kind": "method",
+        "source_path": "lib/matplotlib/cbook.py",
+        "reason": "用于触发 xlim_changed 回调。"
+      },
+      {
+        "name": "matplotlib.cbook.Grouper.get_siblings",
+        "kind": "method",
+        "source_path": "lib/matplotlib/cbook.py",
+        "reason": "用于获取共享轴列表。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_base.py",
+        "object": "set_xlim",
+        "lines": "",
+        "reason": "Issue 明确指出该函数在处理共享轴时使用 emit=False 调用其他轴的 set_xlim，导致回调未被触发。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_shared_axes_retick",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试创建了共享 x 轴和 y 轴的子图，并验证了在一个轴上设置刻度会影响所有共享轴的 xlim。它涉及共享轴的同步机制。",
+        "reusable_parts": [
+          "plt.subplots(2, 2, sharex='all', sharey='all') 创建共享轴",
+          "ax.set_xticks 触发 xlim 变化",
+          "assert ax.get_xlim() == ... 验证同步"
+        ],
+        "possible_gap": "该测试只验证了 xlim 的数值同步，没有注册或验证 xlim_changed 回调是否被调用。"
+      },
+      {
+        "test_name": "test_norm_callback",
+        "test_file": "lib/matplotlib/tests/test_colors.py",
+        "why_relevant": "该测试演示了如何为 Normalize 对象连接 'changed' 回调并验证回调调用次数。这展示了 matplotlib 中回调系统的通用使用模式。",
+        "reusable_parts": [
+          "callbacks.connect 注册回调",
+          "使用 Mock 对象跟踪调用次数",
+          "assert increment.call_count == ... 验证回调触发"
+        ],
+        "possible_gap": "测试对象是 Normalize 而非 Axes，回调信号是 'changed' 而非 'xlim_changed'。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "test_shared_axes_retick 中直接调用 ax.set_xticks 触发 xlim 变化。",
+        "target_pattern": "在共享轴之一上注册 xlim_changed 回调（例如使用 Mock），然后通过另一个共享轴（或主共享轴）调用 set_xlim 来触发变化。",
+        "reason": "Issue 的核心是当变化由共享轴（而非回调注册轴自身）触发时，回调未被调用。需要模拟这种间接触发路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "test_shared_axes_retick 中只检查 xlim 数值的最终状态。",
+        "target_pattern": "在测试中增加对回调调用状态的检查（例如 Mock 的 call_count）。",
+        "reason": "错误现象是回调未被调用，因此需要观测回调的触发状态，而不仅仅是 xlim 的数值结果。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "注册到轴上的 xlim_changed 回调 Mock 对象的 call_count。",
+        "reason": "Issue 的核心是回调未被调用，因此直接观测回调的调用次数是判断问题是否触发的关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "所有共享轴的 get_xlim() 返回值。",
+        "reason": "需要确认 xlim 变化确实已同步到所有轴，以排除回调未触发是因为变化未传播的可能性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "set_xlim 调用时 emit 参数的值（可能需要通过插桩或 mock 观测）。",
+        "reason": "Issue 指出问题源于共享轴调用 set_xlim 时使用了 emit=False。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当通过一个共享轴改变 xlim 时，所有共享轴（包括变化触发轴和其兄弟轴）上注册的 xlim_changed 回调都应被调用至少一次。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的回调参数细节（如 self 对象），避免脆弱的对象身份比较。",
+        "reason": "Issue 期望回调对任何 xlim 变化做出反应，因此断言回调被调用（call_count > 0）是稳定且直接相关的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 unittest.mock.Mock 创建回调函数并连接到轴的 callbacks。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 plt.subplots 创建共享 x 轴的多个子图。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到将回调调用移到 if emit 语句外可能解决递归问题，但不确定这是否是唯一或最佳的修复方案。",
+      "不确定在 emit=False 时调用回调是否会对其他现有功能产生副作用。",
+      "不确定除了 set_xlim 之外，其他可能改变 xlim 的操作（如 autoscale, set_xticks）是否也存在相同问题。"
+    ]
+  }
+}

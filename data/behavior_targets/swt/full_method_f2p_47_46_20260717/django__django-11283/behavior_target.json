@@ -1,0 +1,338 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11283",
+  "issue_summary": "迁移 auth.0011_update_proxy_permissions 在代理模型被重新创建时因重复键违反唯一约束而失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase 和 migrations 测试框架，可能涉及 apps 注册表。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置包含代理模型和具体模型的测试模型，并可能预先在 auth_permission 表中创建特定状态的条目。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要配置数据库并运行迁移来模拟真实迁移环境。",
+        "source": "issue",
+        "confidence": "low"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ProxyModelWithSameAppLabelTests.test_proxy_model_permissions_contenttype",
+        "test_file": "tests/auth_tests/test_migrations.py",
+        "why_relevant": "它直接测试了 update_proxy_model_permissions 函数，并验证了权限内容类型的正确更新。",
+        "reusable_parts": [
+          "导入 update_proxy_permissions 模块",
+          "使用 apps 参数调用 update_proxy_model_permissions",
+          "使用 refresh_from_db() 和 assertEqual 检查 content_type"
+        ],
+        "possible_gap": "该测试可能没有模拟代理模型被“重新创建”的场景，或者数据库状态（已有重复条目）与 Issue 中导致 IntegrityError 的状态不同。"
+      },
+      {
+        "test_name": "ProxyModelWithSameAppLabelTests.test_migrate_backwards",
+        "test_file": "tests/auth_tests/test_migrations.py",
+        "why_relevant": "它测试了 update_proxy_model_permissions 和 revert_proxy_model_permissions 的往返操作，涉及权限的更新和恢复。",
+        "reusable_parts": [
+          "调用 update_proxy_model_permissions 和 revert_proxy_model_permissions",
+          "使用 refresh_from_db() 和 assertEqual 断言"
+        ],
+        "possible_gap": "它可能没有触发导致重复键插入的特定条件，例如在权限表已存在目标条目时运行 update_proxy_model_permissions。"
+      },
+      {
+        "test_name": "CreatePermissionsTests.test_permission_with_proxy_content_type_created",
+        "test_file": "tests/auth_tests/test_management.py",
+        "why_relevant": "它验证了代理模型的权限使用其自身的内容类型，这与迁移试图更新的逻辑相关。",
+        "reusable_parts": [
+          "使用 Permission.objects.filter 检查权限存在性",
+          "涉及代理模型 UserProxy"
+        ],
+        "possible_gap": "它测试的是权限创建，而非迁移中的更新操作，且不涉及 update_proxy_model_permissions 函数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "运行迁移命令 `python manage.py migrate`，特别是应用迁移 `auth.0011_update_proxy_permissions` 时，涉及代理模型（proxy models）。",
+      "evidence": [
+        "Issue 描述：'When I launch python manage.py migrate, I get this error message when migration auth.0011_update_proxy_permissions is applying'",
+        "Issue 描述：'the problem still occurs with other proxy models'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.db.utils.IntegrityError，提示重复键违反唯一约束 'idx_18141_auth_permission_content_type_id_01ab375a_uniq'，详情为 Key (content_type_id, codename)=(12, add_agency) already exists。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'django.db.utils.IntegrityError: duplicate key value violates unique constraint \"idx_18141_auth_permission_content_type_id_01ab375a_uniq\" DETAIL: Key (co.ntent_type_id, codename)=(12, add_agency) already exists.'",
+        "相关源码 2：定义了 IntegrityError 类。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "update_proxy_model_permissions",
+        "kind": "function",
+        "source_path": "django/contrib/auth/migrations/0011_update_proxy_permissions.py",
+        "reason": "Issue 直接涉及此迁移文件中的函数，它是导致 IntegrityError 的源头。"
+      },
+      {
+        "name": "revert_proxy_model_permissions",
+        "kind": "function",
+        "source_path": "django/contrib/auth/migrations/0011_update_proxy_permissions.py",
+        "reason": "相关测试 1 中使用了此函数，它与 update_proxy_model_permissions 配对，可能涉及相关逻辑。"
+      },
+      {
+        "name": "Permission.objects.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 2 使用它来检查权限，Issue 涉及 auth_permission 表的操作。"
+      },
+      {
+        "name": "ContentType.objects.get_for_model",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 4 使用它获取代理模型的内容类型，这与权限内容类型更新相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/migrations/0011_update_proxy_permissions.py",
+        "object": "update_proxy_model_permissions",
+        "lines": "",
+        "reason": "Issue 明确指出此迁移失败，且错误发生在应用此迁移时。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中，权限条目在 update_proxy_model_permissions 调用前，其 content_type 指向具体模型（concrete model）。",
+        "target_pattern": "在 update_proxy_model_permissions 被调用时，数据库中可能已经存在 content_type 指向代理模型（或目标内容类型）且 codename 相同的权限条目。",
+        "reason": "Issue 的错误表明迁移试图插入已存在的 (content_type_id, codename) 对，暗示数据库状态与迁移的假设不符。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 update_proxy_model_permissions(apps, None)。",
+        "target_pattern": "在运行 `python manage.py migrate` 命令链中应用迁移 auth.0011_update_proxy_permissions，可能涉及特定的项目历史、模型定义变化或代理模型被重新创建。",
+        "reason": "Issue 发生在实际项目迁移过程中，而不仅仅是单元测试中的孤立调用。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移 auth.0011_update_proxy_permissions 应能成功运行，不会因尝试插入已存在的权限条目而导致数据库完整性错误。",
+      "evidence": [
+        "Issue 标题和描述暗示迁移应该成功完成。",
+        "相关测试 1 和 4 展示了 update_proxy_model_permissions 函数成功更新权限内容类型，没有引发异常。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "django.db.utils.IntegrityError",
+        "reason": "Issue 的核心错误是 IntegrityError，捕获此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "尝试插入 auth_permission 表的 SQL 语句（或其参数），特别是 content_type_id 和 codename 的值。",
+        "reason": "错误源于重复键违反唯一约束，观察插入操作可以确认是否尝试插入已存在的条目。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 update_proxy_model_permissions 前后，auth_permission 表中相关 (content_type_id, codename) 对的存在状态。",
+        "reason": "可以确认迁移逻辑是否错误地尝试创建已存在的条目。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作（或 update_proxy_model_permissions 调用）不应引发 IntegrityError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为具体数字（如 content_type_id=12）可能因环境而异。",
+        "reason": "Issue 的核心是异常，修复后应不再抛出此异常。"
+      },
+      {
+        "assertion_goal": "迁移后，auth_permission 表中不应存在重复的 (content_type_id, codename) 条目。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的权限数量，除非能精确推导。",
+        "reason": "这直接对应导致 IntegrityError 的数据库状态问题。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致数据库中已存在目标权限条目的确切场景是什么？是代理模型被‘重新创建’的具体含义？",
+    "迁移 auth.0011_update_proxy_permissions 内部逻辑的哪一部分导致了重复插入尝试？",
+    "除了报告中提到的代理模型，是否还有其他必要条件（如特定的应用标签、模型命名）？"
+  ],
+  "raw": {
+    "issue_summary": "迁移 auth.0011_update_proxy_permissions 在代理模型被重新创建时因重复键违反唯一约束而失败。",
+    "trigger_condition": {
+      "text": "运行迁移命令 `python manage.py migrate`，特别是应用迁移 `auth.0011_update_proxy_permissions` 时，涉及代理模型（proxy models）。",
+      "evidence": [
+        "Issue 描述：'When I launch python manage.py migrate, I get this error message when migration auth.0011_update_proxy_permissions is applying'",
+        "Issue 描述：'the problem still occurs with other proxy models'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.db.utils.IntegrityError，提示重复键违反唯一约束 'idx_18141_auth_permission_content_type_id_01ab375a_uniq'，详情为 Key (content_type_id, codename)=(12, add_agency) already exists。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'django.db.utils.IntegrityError: duplicate key value violates unique constraint \"idx_18141_auth_permission_content_type_id_01ab375a_uniq\" DETAIL: Key (co.ntent_type_id, codename)=(12, add_agency) already exists.'",
+        "相关源码 2：定义了 IntegrityError 类。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移 auth.0011_update_proxy_permissions 应能成功运行，不会因尝试插入已存在的权限条目而导致数据库完整性错误。",
+      "evidence": [
+        "Issue 标题和描述暗示迁移应该成功完成。",
+        "相关测试 1 和 4 展示了 update_proxy_model_permissions 函数成功更新权限内容类型，没有引发异常。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "update_proxy_model_permissions",
+        "kind": "function",
+        "source_path": "django/contrib/auth/migrations/0011_update_proxy_permissions.py",
+        "reason": "Issue 直接涉及此迁移文件中的函数，它是导致 IntegrityError 的源头。"
+      },
+      {
+        "name": "revert_proxy_model_permissions",
+        "kind": "function",
+        "source_path": "django/contrib/auth/migrations/0011_update_proxy_permissions.py",
+        "reason": "相关测试 1 中使用了此函数，它与 update_proxy_model_permissions 配对，可能涉及相关逻辑。"
+      },
+      {
+        "name": "Permission.objects.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 2 使用它来检查权限，Issue 涉及 auth_permission 表的操作。"
+      },
+      {
+        "name": "ContentType.objects.get_for_model",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 4 使用它获取代理模型的内容类型，这与权限内容类型更新相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/migrations/0011_update_proxy_permissions.py",
+        "object": "update_proxy_model_permissions",
+        "lines": "",
+        "reason": "Issue 明确指出此迁移失败，且错误发生在应用此迁移时。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ProxyModelWithSameAppLabelTests.test_proxy_model_permissions_contenttype",
+        "test_file": "tests/auth_tests/test_migrations.py",
+        "why_relevant": "它直接测试了 update_proxy_model_permissions 函数，并验证了权限内容类型的正确更新。",
+        "reusable_parts": [
+          "导入 update_proxy_permissions 模块",
+          "使用 apps 参数调用 update_proxy_model_permissions",
+          "使用 refresh_from_db() 和 assertEqual 检查 content_type"
+        ],
+        "possible_gap": "该测试可能没有模拟代理模型被“重新创建”的场景，或者数据库状态（已有重复条目）与 Issue 中导致 IntegrityError 的状态不同。"
+      },
+      {
+        "test_name": "ProxyModelWithSameAppLabelTests.test_migrate_backwards",
+        "test_file": "tests/auth_tests/test_migrations.py",
+        "why_relevant": "它测试了 update_proxy_model_permissions 和 revert_proxy_model_permissions 的往返操作，涉及权限的更新和恢复。",
+        "reusable_parts": [
+          "调用 update_proxy_model_permissions 和 revert_proxy_model_permissions",
+          "使用 refresh_from_db() 和 assertEqual 断言"
+        ],
+        "possible_gap": "它可能没有触发导致重复键插入的特定条件，例如在权限表已存在目标条目时运行 update_proxy_model_permissions。"
+      },
+      {
+        "test_name": "CreatePermissionsTests.test_permission_with_proxy_content_type_created",
+        "test_file": "tests/auth_tests/test_management.py",
+        "why_relevant": "它验证了代理模型的权限使用其自身的内容类型，这与迁移试图更新的逻辑相关。",
+        "reusable_parts": [
+          "使用 Permission.objects.filter 检查权限存在性",
+          "涉及代理模型 UserProxy"
+        ],
+        "possible_gap": "它测试的是权限创建，而非迁移中的更新操作，且不涉及 update_proxy_model_permissions 函数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中，权限条目在 update_proxy_model_permissions 调用前，其 content_type 指向具体模型（concrete model）。",
+        "target_pattern": "在 update_proxy_model_permissions 被调用时，数据库中可能已经存在 content_type 指向代理模型（或目标内容类型）且 codename 相同的权限条目。",
+        "reason": "Issue 的错误表明迁移试图插入已存在的 (content_type_id, codename) 对，暗示数据库状态与迁移的假设不符。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中直接调用 update_proxy_model_permissions(apps, None)。",
+        "target_pattern": "在运行 `python manage.py migrate` 命令链中应用迁移 auth.0011_update_proxy_permissions，可能涉及特定的项目历史、模型定义变化或代理模型被重新创建。",
+        "reason": "Issue 发生在实际项目迁移过程中，而不仅仅是单元测试中的孤立调用。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "django.db.utils.IntegrityError",
+        "reason": "Issue 的核心错误是 IntegrityError，捕获此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "尝试插入 auth_permission 表的 SQL 语句（或其参数），特别是 content_type_id 和 codename 的值。",
+        "reason": "错误源于重复键违反唯一约束，观察插入操作可以确认是否尝试插入已存在的条目。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 update_proxy_model_permissions 前后，auth_permission 表中相关 (content_type_id, codename) 对的存在状态。",
+        "reason": "可以确认迁移逻辑是否错误地尝试创建已存在的条目。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作（或 update_proxy_model_permissions 调用）不应引发 IntegrityError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误信息字符串，因为具体数字（如 content_type_id=12）可能因环境而异。",
+        "reason": "Issue 的核心是异常，修复后应不再抛出此异常。"
+      },
+      {
+        "assertion_goal": "迁移后，auth_permission 表中不应存在重复的 (content_type_id, codename) 条目。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的权限数量，除非能精确推导。",
+        "reason": "这直接对应导致 IntegrityError 的数据库状态问题。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django 的 TestCase 和 migrations 测试框架，可能涉及 apps 注册表。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置包含代理模型和具体模型的测试模型，并可能预先在 auth_permission 表中创建特定状态的条目。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要配置数据库并运行迁移来模拟真实迁移环境。",
+        "source": "issue",
+        "confidence": "low"
+      }
+    ],
+    "uncertainties": [
+      "导致数据库中已存在目标权限条目的确切场景是什么？是代理模型被‘重新创建’的具体含义？",
+      "迁移 auth.0011_update_proxy_permissions 内部逻辑的哪一部分导致了重复插入尝试？",
+      "除了报告中提到的代理模型，是否还有其他必要条件（如特定的应用标签、模型命名）？"
+    ]
+  }
+}

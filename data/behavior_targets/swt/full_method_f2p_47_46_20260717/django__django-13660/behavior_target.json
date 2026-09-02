@@ -1,0 +1,304 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13660",
+  "issue_summary": "使用 django shell -c 执行包含函数定义的 Python 代码时，由于 exec 缺少全局变量字典，导致函数内部无法访问导入的模块。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 Django 设置（如 INSTALLED_APPS）以确保 django.setup() 能正确运行。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应通过 call_command 或直接实例化 Command 并调用其 handle 方法来触发执行路径。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_command_option",
+        "test_file": "tests/shell/tests.py",
+        "why_relevant": "该测试直接使用 call_command 调用 shell 命令并传入 command 参数，与 Issue 触发条件高度相似。",
+        "reusable_parts": [
+          "使用 call_command 调用 'shell' 命令的模式",
+          "传入 command 参数的方式",
+          "使用 SimpleTestCase 和 assertLogs 的测试框架"
+        ],
+        "possible_gap": "该测试传入的 command 参数是单行表达式，没有包含函数定义，因此不会触发 Issue 中描述的函数作用域问题。"
+      },
+      {
+        "test_name": "test_stdin_read",
+        "test_file": "tests/shell/tests.py",
+        "why_relevant": "该测试涉及 shell 命令从 stdin 读取并执行代码，与 -c 选项的执行路径可能共享部分逻辑。",
+        "reusable_parts": [
+          "使用 captured_stdin 和 captured_stdout 的上下文管理器",
+          "调用 call_command('shell') 的基本模式"
+        ],
+        "possible_gap": "该测试通过 stdin 输入代码，而非 -c 选项，且输入代码是简单表达式，不涉及函数定义。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "通过 `python -m django shell -c` 执行包含函数定义和模块导入的 Python 代码字符串。",
+      "evidence": [
+        "Issue 中描述了命令 `python -m django shell -c` 后跟包含 `import django` 和 `def f(): print(django.__version__)` 的代码字符串。",
+        "Issue 指出问题在于 `exec(options['command'])` 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行代码时抛出 NameError: name 'django' is not defined，表明在函数作用域内无法访问全局导入的模块。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的错误堆栈，显示 `File \"<string>\", line 4, in f NameError: name 'django' is not defined`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.commands.shell.Command.handle",
+        "kind": "method",
+        "source_path": "django/core/management/commands/shell.py",
+        "reason": "Issue 明确指出问题在于 shell 命令的 handle 方法中 exec 的调用方式。"
+      },
+      {
+        "name": "exec",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心是 exec 函数的使用方式导致了命名空间问题。"
+      },
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试代码中使用了 call_command 来调用 shell 命令，是生成测试的常用入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/shell.py",
+        "object": "Command.handle",
+        "lines": "",
+        "reason": "Issue 直接引用了该方法的代码片段，并指出 `exec(options['command'])` 缺少全局字典参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_command_option 中 command 参数为单行表达式：'import django; from logging...'",
+        "target_pattern": "command 参数应包含函数定义，例如 'import django\\ndef f():\\n    print(django.__version__)\\nf()'",
+        "reason": "Issue 表明只有当执行的代码包含函数定义时，函数内部对全局导入的访问才会因 exec 的命名空间问题而失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通过 call_command 直接调用，可能绕过了完整的命令行参数解析。",
+        "target_pattern": "可能需要模拟更完整的命令行调用链，确保 exec 在 handle 方法中被调用时的上下文与 Issue 一致。",
+        "reason": "Issue 的触发路径是通过 `python -m django shell -c` 启动的，涉及多层命令解析和调用。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "`django shell -c` 应该能够正确执行包含函数定义和模块导入的代码，函数内部能访问到全局导入的模块。",
+      "evidence": [
+        "Issue 展示了 `python -c` 可以成功执行相同代码并输出版本号，暗示了期望行为。",
+        "Issue 建议通过为 exec 传递一个空字典作为第二个参数来提供全局命名空间。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 call_command 后捕获的异常，特别是 NameError 及其消息。",
+        "reason": "Issue 的核心错误现象是 NameError，观测此异常能直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果代码执行成功，观测其输出（例如打印的版本号）是否与预期一致。",
+        "reason": "在修复后或正常执行时，代码应能正确输出，观测输出可以验证行为正确性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在执行 exec 前后，检查传递给 exec 的 globals 和 locals 字典的状态。",
+        "reason": "Issue 指出问题在于 exec 缺少全局字典参数，观测此状态有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证执行包含函数定义和模块导入的代码不会抛出 NameError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体行号可能变化。",
+        "reason": "Issue 的核心是异常的发生，断言不抛出特定异常能稳定地捕捉问题。"
+      },
+      {
+        "assertion_goal": "验证代码执行成功并产生了预期的输出（如打印的版本号）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、可能包含路径的 stdout 字符串。",
+        "reason": "在修复后，代码应能正确执行并输出，断言输出内容能验证功能正常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "是否必须通过完整的 `python -m django shell -c` 命令行调用才能精确复现，还是通过 call_command 或直接调用 Command.handle 即可。",
+    "除了函数定义，是否还有其他代码结构（如类定义、嵌套作用域）会触发相同问题。",
+    "exec 调用时具体缺失的是哪个全局命名空间（模块级、builtins 等）。"
+  ],
+  "raw": {
+    "issue_summary": "使用 django shell -c 执行包含函数定义的 Python 代码时，由于 exec 缺少全局变量字典，导致函数内部无法访问导入的模块。",
+    "trigger_condition": {
+      "text": "通过 `python -m django shell -c` 执行包含函数定义和模块导入的 Python 代码字符串。",
+      "evidence": [
+        "Issue 中描述了命令 `python -m django shell -c` 后跟包含 `import django` 和 `def f(): print(django.__version__)` 的代码字符串。",
+        "Issue 指出问题在于 `exec(options['command'])` 的调用方式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行代码时抛出 NameError: name 'django' is not defined，表明在函数作用域内无法访问全局导入的模块。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的错误堆栈，显示 `File \"<string>\", line 4, in f NameError: name 'django' is not defined`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "`django shell -c` 应该能够正确执行包含函数定义和模块导入的代码，函数内部能访问到全局导入的模块。",
+      "evidence": [
+        "Issue 展示了 `python -c` 可以成功执行相同代码并输出版本号，暗示了期望行为。",
+        "Issue 建议通过为 exec 传递一个空字典作为第二个参数来提供全局命名空间。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.commands.shell.Command.handle",
+        "kind": "method",
+        "source_path": "django/core/management/commands/shell.py",
+        "reason": "Issue 明确指出问题在于 shell 命令的 handle 方法中 exec 的调用方式。"
+      },
+      {
+        "name": "exec",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心是 exec 函数的使用方式导致了命名空间问题。"
+      },
+      {
+        "name": "call_command",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试代码中使用了 call_command 来调用 shell 命令，是生成测试的常用入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/commands/shell.py",
+        "object": "Command.handle",
+        "lines": "",
+        "reason": "Issue 直接引用了该方法的代码片段，并指出 `exec(options['command'])` 缺少全局字典参数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_command_option",
+        "test_file": "tests/shell/tests.py",
+        "why_relevant": "该测试直接使用 call_command 调用 shell 命令并传入 command 参数，与 Issue 触发条件高度相似。",
+        "reusable_parts": [
+          "使用 call_command 调用 'shell' 命令的模式",
+          "传入 command 参数的方式",
+          "使用 SimpleTestCase 和 assertLogs 的测试框架"
+        ],
+        "possible_gap": "该测试传入的 command 参数是单行表达式，没有包含函数定义，因此不会触发 Issue 中描述的函数作用域问题。"
+      },
+      {
+        "test_name": "test_stdin_read",
+        "test_file": "tests/shell/tests.py",
+        "why_relevant": "该测试涉及 shell 命令从 stdin 读取并执行代码，与 -c 选项的执行路径可能共享部分逻辑。",
+        "reusable_parts": [
+          "使用 captured_stdin 和 captured_stdout 的上下文管理器",
+          "调用 call_command('shell') 的基本模式"
+        ],
+        "possible_gap": "该测试通过 stdin 输入代码，而非 -c 选项，且输入代码是简单表达式，不涉及函数定义。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_command_option 中 command 参数为单行表达式：'import django; from logging...'",
+        "target_pattern": "command 参数应包含函数定义，例如 'import django\\ndef f():\\n    print(django.__version__)\\nf()'",
+        "reason": "Issue 表明只有当执行的代码包含函数定义时，函数内部对全局导入的访问才会因 exec 的命名空间问题而失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试通过 call_command 直接调用，可能绕过了完整的命令行参数解析。",
+        "target_pattern": "可能需要模拟更完整的命令行调用链，确保 exec 在 handle 方法中被调用时的上下文与 Issue 一致。",
+        "reason": "Issue 的触发路径是通过 `python -m django shell -c` 启动的，涉及多层命令解析和调用。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 call_command 后捕获的异常，特别是 NameError 及其消息。",
+        "reason": "Issue 的核心错误现象是 NameError，观测此异常能直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果代码执行成功，观测其输出（例如打印的版本号）是否与预期一致。",
+        "reason": "在修复后或正常执行时，代码应能正确输出，观测输出可以验证行为正确性。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在执行 exec 前后，检查传递给 exec 的 globals 和 locals 字典的状态。",
+        "reason": "Issue 指出问题在于 exec 缺少全局字典参数，观测此状态有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证执行包含函数定义和模块导入的代码不会抛出 NameError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体行号可能变化。",
+        "reason": "Issue 的核心是异常的发生，断言不抛出特定异常能稳定地捕捉问题。"
+      },
+      {
+        "assertion_goal": "验证代码执行成功并产生了预期的输出（如打印的版本号）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、可能包含路径的 stdout 字符串。",
+        "reason": "在修复后，代码应能正确执行并输出，断言输出内容能验证功能正常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 Django 设置（如 INSTALLED_APPS）以确保 django.setup() 能正确运行。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应通过 call_command 或直接实例化 Command 并调用其 handle 方法来触发执行路径。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "是否必须通过完整的 `python -m django shell -c` 命令行调用才能精确复现，还是通过 call_command 或直接调用 Command.handle 即可。",
+      "除了函数定义，是否还有其他代码结构（如类定义、嵌套作用域）会触发相同问题。",
+      "exec 调用时具体缺失的是哪个全局命名空间（模块级、builtins 等）。"
+    ]
+  }
+}

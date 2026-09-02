@@ -1,0 +1,270 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-5631",
+  "issue_summary": "当使用 numpy 数组作为 new 参数进行 mock.patch 装饰时，pytest 在收集测试时会抛出 ValueError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 unittest.mock.patch 和 numpy（或类似的可触发模糊真值错误的数组对象）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的测试文件中定义，以模拟 Issue 中的收集场景。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_exception_repr_extraction_error_on_recursion",
+        "test_file": "testing/code/test_excinfo.py",
+        "why_relevant": "该测试模拟了一个类，其 __eq__ 方法会抛出与 Issue 中完全相同的 ValueError 消息，可用于理解异常触发条件。",
+        "reusable_parts": [
+          "模拟抛出特定 ValueError 的自定义类构造",
+          "pytest.raises 上下文管理器"
+        ],
+        "possible_gap": "该测试关注递归错误检测，而非 mock.patch 与 pytest 收集器的交互。"
+      },
+      {
+        "test_name": "TestSetattrWithImportPath.test_string_expression",
+        "test_file": "testing/test_monkeypatch.py",
+        "why_relevant": "该测试使用了 monkeypatch.setattr 进行模拟，与 mock.patch 功能相似，涉及测试中的模拟操作。",
+        "reusable_parts": [
+          "在测试函数中使用模拟（mock）的通用模式"
+        ],
+        "possible_gap": "它使用 monkeypatch 而非 unittest.mock.patch，且不涉及装饰器或数组参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 @patch(target='XXXXXX', new=np.array([-5.5, 3.0])) 装饰一个测试函数，然后运行 pytest 收集测试。",
+      "evidence": [
+        "Issue 描述：'I'm trying to run pytest with a test file that contains patch where \"new\" is an array'",
+        "Issue 中给出的示例代码：@patch(target='XXXXXX', new=np.array([-5.5, 3.0]))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在测试收集阶段抛出 ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示异常信息",
+        "错误堆栈指向 _pytest/compat.py 第 94 行的列表推导式"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "unittest.mock.patch",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心是使用 patch 装饰器，且 new 参数为 numpy 数组。"
+      },
+      {
+        "name": "_pytest.compat.num_mock_patch_args",
+        "kind": "function",
+        "source_path": "src/_pytest/compat.py",
+        "reason": "错误堆栈指向此函数内的列表推导式，其中包含 'p.new in sentinels' 检查。"
+      },
+      {
+        "name": "_pytest.compat.getfuncargnames",
+        "kind": "function",
+        "source_path": "src/_pytest/compat.py",
+        "reason": "错误堆栈显示 getfuncargnames 调用了 num_mock_patch_args。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/compat.py",
+        "object": "num_mock_patch_args",
+        "lines": "62-73",
+        "reason": "Issue 明确指出错误发生在该函数的列表推导式 'p.new in sentinels' 中，当 p.new 是数组时，该表达式返回布尔数组而非单个布尔值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "mock",
+        "current_pattern": "相似测试中可能使用简单值（如 lambda、字符串）作为 mock 的替换对象。",
+        "target_pattern": "使用 numpy 数组（或任何具有模糊真值的对象）作为 mock.patch 的 new 参数。",
+        "reason": "Issue 表明当 p.new 是数组时，'p.new in sentinels' 会产生问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用被模拟的函数。",
+        "target_pattern": "使用 @patch 装饰器装饰测试函数，触发 pytest 的测试收集流程。",
+        "reason": "错误发生在测试收集阶段（pytest_pycollect_makeitem -> _genfunctions -> getfixtureinfo -> getfuncargnames -> num_mock_patch_args），而非测试执行阶段。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "pytest 应该能够正常收集使用 numpy 数组作为 mock.patch 的 new 参数的测试函数，而不抛出 ValueError 异常。",
+      "evidence": [
+        "Issue 提到：'This works fine with pytest 3.1.3'",
+        "Issue 暗示修复后应恢复此正常行为"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在运行 pytest 收集测试时，观察是否抛出 ValueError 及其消息。",
+        "reason": "Issue 的核心症状是收集阶段抛出的特定 ValueError。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 num_mock_patch_args 函数中，观察 p.new 的类型以及 'p.new in sentinels' 表达式的结果类型。",
+        "reason": "问题的根源在于数组与标量在 'in' 操作中的行为差异。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用数组作为 new 参数的 @patch 装饰的测试函数能够被 pytest 正常收集，而不引发 ValueError。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的异常消息或堆栈跟踪，因为具体行号可能变化。",
+        "reason": "修复后，错误消息不应出现。断言错误消息的缺失比断言特定输出更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "是否只有 numpy 数组会触发此问题，还是任何定义了 __eq__ 并返回非标量布尔值的对象都会触发？",
+    "除了 new 参数，patch 的其他参数（如 spec、autospec）是否会影响触发条件？",
+    "pytest 3.1.3 中正常工作的具体内部状态与 3.6.0 中有何不同？"
+  ],
+  "raw": {
+    "issue_summary": "当使用 numpy 数组作为 new 参数进行 mock.patch 装饰时，pytest 在收集测试时会抛出 ValueError 异常。",
+    "trigger_condition": {
+      "text": "使用 @patch(target='XXXXXX', new=np.array([-5.5, 3.0])) 装饰一个测试函数，然后运行 pytest 收集测试。",
+      "evidence": [
+        "Issue 描述：'I'm trying to run pytest with a test file that contains patch where \"new\" is an array'",
+        "Issue 中给出的示例代码：@patch(target='XXXXXX', new=np.array([-5.5, 3.0]))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在测试收集阶段抛出 ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示异常信息",
+        "错误堆栈指向 _pytest/compat.py 第 94 行的列表推导式"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "pytest 应该能够正常收集使用 numpy 数组作为 mock.patch 的 new 参数的测试函数，而不抛出 ValueError 异常。",
+      "evidence": [
+        "Issue 提到：'This works fine with pytest 3.1.3'",
+        "Issue 暗示修复后应恢复此正常行为"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "unittest.mock.patch",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 的核心是使用 patch 装饰器，且 new 参数为 numpy 数组。"
+      },
+      {
+        "name": "_pytest.compat.num_mock_patch_args",
+        "kind": "function",
+        "source_path": "src/_pytest/compat.py",
+        "reason": "错误堆栈指向此函数内的列表推导式，其中包含 'p.new in sentinels' 检查。"
+      },
+      {
+        "name": "_pytest.compat.getfuncargnames",
+        "kind": "function",
+        "source_path": "src/_pytest/compat.py",
+        "reason": "错误堆栈显示 getfuncargnames 调用了 num_mock_patch_args。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/compat.py",
+        "object": "num_mock_patch_args",
+        "lines": "62-73",
+        "reason": "Issue 明确指出错误发生在该函数的列表推导式 'p.new in sentinels' 中，当 p.new 是数组时，该表达式返回布尔数组而非单个布尔值。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_exception_repr_extraction_error_on_recursion",
+        "test_file": "testing/code/test_excinfo.py",
+        "why_relevant": "该测试模拟了一个类，其 __eq__ 方法会抛出与 Issue 中完全相同的 ValueError 消息，可用于理解异常触发条件。",
+        "reusable_parts": [
+          "模拟抛出特定 ValueError 的自定义类构造",
+          "pytest.raises 上下文管理器"
+        ],
+        "possible_gap": "该测试关注递归错误检测，而非 mock.patch 与 pytest 收集器的交互。"
+      },
+      {
+        "test_name": "TestSetattrWithImportPath.test_string_expression",
+        "test_file": "testing/test_monkeypatch.py",
+        "why_relevant": "该测试使用了 monkeypatch.setattr 进行模拟，与 mock.patch 功能相似，涉及测试中的模拟操作。",
+        "reusable_parts": [
+          "在测试函数中使用模拟（mock）的通用模式"
+        ],
+        "possible_gap": "它使用 monkeypatch 而非 unittest.mock.patch，且不涉及装饰器或数组参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "mock",
+        "current_pattern": "相似测试中可能使用简单值（如 lambda、字符串）作为 mock 的替换对象。",
+        "target_pattern": "使用 numpy 数组（或任何具有模糊真值的对象）作为 mock.patch 的 new 参数。",
+        "reason": "Issue 表明当 p.new 是数组时，'p.new in sentinels' 会产生问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试可能直接调用被模拟的函数。",
+        "target_pattern": "使用 @patch 装饰器装饰测试函数，触发 pytest 的测试收集流程。",
+        "reason": "错误发生在测试收集阶段（pytest_pycollect_makeitem -> _genfunctions -> getfixtureinfo -> getfuncargnames -> num_mock_patch_args），而非测试执行阶段。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在运行 pytest 收集测试时，观察是否抛出 ValueError 及其消息。",
+        "reason": "Issue 的核心症状是收集阶段抛出的特定 ValueError。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 num_mock_patch_args 函数中，观察 p.new 的类型以及 'p.new in sentinels' 表达式的结果类型。",
+        "reason": "问题的根源在于数组与标量在 'in' 操作中的行为差异。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用数组作为 new 参数的 @patch 装饰的测试函数能够被 pytest 正常收集，而不引发 ValueError。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的异常消息或堆栈跟踪，因为具体行号可能变化。",
+        "reason": "修复后，错误消息不应出现。断言错误消息的缺失比断言特定输出更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 unittest.mock.patch 和 numpy（或类似的可触发模糊真值错误的数组对象）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的测试文件中定义，以模拟 Issue 中的收集场景。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "是否只有 numpy 数组会触发此问题，还是任何定义了 __eq__ 并返回非标量布尔值的对象都会触发？",
+      "除了 new 参数，patch 的其他参数（如 spec、autospec）是否会影响触发条件？",
+      "pytest 3.1.3 中正常工作的具体内部状态与 3.6.0 中有何不同？"
+    ]
+  }
+}

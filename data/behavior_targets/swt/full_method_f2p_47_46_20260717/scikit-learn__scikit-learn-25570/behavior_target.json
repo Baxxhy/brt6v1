@@ -1,0 +1,417 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-25570",
+  "issue_summary": "当使用 pandas 输出时，ColumnTransformer 无法正确处理应用于零个特征的转换器，导致在拼接输出列名时出现长度不匹配错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 pandas、numpy、sklearn.compose.ColumnTransformer、sklearn.pipeline.Pipeline 以及相关的转换器（如 SimpleImputer, RobustScaler）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 pd.DataFrame 作为输入数据 X，以支持列名选择和 pandas 输出。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要定义一个简单的目标变量 y 用于分类器的拟合（如果使用 Issue 中的完整示例）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest 的 importorskip 来确保 pandas 可用，并优雅地跳过测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_column_transformer_empty_columns",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试专门验证 ColumnTransformer 处理应用于空列（零特征）的转换器的能力，与 Issue 的核心场景高度相关。",
+        "reusable_parts": [
+          "ColumnTransformer 的构造方式，包括指定空列列表。",
+          "使用 Trans() 和 TransRaise() 等自定义转换器。",
+          "assert_array_equal 断言风格。"
+        ],
+        "possible_gap": "该测试没有使用 set_output(transform=\"pandas\") 配置，也没有在 Pipeline 上下文中运行，而这正是 Issue 触发错误的关键条件。"
+      },
+      {
+        "test_name": "test_column_transformer_set_output",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试验证了 ColumnTransformer 在 set_output(transform=\"pandas\") 下的行为，包括输出类型和列名匹配。",
+        "reusable_parts": [
+          "使用 pd.DataFrame 作为输入。",
+          "调用 ct.set_output(transform=\"pandas\")。",
+          "断言输出是 pandas DataFrame 且列名与 get_feature_names_out 匹配。"
+        ],
+        "possible_gap": "该测试没有包含应用于零特征的转换器，因此不会触发 Issue 中描述的长度不匹配错误。"
+      },
+      {
+        "test_name": "test_feature_names_empty_columns",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试验证了当存在应用于空列的转换器时，get_feature_names_out 的正确行为，这与 Issue 中列名生成问题相关。",
+        "reusable_parts": [
+          "使用空列列表（[]）作为转换器的列选择器。",
+          "使用 OneHotEncoder 等真实转换器。",
+          "断言 get_feature_names_out 的输出。"
+        ],
+        "possible_gap": "该测试同样没有使用 set_output(transform=\"pandas\")，因此不会触发 _hstack 中的 DataFrame 列赋值错误。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在设置了 set_output(transform=\"pandas\") 的 Pipeline 中，使用一个包含至少一个转换器（如 'passthrough'）应用于空特征列表（例如 []）的 ColumnTransformer 进行 fit 操作。",
+      "evidence": [
+        "Issue 中的代码示例显示，当 categorical_features 为空列表且设置了 .set_output(transform=\"pandas\") 时，pipeline.fit(X, y) 会触发错误。",
+        "Issue 描述指出：'ColumnTransformer doesn't deal well with transformers that apply to 0 features (categorical_features in the example below) when using \"pandas\" as output.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 _hstack 方法中尝试为 pandas DataFrame 的 output.columns 赋值时，抛出 ValueError: Length mismatch: Expected axis has 3 elements, new values have 0 elements。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示错误发生在 _column_transformer.py 的 _hstack 方法中，具体是 'output.columns = names_out' 这一行。",
+        "错误信息为：'ValueError: Length mismatch: Expected axis has 3 elements, new values have 0 elements'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.compose.ColumnTransformer",
+        "kind": "class",
+        "source_path": "sklearn/compose/_column_transformer.py",
+        "reason": "Issue 的核心是关于 ColumnTransformer 在处理零特征转换器时的行为。"
+      },
+      {
+        "name": "sklearn.pipeline.Pipeline",
+        "kind": "class",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "Issue 的复现代码使用了 Pipeline，并且错误发生在 Pipeline 的 fit 过程中。"
+      },
+      {
+        "name": "sklearn.pipeline.Pipeline.set_output",
+        "kind": "method",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "Issue 明确指出，移除 .set_output(transform=\"pandas\") 后错误消失，说明此配置是关键触发条件。"
+      },
+      {
+        "name": "sklearn.compose.ColumnTransformer._hstack",
+        "kind": "method",
+        "source_path": "sklearn/compose/_column_transformer.py",
+        "reason": "错误堆栈显示错误发生在 _hstack 方法中，这是拼接转换结果和列名的关键方法。"
+      },
+      {
+        "name": "sklearn.compose.ColumnTransformer._iter",
+        "kind": "method",
+        "source_path": "sklearn/compose/_column_transformer.py",
+        "reason": "Issue 描述提到 'steps with 0 features are not fitted, hence don't appear in `self._iter(fitted=True)`'，这影响了后续的列名生成。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/compose/_column_transformer.py",
+        "object": "ColumnTransformer._hstack",
+        "lines": "856-862",
+        "reason": "Issue 描述和错误堆栈都指向了 _hstack 方法，特别是与 _add_prefix_for_feature_names_out 和设置 output.columns 相关的代码行。"
+      },
+      {
+        "path": "sklearn/compose/_column_transformer.py",
+        "object": "ColumnTransformer._iter",
+        "lines": "",
+        "reason": "Issue 描述指出，零特征的转换器不会被拟合，因此不会出现在 _iter(fitted=True) 的迭代中，这可能导致后续生成列名时信息缺失。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，ColumnTransformer 通常在没有调用 set_output 或使用默认输出的情况下运行。",
+        "target_pattern": "在 ColumnTransformer 或其所在的 Pipeline 上调用 .set_output(transform=\"pandas\")。",
+        "reason": "Issue 明确指出，移除 .set_output(transform=\"pandas\") 后错误消失，因此添加此配置是触发错误的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中，应用于空列的转换器（如 TransRaise）通常与其他正常转换器一起使用。",
+        "target_pattern": "在设置了 pandas 输出的 Pipeline 中，构造一个包含应用于空特征列表（如 []）的转换器（如 'passthrough'）的 ColumnTransformer。",
+        "reason": "Issue 的复现代码表明，同时存在零特征转换器（'categorical'）和正常转换器（'numerical'）是触发条件之一。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接调用 ColumnTransformer 的 fit_transform 或 fit 和 transform。",
+        "target_pattern": "将 ColumnTransformer 作为 Pipeline 的一个步骤，然后调用整个 Pipeline 的 fit 方法。",
+        "reason": "Issue 的错误是在 Pipeline.fit 过程中触发的，这可能涉及不同的内部调用流程和状态管理。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [
+      {
+        "rule": "positive_example_polarity",
+        "severity": "hard",
+        "protected_inputs": [
+          "pandas"
+        ],
+        "instruction": "Inputs explicitly described by the Issue as accepted, parsed, or successful must not be used as invalid inputs and must not be placed inside assertRaises/pytest.raises.",
+        "evidence": [
+          "Issue describes 'pandas' on a successful/accepted path."
+        ],
+        "validation_message_instruction": "For a validation-error-message defect, preserve a genuinely invalid input from the highest-ranked iCoRe seed and mutate only the expected fixed-side message fragment."
+      }
+    ],
+    "audit_warnings": [
+      "Derived polarity audit: do not reinterpret successful Issue example(s) 'pandas' as invalid trigger inputs."
+    ]
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "应用于零个特征的转换器步骤应该被忽略，不应影响最终输出的列名生成和 DataFrame 的构建。",
+      "evidence": [
+        "Issue 的 'Expected Results' 部分明确指出：'The step with no features should be ignored.'",
+        "相关测试 test_column_transformer_empty_columns 表明，当转换器应用于空列时，ColumnTransformer 应能正常工作并输出正确形状的数据。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "pipeline.fit(X, y) 调用是否抛出 ValueError，以及错误消息是否包含 'Length mismatch'。",
+        "reason": "这是 Issue 中观察到的直接错误现象，是判断缺陷是否被触发的明确标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在调用 fit 之前和之后，检查 ColumnTransformer 的 transformers_ 属性，特别是应用于空列的转换器条目状态。",
+        "reason": "Issue 提到零特征的转换器不会被拟合，因此可能不会出现在 transformers_ 中，这影响了后续的列名生成。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在 _hstack 方法内部，观察 names_out（准备赋给 output.columns 的列名列表）的长度与 output（DataFrame）的列数是否匹配。",
+        "reason": "错误直接源于长度不匹配，观察这两个值可以定位不一致的来源。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "ColumnTransformer 或 Pipeline 的 transform 输出类型，在设置 set_output(transform=\"pandas\") 后是否为 pandas DataFrame。",
+        "reason": "确认 pandas 输出配置已生效，这是触发错误的必要条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 ColumnTransformer 包含零特征转换器且配置了 pandas 输出时，Pipeline.fit 应成功完成而不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串，因为不同版本或环境下措辞可能微调。",
+        "reason": "Issue 的核心是期望零特征步骤被忽略，因此修复后 fit 不应因列名长度不匹配而失败。当前测试应验证错误是否被触发，故使用 raises 断言捕获 ValueError。"
+      },
+      {
+        "assertion_goal": "最终输出的 pandas DataFrame 的列数应与实际有输出的转换器生成的列数一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的列名顺序或完整列表，除非 Issue 明确指定。",
+        "reason": "修复后，列数应正确匹配，避免长度不匹配错误。这是一个稳定且核心的断言目标。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误是否只发生在转换器为 'passthrough' 时，还是任何类型的转换器（如实际拟合器）应用于空列都会触发？",
+    "_iter(fitted=True) 中排除零特征转换器的具体逻辑是什么，以及这如何影响 _add_prefix_for_feature_names_out 的输入？",
+    "修复后的确切行为：零特征转换器是完全从输出中移除，还是以某种方式（如生成零列）被表示？这如何影响 get_feature_names_out 的输出？",
+    "除了 Pipeline.fit，直接调用 ColumnTransformer.fit_transform 在 pandas 输出模式下是否也会触发同样的错误？"
+  ],
+  "raw": {
+    "issue_summary": "当使用 pandas 输出时，ColumnTransformer 无法正确处理应用于零个特征的转换器，导致在拼接输出列名时出现长度不匹配错误。",
+    "trigger_condition": {
+      "text": "在设置了 set_output(transform=\"pandas\") 的 Pipeline 中，使用一个包含至少一个转换器（如 'passthrough'）应用于空特征列表（例如 []）的 ColumnTransformer 进行 fit 操作。",
+      "evidence": [
+        "Issue 中的代码示例显示，当 categorical_features 为空列表且设置了 .set_output(transform=\"pandas\") 时，pipeline.fit(X, y) 会触发错误。",
+        "Issue 描述指出：'ColumnTransformer doesn't deal well with transformers that apply to 0 features (categorical_features in the example below) when using \"pandas\" as output.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 _hstack 方法中尝试为 pandas DataFrame 的 output.columns 赋值时，抛出 ValueError: Length mismatch: Expected axis has 3 elements, new values have 0 elements。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示错误发生在 _column_transformer.py 的 _hstack 方法中，具体是 'output.columns = names_out' 这一行。",
+        "错误信息为：'ValueError: Length mismatch: Expected axis has 3 elements, new values have 0 elements'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "应用于零个特征的转换器步骤应该被忽略，不应影响最终输出的列名生成和 DataFrame 的构建。",
+      "evidence": [
+        "Issue 的 'Expected Results' 部分明确指出：'The step with no features should be ignored.'",
+        "相关测试 test_column_transformer_empty_columns 表明，当转换器应用于空列时，ColumnTransformer 应能正常工作并输出正确形状的数据。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.compose.ColumnTransformer",
+        "kind": "class",
+        "source_path": "sklearn/compose/_column_transformer.py",
+        "reason": "Issue 的核心是关于 ColumnTransformer 在处理零特征转换器时的行为。"
+      },
+      {
+        "name": "sklearn.pipeline.Pipeline",
+        "kind": "class",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "Issue 的复现代码使用了 Pipeline，并且错误发生在 Pipeline 的 fit 过程中。"
+      },
+      {
+        "name": "sklearn.pipeline.Pipeline.set_output",
+        "kind": "method",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "Issue 明确指出，移除 .set_output(transform=\"pandas\") 后错误消失，说明此配置是关键触发条件。"
+      },
+      {
+        "name": "sklearn.compose.ColumnTransformer._hstack",
+        "kind": "method",
+        "source_path": "sklearn/compose/_column_transformer.py",
+        "reason": "错误堆栈显示错误发生在 _hstack 方法中，这是拼接转换结果和列名的关键方法。"
+      },
+      {
+        "name": "sklearn.compose.ColumnTransformer._iter",
+        "kind": "method",
+        "source_path": "sklearn/compose/_column_transformer.py",
+        "reason": "Issue 描述提到 'steps with 0 features are not fitted, hence don't appear in `self._iter(fitted=True)`'，这影响了后续的列名生成。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/compose/_column_transformer.py",
+        "object": "ColumnTransformer._hstack",
+        "lines": "856-862",
+        "reason": "Issue 描述和错误堆栈都指向了 _hstack 方法，特别是与 _add_prefix_for_feature_names_out 和设置 output.columns 相关的代码行。"
+      },
+      {
+        "path": "sklearn/compose/_column_transformer.py",
+        "object": "ColumnTransformer._iter",
+        "lines": "",
+        "reason": "Issue 描述指出，零特征的转换器不会被拟合，因此不会出现在 _iter(fitted=True) 的迭代中，这可能导致后续生成列名时信息缺失。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_column_transformer_empty_columns",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试专门验证 ColumnTransformer 处理应用于空列（零特征）的转换器的能力，与 Issue 的核心场景高度相关。",
+        "reusable_parts": [
+          "ColumnTransformer 的构造方式，包括指定空列列表。",
+          "使用 Trans() 和 TransRaise() 等自定义转换器。",
+          "assert_array_equal 断言风格。"
+        ],
+        "possible_gap": "该测试没有使用 set_output(transform=\"pandas\") 配置，也没有在 Pipeline 上下文中运行，而这正是 Issue 触发错误的关键条件。"
+      },
+      {
+        "test_name": "test_column_transformer_set_output",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试验证了 ColumnTransformer 在 set_output(transform=\"pandas\") 下的行为，包括输出类型和列名匹配。",
+        "reusable_parts": [
+          "使用 pd.DataFrame 作为输入。",
+          "调用 ct.set_output(transform=\"pandas\")。",
+          "断言输出是 pandas DataFrame 且列名与 get_feature_names_out 匹配。"
+        ],
+        "possible_gap": "该测试没有包含应用于零特征的转换器，因此不会触发 Issue 中描述的长度不匹配错误。"
+      },
+      {
+        "test_name": "test_feature_names_empty_columns",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试验证了当存在应用于空列的转换器时，get_feature_names_out 的正确行为，这与 Issue 中列名生成问题相关。",
+        "reusable_parts": [
+          "使用空列列表（[]）作为转换器的列选择器。",
+          "使用 OneHotEncoder 等真实转换器。",
+          "断言 get_feature_names_out 的输出。"
+        ],
+        "possible_gap": "该测试同样没有使用 set_output(transform=\"pandas\")，因此不会触发 _hstack 中的 DataFrame 列赋值错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，ColumnTransformer 通常在没有调用 set_output 或使用默认输出的情况下运行。",
+        "target_pattern": "在 ColumnTransformer 或其所在的 Pipeline 上调用 .set_output(transform=\"pandas\")。",
+        "reason": "Issue 明确指出，移除 .set_output(transform=\"pandas\") 后错误消失，因此添加此配置是触发错误的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中，应用于空列的转换器（如 TransRaise）通常与其他正常转换器一起使用。",
+        "target_pattern": "在设置了 pandas 输出的 Pipeline 中，构造一个包含应用于空特征列表（如 []）的转换器（如 'passthrough'）的 ColumnTransformer。",
+        "reason": "Issue 的复现代码表明，同时存在零特征转换器（'categorical'）和正常转换器（'numerical'）是触发条件之一。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常直接调用 ColumnTransformer 的 fit_transform 或 fit 和 transform。",
+        "target_pattern": "将 ColumnTransformer 作为 Pipeline 的一个步骤，然后调用整个 Pipeline 的 fit 方法。",
+        "reason": "Issue 的错误是在 Pipeline.fit 过程中触发的，这可能涉及不同的内部调用流程和状态管理。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "pipeline.fit(X, y) 调用是否抛出 ValueError，以及错误消息是否包含 'Length mismatch'。",
+        "reason": "这是 Issue 中观察到的直接错误现象，是判断缺陷是否被触发的明确标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在调用 fit 之前和之后，检查 ColumnTransformer 的 transformers_ 属性，特别是应用于空列的转换器条目状态。",
+        "reason": "Issue 提到零特征的转换器不会被拟合，因此可能不会出现在 transformers_ 中，这影响了后续的列名生成。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "在 _hstack 方法内部，观察 names_out（准备赋给 output.columns 的列名列表）的长度与 output（DataFrame）的列数是否匹配。",
+        "reason": "错误直接源于长度不匹配，观察这两个值可以定位不一致的来源。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "ColumnTransformer 或 Pipeline 的 transform 输出类型，在设置 set_output(transform=\"pandas\") 后是否为 pandas DataFrame。",
+        "reason": "确认 pandas 输出配置已生效，这是触发错误的必要条件。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 ColumnTransformer 包含零特征转换器且配置了 pandas 输出时，Pipeline.fit 应成功完成而不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串，因为不同版本或环境下措辞可能微调。",
+        "reason": "Issue 的核心是期望零特征步骤被忽略，因此修复后 fit 不应因列名长度不匹配而失败。当前测试应验证错误是否被触发，故使用 raises 断言捕获 ValueError。"
+      },
+      {
+        "assertion_goal": "最终输出的 pandas DataFrame 的列数应与实际有输出的转换器生成的列数一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的列名顺序或完整列表，除非 Issue 明确指定。",
+        "reason": "修复后，列数应正确匹配，避免长度不匹配错误。这是一个稳定且核心的断言目标。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 pandas、numpy、sklearn.compose.ColumnTransformer、sklearn.pipeline.Pipeline 以及相关的转换器（如 SimpleImputer, RobustScaler）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 pd.DataFrame 作为输入数据 X，以支持列名选择和 pandas 输出。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要定义一个简单的目标变量 y 用于分类器的拟合（如果使用 Issue 中的完整示例）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest 的 importorskip 来确保 pandas 可用，并优雅地跳过测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "错误是否只发生在转换器为 'passthrough' 时，还是任何类型的转换器（如实际拟合器）应用于空列都会触发？",
+      "_iter(fitted=True) 中排除零特征转换器的具体逻辑是什么，以及这如何影响 _add_prefix_for_feature_names_out 的输入？",
+      "修复后的确切行为：零特征转换器是完全从输出中移除，还是以某种方式（如生成零列）被表示？这如何影响 get_feature_names_out 的输出？",
+      "除了 Pipeline.fit，直接调用 ColumnTransformer.fit_transform 在 pandas 输出模式下是否也会触发同样的错误？"
+    ]
+  }
+}

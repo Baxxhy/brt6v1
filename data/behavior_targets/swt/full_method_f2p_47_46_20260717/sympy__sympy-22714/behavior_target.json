@@ -1,0 +1,408 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-22714",
+  "issue_summary": "在 evaluate(False) 上下文中使用 sympify 或 parse_expr 解析 Point2D 字符串会抛出 'Imaginary coordinates are not permitted.' 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 或相关模块（sympify, evaluate, Point2D）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在普通 Python 环境中运行，无需特殊 fixture 或数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_evaluate_false",
+        "test_file": "sympy/core/tests/test_sympify.py",
+        "why_relevant": "它直接测试 sympify 在 evaluate=False 下的行为，包含多种表达式。",
+        "reusable_parts": [
+          "import sympify",
+          "使用 evaluate=False 参数",
+          "assert 风格：比较 sympify 结果与预期表达式结构"
+        ],
+        "possible_gap": "该测试未涉及几何对象（如 Point2D）的字符串解析。"
+      },
+      {
+        "test_name": "test_function_evaluate_false",
+        "test_file": "sympy/parsing/tests/test_sympy_parser.py",
+        "why_relevant": "它测试 parse_expr 在 evaluate=False 下解析各种函数调用，与 Issue 中解析 Point2D 函数调用类似。",
+        "reusable_parts": [
+          "import parse_expr",
+          "使用 evaluate=False 参数",
+          "assert 风格：检查字符串表示"
+        ],
+        "possible_gap": "未测试 Point2D 或任何几何类。"
+      },
+      {
+        "test_name": "test_arguments",
+        "test_file": "sympy/geometry/tests/test_point.py",
+        "why_relevant": "它测试 Point 和 Point2D 的构造，包括 evaluate=False 参数的使用。",
+        "reusable_parts": [
+          "import Point, Point2D",
+          "使用 evaluate=False 参数构造点",
+          "assert 风格：比较坐标"
+        ],
+        "possible_gap": "该测试直接调用构造函数，而非通过 sympify/parse_expr 解析字符串。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 `with evaluate(False):` 上下文管理器内，调用 `sympify` 或 `parse_expr` 解析字符串 `'Point2D(Integer(1),Integer(2))'`。",
+      "evidence": [
+        "Issue 中的代码示例：`with sp.evaluate(False): sp.S('Point2D(Integer(1),Integer(2))')`",
+        "Issue 说明：`with evaluate(False)` crashes unexpectedly with `Point2D`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: Imaginary coordinates are not permitted.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示异常来自 `sympy/geometry/point.py` 第 153 行的 `__new__` 方法。",
+        "错误信息：`ValueError: Imaginary coordinates are not permitted.`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympify",
+        "kind": "function",
+        "source_path": "sympy/core/sympify.py",
+        "reason": "Issue 中触发错误的入口是 `sp.S`，它是 `sympify` 的别名。"
+      },
+      {
+        "name": "parse_expr",
+        "kind": "function",
+        "source_path": "sympy/parsing/sympy_parser.py",
+        "reason": "sympify 内部调用了 parse_expr，且 parse_expr 的 evaluate 参数控制求值行为。"
+      },
+      {
+        "name": "evaluate",
+        "kind": "function",
+        "source_path": "sympy/core/parameters.py",
+        "reason": "Issue 使用了 `with evaluate(False):` 上下文管理器来全局禁用求值。"
+      },
+      {
+        "name": "Point2D",
+        "kind": "class",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Issue 中解析的字符串是 Point2D 构造，异常来自其父类 Point 的 __new__ 方法。"
+      },
+      {
+        "name": "Point",
+        "kind": "class",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Point2D 继承自 Point，异常在 Point.__new__ 中抛出。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/geometry/point.py",
+        "object": "Point.__new__",
+        "lines": "42-857",
+        "reason": "错误堆栈指向 Point.__new__ 第153行抛出异常。当 evaluate=False 时，坐标可能以某种形式（如未求值的表达式）被传递，导致坐标检查逻辑误判为虚数。"
+      },
+      {
+        "path": "sympy/parsing/sympy_parser.py",
+        "object": "parse_expr",
+        "lines": "918-1100",
+        "reason": "parse_expr 处理 evaluate=False 时，会调用 `evaluateFalse` 函数并编译代码。可能在此过程中，传递给 Point 构造函数的参数形式发生了变化。"
+      },
+      {
+        "path": "sympy/core/parameters.py",
+        "object": "evaluate",
+        "lines": "71-102",
+        "reason": "全局 evaluate 标志通过此上下文管理器设置，可能影响下游的求值决策。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在测试中直接调用函数并传递 evaluate=False 参数（如 sympify('2+3', evaluate=False)）。",
+        "target_pattern": "使用全局上下文管理器 `with evaluate(False):`，然后调用 sympify 或 parse_expr 而不显式传递 evaluate 参数。",
+        "reason": "Issue 表明全局 evaluate(False) 上下文与显式传递 evaluate=False 参数的行为可能不同。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用简单算术表达式（如 '2+3'）或数学函数（如 'Abs(0)'）作为输入字符串。",
+        "target_pattern": "使用几何点构造字符串作为输入，如 'Point2D(Integer(1),Integer(2))'。",
+        "reason": "Issue 特定于 Point2D 的字符串解析。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用构造函数 Point2D(1, 2, evaluate=False)。",
+        "target_pattern": "通过 sympify 或 parse_expr 解析字符串来间接创建 Point2D。",
+        "reason": "缺陷可能出现在从字符串解析到构造函数调用的转换链中。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 evaluate(False) 上下文中解析 Point2D 字符串应成功，返回一个未求值的 Point2D 对象，且不抛出 Imaginary coordinates 异常。",
+      "evidence": [
+        "Issue 指出：`However, it works without `with evaluate(False)`. Both of following commands work`",
+        "相关测试 test_arguments 中展示了 `evaluate=False` 参数用于 Point 构造。",
+        "Point2D 文档提到：`Floats are automatically converted to Rational unless the evaluate flag is False:`"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "是否抛出 ValueError 及其消息是否包含 'Imaginary coordinates are not permitted.'",
+        "reason": "Issue 的核心错误现象就是这个异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "sympify/parse_expr 的返回值类型和 repr/str 表示。",
+        "reason": "修复后应返回一个 Point2D 对象，且其坐标应为未求值形式（如 Integer(1)）。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "返回值的类型是否为 Point2D 或其基类 Point。",
+        "reason": "验证解析成功创建了几何点对象。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "全局 evaluate 标志的状态（通过 parameters.global_parameters.evaluate）。",
+        "reason": "确保 evaluate(False) 上下文管理器正确设置了全局标志。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 evaluate(False) 上下文中解析 Point2D 字符串不应抛出 Imaginary coordinates 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能微调。",
+        "reason": "Issue 的核心是异常被错误地抛出。修复后，该异常不应出现。"
+      },
+      {
+        "assertion_goal": "解析结果应是一个 Point2D 实例。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串相等，因为内部表示可能变化。",
+        "reason": "验证成功创建了正确类型的对象。"
+      },
+      {
+        "assertion_goal": "解析结果的坐标应保持未求值形式（例如包含 Integer 对象）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言坐标等于具体的数值（如 1, 2），因为 evaluate=False 应保留符号形式。",
+        "reason": "evaluate=False 应抑制自动求值，坐标应为输入的字面形式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致 Imaginary coordinates 检查失败的精确输入参数是什么（在 evaluate=False 下，坐标参数变成了什么形式？）。",
+    "缺陷是仅在全局 evaluate(False) 上下文中出现，还是在显式传递 evaluate=False 给 sympify/parse_expr 时也会出现？Issue 暗示后者工作，但需要确认。",
+    "Point.__new__ 中检查虚数坐标的逻辑具体是什么，以及它如何与未求值的表达式交互。",
+    "除了 Point2D，其他几何类（Point3D, Point）或函数是否受相同问题影响。"
+  ],
+  "raw": {
+    "issue_summary": "在 evaluate(False) 上下文中使用 sympify 或 parse_expr 解析 Point2D 字符串会抛出 'Imaginary coordinates are not permitted.' 异常。",
+    "trigger_condition": {
+      "text": "在 `with evaluate(False):` 上下文管理器内，调用 `sympify` 或 `parse_expr` 解析字符串 `'Point2D(Integer(1),Integer(2))'`。",
+      "evidence": [
+        "Issue 中的代码示例：`with sp.evaluate(False): sp.S('Point2D(Integer(1),Integer(2))')`",
+        "Issue 说明：`with evaluate(False)` crashes unexpectedly with `Point2D`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: Imaginary coordinates are not permitted.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示异常来自 `sympy/geometry/point.py` 第 153 行的 `__new__` 方法。",
+        "错误信息：`ValueError: Imaginary coordinates are not permitted.`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 evaluate(False) 上下文中解析 Point2D 字符串应成功，返回一个未求值的 Point2D 对象，且不抛出 Imaginary coordinates 异常。",
+      "evidence": [
+        "Issue 指出：`However, it works without `with evaluate(False)`. Both of following commands work`",
+        "相关测试 test_arguments 中展示了 `evaluate=False` 参数用于 Point 构造。",
+        "Point2D 文档提到：`Floats are automatically converted to Rational unless the evaluate flag is False:`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympify",
+        "kind": "function",
+        "source_path": "sympy/core/sympify.py",
+        "reason": "Issue 中触发错误的入口是 `sp.S`，它是 `sympify` 的别名。"
+      },
+      {
+        "name": "parse_expr",
+        "kind": "function",
+        "source_path": "sympy/parsing/sympy_parser.py",
+        "reason": "sympify 内部调用了 parse_expr，且 parse_expr 的 evaluate 参数控制求值行为。"
+      },
+      {
+        "name": "evaluate",
+        "kind": "function",
+        "source_path": "sympy/core/parameters.py",
+        "reason": "Issue 使用了 `with evaluate(False):` 上下文管理器来全局禁用求值。"
+      },
+      {
+        "name": "Point2D",
+        "kind": "class",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Issue 中解析的字符串是 Point2D 构造，异常来自其父类 Point 的 __new__ 方法。"
+      },
+      {
+        "name": "Point",
+        "kind": "class",
+        "source_path": "sympy/geometry/point.py",
+        "reason": "Point2D 继承自 Point，异常在 Point.__new__ 中抛出。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/geometry/point.py",
+        "object": "Point.__new__",
+        "lines": "42-857",
+        "reason": "错误堆栈指向 Point.__new__ 第153行抛出异常。当 evaluate=False 时，坐标可能以某种形式（如未求值的表达式）被传递，导致坐标检查逻辑误判为虚数。"
+      },
+      {
+        "path": "sympy/parsing/sympy_parser.py",
+        "object": "parse_expr",
+        "lines": "918-1100",
+        "reason": "parse_expr 处理 evaluate=False 时，会调用 `evaluateFalse` 函数并编译代码。可能在此过程中，传递给 Point 构造函数的参数形式发生了变化。"
+      },
+      {
+        "path": "sympy/core/parameters.py",
+        "object": "evaluate",
+        "lines": "71-102",
+        "reason": "全局 evaluate 标志通过此上下文管理器设置，可能影响下游的求值决策。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_evaluate_false",
+        "test_file": "sympy/core/tests/test_sympify.py",
+        "why_relevant": "它直接测试 sympify 在 evaluate=False 下的行为，包含多种表达式。",
+        "reusable_parts": [
+          "import sympify",
+          "使用 evaluate=False 参数",
+          "assert 风格：比较 sympify 结果与预期表达式结构"
+        ],
+        "possible_gap": "该测试未涉及几何对象（如 Point2D）的字符串解析。"
+      },
+      {
+        "test_name": "test_function_evaluate_false",
+        "test_file": "sympy/parsing/tests/test_sympy_parser.py",
+        "why_relevant": "它测试 parse_expr 在 evaluate=False 下解析各种函数调用，与 Issue 中解析 Point2D 函数调用类似。",
+        "reusable_parts": [
+          "import parse_expr",
+          "使用 evaluate=False 参数",
+          "assert 风格：检查字符串表示"
+        ],
+        "possible_gap": "未测试 Point2D 或任何几何类。"
+      },
+      {
+        "test_name": "test_arguments",
+        "test_file": "sympy/geometry/tests/test_point.py",
+        "why_relevant": "它测试 Point 和 Point2D 的构造，包括 evaluate=False 参数的使用。",
+        "reusable_parts": [
+          "import Point, Point2D",
+          "使用 evaluate=False 参数构造点",
+          "assert 风格：比较坐标"
+        ],
+        "possible_gap": "该测试直接调用构造函数，而非通过 sympify/parse_expr 解析字符串。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在测试中直接调用函数并传递 evaluate=False 参数（如 sympify('2+3', evaluate=False)）。",
+        "target_pattern": "使用全局上下文管理器 `with evaluate(False):`，然后调用 sympify 或 parse_expr 而不显式传递 evaluate 参数。",
+        "reason": "Issue 表明全局 evaluate(False) 上下文与显式传递 evaluate=False 参数的行为可能不同。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试使用简单算术表达式（如 '2+3'）或数学函数（如 'Abs(0)'）作为输入字符串。",
+        "target_pattern": "使用几何点构造字符串作为输入，如 'Point2D(Integer(1),Integer(2))'。",
+        "reason": "Issue 特定于 Point2D 的字符串解析。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用构造函数 Point2D(1, 2, evaluate=False)。",
+        "target_pattern": "通过 sympify 或 parse_expr 解析字符串来间接创建 Point2D。",
+        "reason": "缺陷可能出现在从字符串解析到构造函数调用的转换链中。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "是否抛出 ValueError 及其消息是否包含 'Imaginary coordinates are not permitted.'",
+        "reason": "Issue 的核心错误现象就是这个异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "sympify/parse_expr 的返回值类型和 repr/str 表示。",
+        "reason": "修复后应返回一个 Point2D 对象，且其坐标应为未求值形式（如 Integer(1)）。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "返回值的类型是否为 Point2D 或其基类 Point。",
+        "reason": "验证解析成功创建了几何点对象。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "全局 evaluate 标志的状态（通过 parameters.global_parameters.evaluate）。",
+        "reason": "确保 evaluate(False) 上下文管理器正确设置了全局标志。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 evaluate(False) 上下文中解析 Point2D 字符串不应抛出 Imaginary coordinates 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能微调。",
+        "reason": "Issue 的核心是异常被错误地抛出。修复后，该异常不应出现。"
+      },
+      {
+        "assertion_goal": "解析结果应是一个 Point2D 实例。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串相等，因为内部表示可能变化。",
+        "reason": "验证成功创建了正确类型的对象。"
+      },
+      {
+        "assertion_goal": "解析结果的坐标应保持未求值形式（例如包含 Integer 对象）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言坐标等于具体的数值（如 1, 2），因为 evaluate=False 应保留符号形式。",
+        "reason": "evaluate=False 应抑制自动求值，坐标应为输入的字面形式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 或相关模块（sympify, evaluate, Point2D）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在普通 Python 环境中运行，无需特殊 fixture 或数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致 Imaginary coordinates 检查失败的精确输入参数是什么（在 evaluate=False 下，坐标参数变成了什么形式？）。",
+      "缺陷是仅在全局 evaluate(False) 上下文中出现，还是在显式传递 evaluate=False 给 sympify/parse_expr 时也会出现？Issue 暗示后者工作，但需要确认。",
+      "Point.__new__ 中检查虚数坐标的逻辑具体是什么，以及它如何与未求值的表达式交互。",
+      "除了 Point2D，其他几何类（Point3D, Point）或函数是否受相同问题影响。"
+    ]
+  }
+}

@@ -1,0 +1,248 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "psf__requests-3362",
+  "issue_summary": "当 decode_unicode=True 时，iter_content() 返回 bytes 而非 unicode，与 text 属性行为不一致。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要构造一个 requests.Response 对象，并设置其内容（_content 或 raw）、编码（encoding）以及内容消耗状态（_content_consumed）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 HTTP 响应流（如使用 io.BytesIO）来测试流式读取路径。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRequests.test_response_decode_unicode",
+        "test_file": "tests/test_requests.py",
+        "why_relevant": "该测试直接验证 iter_content(decode_unicode=True) 应返回 unicode，与 Issue 目标高度一致。",
+        "reusable_parts": [
+          "Response 对象构造",
+          "设置 _content, _content_consumed, encoding",
+          "调用 iter_content(decode_unicode=True)",
+          "使用 isinstance(chunk, str) 断言"
+        ],
+        "possible_gap": "该测试使用预设的简单字节内容（b'the content'）和 ascii 编码，可能未覆盖 Issue 中提到的 application/json 响应场景或更复杂的编码/解码流程。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对响应对象调用 iter_content(decode_unicode=True) 迭代内容，同时响应编码已知（如 'ascii'）且内容为字节串。",
+      "evidence": [
+        "Issue 描述：'next(r.iter_content(16*1024, decode_unicode=True))' 返回 bytes",
+        "源码片段 1：iter_content 函数定义及 decode_unicode 参数",
+        "相关测试 1：测试 iter_content(decode_unicode=True) 应返回 unicode"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "iter_content(decode_unicode=True) 返回的迭代项是 bytes 类型，而非预期的 str (unicode) 类型。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述：'returning bytes, whereas r.text returns unicode'",
+        "相关测试 1：断言 'all(isinstance(chunk, str) for chunk in chunks)' 表明期望返回 str"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.Response.iter_content",
+        "kind": "method",
+        "source_path": "requests/models.py",
+        "reason": "Issue 直接报告此方法在 decode_unicode=True 时的行为问题。"
+      },
+      {
+        "name": "requests.Response.text",
+        "kind": "method",
+        "source_path": "requests/models.py",
+        "reason": "Issue 中作为对比参照，展示预期的 unicode 返回行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/models.py",
+        "object": "Response.iter_content",
+        "lines": "653-700",
+        "reason": "该函数负责处理 decode_unicode 参数，其实现可能未正确解码或返回类型有误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用简单的 ASCII 编码和预设的字节内容（b'the content'）。",
+        "target_pattern": "使用更复杂的编码场景，例如响应内容为 JSON 字节串，编码可能由 HTTP 头或内容推断。",
+        "reason": "Issue 提到 'When requesting an application/json document'，触发条件可能涉及特定的内容类型和编码处理路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中直接设置 r._content 和 r.encoding。",
+        "target_pattern": "模拟一个真实的 HTTP 响应，其中 raw 属性包含字节流，编码可能由响应头决定或为 None。",
+        "reason": "Issue 发生在实际请求场景，iter_content 可能从 raw 流读取并解码，而非从已消耗的 _content。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 decode_unicode=True 时，iter_content() 应返回解码后的 unicode (str) 对象，与 text 属性返回的类型一致。",
+      "evidence": [
+        "Issue 描述：'My understanding was that both should return a unicode object.'",
+        "源码片段 1：docstring 说明 'If decode_unicode is True, content will be decoded...'",
+        "相关测试 1：测试名称和断言明确期望返回 unicode"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(chunk) for chunk in r.iter_content(decode_unicode=True)",
+        "reason": "直接观测迭代返回项的类型是 bytes 还是 str，是 Issue 的核心症状。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "next(r.iter_content(decode_unicode=True)) 与 r.text 的对比",
+        "reason": "Issue 将两者行为进行对比，观测其返回值类型和内容是否一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 iter_content(decode_unicode=True) 返回的所有块都是 str (unicode) 类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的字符串内容相等，因为内容可能因分块而改变；避免断言 bytes 类型。",
+        "reason": "Issue 的核心是类型错误，而非内容错误。使用 isinstance 检查类型是稳定且直接的断言方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发缺陷是否依赖于特定的响应编码（如 UTF-8 vs ASCII）或内容类型（application/json）。",
+    "缺陷是否只发生在流式读取（从 raw）路径，还是也发生在从 _content 重用的路径。",
+    "decode_unicode 处理逻辑中，stream_decode_response_unicode 函数的具体行为是否与缺陷相关。"
+  ],
+  "raw": {
+    "issue_summary": "当 decode_unicode=True 时，iter_content() 返回 bytes 而非 unicode，与 text 属性行为不一致。",
+    "trigger_condition": {
+      "text": "对响应对象调用 iter_content(decode_unicode=True) 迭代内容，同时响应编码已知（如 'ascii'）且内容为字节串。",
+      "evidence": [
+        "Issue 描述：'next(r.iter_content(16*1024, decode_unicode=True))' 返回 bytes",
+        "源码片段 1：iter_content 函数定义及 decode_unicode 参数",
+        "相关测试 1：测试 iter_content(decode_unicode=True) 应返回 unicode"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "iter_content(decode_unicode=True) 返回的迭代项是 bytes 类型，而非预期的 str (unicode) 类型。",
+      "symptom_type": "wrong_type",
+      "evidence": [
+        "Issue 描述：'returning bytes, whereas r.text returns unicode'",
+        "相关测试 1：断言 'all(isinstance(chunk, str) for chunk in chunks)' 表明期望返回 str"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 decode_unicode=True 时，iter_content() 应返回解码后的 unicode (str) 对象，与 text 属性返回的类型一致。",
+      "evidence": [
+        "Issue 描述：'My understanding was that both should return a unicode object.'",
+        "源码片段 1：docstring 说明 'If decode_unicode is True, content will be decoded...'",
+        "相关测试 1：测试名称和断言明确期望返回 unicode"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.Response.iter_content",
+        "kind": "method",
+        "source_path": "requests/models.py",
+        "reason": "Issue 直接报告此方法在 decode_unicode=True 时的行为问题。"
+      },
+      {
+        "name": "requests.Response.text",
+        "kind": "method",
+        "source_path": "requests/models.py",
+        "reason": "Issue 中作为对比参照，展示预期的 unicode 返回行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/models.py",
+        "object": "Response.iter_content",
+        "lines": "653-700",
+        "reason": "该函数负责处理 decode_unicode 参数，其实现可能未正确解码或返回类型有误。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRequests.test_response_decode_unicode",
+        "test_file": "tests/test_requests.py",
+        "why_relevant": "该测试直接验证 iter_content(decode_unicode=True) 应返回 unicode，与 Issue 目标高度一致。",
+        "reusable_parts": [
+          "Response 对象构造",
+          "设置 _content, _content_consumed, encoding",
+          "调用 iter_content(decode_unicode=True)",
+          "使用 isinstance(chunk, str) 断言"
+        ],
+        "possible_gap": "该测试使用预设的简单字节内容（b'the content'）和 ascii 编码，可能未覆盖 Issue 中提到的 application/json 响应场景或更复杂的编码/解码流程。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中使用简单的 ASCII 编码和预设的字节内容（b'the content'）。",
+        "target_pattern": "使用更复杂的编码场景，例如响应内容为 JSON 字节串，编码可能由 HTTP 头或内容推断。",
+        "reason": "Issue 提到 'When requesting an application/json document'，触发条件可能涉及特定的内容类型和编码处理路径。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中直接设置 r._content 和 r.encoding。",
+        "target_pattern": "模拟一个真实的 HTTP 响应，其中 raw 属性包含字节流，编码可能由响应头决定或为 None。",
+        "reason": "Issue 发生在实际请求场景，iter_content 可能从 raw 流读取并解码，而非从已消耗的 _content。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(chunk) for chunk in r.iter_content(decode_unicode=True)",
+        "reason": "直接观测迭代返回项的类型是 bytes 还是 str，是 Issue 的核心症状。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "next(r.iter_content(decode_unicode=True)) 与 r.text 的对比",
+        "reason": "Issue 将两者行为进行对比，观测其返回值类型和内容是否一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 iter_content(decode_unicode=True) 返回的所有块都是 str (unicode) 类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的字符串内容相等，因为内容可能因分块而改变；避免断言 bytes 类型。",
+        "reason": "Issue 的核心是类型错误，而非内容错误。使用 isinstance 检查类型是稳定且直接的断言方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要构造一个 requests.Response 对象，并设置其内容（_content 或 raw）、编码（encoding）以及内容消耗状态（_content_consumed）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 HTTP 响应流（如使用 io.BytesIO）来测试流式读取路径。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "触发缺陷是否依赖于特定的响应编码（如 UTF-8 vs ASCII）或内容类型（application/json）。",
+      "缺陷是否只发生在流式读取（从 raw）路径，还是也发生在从 _content 重用的路径。",
+      "decode_unicode 处理逻辑中，stream_decode_response_unicode 函数的具体行为是否与缺陷相关。"
+    ]
+  }
+}

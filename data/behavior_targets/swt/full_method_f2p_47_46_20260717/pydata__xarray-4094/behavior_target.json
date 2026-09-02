@@ -1,0 +1,254 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-4094",
+  "issue_summary": "to_unstacked_dataset 方法在处理单维度变量时无法正确完成 roundtrip 操作，导致 MergeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy，并构造包含单维度变量的 Dataset。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest 框架和 assert_identical 辅助函数进行断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_to_stacked_array_to_unstacked_dataset_different_dimension",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试明确测试了变量具有不同维度（包括单维度）时的 roundtrip 场景，与 Issue 高度相关。",
+        "reusable_parts": [
+          "create_test_stacked_array fixture 的使用",
+          "Dataset 的构造",
+          "to_stacked_array 和 to_unstacked_dataset 的调用模式",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "该测试中使用的单维度变量 b 是通过 b.isel(y=0) 从二维变量创建的，其坐标可能比 Issue 中完全独立的单维度变量更简单。Issue 中的变量可能缺少某些坐标维度，导致冲突。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个包含单维度变量的 Dataset 调用 to_stacked_array 方法，然后对结果调用 to_unstacked_dataset 方法。",
+      "evidence": [
+        "Issue 中的 MCVE 代码：data.to_stacked_array('y', sample_dims=['x']) 和 stacked.to_unstacked_dataset('y')",
+        "Issue 描述：'this doesn't work if the variables only have a single dimension'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 MergeError: conflicting values for variable 'y' on objects to be combined.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：'MergeError: conflicting values for variable 'y' on objects to be combined.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Dataset.to_stacked_array",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中触发 bug 的起始 API 调用。"
+      },
+      {
+        "name": "DataArray.to_unstacked_dataset",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 中触发 bug 的后续 API 调用，也是错误发生的地方。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataarray.py",
+        "object": "DataArray.to_unstacked_dataset",
+        "lines": "1901-1967",
+        "reason": "该方法是错误发生的地方，负责从堆叠的 DataArray 恢复为 Dataset，可能未正确处理单维度变量产生的坐标。"
+      },
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.to_stacked_array",
+        "lines": "3370-3488",
+        "reason": "该方法创建了堆叠的 DataArray，其内部逻辑（如 ensure_stackable 函数）可能为单维度变量生成了有问题的坐标，导致后续 unstack 失败。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中，单维度变量 b 是从二维变量 a 通过 .isel(y=0) 派生的，保留了 y 坐标信息。",
+        "target_pattern": "Issue 中，单维度变量 arr 是独立创建的 DataArray，其坐标仅包含维度 x，没有 y 坐标。",
+        "reason": "独立创建的单维度变量在堆叠时可能被分配了不同的坐标值（如 None），导致在解堆叠时与原始坐标冲突。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 中，Dataset D 包含变量 a (x, y) 和 b (x)。",
+        "target_pattern": "Issue 中，Dataset data 包含变量 a (x) 和 b (x)，两者都是单维度变量。",
+        "reason": "当所有变量都只有单维度时，堆叠逻辑可能产生特殊的坐标结构，导致解堆叠失败。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "to_stacked_array 和 to_unstacked_dataset 应能成功完成 roundtrip 操作，即使变量只有单个维度。",
+      "evidence": [
+        "Issue 中的 'Expected Output: A working roundtrip.'",
+        "相关测试 1 和 2 展示了 roundtrip 成功的场景"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "stacked.to_unstacked_dataset('y')",
+        "reason": "直接观察该调用是否抛出 MergeError 是判断 Issue 是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "stacked.coords 和 stacked.indexes",
+        "reason": "观察堆叠后 DataArray 的坐标和索引结构，特别是 'y' 坐标的值，有助于理解冲突的来源。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对单维度变量 Dataset 进行 stack 和 unstack 的 roundtrip 操作不会抛出异常，且结果与原始 Dataset 相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或内部数据结构，因为它们可能在修复中改变。",
+        "reason": "Issue 的核心诉求是功能正常工作（roundtrip），assert_identical 或等价比较能稳定验证此语义。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "MergeError 的具体触发条件：是坐标值冲突，还是坐标维度缺失？",
+    "to_stacked_array 内部 ensure_stackable 函数为单维度变量分配的坐标具体是什么？",
+    "修复后的正确行为下，stacked DataArray 的坐标结构应该是什么样的？"
+  ],
+  "raw": {
+    "issue_summary": "to_unstacked_dataset 方法在处理单维度变量时无法正确完成 roundtrip 操作，导致 MergeError。",
+    "trigger_condition": {
+      "text": "对一个包含单维度变量的 Dataset 调用 to_stacked_array 方法，然后对结果调用 to_unstacked_dataset 方法。",
+      "evidence": [
+        "Issue 中的 MCVE 代码：data.to_stacked_array('y', sample_dims=['x']) 和 stacked.to_unstacked_dataset('y')",
+        "Issue 描述：'this doesn't work if the variables only have a single dimension'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 MergeError: conflicting values for variable 'y' on objects to be combined.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误信息：'MergeError: conflicting values for variable 'y' on objects to be combined.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "to_stacked_array 和 to_unstacked_dataset 应能成功完成 roundtrip 操作，即使变量只有单个维度。",
+      "evidence": [
+        "Issue 中的 'Expected Output: A working roundtrip.'",
+        "相关测试 1 和 2 展示了 roundtrip 成功的场景"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Dataset.to_stacked_array",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 中触发 bug 的起始 API 调用。"
+      },
+      {
+        "name": "DataArray.to_unstacked_dataset",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 中触发 bug 的后续 API 调用，也是错误发生的地方。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataarray.py",
+        "object": "DataArray.to_unstacked_dataset",
+        "lines": "1901-1967",
+        "reason": "该方法是错误发生的地方，负责从堆叠的 DataArray 恢复为 Dataset，可能未正确处理单维度变量产生的坐标。"
+      },
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.to_stacked_array",
+        "lines": "3370-3488",
+        "reason": "该方法创建了堆叠的 DataArray，其内部逻辑（如 ensure_stackable 函数）可能为单维度变量生成了有问题的坐标，导致后续 unstack 失败。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestDataset.test_to_stacked_array_to_unstacked_dataset_different_dimension",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试明确测试了变量具有不同维度（包括单维度）时的 roundtrip 场景，与 Issue 高度相关。",
+        "reusable_parts": [
+          "create_test_stacked_array fixture 的使用",
+          "Dataset 的构造",
+          "to_stacked_array 和 to_unstacked_dataset 的调用模式",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "该测试中使用的单维度变量 b 是通过 b.isel(y=0) 从二维变量创建的，其坐标可能比 Issue 中完全独立的单维度变量更简单。Issue 中的变量可能缺少某些坐标维度，导致冲突。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 中，单维度变量 b 是从二维变量 a 通过 .isel(y=0) 派生的，保留了 y 坐标信息。",
+        "target_pattern": "Issue 中，单维度变量 arr 是独立创建的 DataArray，其坐标仅包含维度 x，没有 y 坐标。",
+        "reason": "独立创建的单维度变量在堆叠时可能被分配了不同的坐标值（如 None），导致在解堆叠时与原始坐标冲突。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 2 中，Dataset D 包含变量 a (x, y) 和 b (x)。",
+        "target_pattern": "Issue 中，Dataset data 包含变量 a (x) 和 b (x)，两者都是单维度变量。",
+        "reason": "当所有变量都只有单维度时，堆叠逻辑可能产生特殊的坐标结构，导致解堆叠失败。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "stacked.to_unstacked_dataset('y')",
+        "reason": "直接观察该调用是否抛出 MergeError 是判断 Issue 是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "stacked.coords 和 stacked.indexes",
+        "reason": "观察堆叠后 DataArray 的坐标和索引结构，特别是 'y' 坐标的值，有助于理解冲突的来源。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对单维度变量 Dataset 进行 stack 和 unstack 的 roundtrip 操作不会抛出异常，且结果与原始 Dataset 相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或内部数据结构，因为它们可能在修复中改变。",
+        "reason": "Issue 的核心诉求是功能正常工作（roundtrip），assert_identical 或等价比较能稳定验证此语义。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 和 numpy，并构造包含单维度变量的 Dataset。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用 pytest 框架和 assert_identical 辅助函数进行断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "MergeError 的具体触发条件：是坐标值冲突，还是坐标维度缺失？",
+      "to_stacked_array 内部 ensure_stackable 函数为单维度变量分配的坐标具体是什么？",
+      "修复后的正确行为下，stacked DataArray 的坐标结构应该是什么样的？"
+    ]
+  }
+}

@@ -1,0 +1,312 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-4966",
+  "issue_summary": "xarray 在使用 pydap 引擎读取带有 _Unsigned=False 属性的 OPeNDAP 数据时，未能正确处理有符号字节，导致数值解码错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要网络连接以访问远程 OPeNDAP 数据源。可能需要使用 @network 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要 pydap 库。需要使用 @requires_pydap 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或使用一个固定的、包含 _Unsigned=False 属性的测试数据 URL。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestPydap.test_cmp_local_file",
+        "test_file": "xarray/tests/test_backends.py",
+        "why_relevant": "这是一个使用 pydap 引擎的测试类中的测试，提供了使用 pydap 后端读取数据并比较的基础框架。",
+        "reusable_parts": [
+          "@requires_pydap 装饰器",
+          "TestPydap 类的结构",
+          "create_datasets 上下文管理器",
+          "assert_equal 断言风格"
+        ],
+        "possible_gap": "该测试比较本地文件与 pydap 读取的结果，不涉及远程 OPeNDAP 数据源，也不测试带有特殊属性（如 _Unsigned=False）的字节类型变量的解码。"
+      },
+      {
+        "test_name": "test_CFMaskCoder_decode",
+        "test_file": "xarray/tests/test_coding.py",
+        "why_relevant": "测试了 CF 解码相关的编码器（CFMaskCoder），与 decode_cf_variable 函数中使用的解码器属于同一模块，提供了变量解码和属性处理的测试模式。",
+        "reusable_parts": [
+          "xr.Variable 的构造",
+          "coder.decode 的调用方式",
+          "assert_identical 断言"
+        ],
+        "possible_gap": "该测试只测试了 _FillValue 掩码，没有测试 _Unsigned 属性的处理，也没有涉及 pydap 后端。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 engine='pydap' 调用 xr.open_dataset 读取一个包含带有 _Unsigned=False 属性的字节类型变量的远程 OPeNDAP 数据集。",
+      "evidence": [
+        "Issue 中展示了使用 engine='pydap' 调用 xr.open_dataset 读取特定 URL 的代码片段。",
+        "Issue 描述指出 OPeNDAP 使用 _Unsigned=False 属性来存储有符号字节，而 xarray 未处理此属性。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 pydap 引擎读取的数据集中，本应为负值的坐标值（如 -128, -1）被错误地解码为正的大值（如 128, 255）。同时，在 conventions.py 第 492 行产生一个 SerializationWarning，提示变量有 _Unsigned 属性但不是整数类型。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的 Python 交互会话输出显示，engine='netcdf4' 返回的坐标值为 [-128.0, -1.0, ...]，而 engine='pydap' 返回的坐标值为 [128.0, 255.0, ...]。",
+        "Issue 中的警告信息：`SerializationWarning: variable 'test' has _Unsigned attribute but is not of integer type. Ignoring attribute.`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.open_dataset",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中触发问题的入口 API 调用。"
+      },
+      {
+        "name": "decode_cf_variable",
+        "kind": "function",
+        "source_path": "xarray/conventions.py",
+        "reason": "Issue 中引用的处理 _Unsigned 属性的位置，是解码 CF 变量的核心函数。"
+      },
+      {
+        "name": "variables.UnsignedIntegerCoder",
+        "kind": "class",
+        "source_path": "",
+        "reason": "源码片段显示 decode_cf_variable 在 mask_and_scale 步骤中使用了 UnsignedIntegerCoder() 来处理 _Unsigned 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/conventions.py",
+        "object": "decode_cf_variable",
+        "lines": "282-379",
+        "reason": "Issue 明确指出处理 _Unsigned=True 约定的位置在此函数中，并建议应在同一位置对称地处理 _Unsigned=False 的情况。"
+      },
+      {
+        "path": "xarray/coding/variables.py",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 中第一个链接指向此文件的第 311 行，作为处理 _Unsigned=True 约定的参考位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中可能使用标准 netCDF 文件或没有 _Unsigned 属性的数据。",
+        "target_pattern": "使用一个包含带有 _Unsigned=False 属性的字节类型变量的远程 OPeNDAP 数据源 URL。",
+        "reason": "Issue 表明只有当数据源包含 _Unsigned=False 属性且使用 pydap 引擎时，解码错误才会发生。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用默认的 engine 参数或 engine='netcdf4'。",
+        "target_pattern": "在调用 open_dataset 时显式指定 engine='pydap'。",
+        "reason": "Issue 显示只有 pydap 引擎会触发错误，netcdf4 引擎能正确处理。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用 pydap 引擎读取带有 _Unsigned=False 属性的字节变量时，应能正确解码出负值，其行为应与 netcdf4 引擎一致。",
+      "evidence": [
+        "Issue 描述指出 netcdf-c 库内部处理了 _Unsigned=False 这个 hack，使得 netcdf4 引擎能返回正确的负值。",
+        "Issue 建议应在 xarray 中对称地处理 _Unsigned=False 的情况。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "dataset['test'].values 或 dataset.coords['test'].values",
+        "reason": "Issue 的核心错误是坐标值错误，观察解码后的数值数组可以直接判断是否包含负值。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings(record=True) 捕获的 SerializationWarning 消息",
+        "reason": "Issue 中提到了一个特定的 SerializationWarning，观察其是否出现及内容可以辅助判断解码流程。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 pydap 引擎读取的数据集中，特定坐标变量的值应包含负值（如 -128, -1），且与使用 netcdf4 引擎读取的结果在数值上一致（或符号正确）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串或所有属性完全一致，因为不同引擎可能产生微小的元数据差异。",
+        "reason": "Issue 的核心是数值解码错误，直接比较关键坐标的数值数组最稳定且与问题对齐。"
+      },
+      {
+        "assertion_goal": "解码过程不应产生关于 _Unsigned 属性被忽略的 SerializationWarning（修复后）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完全没有警告，因为其他无关警告可能存在。",
+        "reason": "Issue 中明确提到了一个特定的警告信息，其消失是修复的预期结果之一。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "UnsignedIntegerCoder 内部处理 _Unsigned 属性的具体逻辑，以及如何修改以支持 _Unsigned=False。",
+    "pydap 后端在将原始数据传递给 xarray 解码之前，是否已经丢失了符号信息。",
+    "除了给定的测试 URL，是否还有其他方式可以构造触发此缺陷的输入。"
+  ],
+  "raw": {
+    "issue_summary": "xarray 在使用 pydap 引擎读取带有 _Unsigned=False 属性的 OPeNDAP 数据时，未能正确处理有符号字节，导致数值解码错误。",
+    "trigger_condition": {
+      "text": "使用 engine='pydap' 调用 xr.open_dataset 读取一个包含带有 _Unsigned=False 属性的字节类型变量的远程 OPeNDAP 数据集。",
+      "evidence": [
+        "Issue 中展示了使用 engine='pydap' 调用 xr.open_dataset 读取特定 URL 的代码片段。",
+        "Issue 描述指出 OPeNDAP 使用 _Unsigned=False 属性来存储有符号字节，而 xarray 未处理此属性。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 pydap 引擎读取的数据集中，本应为负值的坐标值（如 -128, -1）被错误地解码为正的大值（如 128, 255）。同时，在 conventions.py 第 492 行产生一个 SerializationWarning，提示变量有 _Unsigned 属性但不是整数类型。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的 Python 交互会话输出显示，engine='netcdf4' 返回的坐标值为 [-128.0, -1.0, ...]，而 engine='pydap' 返回的坐标值为 [128.0, 255.0, ...]。",
+        "Issue 中的警告信息：`SerializationWarning: variable 'test' has _Unsigned attribute but is not of integer type. Ignoring attribute.`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 pydap 引擎读取带有 _Unsigned=False 属性的字节变量时，应能正确解码出负值，其行为应与 netcdf4 引擎一致。",
+      "evidence": [
+        "Issue 描述指出 netcdf-c 库内部处理了 _Unsigned=False 这个 hack，使得 netcdf4 引擎能返回正确的负值。",
+        "Issue 建议应在 xarray 中对称地处理 _Unsigned=False 的情况。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.open_dataset",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中触发问题的入口 API 调用。"
+      },
+      {
+        "name": "decode_cf_variable",
+        "kind": "function",
+        "source_path": "xarray/conventions.py",
+        "reason": "Issue 中引用的处理 _Unsigned 属性的位置，是解码 CF 变量的核心函数。"
+      },
+      {
+        "name": "variables.UnsignedIntegerCoder",
+        "kind": "class",
+        "source_path": "",
+        "reason": "源码片段显示 decode_cf_variable 在 mask_and_scale 步骤中使用了 UnsignedIntegerCoder() 来处理 _Unsigned 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/conventions.py",
+        "object": "decode_cf_variable",
+        "lines": "282-379",
+        "reason": "Issue 明确指出处理 _Unsigned=True 约定的位置在此函数中，并建议应在同一位置对称地处理 _Unsigned=False 的情况。"
+      },
+      {
+        "path": "xarray/coding/variables.py",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 中第一个链接指向此文件的第 311 行，作为处理 _Unsigned=True 约定的参考位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestPydap.test_cmp_local_file",
+        "test_file": "xarray/tests/test_backends.py",
+        "why_relevant": "这是一个使用 pydap 引擎的测试类中的测试，提供了使用 pydap 后端读取数据并比较的基础框架。",
+        "reusable_parts": [
+          "@requires_pydap 装饰器",
+          "TestPydap 类的结构",
+          "create_datasets 上下文管理器",
+          "assert_equal 断言风格"
+        ],
+        "possible_gap": "该测试比较本地文件与 pydap 读取的结果，不涉及远程 OPeNDAP 数据源，也不测试带有特殊属性（如 _Unsigned=False）的字节类型变量的解码。"
+      },
+      {
+        "test_name": "test_CFMaskCoder_decode",
+        "test_file": "xarray/tests/test_coding.py",
+        "why_relevant": "测试了 CF 解码相关的编码器（CFMaskCoder），与 decode_cf_variable 函数中使用的解码器属于同一模块，提供了变量解码和属性处理的测试模式。",
+        "reusable_parts": [
+          "xr.Variable 的构造",
+          "coder.decode 的调用方式",
+          "assert_identical 断言"
+        ],
+        "possible_gap": "该测试只测试了 _FillValue 掩码，没有测试 _Unsigned 属性的处理，也没有涉及 pydap 后端。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中可能使用标准 netCDF 文件或没有 _Unsigned 属性的数据。",
+        "target_pattern": "使用一个包含带有 _Unsigned=False 属性的字节类型变量的远程 OPeNDAP 数据源 URL。",
+        "reason": "Issue 表明只有当数据源包含 _Unsigned=False 属性且使用 pydap 引擎时，解码错误才会发生。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能使用默认的 engine 参数或 engine='netcdf4'。",
+        "target_pattern": "在调用 open_dataset 时显式指定 engine='pydap'。",
+        "reason": "Issue 显示只有 pydap 引擎会触发错误，netcdf4 引擎能正确处理。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "dataset['test'].values 或 dataset.coords['test'].values",
+        "reason": "Issue 的核心错误是坐标值错误，观察解码后的数值数组可以直接判断是否包含负值。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings(record=True) 捕获的 SerializationWarning 消息",
+        "reason": "Issue 中提到了一个特定的 SerializationWarning，观察其是否出现及内容可以辅助判断解码流程。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 pydap 引擎读取的数据集中，特定坐标变量的值应包含负值（如 -128, -1），且与使用 netcdf4 引擎读取的结果在数值上一致（或符号正确）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串或所有属性完全一致，因为不同引擎可能产生微小的元数据差异。",
+        "reason": "Issue 的核心是数值解码错误，直接比较关键坐标的数值数组最稳定且与问题对齐。"
+      },
+      {
+        "assertion_goal": "解码过程不应产生关于 _Unsigned 属性被忽略的 SerializationWarning（修复后）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完全没有警告，因为其他无关警告可能存在。",
+        "reason": "Issue 中明确提到了一个特定的警告信息，其消失是修复的预期结果之一。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要网络连接以访问远程 OPeNDAP 数据源。可能需要使用 @network 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要 pydap 库。需要使用 @requires_pydap 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或使用一个固定的、包含 _Unsigned=False 属性的测试数据 URL。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "UnsignedIntegerCoder 内部处理 _Unsigned 属性的具体逻辑，以及如何修改以支持 _Unsigned=False。",
+      "pydap 后端在将原始数据传递给 xarray 解码之前，是否已经丢失了符号信息。",
+      "除了给定的测试 URL，是否还有其他方式可以构造触发此缺陷的输入。"
+    ]
+  }
+}

@@ -1,0 +1,216 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-15100",
+  "issue_summary": "strip_accents_unicode 函数在处理已经是 NFKD 形式的字符串时，无法去除重音符号。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 strip_accents_unicode 函数。可能需要使用 unicodedata 模块来构造 NFKD 形式的字符串。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_strip_accents",
+        "test_file": "sklearn/feature_extraction/tests/test_text.py",
+        "why_relevant": "这是直接测试 strip_accents_unicode 函数的测试，包含了多种重音字符的测试用例。",
+        "reusable_parts": [
+          "import strip_accents_unicode",
+          "assert strip_accents_unicode(a) == expected 的断言风格"
+        ],
+        "possible_gap": "现有测试用例中的输入字符串（如 'àáâãäåçèéêë'）可能不是 NFKD 形式，因此没有覆盖到 Issue 中描述的缺陷场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 strip_accents_unicode 函数，传入一个已经是 NFKD 形式的、包含重音符号的字符串。",
+      "evidence": [
+        "Issue 中的代码示例：s2 = chr(110) + chr(771) 是 NFKD 形式，调用 strip_accents_unicode(s2) 返回未改变的值。",
+        "源码片段 2 显示函数逻辑：如果 unicodedata.normalize('NFKD', s) 的结果等于输入 s，则直接返回 s。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "strip_accents_unicode 函数返回了未去除重音的原始字符串，而不是预期的去除重音后的字符串。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的实际结果：print(strip_accents_unicode(s2) == s2) # => True",
+        "Issue 描述：strip_accent_unicode does nothing if the string is already in NFKD form."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "strip_accents_unicode",
+        "kind": "function",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "这是 Issue 直接报告的存在缺陷的函数。"
+      },
+      {
+        "name": "CountVectorizer",
+        "kind": "class",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 提到 CountVectorizer 的 strip_accents=\"unicode\" 功能存在问题，该功能内部会调用 strip_accents_unicode。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/feature_extraction/text.py",
+        "object": "strip_accents_unicode",
+        "lines": "114-136",
+        "reason": "该函数的实现逻辑是：先对输入字符串进行 NFKD 规范化，如果结果与输入相同则直接返回输入，否则过滤掉组合字符。这导致已经是 NFKD 形式的输入被跳过处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用的是普通的、包含重音符号的 Unicode 字符串（如 'àáâãäåçèéêë'）。",
+        "target_pattern": "输入应是一个已经是 NFKD 形式的字符串，即重音符号由基础字符和组合字符（combining character）表示（如 'n' + '~'）。",
+        "reason": "根据 Issue，只有当输入字符串已经是 NFKD 形式时，strip_accents_unicode 的提前返回逻辑才会被触发，导致缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "strip_accents_unicode 函数应能正确处理所有包含重音符号的 Unicode 字符串，无论其原始规范化形式如何，最终都应去除重音符号。",
+      "evidence": [
+        "Issue 中的预期结果：s1 and s2 should both be normalized to the same string, \"n\".",
+        "源码片段 2 的函数文档：Transform accentuated unicode symbols into their simple counterpart。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "strip_accents_unicode(s) 的返回值",
+        "reason": "Issue 的核心是函数返回了错误的（未去除重音的）值。观察返回值可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "unicodedata.normalize('NFKD', s) == s 的比较结果",
+        "reason": "这是源码中决定是否提前返回的关键条件。观察这个条件有助于理解执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于视觉相同但表示形式不同的重音字符串（一个是组合字符，一个是预组合字符），strip_accents_unicode 应返回相同的、去除重音后的字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、复杂的 Unicode 字符串字面量相等，因为表示形式可能不同。应关注去除重音后的结果是否一致。",
+        "reason": "Issue 的预期是 s1 和 s2 都被归一化为 \"n\"。断言两个不同输入的处理结果相等，比断言具体输出字符串更稳定，且直接对应 Issue 语义。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "现有测试 test_strip_accents 中的输入字符串是否已经是 NFKD 形式？",
+    "除了 Issue 中给出的例子，是否还有其他字符或场景会触发此缺陷？",
+    "CountVectorizer 的 strip_accents=\"unicode\" 选项在内部调用 strip_accents_unicode 时，是否会因为预处理步骤而改变输入字符串的规范化形式，从而影响缺陷的触发？"
+  ],
+  "raw": {
+    "issue_summary": "strip_accents_unicode 函数在处理已经是 NFKD 形式的字符串时，无法去除重音符号。",
+    "trigger_condition": {
+      "text": "调用 strip_accents_unicode 函数，传入一个已经是 NFKD 形式的、包含重音符号的字符串。",
+      "evidence": [
+        "Issue 中的代码示例：s2 = chr(110) + chr(771) 是 NFKD 形式，调用 strip_accents_unicode(s2) 返回未改变的值。",
+        "源码片段 2 显示函数逻辑：如果 unicodedata.normalize('NFKD', s) 的结果等于输入 s，则直接返回 s。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "strip_accents_unicode 函数返回了未去除重音的原始字符串，而不是预期的去除重音后的字符串。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的实际结果：print(strip_accents_unicode(s2) == s2) # => True",
+        "Issue 描述：strip_accent_unicode does nothing if the string is already in NFKD form."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "strip_accents_unicode 函数应能正确处理所有包含重音符号的 Unicode 字符串，无论其原始规范化形式如何，最终都应去除重音符号。",
+      "evidence": [
+        "Issue 中的预期结果：s1 and s2 should both be normalized to the same string, \"n\".",
+        "源码片段 2 的函数文档：Transform accentuated unicode symbols into their simple counterpart。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "strip_accents_unicode",
+        "kind": "function",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "这是 Issue 直接报告的存在缺陷的函数。"
+      },
+      {
+        "name": "CountVectorizer",
+        "kind": "class",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 提到 CountVectorizer 的 strip_accents=\"unicode\" 功能存在问题，该功能内部会调用 strip_accents_unicode。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/feature_extraction/text.py",
+        "object": "strip_accents_unicode",
+        "lines": "114-136",
+        "reason": "该函数的实现逻辑是：先对输入字符串进行 NFKD 规范化，如果结果与输入相同则直接返回输入，否则过滤掉组合字符。这导致已经是 NFKD 形式的输入被跳过处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_strip_accents",
+        "test_file": "sklearn/feature_extraction/tests/test_text.py",
+        "why_relevant": "这是直接测试 strip_accents_unicode 函数的测试，包含了多种重音字符的测试用例。",
+        "reusable_parts": [
+          "import strip_accents_unicode",
+          "assert strip_accents_unicode(a) == expected 的断言风格"
+        ],
+        "possible_gap": "现有测试用例中的输入字符串（如 'àáâãäåçèéêë'）可能不是 NFKD 形式，因此没有覆盖到 Issue 中描述的缺陷场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用的是普通的、包含重音符号的 Unicode 字符串（如 'àáâãäåçèéêë'）。",
+        "target_pattern": "输入应是一个已经是 NFKD 形式的字符串，即重音符号由基础字符和组合字符（combining character）表示（如 'n' + '~'）。",
+        "reason": "根据 Issue，只有当输入字符串已经是 NFKD 形式时，strip_accents_unicode 的提前返回逻辑才会被触发，导致缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "strip_accents_unicode(s) 的返回值",
+        "reason": "Issue 的核心是函数返回了错误的（未去除重音的）值。观察返回值可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "unicodedata.normalize('NFKD', s) == s 的比较结果",
+        "reason": "这是源码中决定是否提前返回的关键条件。观察这个条件有助于理解执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于视觉相同但表示形式不同的重音字符串（一个是组合字符，一个是预组合字符），strip_accents_unicode 应返回相同的、去除重音后的字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、复杂的 Unicode 字符串字面量相等，因为表示形式可能不同。应关注去除重音后的结果是否一致。",
+        "reason": "Issue 的预期是 s1 和 s2 都被归一化为 \"n\"。断言两个不同输入的处理结果相等，比断言具体输出字符串更稳定，且直接对应 Issue 语义。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 strip_accents_unicode 函数。可能需要使用 unicodedata 模块来构造 NFKD 形式的字符串。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "现有测试 test_strip_accents 中的输入字符串是否已经是 NFKD 形式？",
+      "除了 Issue 中给出的例子，是否还有其他字符或场景会触发此缺陷？",
+      "CountVectorizer 的 strip_accents=\"unicode\" 选项在内部调用 strip_accents_unicode 时，是否会因为预处理步骤而改变输入字符串的规范化形式，从而影响缺陷的触发？"
+    ]
+  }
+}

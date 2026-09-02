@@ -1,0 +1,338 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13417",
+  "issue_summary": "QuerySet.ordered 属性在带有 Meta.ordering 的模型上进行 GROUP BY 查询时返回错误值。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个定义了 Meta.ordering 的 Django 模型（例如 Issue 中的 Foo）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以访问数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一些模型实例以确保查询非空，但这不是缺陷触发的必要条件。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_annotated_ordering",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "直接测试了 annotate() 后 QuerySet.ordered 属性的行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类 QuerysetOrderedTests",
+          "使用 annotate(Count(...)) 的调用模式",
+          "对 ordered 属性进行断言 (self.assertIs)"
+        ],
+        "possible_gap": "该测试使用的 Annotation 模型可能没有设置 Meta.ordering，而 Issue 的核心在于模型有默认排序 (Meta.ordering) 时，annotate 后 ordered 属性未正确变为 False。"
+      },
+      {
+        "test_name": "test_cleared_default_ordering",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "测试了清除默认排序（order_by()）后 ordered 属性的变化，涉及默认排序的逻辑。",
+        "reusable_parts": [
+          "测试类 QuerysetOrderedTests",
+          "使用 Tag 模型（可能定义了 Meta.ordering）",
+          "对 ordered 属性进行断言"
+        ],
+        "possible_gap": "它通过 order_by() 显式清除排序，而 Issue 是通过 annotate() 隐式清除，触发路径不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个定义了 Meta.ordering 的模型，调用 annotate() 方法（例如使用 Count 聚合）生成一个包含 GROUP BY 子句的 QuerySet，然后访问其 ordered 属性。",
+      "evidence": [
+        "Issue 描述：'Using the annotate function on a queryset doesn't keep the default ordering set in model's meta class.'",
+        "Issue 示例代码：qs2 = Foo.objects.annotate(Count(\"pk\")).all()",
+        "相关测试 1 使用了 annotate(Count(...))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "QuerySet.ordered 属性返回 True，但生成的 SQL 查询中没有 ORDER BY 子句。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'qs2.ordered # => True'",
+        "Issue 中显示的 SQL：'SELECT ... FROM \"foo_foo\" GROUP BY \"foo_foo\".\"uuid\"'（无 ORDER BY）",
+        "相关测试 1 预期 annotated queryset 的 ordered 为 False：self.assertIs(qs.ordered, False)"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心触发操作，用于添加聚合注释并可能导致 GROUP BY。"
+      },
+      {
+        "name": "QuerySet.ordered",
+        "kind": "property",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 报告其返回值不正确，是缺陷的直接表现点。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 示例中使用的聚合函数，用于触发 GROUP BY。"
+      },
+      {
+        "name": "QuerySet.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 示例中用于获取 QuerySet 的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.ordered",
+        "lines": "1218-1230",
+        "reason": "该属性负责判断 QuerySet 是否有序。其逻辑可能未正确处理 annotate() 导致默认排序被清除的情况。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._annotate",
+        "lines": "",
+        "reason": "annotate() 方法内部调用了 _annotate，可能在这里修改了查询结构（添加 GROUP BY）但未正确更新与排序相关的状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，Annotation 模型可能没有 Meta.ordering，或者其默认排序在 annotate 后不影响 ordered 判断。",
+        "target_pattern": "使用一个定义了 Meta.ordering 的模型（如 Issue 中的 Foo），然后对其调用 annotate(Count(...))。",
+        "reason": "Issue 明确指出问题发生在模型有 Meta.ordering 的情况下。将测试中的模型替换为有默认排序的模型，可能触发 ordered 属性计算错误的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 直接对 Annotation.objects 调用 annotate。",
+        "target_pattern": "先获取基础 QuerySet (Foo.objects.all())，再对其调用 annotate，如 Issue 示例所示。",
+        "reason": "Issue 示例展示了完整的调用链，确保 QuerySet 初始状态带有默认排序。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 QuerySet 因使用 annotate() 进行 GROUP BY 而清除了默认排序时，其 ordered 属性应返回 False，以准确反映结果集不会被排序。",
+      "evidence": [
+        "Issue 隐含期望：ordered 属性应反映 SQL 查询是否包含 ORDER BY。",
+        "相关测试 1 的断言：self.assertIs(qs.ordered, False) 表明 annotate 后的 queryset 预期是无序的。",
+        "源码片段 2 中 ordered 属性的文档：'Return True if the QuerySet is ordered -- i.e. has an order_by() clause or a default ordering on the model (or is empty).'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "qs.query.sql_with_params() 或 str(qs.query)",
+        "reason": "Issue 的核心矛盾在于 ordered 属性为 True 但 SQL 无 ORDER BY。直接观察生成的 SQL 语句是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "qs.ordered",
+        "reason": "这是缺陷的直接表现点，需要观察其返回值。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "qs.query.default_ordering, qs.query.order_by",
+        "reason": "ordered 属性的计算依赖于这些内部查询状态，观察它们有助于理解缺陷根源。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于有 Meta.ordering 的模型，调用 annotate(Count(...)) 后，QuerySet.ordered 应为 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串，因为数据库后端或字段名可能不同。",
+        "reason": "直接验证 ordered 属性的返回值是否符合预期，这是 Issue 的核心诉求，且不依赖于具体的 SQL 方言或表结构细节。"
+      },
+      {
+        "assertion_goal": "生成的 SQL 查询中不应包含 ORDER BY 子句。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 SQL 字符串完全等于某个特定值。",
+        "reason": "Issue 通过 SQL 片段证明了 ORDER BY 的缺失。检查 SQL 中是否包含 'ORDER BY' 是验证 ordered 属性是否与事实一致的有效方法。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "是否所有类型的 annotate（不仅仅是 Count）都会触发此问题？",
+    "缺陷的确切逻辑位置是在 ordered 属性内部，还是在 annotate 过程中对查询状态的修改？",
+    "除了 PostgreSQL，其他数据库后端是否表现一致？"
+  ],
+  "raw": {
+    "issue_summary": "QuerySet.ordered 属性在带有 Meta.ordering 的模型上进行 GROUP BY 查询时返回错误值。",
+    "trigger_condition": {
+      "text": "对一个定义了 Meta.ordering 的模型，调用 annotate() 方法（例如使用 Count 聚合）生成一个包含 GROUP BY 子句的 QuerySet，然后访问其 ordered 属性。",
+      "evidence": [
+        "Issue 描述：'Using the annotate function on a queryset doesn't keep the default ordering set in model's meta class.'",
+        "Issue 示例代码：qs2 = Foo.objects.annotate(Count(\"pk\")).all()",
+        "相关测试 1 使用了 annotate(Count(...))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "QuerySet.ordered 属性返回 True，但生成的 SQL 查询中没有 ORDER BY 子句。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'qs2.ordered # => True'",
+        "Issue 中显示的 SQL：'SELECT ... FROM \"foo_foo\" GROUP BY \"foo_foo\".\"uuid\"'（无 ORDER BY）",
+        "相关测试 1 预期 annotated queryset 的 ordered 为 False：self.assertIs(qs.ordered, False)"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 QuerySet 因使用 annotate() 进行 GROUP BY 而清除了默认排序时，其 ordered 属性应返回 False，以准确反映结果集不会被排序。",
+      "evidence": [
+        "Issue 隐含期望：ordered 属性应反映 SQL 查询是否包含 ORDER BY。",
+        "相关测试 1 的断言：self.assertIs(qs.ordered, False) 表明 annotate 后的 queryset 预期是无序的。",
+        "源码片段 2 中 ordered 属性的文档：'Return True if the QuerySet is ordered -- i.e. has an order_by() clause or a default ordering on the model (or is empty).'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心触发操作，用于添加聚合注释并可能导致 GROUP BY。"
+      },
+      {
+        "name": "QuerySet.ordered",
+        "kind": "property",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 报告其返回值不正确，是缺陷的直接表现点。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 示例中使用的聚合函数，用于触发 GROUP BY。"
+      },
+      {
+        "name": "QuerySet.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 示例中用于获取 QuerySet 的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.ordered",
+        "lines": "1218-1230",
+        "reason": "该属性负责判断 QuerySet 是否有序。其逻辑可能未正确处理 annotate() 导致默认排序被清除的情况。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._annotate",
+        "lines": "",
+        "reason": "annotate() 方法内部调用了 _annotate，可能在这里修改了查询结构（添加 GROUP BY）但未正确更新与排序相关的状态。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_annotated_ordering",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "直接测试了 annotate() 后 QuerySet.ordered 属性的行为，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类 QuerysetOrderedTests",
+          "使用 annotate(Count(...)) 的调用模式",
+          "对 ordered 属性进行断言 (self.assertIs)"
+        ],
+        "possible_gap": "该测试使用的 Annotation 模型可能没有设置 Meta.ordering，而 Issue 的核心在于模型有默认排序 (Meta.ordering) 时，annotate 后 ordered 属性未正确变为 False。"
+      },
+      {
+        "test_name": "test_cleared_default_ordering",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "测试了清除默认排序（order_by()）后 ordered 属性的变化，涉及默认排序的逻辑。",
+        "reusable_parts": [
+          "测试类 QuerysetOrderedTests",
+          "使用 Tag 模型（可能定义了 Meta.ordering）",
+          "对 ordered 属性进行断言"
+        ],
+        "possible_gap": "它通过 order_by() 显式清除排序，而 Issue 是通过 annotate() 隐式清除，触发路径不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，Annotation 模型可能没有 Meta.ordering，或者其默认排序在 annotate 后不影响 ordered 判断。",
+        "target_pattern": "使用一个定义了 Meta.ordering 的模型（如 Issue 中的 Foo），然后对其调用 annotate(Count(...))。",
+        "reason": "Issue 明确指出问题发生在模型有 Meta.ordering 的情况下。将测试中的模型替换为有默认排序的模型，可能触发 ordered 属性计算错误的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 直接对 Annotation.objects 调用 annotate。",
+        "target_pattern": "先获取基础 QuerySet (Foo.objects.all())，再对其调用 annotate，如 Issue 示例所示。",
+        "reason": "Issue 示例展示了完整的调用链，确保 QuerySet 初始状态带有默认排序。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "qs.query.sql_with_params() 或 str(qs.query)",
+        "reason": "Issue 的核心矛盾在于 ordered 属性为 True 但 SQL 无 ORDER BY。直接观察生成的 SQL 语句是判断缺陷是否触发的关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "qs.ordered",
+        "reason": "这是缺陷的直接表现点，需要观察其返回值。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "qs.query.default_ordering, qs.query.order_by",
+        "reason": "ordered 属性的计算依赖于这些内部查询状态，观察它们有助于理解缺陷根源。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于有 Meta.ordering 的模型，调用 annotate(Count(...)) 后，QuerySet.ordered 应为 False。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串，因为数据库后端或字段名可能不同。",
+        "reason": "直接验证 ordered 属性的返回值是否符合预期，这是 Issue 的核心诉求，且不依赖于具体的 SQL 方言或表结构细节。"
+      },
+      {
+        "assertion_goal": "生成的 SQL 查询中不应包含 ORDER BY 子句。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 SQL 字符串完全等于某个特定值。",
+        "reason": "Issue 通过 SQL 片段证明了 ORDER BY 的缺失。检查 SQL 中是否包含 'ORDER BY' 是验证 ordered 属性是否与事实一致的有效方法。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个定义了 Meta.ordering 的 Django 模型（例如 Issue 中的 Foo）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以访问数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建一些模型实例以确保查询非空，但这不是缺陷触发的必要条件。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "uncertainties": [
+      "是否所有类型的 annotate（不仅仅是 Count）都会触发此问题？",
+      "缺陷的确切逻辑位置是在 ordered 属性内部，还是在 annotate 过程中对查询状态的修改？",
+      "除了 PostgreSQL，其他数据库后端是否表现一致？"
+    ]
+  }
+}

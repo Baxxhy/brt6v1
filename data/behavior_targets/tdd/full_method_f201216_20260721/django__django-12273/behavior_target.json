@@ -1,0 +1,354 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12273",
+  "issue_summary": "重置子模型主键为 None 后保存会错误地覆盖现有对象，而不是创建新对象。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 或 TransactionTestCase 来管理数据库事务。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义 Item 和 Derived 模型，其中 Item 具有一个主键字段（如 AutoField 或 UUIDField）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置测试数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UpdateOrCreateTestsWithManualPKs.test_create_with_duplicate_primary_key",
+        "test_file": "tests/get_or_create/tests.py",
+        "why_relevant": "该测试涉及手动设置主键和重复主键的场景，与 Issue 中手动操作主键（设置为 None）相关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "使用 Model.objects.create",
+          "assertRaises 和 assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试关注主键冲突时的 IntegrityError，而 Issue 是主键为 None 时错误地覆盖，场景不同。"
+      },
+      {
+        "test_name": "ModelLookupTest.test_lookup_by_primary_key",
+        "test_file": "tests/basic/tests.py",
+        "why_relevant": "该测试涉及通过主键（pk）查找对象，与 Issue 中通过 pk 获取对象进行验证相关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "使用 Model.objects.get(pk=...) 和 filter(pk__in=...)",
+          "assertEquals 和 assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试不涉及修改主键或模型继承。"
+      },
+      {
+        "test_name": "IsNullTests.test_primary_key",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试涉及主键字段的 __isnull 查询，与主键值可能为 None 的状态有关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "创建具有自定义主键和外键关系的模型实例",
+          "使用 assertSequenceEqual"
+        ],
+        "possible_gap": "该测试关注查询过滤，而非保存行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个继承自父模型的子模型实例，将其主键字段设置为 None 后调用 save() 方法。",
+      "evidence": [
+        "Issue 中描述了 Derived 实例调用 reset() 方法将 uid 设为 None，然后调用 save()。",
+        "Issue 中的 setUp 方法展示了操作步骤：创建 Derived 对象，获取其父类 Item 对象，调用 reset() 和 save()。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "现有对象被覆盖，而不是创建一个具有新主键的新对象。具体表现为，保存后通过主键查询到的对象，其字段 f 的值仍为 False（即被重置后的值），而不是预期的 True（即原始对象的值）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'the first object is overwritten on save()'。",
+        "Issue 中的 test_f_true 期望 obj.f 为 True，但实际应为 False（因为对象被覆盖）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "models.Model.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发 bug 的关键操作是调用 save() 方法。"
+      },
+      {
+        "name": "models.Model.__init__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "主键为 None 时，save() 可能调用相关逻辑来决定是插入还是更新。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.create",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中使用了 Derived.objects.create 来初始创建对象。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中使用了 Item.objects.get 来检索对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "models.Model.save",
+        "lines": "",
+        "reason": "save() 方法在处理主键为 None 的模型实例时，可能错误地执行了更新操作而非插入操作，尤其是在继承模型的场景下。"
+      },
+      {
+        "path": "",
+        "object": "模型继承相关的查询或保存逻辑",
+        "lines": "",
+        "reason": "Issue 涉及父类 Item 和子类 Derived，问题可能出在处理多表继承时主键状态的逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试通常创建具有确定主键的对象。",
+        "target_pattern": "创建一个对象后，将其主键字段显式设置为 None，然后保存。",
+        "reason": "Issue 表明，将现有对象的主键设为 None 后保存会触发覆盖行为，而非创建新对象。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接创建或获取对象并进行断言。",
+        "target_pattern": "操作链：创建对象 -> 获取其父类引用 -> 修改主键为 None -> 保存 -> 验证原始对象状态。",
+        "reason": "Issue 中的 bug 复现步骤包含了通过父类模型获取对象并操作，这可能影响主键状态的处理。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "将子模型实例的主键设置为 None 后保存，应该创建一个具有新主键的新对象，而不是覆盖原有对象。原有对象应保持不变。",
+      "evidence": [
+        "Issue 标题和描述暗示重置主键应该有效，即产生新对象。",
+        "测试 test_f_true 期望 obj.f 为 True，这暗示原始对象的状态应被保留。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "调用 save() 前后，数据库中具有相同原始主键值的对象数量及其字段值。",
+        "reason": "如果 bug 被触发，原始主键对应的对象字段会被错误更新；如果行为正确，应该有两个不同主键的对象。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "save() 方法执行时生成的 SQL 语句（是 INSERT 还是 UPDATE）。",
+        "reason": "bug 的核心是错误地执行了 UPDATE 而不是 INSERT，观测 SQL 可以明确行为。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "save() 方法调用后返回的对象的主键值。",
+        "reason": "如果创建了新对象，主键应为新值（非 None）；如果覆盖了旧对象，主键应保持不变。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在重置主键并保存后，原始对象的状态（如字段 f 的值）未被改变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或完整的对象 repr。",
+        "reason": "Issue 中的测试期望 obj.f 为 True，这直接对应了原始对象状态应保持不变的核心语义。"
+      },
+      {
+        "assertion_goal": "验证在重置主键并保存后，数据库中应该存在两个具有不同主键的对象。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言主键的精确值（如果是自动生成的）。",
+        "reason": "这可以更稳定地验证是否创建了新对象，而不依赖具体的主键生成机制。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "bug 是否只发生在多表继承（Derived 继承 Item）场景，还是也发生在抽象基类或代理模型场景？",
+    "bug 是否与主键字段的具体类型（AutoField 与 UUIDField）有关？Issue 中提到了两种，但示例用了 AutoField。",
+    "Django 内部具体是哪个函数或条件判断错误导致了 UPDATE 而非 INSERT？"
+  ],
+  "raw": {
+    "issue_summary": "重置子模型主键为 None 后保存会错误地覆盖现有对象，而不是创建新对象。",
+    "trigger_condition": {
+      "text": "对一个继承自父模型的子模型实例，将其主键字段设置为 None 后调用 save() 方法。",
+      "evidence": [
+        "Issue 中描述了 Derived 实例调用 reset() 方法将 uid 设为 None，然后调用 save()。",
+        "Issue 中的 setUp 方法展示了操作步骤：创建 Derived 对象，获取其父类 Item 对象，调用 reset() 和 save()。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "现有对象被覆盖，而不是创建一个具有新主键的新对象。具体表现为，保存后通过主键查询到的对象，其字段 f 的值仍为 False（即被重置后的值），而不是预期的 True（即原始对象的值）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'the first object is overwritten on save()'。",
+        "Issue 中的 test_f_true 期望 obj.f 为 True，但实际应为 False（因为对象被覆盖）。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "将子模型实例的主键设置为 None 后保存，应该创建一个具有新主键的新对象，而不是覆盖原有对象。原有对象应保持不变。",
+      "evidence": [
+        "Issue 标题和描述暗示重置主键应该有效，即产生新对象。",
+        "测试 test_f_true 期望 obj.f 为 True，这暗示原始对象的状态应被保留。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "models.Model.save",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中触发 bug 的关键操作是调用 save() 方法。"
+      },
+      {
+        "name": "models.Model.__init__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "主键为 None 时，save() 可能调用相关逻辑来决定是插入还是更新。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.create",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中使用了 Derived.objects.create 来初始创建对象。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中使用了 Item.objects.get 来检索对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "models.Model.save",
+        "lines": "",
+        "reason": "save() 方法在处理主键为 None 的模型实例时，可能错误地执行了更新操作而非插入操作，尤其是在继承模型的场景下。"
+      },
+      {
+        "path": "",
+        "object": "模型继承相关的查询或保存逻辑",
+        "lines": "",
+        "reason": "Issue 涉及父类 Item 和子类 Derived，问题可能出在处理多表继承时主键状态的逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UpdateOrCreateTestsWithManualPKs.test_create_with_duplicate_primary_key",
+        "test_file": "tests/get_or_create/tests.py",
+        "why_relevant": "该测试涉及手动设置主键和重复主键的场景，与 Issue 中手动操作主键（设置为 None）相关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "使用 Model.objects.create",
+          "assertRaises 和 assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试关注主键冲突时的 IntegrityError，而 Issue 是主键为 None 时错误地覆盖，场景不同。"
+      },
+      {
+        "test_name": "ModelLookupTest.test_lookup_by_primary_key",
+        "test_file": "tests/basic/tests.py",
+        "why_relevant": "该测试涉及通过主键（pk）查找对象，与 Issue 中通过 pk 获取对象进行验证相关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "使用 Model.objects.get(pk=...) 和 filter(pk__in=...)",
+          "assertEquals 和 assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试不涉及修改主键或模型继承。"
+      },
+      {
+        "test_name": "IsNullTests.test_primary_key",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试涉及主键字段的 __isnull 查询，与主键值可能为 None 的状态有关。",
+        "reusable_parts": [
+          "TestCase 基类",
+          "创建具有自定义主键和外键关系的模型实例",
+          "使用 assertSequenceEqual"
+        ],
+        "possible_gap": "该测试关注查询过滤，而非保存行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试通常创建具有确定主键的对象。",
+        "target_pattern": "创建一个对象后，将其主键字段显式设置为 None，然后保存。",
+        "reason": "Issue 表明，将现有对象的主键设为 None 后保存会触发覆盖行为，而非创建新对象。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试通常直接创建或获取对象并进行断言。",
+        "target_pattern": "操作链：创建对象 -> 获取其父类引用 -> 修改主键为 None -> 保存 -> 验证原始对象状态。",
+        "reason": "Issue 中的 bug 复现步骤包含了通过父类模型获取对象并操作，这可能影响主键状态的处理。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "调用 save() 前后，数据库中具有相同原始主键值的对象数量及其字段值。",
+        "reason": "如果 bug 被触发，原始主键对应的对象字段会被错误更新；如果行为正确，应该有两个不同主键的对象。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "save() 方法执行时生成的 SQL 语句（是 INSERT 还是 UPDATE）。",
+        "reason": "bug 的核心是错误地执行了 UPDATE 而不是 INSERT，观测 SQL 可以明确行为。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "save() 方法调用后返回的对象的主键值。",
+        "reason": "如果创建了新对象，主键应为新值（非 None）；如果覆盖了旧对象，主键应保持不变。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在重置主键并保存后，原始对象的状态（如字段 f 的值）未被改变。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或完整的对象 repr。",
+        "reason": "Issue 中的测试期望 obj.f 为 True，这直接对应了原始对象状态应保持不变的核心语义。"
+      },
+      {
+        "assertion_goal": "验证在重置主键并保存后，数据库中应该存在两个具有不同主键的对象。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言主键的精确值（如果是自动生成的）。",
+        "reason": "这可以更稳定地验证是否创建了新对象，而不依赖具体的主键生成机制。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 或 TransactionTestCase 来管理数据库事务。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要定义 Item 和 Derived 模型，其中 Item 具有一个主键字段（如 AutoField 或 UUIDField）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置测试数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "bug 是否只发生在多表继承（Derived 继承 Item）场景，还是也发生在抽象基类或代理模型场景？",
+      "bug 是否与主键字段的具体类型（AutoField 与 UUIDField）有关？Issue 中提到了两种，但示例用了 AutoField。",
+      "Django 内部具体是哪个函数或条件判断错误导致了 UPDATE 而非 INSERT？"
+    ]
+  }
+}

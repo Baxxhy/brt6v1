@@ -1,0 +1,308 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-24213",
+  "issue_summary": "collect_factor_and_dimension 在加法运算中未能检测到等价维度，导致本应兼容的维度组合被误判为不兼容并抛出 ValueError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.physics.units 和 sympy.physics.units.systems.si.SI。可能需要使用 warns_deprecated_sympy 上下文管理器，因为相关代码显示 Quantity._collect_factor_and_dimension 已弃用。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在类或模块级别设置，但 Issue 中的代码是线性的，因此可以直接在测试函数中复制其步骤。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_factor_and_dimension",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "该测试直接调用了 SI._collect_factor_and_dimension 方法，并验证了包含不同单位（但维度兼容）的加法表达式的结果。",
+        "reusable_parts": [
+          "导入 SI 和 units 模块",
+          "使用 Quantity 创建对象",
+          "调用 SI._collect_factor_and_dimension",
+          "使用 assert 比较返回的元组 (factor, dimension)"
+        ],
+        "possible_gap": "现有测试用例中的加法操作数单位不同但维度相同（如 meter 和 km 都是长度），而 Issue 中的操作数具有不同的维度定义（velocity vs acceleration*time），需要验证维度等价性，这可能未被现有测试覆盖。"
+      },
+      {
+        "test_name": "test_check_unit_consistency",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "该测试使用 raises(ValueError, ...) 来验证当操作数维度不兼容时，SI._collect_factor_and_dimension 会抛出异常。这展示了错误检测的预期行为。",
+        "reusable_parts": [
+          "使用 raises 断言来捕获 ValueError",
+          "创建 Quantity 对象并设置缩放因子",
+          "定义检查函数调用 SI._collect_factor_and_dimension"
+        ],
+        "possible_gap": "该测试验证了维度不兼容时应抛出异常，但 Issue 的情况是维度本应兼容却被误判为不兼容。测试需要变异以触发这种误判。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 SI._collect_factor_and_dimension 处理一个加法表达式，其中两个操作数具有不同的维度定义（如 velocity 和 acceleration*time），但这两个维度在物理上是等价的。",
+      "evidence": [
+        "Issue 中的代码：expr1 = a1*t1 + v1; SI._collect_factor_and_dimension(expr1)",
+        "相关测试 1 中使用了 SI._collect_factor_and_dimension 处理包含不同单位的加法表达式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 SI._collect_factor_and_dimension(expr1) 时抛出 ValueError，提示维度不匹配：'Dimension of \"v1\" is Dimension(velocity), but it should be Dimension(acceleration*time)'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 信息。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SI._collect_factor_and_dimension",
+        "kind": "method",
+        "source_path": "sympy/physics/units/unitsystem.py",
+        "reason": "Issue 中直接调用此方法触发了错误，它是计算表达式缩放因子和维度的核心 API。"
+      },
+      {
+        "name": "Quantity",
+        "kind": "class",
+        "source_path": "sympy/physics/units/quantities.py",
+        "reason": "Issue 中创建了 Quantity 对象并设置了维度和缩放因子。"
+      },
+      {
+        "name": "SI.set_quantity_dimension",
+        "kind": "method",
+        "source_path": "sympy/physics/units/dimensions.py",
+        "reason": "Issue 中用于设置 Quantity 的维度。"
+      },
+      {
+        "name": "SI.set_quantity_scale_factor",
+        "kind": "method",
+        "source_path": "sympy/physics/units/dimensions.py",
+        "reason": "Issue 中用于设置 Quantity 的缩放因子。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/physics/units/unitsystem.py",
+        "object": "_collect_factor_and_dimension",
+        "lines": "179",
+        "reason": "Issue 中的 Traceback 指向该文件的第 179 行，是抛出 ValueError 的位置。该方法负责收集表达式的因子和维度，可能在进行维度等价性检查时存在缺陷。"
+      },
+      {
+        "path": "sympy/physics/units/dimensions.py",
+        "object": "Dimension 或维度系统相关逻辑",
+        "lines": "",
+        "reason": "维度等价性判断可能依赖于底层的维度系统（如 dimsys_SI）。相关测试 3 (test_Dimension_add_sub) 涉及维度加法和等价性检查。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_factor_and_dimension 中，加法表达式的操作数具有相同的维度（如 length）。",
+        "target_pattern": "构造一个加法表达式，其操作数具有不同的维度定义（如 velocity 和 acceleration*time），但这两个维度在物理上是等价的。",
+        "reason": "Issue 表明当前实现在处理这种等价但不同名的维度组合时，未能正确识别其兼容性，导致误抛异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，Quantity 对象的维度通过 set_global_relative_scale_factor 或直接构造参数设置，可能使用标准单位（如 meter, second）。",
+        "target_pattern": "使用 SI.set_quantity_dimension 为 Quantity 对象设置具体的维度对象（如 units.velocity, units.acceleration），并使用 SI.set_quantity_scale_factor 设置包含单位的缩放因子。",
+        "reason": "Issue 中的复现步骤使用了 SI.set_quantity_dimension 和 SI.set_quantity_scale_factor 来配置 Quantity，这可能影响了维度信息的存储和后续等价性判断。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "SI._collect_factor_and_dimension 应能识别出 velocity 和 acceleration*time 是等价的物理维度，从而成功计算表达式的缩放因子和维度，而不抛出异常。",
+      "evidence": [
+        "从 Issue 描述和错误信息推断，该加法在物理上应合法。相关测试 1 中 test_factor_and_dimension 展示了 SI._collect_factor_and_dimension 能成功处理不同单位但维度兼容的加法（如 meter + km）。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 SI._collect_factor_and_dimension(expr) 时是否抛出 ValueError 及其消息内容。",
+        "reason": "Issue 的核心错误现象就是抛出特定的 ValueError。观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "SI._collect_factor_and_dimension(expr) 成功执行后的返回值，即 (scale_factor, dimension) 元组。",
+        "reason": "如果修复成功，方法应返回计算结果而非抛出异常。观测返回值可以验证正确行为。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "SI._collect_factor_and_dimension 返回的维度对象的类型和内部表示（如 Dimension('velocity') 与 Dimension('acceleration*time') 的比较）。",
+        "reason": "缺陷可能源于维度对象的等价性比较逻辑。观测维度对象有助于理解内部状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于给定的表达式 a1*t1 + v1（其中 velocity 和 acceleration*time 等价），SI._collect_factor_and_dimension 应成功执行并返回一个 (scale_factor, dimension) 元组，而不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回的 scale_factor 或 dimension 的精确值，因为 Issue 未提供。避免断言完整的异常消息字符串。",
+        "reason": "Issue 的核心是异常被误抛。修复后，调用不应引发异常。使用 raises 断言其缺失是稳定且与 Issue 对齐的方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "velocity 和 acceleration*time 在 SymPy 的维度系统中是否被明确定义为等价？这需要查阅维度依赖关系（如 dimsys_SI.get_dimensional_dependencies）。",
+    "缺陷的确切位置是在 _collect_factor_and_dimension 中进行维度比较时，还是在底层维度系统的等价性检查中？",
+    "修复后的正确返回值（scale_factor 和 dimension）具体是什么？Issue 未提供。"
+  ],
+  "raw": {
+    "issue_summary": "collect_factor_and_dimension 在加法运算中未能检测到等价维度，导致本应兼容的维度组合被误判为不兼容并抛出 ValueError。",
+    "trigger_condition": {
+      "text": "使用 SI._collect_factor_and_dimension 处理一个加法表达式，其中两个操作数具有不同的维度定义（如 velocity 和 acceleration*time），但这两个维度在物理上是等价的。",
+      "evidence": [
+        "Issue 中的代码：expr1 = a1*t1 + v1; SI._collect_factor_and_dimension(expr1)",
+        "相关测试 1 中使用了 SI._collect_factor_and_dimension 处理包含不同单位的加法表达式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 SI._collect_factor_and_dimension(expr1) 时抛出 ValueError，提示维度不匹配：'Dimension of \"v1\" is Dimension(velocity), but it should be Dimension(acceleration*time)'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 信息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "SI._collect_factor_and_dimension 应能识别出 velocity 和 acceleration*time 是等价的物理维度，从而成功计算表达式的缩放因子和维度，而不抛出异常。",
+      "evidence": [
+        "从 Issue 描述和错误信息推断，该加法在物理上应合法。相关测试 1 中 test_factor_and_dimension 展示了 SI._collect_factor_and_dimension 能成功处理不同单位但维度兼容的加法（如 meter + km）。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "SI._collect_factor_and_dimension",
+        "kind": "method",
+        "source_path": "sympy/physics/units/unitsystem.py",
+        "reason": "Issue 中直接调用此方法触发了错误，它是计算表达式缩放因子和维度的核心 API。"
+      },
+      {
+        "name": "Quantity",
+        "kind": "class",
+        "source_path": "sympy/physics/units/quantities.py",
+        "reason": "Issue 中创建了 Quantity 对象并设置了维度和缩放因子。"
+      },
+      {
+        "name": "SI.set_quantity_dimension",
+        "kind": "method",
+        "source_path": "sympy/physics/units/dimensions.py",
+        "reason": "Issue 中用于设置 Quantity 的维度。"
+      },
+      {
+        "name": "SI.set_quantity_scale_factor",
+        "kind": "method",
+        "source_path": "sympy/physics/units/dimensions.py",
+        "reason": "Issue 中用于设置 Quantity 的缩放因子。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/physics/units/unitsystem.py",
+        "object": "_collect_factor_and_dimension",
+        "lines": "179",
+        "reason": "Issue 中的 Traceback 指向该文件的第 179 行，是抛出 ValueError 的位置。该方法负责收集表达式的因子和维度，可能在进行维度等价性检查时存在缺陷。"
+      },
+      {
+        "path": "sympy/physics/units/dimensions.py",
+        "object": "Dimension 或维度系统相关逻辑",
+        "lines": "",
+        "reason": "维度等价性判断可能依赖于底层的维度系统（如 dimsys_SI）。相关测试 3 (test_Dimension_add_sub) 涉及维度加法和等价性检查。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_factor_and_dimension",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "该测试直接调用了 SI._collect_factor_and_dimension 方法，并验证了包含不同单位（但维度兼容）的加法表达式的结果。",
+        "reusable_parts": [
+          "导入 SI 和 units 模块",
+          "使用 Quantity 创建对象",
+          "调用 SI._collect_factor_and_dimension",
+          "使用 assert 比较返回的元组 (factor, dimension)"
+        ],
+        "possible_gap": "现有测试用例中的加法操作数单位不同但维度相同（如 meter 和 km 都是长度），而 Issue 中的操作数具有不同的维度定义（velocity vs acceleration*time），需要验证维度等价性，这可能未被现有测试覆盖。"
+      },
+      {
+        "test_name": "test_check_unit_consistency",
+        "test_file": "sympy/physics/units/tests/test_quantities.py",
+        "why_relevant": "该测试使用 raises(ValueError, ...) 来验证当操作数维度不兼容时，SI._collect_factor_and_dimension 会抛出异常。这展示了错误检测的预期行为。",
+        "reusable_parts": [
+          "使用 raises 断言来捕获 ValueError",
+          "创建 Quantity 对象并设置缩放因子",
+          "定义检查函数调用 SI._collect_factor_and_dimension"
+        ],
+        "possible_gap": "该测试验证了维度不兼容时应抛出异常，但 Issue 的情况是维度本应兼容却被误判为不兼容。测试需要变异以触发这种误判。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_factor_and_dimension 中，加法表达式的操作数具有相同的维度（如 length）。",
+        "target_pattern": "构造一个加法表达式，其操作数具有不同的维度定义（如 velocity 和 acceleration*time），但这两个维度在物理上是等价的。",
+        "reason": "Issue 表明当前实现在处理这种等价但不同名的维度组合时，未能正确识别其兼容性，导致误抛异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，Quantity 对象的维度通过 set_global_relative_scale_factor 或直接构造参数设置，可能使用标准单位（如 meter, second）。",
+        "target_pattern": "使用 SI.set_quantity_dimension 为 Quantity 对象设置具体的维度对象（如 units.velocity, units.acceleration），并使用 SI.set_quantity_scale_factor 设置包含单位的缩放因子。",
+        "reason": "Issue 中的复现步骤使用了 SI.set_quantity_dimension 和 SI.set_quantity_scale_factor 来配置 Quantity，这可能影响了维度信息的存储和后续等价性判断。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 SI._collect_factor_and_dimension(expr) 时是否抛出 ValueError 及其消息内容。",
+        "reason": "Issue 的核心错误现象就是抛出特定的 ValueError。观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "SI._collect_factor_and_dimension(expr) 成功执行后的返回值，即 (scale_factor, dimension) 元组。",
+        "reason": "如果修复成功，方法应返回计算结果而非抛出异常。观测返回值可以验证正确行为。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "SI._collect_factor_and_dimension 返回的维度对象的类型和内部表示（如 Dimension('velocity') 与 Dimension('acceleration*time') 的比较）。",
+        "reason": "缺陷可能源于维度对象的等价性比较逻辑。观测维度对象有助于理解内部状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于给定的表达式 a1*t1 + v1（其中 velocity 和 acceleration*time 等价），SI._collect_factor_and_dimension 应成功执行并返回一个 (scale_factor, dimension) 元组，而不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回的 scale_factor 或 dimension 的精确值，因为 Issue 未提供。避免断言完整的异常消息字符串。",
+        "reason": "Issue 的核心是异常被误抛。修复后，调用不应引发异常。使用 raises 断言其缺失是稳定且与 Issue 对齐的方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.physics.units 和 sympy.physics.units.systems.si.SI。可能需要使用 warns_deprecated_sympy 上下文管理器，因为相关代码显示 Quantity._collect_factor_and_dimension 已弃用。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在类或模块级别设置，但 Issue 中的代码是线性的，因此可以直接在测试函数中复制其步骤。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "velocity 和 acceleration*time 在 SymPy 的维度系统中是否被明确定义为等价？这需要查阅维度依赖关系（如 dimsys_SI.get_dimensional_dependencies）。",
+      "缺陷的确切位置是在 _collect_factor_and_dimension 中进行维度比较时，还是在底层维度系统的等价性检查中？",
+      "修复后的正确返回值（scale_factor 和 dimension）具体是什么？Issue 未提供。"
+    ]
+  }
+}

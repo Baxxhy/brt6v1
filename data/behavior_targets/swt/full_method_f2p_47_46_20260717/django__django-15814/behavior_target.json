@@ -1,0 +1,394 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15814",
+  "issue_summary": "在代理模型上使用 select_related() 后调用 only() 方法会导致 ValueError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义代理模型（ProxyCustomModel）和引用它的外键模型（AnotherModel），并插入测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 django.test.TestCase 以确保数据库事务支持。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库设置，但标准 Django 测试运行器会处理。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_proxy_model_defer_with_select_related",
+        "test_file": "tests/defer_regress/tests.py",
+        "why_relevant": "该测试直接涉及代理模型、select_related 和 only（通过 defer 的相反操作）的组合使用，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "代理模型（ProxyRelated）和关联模型（Item, RelatedItem）的导入和定义模式",
+          "使用 select_related().only() 的查询链构造",
+          "使用 assertNumQueries 验证查询行为的断言风格"
+        ],
+        "possible_gap": "该测试使用的 only(\"item__name\") 中的关联字段 'item' 可能指向的是具体模型而非代理模型，或者模型关系结构（ForeignKey 指向代理模型 vs 具体模型）与 Issue 中的不同，因此可能没有触发相同的路径。"
+      },
+      {
+        "test_name": "test_select_related_defer",
+        "test_file": "tests/model_inheritance/tests.py",
+        "why_relevant": "该测试涉及 select_related 与 defer 的组合使用，并处理了模型继承（父到子）的场景，与字段延迟加载和关联预取相关。",
+        "reusable_parts": [
+          "使用 select_related 和 defer 的查询链构造",
+          "使用 assertNumQueries 验证延迟加载行为的模式",
+          "对关联对象字段进行访问和断言的模式"
+        ],
+        "possible_gap": "该测试处理的是模型继承（Restaurant 到 ItalianRestaurant），而非代理模型。代理模型的元数据行为可能与继承模型不同。"
+      },
+      {
+        "test_name": "test_select_related",
+        "test_file": "tests/proxy_models/tests.py",
+        "why_relevant": "该测试验证了在代理模型上使用 select_related 的基本功能，提供了代理模型查询的基础设施。",
+        "reusable_parts": [
+          "代理模型（StateProxy）和关联模型（Country, State）的定义和导入",
+          "在代理模型上调用 select_related() 的简单模式",
+          "基本的查询和断言模式"
+        ],
+        "possible_gap": "该测试没有使用 only() 方法，因此没有触发与字段延迟加载相关的错误路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在代理模型（ProxyCustomModel）的查询集上，先调用 select_related(\"custom\") 再调用 only(\"custom__name\")，然后对查询集求值（例如转换为列表）。",
+      "evidence": [
+        "Issue 描述中提供了触发错误的模型定义和命令：AnotherModel.objects.select_related(\"custom\").only(\"custom__name\").all()",
+        "Issue 中的堆栈跟踪显示错误发生在查询集求值（__len__）时"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ValueError: 'id' is not in list",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的堆栈跟踪最后一行显示 ValueError: 'id' is not in list",
+        "错误发生在 django/db/models/query.py 的 __init__ 方法中，具体是 self.pk_idx = self.init_list.index(self.model_cls._meta.pk.attname) 这一行"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.select_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的操作链的第一步，用于指定要预取的关联对象。"
+      },
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的操作链的第二步，用于指定要立即加载的字段。"
+      },
+      {
+        "name": "QuerySet.__len__",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发查询集求值和错误异常的方法（通过 list() 调用）。"
+      },
+      {
+        "name": "QuerySet._fetch_all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "__len__ 调用的内部方法，负责填充结果缓存，是错误传播路径的一部分。"
+      },
+      {
+        "name": "RelatedPopulator.__init__",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "堆栈跟踪中直接抛出 ValueError 的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "Issue 描述中明确指出，在 django/db/models/sql/query.py 的第 745 行附近，将 opts = cur_model._meta 替换为 opts = cur_model._meta.concrete_model._meta 可以解决问题。这表明该位置在处理代理模型的元数据时可能存在问题。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "RelatedPopulator.__init__",
+        "lines": "2243",
+        "reason": "堆栈跟踪显示 ValueError 直接在此处抛出，因为 init_list 中找不到 'id' 字段。这可能是因为代理模型的字段列表（init_list）与具体模型的字段列表不一致。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "get_related_populators",
+        "lines": "2268",
+        "reason": "调用 RelatedPopulator 构造函数的地方，负责为关联对象创建填充器。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "ProxyRelated.objects.select_related().only(\"item__name\")",
+        "target_pattern": "AnotherModel.objects.select_related(\"custom\").only(\"custom__name\")",
+        "reason": "Issue 中的关键触发模式是 ForeignKey 指向一个代理模型（ProxyCustomModel），然后通过 select_related 预取该代理模型关联，再通过 only 指定代理模型上的字段。相关测试 3 中的关联可能指向具体模型或结构不同。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "ForeignKey 指向具体模型或未明确为代理模型",
+        "target_pattern": "ForeignKey 明确指向代理模型类（ProxyCustomModel）",
+        "reason": "Issue 中 AnotherModel 的 custom 字段是 ForeignKey(ProxyCustomModel, ...)，其中 ProxyCustomModel 是 CustomModel 的代理模型。这是触发错误的关键配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "only(\"item__name\") 中的字段路径可能解析到具体模型",
+        "target_pattern": "only(\"custom__name\") 中的字段路径需要解析到代理模型",
+        "reason": "only() 的参数需要跨越代理模型关联进行解析，这可能影响内部字段列表（init_list）的构建，导致缺少 'id' 字段。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "查询应正常执行并返回结果，不应抛出 ValueError 异常。",
+      "evidence": [
+        "Issue 描述中提到，如果将 django/db/models/sql/query.py 第 745 行的 opts = cur_model._meta 替换为 opts = cur_model._meta.concrete_model._meta，则一切工作正常。这表明修复后查询应能正常执行。",
+        "相关测试 3 (test_proxy_model_defer_with_select_related) 展示了在代理模型上使用 select_related 和 only 的预期行为：查询成功执行并可以访问延迟加载的字段。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 list(qs) 或 len(qs) 时是否抛出 ValueError",
+        "reason": "Issue 的核心错误现象是在查询集求值时抛出 ValueError: 'id' is not in list。捕获此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "RelatedPopulator 初始化时的 init_list 和 model_cls._meta.pk.attname 的值",
+        "reason": "错误直接源于在 init_list 中找不到主键属性名（'id'）。观察这些值有助于理解代理模型与具体模型在字段列表上的差异。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询语句，特别是 SELECT 子句中的字段列表",
+        "reason": "only() 会影响 SELECT 的字段，观察 SQL 可以确认代理模型的字段（包括主键）是否被正确包含。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "查询集求值（如转换为列表）不应抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为行号或细微措辞可能变化。",
+        "reason": "Issue 的核心是异常的发生。断言会抛出 ValueError 可以捕捉缺陷，但修复后应改为断言不抛出异常（或正常返回结果）。"
+      },
+      {
+        "assertion_goal": "查询应成功执行并可以访问指定的字段（custom__name）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的对象 repr 或依赖于数据库特定 ID 的值。",
+        "reason": "修复后，查询应能正常返回数据，并且通过 only() 指定的字段应可访问。断言字段值可以验证功能正常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误是否只发生在 ForeignKey 指向代理模型时，还是其他类型的关联（如 OneToOneField）也会触发？",
+    "除了 only(\"custom__name\") 之外，其他字段选择模式（如 only(\"custom__id\")、多个字段、跨多个关联）是否也会触发错误？",
+    "错误是否与特定的数据库后端有关？Issue 中只提到了 Windows/Python/Django 版本。",
+    "django/db/models/sql/query.py 中确切的第 745 行代码上下文是什么？检索出的源码片段 4 没有显示具体行号内容。"
+  ],
+  "raw": {
+    "issue_summary": "在代理模型上使用 select_related() 后调用 only() 方法会导致 ValueError 异常。",
+    "trigger_condition": {
+      "text": "在代理模型（ProxyCustomModel）的查询集上，先调用 select_related(\"custom\") 再调用 only(\"custom__name\")，然后对查询集求值（例如转换为列表）。",
+      "evidence": [
+        "Issue 描述中提供了触发错误的模型定义和命令：AnotherModel.objects.select_related(\"custom\").only(\"custom__name\").all()",
+        "Issue 中的堆栈跟踪显示错误发生在查询集求值（__len__）时"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "ValueError: 'id' is not in list",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的堆栈跟踪最后一行显示 ValueError: 'id' is not in list",
+        "错误发生在 django/db/models/query.py 的 __init__ 方法中，具体是 self.pk_idx = self.init_list.index(self.model_cls._meta.pk.attname) 这一行"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "查询应正常执行并返回结果，不应抛出 ValueError 异常。",
+      "evidence": [
+        "Issue 描述中提到，如果将 django/db/models/sql/query.py 第 745 行的 opts = cur_model._meta 替换为 opts = cur_model._meta.concrete_model._meta，则一切工作正常。这表明修复后查询应能正常执行。",
+        "相关测试 3 (test_proxy_model_defer_with_select_related) 展示了在代理模型上使用 select_related 和 only 的预期行为：查询成功执行并可以访问延迟加载的字段。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.select_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的操作链的第一步，用于指定要预取的关联对象。"
+      },
+      {
+        "name": "QuerySet.only",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的操作链的第二步，用于指定要立即加载的字段。"
+      },
+      {
+        "name": "QuerySet.__len__",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发查询集求值和错误异常的方法（通过 list() 调用）。"
+      },
+      {
+        "name": "QuerySet._fetch_all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "__len__ 调用的内部方法，负责填充结果缓存，是错误传播路径的一部分。"
+      },
+      {
+        "name": "RelatedPopulator.__init__",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "堆栈跟踪中直接抛出 ValueError 的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "Issue 描述中明确指出，在 django/db/models/sql/query.py 的第 745 行附近，将 opts = cur_model._meta 替换为 opts = cur_model._meta.concrete_model._meta 可以解决问题。这表明该位置在处理代理模型的元数据时可能存在问题。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "RelatedPopulator.__init__",
+        "lines": "2243",
+        "reason": "堆栈跟踪显示 ValueError 直接在此处抛出，因为 init_list 中找不到 'id' 字段。这可能是因为代理模型的字段列表（init_list）与具体模型的字段列表不一致。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "get_related_populators",
+        "lines": "2268",
+        "reason": "调用 RelatedPopulator 构造函数的地方，负责为关联对象创建填充器。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_proxy_model_defer_with_select_related",
+        "test_file": "tests/defer_regress/tests.py",
+        "why_relevant": "该测试直接涉及代理模型、select_related 和 only（通过 defer 的相反操作）的组合使用，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "代理模型（ProxyRelated）和关联模型（Item, RelatedItem）的导入和定义模式",
+          "使用 select_related().only() 的查询链构造",
+          "使用 assertNumQueries 验证查询行为的断言风格"
+        ],
+        "possible_gap": "该测试使用的 only(\"item__name\") 中的关联字段 'item' 可能指向的是具体模型而非代理模型，或者模型关系结构（ForeignKey 指向代理模型 vs 具体模型）与 Issue 中的不同，因此可能没有触发相同的路径。"
+      },
+      {
+        "test_name": "test_select_related_defer",
+        "test_file": "tests/model_inheritance/tests.py",
+        "why_relevant": "该测试涉及 select_related 与 defer 的组合使用，并处理了模型继承（父到子）的场景，与字段延迟加载和关联预取相关。",
+        "reusable_parts": [
+          "使用 select_related 和 defer 的查询链构造",
+          "使用 assertNumQueries 验证延迟加载行为的模式",
+          "对关联对象字段进行访问和断言的模式"
+        ],
+        "possible_gap": "该测试处理的是模型继承（Restaurant 到 ItalianRestaurant），而非代理模型。代理模型的元数据行为可能与继承模型不同。"
+      },
+      {
+        "test_name": "test_select_related",
+        "test_file": "tests/proxy_models/tests.py",
+        "why_relevant": "该测试验证了在代理模型上使用 select_related 的基本功能，提供了代理模型查询的基础设施。",
+        "reusable_parts": [
+          "代理模型（StateProxy）和关联模型（Country, State）的定义和导入",
+          "在代理模型上调用 select_related() 的简单模式",
+          "基本的查询和断言模式"
+        ],
+        "possible_gap": "该测试没有使用 only() 方法，因此没有触发与字段延迟加载相关的错误路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "ProxyRelated.objects.select_related().only(\"item__name\")",
+        "target_pattern": "AnotherModel.objects.select_related(\"custom\").only(\"custom__name\")",
+        "reason": "Issue 中的关键触发模式是 ForeignKey 指向一个代理模型（ProxyCustomModel），然后通过 select_related 预取该代理模型关联，再通过 only 指定代理模型上的字段。相关测试 3 中的关联可能指向具体模型或结构不同。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "ForeignKey 指向具体模型或未明确为代理模型",
+        "target_pattern": "ForeignKey 明确指向代理模型类（ProxyCustomModel）",
+        "reason": "Issue 中 AnotherModel 的 custom 字段是 ForeignKey(ProxyCustomModel, ...)，其中 ProxyCustomModel 是 CustomModel 的代理模型。这是触发错误的关键配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "only(\"item__name\") 中的字段路径可能解析到具体模型",
+        "target_pattern": "only(\"custom__name\") 中的字段路径需要解析到代理模型",
+        "reason": "only() 的参数需要跨越代理模型关联进行解析，这可能影响内部字段列表（init_list）的构建，导致缺少 'id' 字段。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 list(qs) 或 len(qs) 时是否抛出 ValueError",
+        "reason": "Issue 的核心错误现象是在查询集求值时抛出 ValueError: 'id' is not in list。捕获此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "RelatedPopulator 初始化时的 init_list 和 model_cls._meta.pk.attname 的值",
+        "reason": "错误直接源于在 init_list 中找不到主键属性名（'id'）。观察这些值有助于理解代理模型与具体模型在字段列表上的差异。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询语句，特别是 SELECT 子句中的字段列表",
+        "reason": "only() 会影响 SELECT 的字段，观察 SQL 可以确认代理模型的字段（包括主键）是否被正确包含。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "查询集求值（如转换为列表）不应抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为行号或细微措辞可能变化。",
+        "reason": "Issue 的核心是异常的发生。断言会抛出 ValueError 可以捕捉缺陷，但修复后应改为断言不抛出异常（或正常返回结果）。"
+      },
+      {
+        "assertion_goal": "查询应成功执行并可以访问指定的字段（custom__name）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的对象 repr 或依赖于数据库特定 ID 的值。",
+        "reason": "修复后，查询应能正常返回数据，并且通过 only() 指定的字段应可访问。断言字段值可以验证功能正常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义代理模型（ProxyCustomModel）和引用它的外键模型（AnotherModel），并插入测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应继承自 django.test.TestCase 以确保数据库事务支持。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库设置，但标准 Django 测试运行器会处理。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "错误是否只发生在 ForeignKey 指向代理模型时，还是其他类型的关联（如 OneToOneField）也会触发？",
+      "除了 only(\"custom__name\") 之外，其他字段选择模式（如 only(\"custom__id\")、多个字段、跨多个关联）是否也会触发错误？",
+      "错误是否与特定的数据库后端有关？Issue 中只提到了 Windows/Python/Django 版本。",
+      "django/db/models/sql/query.py 中确切的第 745 行代码上下文是什么？检索出的源码片段 4 没有显示具体行号内容。"
+    ]
+  }
+}

@@ -1,0 +1,368 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14170",
+  "issue_summary": "YearLookup 优化错误地将 __iso_year 查找转换为 BETWEEN 查询，导致 ExtractIsoYear 在过滤时返回错误数据。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 DateFunctionTests 测试类（或类似结构），它提供了 create_model 方法来创建 DTModel 实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 USE_TZ=False 以避免时区复杂性。相关测试都使用了 @override_settings(USE_TZ=False)。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入必要的模块：datetime, ExtractIsoYear, DTModel 等。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_extract_year_exact_lookup",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "它直接测试了 'year' 和 'iso_year' 查找的 exact 行为，并检查了 BETWEEN 优化和 EXTRACT 的使用，与 Issue 场景高度重叠。",
+        "reusable_parts": [
+          "测试类 DateFunctionTests 和 create_model fixture",
+          "使用 DTModel 对象",
+          "使用 start_datetime 和 end_datetime 变量",
+          "检查 query_string 中 ' between ' 和 'extract' 计数的断言模式",
+          "for lookup in ('year', 'iso_year'): 循环结构"
+        ],
+        "possible_gap": "该测试断言了对于 'iso_year' 查找，BETWEEN 应该出现且 EXTRACT 为 0（这恰恰是 Issue 指出的错误行为）。因此，它目前是验证错误优化的“正向”测试，不能直接复现缺陷。需要变异其断言逻辑或输入数据来暴露问题。"
+      },
+      {
+        "test_name": "test_extract_iso_year_func",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "它测试了 ExtractIsoYear 注解的基本功能，并包含了一个使用 __iso_year 查找的过滤（filter(start_datetime__iso_year=ExtractIsoYear('start_datetime'))）。",
+        "reusable_parts": [
+          "测试类 DateFunctionTests 和 create_model fixture",
+          "使用 ExtractIsoYear 进行注解",
+          "使用 __iso_year 查找进行过滤",
+          "assertQuerysetEqual 和 assertEqual 断言"
+        ],
+        "possible_gap": "该测试中的过滤使用了表达式右侧（ExtractIsoYear('start_datetime')），根据相关测试 3 的注释（\"an expression rhs cannot use the between optimization\"），这可能避免了有缺陷的优化路径。Issue 触发条件更侧重于右侧是常量值（如 2020）。"
+      },
+      {
+        "test_name": "test_extract_iso_year_func_boundaries",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "它测试了 ExtractIsoYear 在 ISO 年份边界情况下的行为，提供了可能暴露 BETWEEN 优化错误的关键日期数据（例如 2014-12-31 属于 2015 ISO 年）。",
+        "reusable_parts": [
+          "边界日期数据（week_52_day_2014, week_1_day_2014_2015, week_53_day_2015）",
+          "使用 annotate 和 order_by",
+          "assertQuerysetEqual 断言"
+        ],
+        "possible_gap": "它主要测试注解的正确性，没有直接测试使用常量值进行 __iso_year 过滤，因此可能不会触发有缺陷的 BETWEEN 优化。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 __iso_year 查找进行过滤，无论是通过显式注解（annotated ExtractIsoYear）还是隐式查找（start_date__iso_year）。",
+      "evidence": [
+        "Issue 中显示：使用 qs.filter(extracted=2020) 或 DTModel.objects.filter(start_date__iso_year=2020) 会生成 BETWEEN 查询。",
+        "相关测试 3 显示：lookup 参数包括 'iso_year'，并检查 BETWEEN 的出现。",
+        "源码片段 2 显示：ExtractIsoYear.lookup_name = 'iso_year'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 __iso_year 过滤时，生成的 SQL 使用了 BETWEEN 子句（例如 WHERE start_date BETWEEN 2020-01-01 AND 2020-12-31），而不是正确的 EXTRACT('isoyear' FROM ...) 逻辑，导致返回错误数据。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中显示的 SQL 查询：WHERE \"db_functions_dtmodel\".\"start_date\" BETWEEN 2020-01-01 AND 2020-12-31。",
+        "Issue 中明确说明：\"This results in the wrong data being returned by filters using iso_year.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ExtractIsoYear",
+        "kind": "class",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "这是与 __iso_year 查找相关的提取函数，其 lookup_name 为 'iso_year'。"
+      },
+      {
+        "name": "YearLookup",
+        "kind": "class",
+        "source_path": "django/db/models/lookups.py",
+        "reason": "Issue 指出其优化（使用 BETWEEN）错误地应用于 __iso_year 查找。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发缺陷的 API 调用入口。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中展示了与 ExtractIsoYear 注解结合使用的场景。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/lookups.py",
+        "object": "YearLookup",
+        "lines": "540-569",
+        "reason": "Issue 明确指出优化（使用 BETWEEN 代替 EXTRACT）错误地注册给了 __iso_year 查找。其 as_sql 或相关方法可能未区分 'year' 和 'iso_year'。"
+      },
+      {
+        "path": "django/db/models/functions/datetime.py",
+        "object": "ExtractIsoYear",
+        "lines": "93-95",
+        "reason": "定义了 lookup_name = 'iso_year'，可能通过此名称与 YearLookup 关联，导致错误的优化应用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 3 中，对于 lookup='iso_year'，使用常量值（如 2015）进行过滤，并断言 BETWEEN 出现且 EXTRACT 为 0。",
+        "target_pattern": "使用常量值进行 __iso_year 过滤，但断言结果集应基于 ISO 年份正确过滤，而不是基于公历年的 BETWEEN 范围。这可能需要改变断言逻辑（例如检查返回的记录数或具体记录），或者检查生成的 SQL 不应包含错误的 BETWEEN。",
+        "reason": "Issue 表明，对于 iso_year，当前的 BETWEEN 优化是错误的。因此，一个使用常量值过滤并期望正确结果的测试应该会失败，从而暴露缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，过滤使用表达式右侧：filter(start_datetime__iso_year=ExtractIsoYear('start_datetime'))。",
+        "target_pattern": "将过滤右侧改为常量值，例如 filter(start_datetime__iso_year=2015)。",
+        "reason": "Issue 显示，当右侧是常量值时，会触发有缺陷的 BETWEEN 优化。而表达式右侧可能避免了该优化（如相关测试 3 所述）。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "boundary_value",
+        "current_pattern": "相关测试 2 提供了 ISO 年份边界日期（如 2014-12-31 属于 2015 ISO 年）。",
+        "target_pattern": "使用这些边界日期创建模型，然后使用基于公历年的 BETWEEN 优化（如过滤 iso_year=2014）进行查询，预期会返回错误结果。",
+        "reason": "公历年 BETWEEN 2014-01-01 AND 2014-12-31 会错误地包含或排除属于 2015 ISO 年的 2014-12-31，从而暴露缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用 __iso_year 查找进行过滤时，应基于 ISO-8601 周编号年份进行正确比较，不应错误地使用基于公历年的 BETWEEN 优化。",
+      "evidence": [
+        "Issue 中显示：仅注解时（qs.query）生成正确的 EXTRACT('isoyear' FROM ...) SQL。",
+        "相关测试 1 和 2 展示了 ExtractIsoYear 注解的正确行为，并期望基于 ISO 年份的过滤能正常工作。",
+        "源码片段 2 的文档字符串：\"Return the ISO-8601 week-numbering year.\""
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "str(qs.query)",
+        "reason": "Issue 的核心表现是生成的 SQL 错误地使用了 BETWEEN 子句。观察生成的 SQL 字符串是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "qs.count() 或具体的 qs 结果列表",
+        "reason": "错误的 SQL 会导致返回错误的数据。观察查询返回的记录数量或具体记录，可以与基于 ISO 年份的正确预期进行比较。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 __iso_year 和常量值过滤时，返回的结果集应基于 ISO-8601 周编号年份正确匹配。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 SQL 中完全不含 'BETWEEN'（因为修复后可能对 'year' 查找仍使用 BETWEEN）。避免断言完整的、具体的 SQL 字符串。",
+        "reason": "这直接对应 Issue 中“返回错误数据”的问题。断言结果正确性比断言 SQL 实现细节更稳定，且与 expected_behavior 对齐。"
+      },
+      {
+        "assertion_goal": "对于属于不同 ISO 年和公历年的边界日期，使用 __iso_year 过滤应返回正确记录。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅检查 SQL 片段计数而不验证数据正确性。",
+        "reason": "边界情况能有效区分公历年和 ISO 年，是验证修复的强有力断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "YearLookup 内部具体如何将优化错误地应用于 'iso_year' 的确切机制（例如，是注册逻辑错误还是 as_sql 方法中的条件缺失）。",
+    "修复后，对于 'iso_year' 查找，正确的 SQL 应该是什么样子（是完全禁用 BETWEEN 并使用 EXTRACT，还是有其他正确的范围计算方式）。Issue 只显示了错误的 BETWEEN，没有显示修复后的正确 SQL。",
+    "除了 exact 查找（__iso_year=value）外，其他查找（如 __iso_year__lt）是否也受到相同缺陷影响。相关测试 4 和 5 也测试了 'iso_year'，但未在 Issue 中明确提及。"
+  ],
+  "raw": {
+    "issue_summary": "YearLookup 优化错误地将 __iso_year 查找转换为 BETWEEN 查询，导致 ExtractIsoYear 在过滤时返回错误数据。",
+    "trigger_condition": {
+      "text": "使用 __iso_year 查找进行过滤，无论是通过显式注解（annotated ExtractIsoYear）还是隐式查找（start_date__iso_year）。",
+      "evidence": [
+        "Issue 中显示：使用 qs.filter(extracted=2020) 或 DTModel.objects.filter(start_date__iso_year=2020) 会生成 BETWEEN 查询。",
+        "相关测试 3 显示：lookup 参数包括 'iso_year'，并检查 BETWEEN 的出现。",
+        "源码片段 2 显示：ExtractIsoYear.lookup_name = 'iso_year'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 __iso_year 过滤时，生成的 SQL 使用了 BETWEEN 子句（例如 WHERE start_date BETWEEN 2020-01-01 AND 2020-12-31），而不是正确的 EXTRACT('isoyear' FROM ...) 逻辑，导致返回错误数据。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中显示的 SQL 查询：WHERE \"db_functions_dtmodel\".\"start_date\" BETWEEN 2020-01-01 AND 2020-12-31。",
+        "Issue 中明确说明：\"This results in the wrong data being returned by filters using iso_year.\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 __iso_year 查找进行过滤时，应基于 ISO-8601 周编号年份进行正确比较，不应错误地使用基于公历年的 BETWEEN 优化。",
+      "evidence": [
+        "Issue 中显示：仅注解时（qs.query）生成正确的 EXTRACT('isoyear' FROM ...) SQL。",
+        "相关测试 1 和 2 展示了 ExtractIsoYear 注解的正确行为，并期望基于 ISO 年份的过滤能正常工作。",
+        "源码片段 2 的文档字符串：\"Return the ISO-8601 week-numbering year.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ExtractIsoYear",
+        "kind": "class",
+        "source_path": "django/db/models/functions/datetime.py",
+        "reason": "这是与 __iso_year 查找相关的提取函数，其 lookup_name 为 'iso_year'。"
+      },
+      {
+        "name": "YearLookup",
+        "kind": "class",
+        "source_path": "django/db/models/lookups.py",
+        "reason": "Issue 指出其优化（使用 BETWEEN）错误地应用于 __iso_year 查找。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发缺陷的 API 调用入口。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中展示了与 ExtractIsoYear 注解结合使用的场景。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/lookups.py",
+        "object": "YearLookup",
+        "lines": "540-569",
+        "reason": "Issue 明确指出优化（使用 BETWEEN 代替 EXTRACT）错误地注册给了 __iso_year 查找。其 as_sql 或相关方法可能未区分 'year' 和 'iso_year'。"
+      },
+      {
+        "path": "django/db/models/functions/datetime.py",
+        "object": "ExtractIsoYear",
+        "lines": "93-95",
+        "reason": "定义了 lookup_name = 'iso_year'，可能通过此名称与 YearLookup 关联，导致错误的优化应用。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_extract_year_exact_lookup",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "它直接测试了 'year' 和 'iso_year' 查找的 exact 行为，并检查了 BETWEEN 优化和 EXTRACT 的使用，与 Issue 场景高度重叠。",
+        "reusable_parts": [
+          "测试类 DateFunctionTests 和 create_model fixture",
+          "使用 DTModel 对象",
+          "使用 start_datetime 和 end_datetime 变量",
+          "检查 query_string 中 ' between ' 和 'extract' 计数的断言模式",
+          "for lookup in ('year', 'iso_year'): 循环结构"
+        ],
+        "possible_gap": "该测试断言了对于 'iso_year' 查找，BETWEEN 应该出现且 EXTRACT 为 0（这恰恰是 Issue 指出的错误行为）。因此，它目前是验证错误优化的“正向”测试，不能直接复现缺陷。需要变异其断言逻辑或输入数据来暴露问题。"
+      },
+      {
+        "test_name": "test_extract_iso_year_func",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "它测试了 ExtractIsoYear 注解的基本功能，并包含了一个使用 __iso_year 查找的过滤（filter(start_datetime__iso_year=ExtractIsoYear('start_datetime'))）。",
+        "reusable_parts": [
+          "测试类 DateFunctionTests 和 create_model fixture",
+          "使用 ExtractIsoYear 进行注解",
+          "使用 __iso_year 查找进行过滤",
+          "assertQuerysetEqual 和 assertEqual 断言"
+        ],
+        "possible_gap": "该测试中的过滤使用了表达式右侧（ExtractIsoYear('start_datetime')），根据相关测试 3 的注释（\"an expression rhs cannot use the between optimization\"），这可能避免了有缺陷的优化路径。Issue 触发条件更侧重于右侧是常量值（如 2020）。"
+      },
+      {
+        "test_name": "test_extract_iso_year_func_boundaries",
+        "test_file": "tests/db_functions/datetime/test_extract_trunc.py",
+        "why_relevant": "它测试了 ExtractIsoYear 在 ISO 年份边界情况下的行为，提供了可能暴露 BETWEEN 优化错误的关键日期数据（例如 2014-12-31 属于 2015 ISO 年）。",
+        "reusable_parts": [
+          "边界日期数据（week_52_day_2014, week_1_day_2014_2015, week_53_day_2015）",
+          "使用 annotate 和 order_by",
+          "assertQuerysetEqual 断言"
+        ],
+        "possible_gap": "它主要测试注解的正确性，没有直接测试使用常量值进行 __iso_year 过滤，因此可能不会触发有缺陷的 BETWEEN 优化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 3 中，对于 lookup='iso_year'，使用常量值（如 2015）进行过滤，并断言 BETWEEN 出现且 EXTRACT 为 0。",
+        "target_pattern": "使用常量值进行 __iso_year 过滤，但断言结果集应基于 ISO 年份正确过滤，而不是基于公历年的 BETWEEN 范围。这可能需要改变断言逻辑（例如检查返回的记录数或具体记录），或者检查生成的 SQL 不应包含错误的 BETWEEN。",
+        "reason": "Issue 表明，对于 iso_year，当前的 BETWEEN 优化是错误的。因此，一个使用常量值过滤并期望正确结果的测试应该会失败，从而暴露缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，过滤使用表达式右侧：filter(start_datetime__iso_year=ExtractIsoYear('start_datetime'))。",
+        "target_pattern": "将过滤右侧改为常量值，例如 filter(start_datetime__iso_year=2015)。",
+        "reason": "Issue 显示，当右侧是常量值时，会触发有缺陷的 BETWEEN 优化。而表达式右侧可能避免了该优化（如相关测试 3 所述）。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "boundary_value",
+        "current_pattern": "相关测试 2 提供了 ISO 年份边界日期（如 2014-12-31 属于 2015 ISO 年）。",
+        "target_pattern": "使用这些边界日期创建模型，然后使用基于公历年的 BETWEEN 优化（如过滤 iso_year=2014）进行查询，预期会返回错误结果。",
+        "reason": "公历年 BETWEEN 2014-01-01 AND 2014-12-31 会错误地包含或排除属于 2015 ISO 年的 2014-12-31，从而暴露缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "str(qs.query)",
+        "reason": "Issue 的核心表现是生成的 SQL 错误地使用了 BETWEEN 子句。观察生成的 SQL 字符串是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "qs.count() 或具体的 qs 结果列表",
+        "reason": "错误的 SQL 会导致返回错误的数据。观察查询返回的记录数量或具体记录，可以与基于 ISO 年份的正确预期进行比较。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 __iso_year 和常量值过滤时，返回的结果集应基于 ISO-8601 周编号年份正确匹配。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言 SQL 中完全不含 'BETWEEN'（因为修复后可能对 'year' 查找仍使用 BETWEEN）。避免断言完整的、具体的 SQL 字符串。",
+        "reason": "这直接对应 Issue 中“返回错误数据”的问题。断言结果正确性比断言 SQL 实现细节更稳定，且与 expected_behavior 对齐。"
+      },
+      {
+        "assertion_goal": "对于属于不同 ISO 年和公历年的边界日期，使用 __iso_year 过滤应返回正确记录。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅检查 SQL 片段计数而不验证数据正确性。",
+        "reason": "边界情况能有效区分公历年和 ISO 年，是验证修复的强有力断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 DateFunctionTests 测试类（或类似结构），它提供了 create_model 方法来创建 DTModel 实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要设置 USE_TZ=False 以避免时区复杂性。相关测试都使用了 @override_settings(USE_TZ=False)。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入必要的模块：datetime, ExtractIsoYear, DTModel 等。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "YearLookup 内部具体如何将优化错误地应用于 'iso_year' 的确切机制（例如，是注册逻辑错误还是 as_sql 方法中的条件缺失）。",
+      "修复后，对于 'iso_year' 查找，正确的 SQL 应该是什么样子（是完全禁用 BETWEEN 并使用 EXTRACT，还是有其他正确的范围计算方式）。Issue 只显示了错误的 BETWEEN，没有显示修复后的正确 SQL。",
+      "除了 exact 查找（__iso_year=value）外，其他查找（如 __iso_year__lt）是否也受到相同缺陷影响。相关测试 4 和 5 也测试了 'iso_year'，但未在 Issue 中明确提及。"
+    ]
+  }
+}

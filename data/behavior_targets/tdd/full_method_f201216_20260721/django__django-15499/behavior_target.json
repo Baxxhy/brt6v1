@@ -1,0 +1,242 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15499",
+  "issue_summary": "在迁移优化过程中，CreateModel + AlterModelManagers 应该被优化为单个 CreateModel，但当前可能未实现。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 的子类，并可能导入 migrations 模块和相关模型字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_create_model_and_remove_model_options",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "它测试了 CreateModel 与 AlterModelOptions 的优化合并，这与 Issue 中 CreateModel 与 AlterModelManagers 的优化场景高度相似。",
+        "reusable_parts": [
+          "OptimizerTests 类",
+          "assertOptimizesTo 方法调用模式",
+          "migrations.CreateModel 和 migrations.AlterModelOptions 的构造方式"
+        ],
+        "possible_gap": "该测试针对的是 AlterModelOptions，而不是 AlterModelManagers。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在迁移操作序列中，一个 CreateModel 操作后面紧跟着一个 AlterModelManagers 操作。",
+      "evidence": [
+        "Issue 描述提到 'CreateModel + AlterModelManagers can become just CreateModel'，表明这是预期的优化场景。",
+        "相关测试展示了 CreateModel 与其他操作（如 AlterModelOptions、AddField）的优化合并模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "CreateModel 和 AlterModelManagers 没有被优化合并，导致迁移序列比预期的长。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述暗示当前优化器可能没有处理 CreateModel + AlterModelManagers 的情况，而它应该像处理 CreateModel + AlterModelOptions 一样进行优化。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.CreateModel",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是 Issue 中提到的需要被优化的操作之一。"
+      },
+      {
+        "name": "migrations.AlterModelManagers",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是 Issue 中提到的需要被优化的另一个操作。"
+      },
+      {
+        "name": "CreateModel.reduce",
+        "kind": "method",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "优化逻辑很可能在 CreateModel 的 reduce 方法中实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "CreateModel.reduce",
+        "lines": "",
+        "reason": "该方法负责优化操作序列，可能缺少对 AlterModelManagers 的处理逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "在相似测试中，操作序列是 [CreateModel(...), AlterModelOptions(...)]。",
+        "target_pattern": "根据 Issue，操作序列应变为 [CreateModel(...), AlterModelManagers(...)]。",
+        "reason": "将操作类型从 AlterModelOptions 替换为 AlterModelManagers，以触发针对 managers 的优化逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "CreateModel 构造时可能没有或具有默认的 managers 参数。",
+        "target_pattern": "CreateModel 构造时不指定 managers，然后在 AlterModelManagers 中指定。",
+        "reason": "模拟 Issue 描述的场景：先创建模型，再改变其 managers。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移优化器应该将 CreateModel 操作和紧随其后的 AlterModelManagers 操作合并为一个 CreateModel 操作，其 managers 参数由 AlterModelManagers 指定。",
+      "evidence": [
+        "Issue 明确说明 'CreateModel + AlterModelManagers can become just CreateModel'。",
+        "相关测试 test_create_model_and_remove_model_options 展示了 CreateModel + AlterModelOptions 被优化为单个 CreateModel 的模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "优化器处理操作序列前后的操作列表长度和内容。",
+        "reason": "可以观察优化后是否仍然存在两个操作，或者是否被合并为一个 CreateModel。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "CreateModel.reduce 方法的返回值。",
+        "reason": "可以观察 reduce 方法是否返回了合并后的操作列表。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "优化后的操作列表应只包含一个 CreateModel 操作，且其 managers 参数与原始 AlterModelManagers 操作中的一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串相等，因为内部表示可能变化。",
+        "reason": "这直接验证了优化合并是否成功发生。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "AlterModelManagers 操作是否必须在 CreateModel 之后立即出现才能被优化。",
+    "CreateModel.reduce 方法中是否已经存在部分处理 AlterModelManagers 的逻辑但存在缺陷，还是完全缺失。",
+    "优化合并时，如果 CreateModel 已经指定了 managers 参数，与 AlterModelManagers 的冲突如何处理。"
+  ],
+  "raw": {
+    "issue_summary": "在迁移优化过程中，CreateModel + AlterModelManagers 应该被优化为单个 CreateModel，但当前可能未实现。",
+    "trigger_condition": {
+      "text": "在迁移操作序列中，一个 CreateModel 操作后面紧跟着一个 AlterModelManagers 操作。",
+      "evidence": [
+        "Issue 描述提到 'CreateModel + AlterModelManagers can become just CreateModel'，表明这是预期的优化场景。",
+        "相关测试展示了 CreateModel 与其他操作（如 AlterModelOptions、AddField）的优化合并模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "CreateModel 和 AlterModelManagers 没有被优化合并，导致迁移序列比预期的长。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述暗示当前优化器可能没有处理 CreateModel + AlterModelManagers 的情况，而它应该像处理 CreateModel + AlterModelOptions 一样进行优化。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "迁移优化器应该将 CreateModel 操作和紧随其后的 AlterModelManagers 操作合并为一个 CreateModel 操作，其 managers 参数由 AlterModelManagers 指定。",
+      "evidence": [
+        "Issue 明确说明 'CreateModel + AlterModelManagers can become just CreateModel'。",
+        "相关测试 test_create_model_and_remove_model_options 展示了 CreateModel + AlterModelOptions 被优化为单个 CreateModel 的模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.CreateModel",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是 Issue 中提到的需要被优化的操作之一。"
+      },
+      {
+        "name": "migrations.AlterModelManagers",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "这是 Issue 中提到的需要被优化的另一个操作。"
+      },
+      {
+        "name": "CreateModel.reduce",
+        "kind": "method",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "优化逻辑很可能在 CreateModel 的 reduce 方法中实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "CreateModel.reduce",
+        "lines": "",
+        "reason": "该方法负责优化操作序列，可能缺少对 AlterModelManagers 的处理逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_create_model_and_remove_model_options",
+        "test_file": "tests/migrations/test_optimizer.py",
+        "why_relevant": "它测试了 CreateModel 与 AlterModelOptions 的优化合并，这与 Issue 中 CreateModel 与 AlterModelManagers 的优化场景高度相似。",
+        "reusable_parts": [
+          "OptimizerTests 类",
+          "assertOptimizesTo 方法调用模式",
+          "migrations.CreateModel 和 migrations.AlterModelOptions 的构造方式"
+        ],
+        "possible_gap": "该测试针对的是 AlterModelOptions，而不是 AlterModelManagers。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "在相似测试中，操作序列是 [CreateModel(...), AlterModelOptions(...)]。",
+        "target_pattern": "根据 Issue，操作序列应变为 [CreateModel(...), AlterModelManagers(...)]。",
+        "reason": "将操作类型从 AlterModelOptions 替换为 AlterModelManagers，以触发针对 managers 的优化逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "CreateModel 构造时可能没有或具有默认的 managers 参数。",
+        "target_pattern": "CreateModel 构造时不指定 managers，然后在 AlterModelManagers 中指定。",
+        "reason": "模拟 Issue 描述的场景：先创建模型，再改变其 managers。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "优化器处理操作序列前后的操作列表长度和内容。",
+        "reason": "可以观察优化后是否仍然存在两个操作，或者是否被合并为一个 CreateModel。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "CreateModel.reduce 方法的返回值。",
+        "reason": "可以观察 reduce 方法是否返回了合并后的操作列表。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "优化后的操作列表应只包含一个 CreateModel 操作，且其 managers 参数与原始 AlterModelManagers 操作中的一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串相等，因为内部表示可能变化。",
+        "reason": "这直接验证了优化合并是否成功发生。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 的子类，并可能导入 migrations 模块和相关模型字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "AlterModelManagers 操作是否必须在 CreateModel 之后立即出现才能被优化。",
+      "CreateModel.reduce 方法中是否已经存在部分处理 AlterModelManagers 的逻辑但存在缺陷，还是完全缺失。",
+      "优化合并时，如果 CreateModel 已经指定了 managers 参数，与 AlterModelManagers 的冲突如何处理。"
+    ]
+  }
+}

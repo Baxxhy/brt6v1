@@ -1,0 +1,364 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11734",
+  "issue_summary": "在 exclude() 或 ~Q() 中使用 OuterRef 时，引用了错误的模型，导致 ValueError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Number 和 Item 模型，以及相关的 Tag、Category 等关联模型的数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 类并设置测试数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 Exists、OuterRef、Q 等 Django 表达式类。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_union_with_values_list_on_annotated_and_unannotated",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "该测试使用了 Number.objects.annotate(Exists(...filter(OuterRef...))) 的模式，与 Issue 中第一个正常用例结构相似，可以作为起点。",
+        "reusable_parts": [
+          "导入 Number 和 ReservedName 模型",
+          "使用 annotate(Exists(...)) 的模式",
+          "TestCase 框架"
+        ],
+        "possible_gap": "该测试只在 filter() 中使用 OuterRef，没有测试 exclude() 或 ~Q()，因此无法触发缺陷。"
+      },
+      {
+        "test_name": "Queries1Tests.test_exclude",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试直接使用了 Item.objects.exclude(...) 和 filter(~Q(...))，展示了 exclude 和 Q 对象的基本用法。",
+        "reusable_parts": [
+          "Item 模型的使用",
+          "exclude 和 Q 对象的组合",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有使用 OuterRef 或子查询，因此无法触发与 OuterRef 解析相关的缺陷。"
+      },
+      {
+        "test_name": "BasicExpressionsTests.test_nested_subquery_outer_ref_2",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试使用了嵌套的 OuterRef 和 Subquery，展示了复杂子查询的构造，与 Issue 中涉及 OuterRef 的上下文相关。",
+        "reusable_parts": [
+          "OuterRef 和 Subquery 的使用模式",
+          "使用 annotate 包装子查询",
+          "assertCountEqual 断言"
+        ],
+        "possible_gap": "该测试没有使用 exclude() 或 ~Q()，因此无法触发缺陷。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 QuerySet 的 annotate() 中使用 Exists 子查询，且子查询内部使用 exclude() 或 filter(~Q(...)) 并包含 OuterRef 引用。",
+      "evidence": [
+        "Issue 中提供的三个测试用例：第一个使用 filter() 正常，第二个使用 exclude() 崩溃，第三个使用 filter(~Q(...)) 崩溃。",
+        "Issue 描述：'OuterRef in exclude() or ~Q() uses wrong model.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 ValueError: This queryset contains a reference to an outer query and may only be used in a subquery。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：'ValueError: This queryset contains a reference to an outer query and may only be used in a subquery'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中的缺陷触发代码使用了 annotate() 方法。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.exclude",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中第二个触发缺陷的用例使用了 exclude() 方法。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中第一个正常用例和第三个缺陷用例都使用了 filter() 方法。"
+      },
+      {
+        "name": "django.db.models.expressions.Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中的测试用例使用 Exists 来包装子查询。"
+      },
+      {
+        "name": "django.db.models.expressions.OuterRef",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是 OuterRef 在特定上下文中被错误解析。"
+      },
+      {
+        "name": "django.db.models.Q",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中第三个触发缺陷的用例使用了 ~Q()。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._filter_or_exclude",
+        "lines": "",
+        "reason": "filter() 和 exclude() 都调用 _filter_or_exclude，而 exclude() 和 filter(~Q(...)) 的行为差异可能源于此方法在处理否定逻辑和 OuterRef 时的错误。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "OuterRef 的解析和子查询的构建很可能在 Query 类中完成，特别是处理 exclude 或 NOT 条件时可能错误地改变了查询的上下文。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 annotate 的 Exists 子查询中使用 filter(condition_with_OuterRef)。",
+        "target_pattern": "在 annotate 的 Exists 子查询中使用 exclude(condition_with_OuterRef) 或 filter(~Q(condition_with_OuterRef))。",
+        "reason": "Issue 表明缺陷仅在 exclude 或 filter(~Q(...)) 中触发，而 filter 正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "在子查询条件中使用正向逻辑（如 filter(tags__category_id=OuterRef('pk'))）。",
+        "target_pattern": "在子查询条件中使用否定逻辑（如 exclude(...) 或 ~Q(...)）。",
+        "reason": "缺陷与否定操作符（NOT）处理 OuterRef 的方式有关。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 exclude() 或 filter(~Q(...)) 中正确解析 OuterRef，使得包含此类子查询的 annotate() 能够正常执行，不抛出异常。",
+      "evidence": [
+        "Issue 中第一个使用 filter() 的测试用例正常工作，表明期望 exclude() 和 filter(~Q(...)) 也能类似工作。",
+        "相关测试 1 展示了在 filter() 中成功使用 OuterRef 的模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 qs.query 或打印 qs 时是否抛出 ValueError。",
+        "reason": "Issue 中观察到的直接错误是 ValueError 异常。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是子查询部分和 OuterRef 的解析。",
+        "reason": "缺陷可能导致 SQL 生成错误，例如 OuterRef 被错误地绑定到外部查询。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询执行后返回的 QuerySet 对象或结果列表。",
+        "reason": "在修复后，查询应能正常执行并返回结果，而非抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "包含 exclude 或 ~Q 的 OuterRef 子查询能够正常执行，不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的结果集，因为这些可能随实现变化。",
+        "reason": "当前缺陷表现为异常，因此初始断言可以验证不引发该异常。修复后，断言风格应转向验证查询正常执行（例如，不引发异常或返回预期结果）。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切代码位置（具体文件、函数、行号）尚不明确。",
+    "修复后，exclude() 和 filter(~Q(...)) 生成的 SQL 查询具体应如何变化。",
+    "是否还有其他类似的 API 组合（如 annotate 中使用其他聚合表达式）也会触发此缺陷。"
+  ],
+  "raw": {
+    "issue_summary": "在 exclude() 或 ~Q() 中使用 OuterRef 时，引用了错误的模型，导致 ValueError 异常。",
+    "trigger_condition": {
+      "text": "在 QuerySet 的 annotate() 中使用 Exists 子查询，且子查询内部使用 exclude() 或 filter(~Q(...)) 并包含 OuterRef 引用。",
+      "evidence": [
+        "Issue 中提供的三个测试用例：第一个使用 filter() 正常，第二个使用 exclude() 崩溃，第三个使用 filter(~Q(...)) 崩溃。",
+        "Issue 描述：'OuterRef in exclude() or ~Q() uses wrong model.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 ValueError: This queryset contains a reference to an outer query and may only be used in a subquery。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出的错误信息：'ValueError: This queryset contains a reference to an outer query and may only be used in a subquery'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 exclude() 或 filter(~Q(...)) 中正确解析 OuterRef，使得包含此类子查询的 annotate() 能够正常执行，不抛出异常。",
+      "evidence": [
+        "Issue 中第一个使用 filter() 的测试用例正常工作，表明期望 exclude() 和 filter(~Q(...)) 也能类似工作。",
+        "相关测试 1 展示了在 filter() 中成功使用 OuterRef 的模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中的缺陷触发代码使用了 annotate() 方法。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.exclude",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中第二个触发缺陷的用例使用了 exclude() 方法。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中第一个正常用例和第三个缺陷用例都使用了 filter() 方法。"
+      },
+      {
+        "name": "django.db.models.expressions.Exists",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 中的测试用例使用 Exists 来包装子查询。"
+      },
+      {
+        "name": "django.db.models.expressions.OuterRef",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是 OuterRef 在特定上下文中被错误解析。"
+      },
+      {
+        "name": "django.db.models.Q",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中第三个触发缺陷的用例使用了 ~Q()。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._filter_or_exclude",
+        "lines": "",
+        "reason": "filter() 和 exclude() 都调用 _filter_or_exclude，而 exclude() 和 filter(~Q(...)) 的行为差异可能源于此方法在处理否定逻辑和 OuterRef 时的错误。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "OuterRef 的解析和子查询的构建很可能在 Query 类中完成，特别是处理 exclude 或 NOT 条件时可能错误地改变了查询的上下文。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_union_with_values_list_on_annotated_and_unannotated",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "该测试使用了 Number.objects.annotate(Exists(...filter(OuterRef...))) 的模式，与 Issue 中第一个正常用例结构相似，可以作为起点。",
+        "reusable_parts": [
+          "导入 Number 和 ReservedName 模型",
+          "使用 annotate(Exists(...)) 的模式",
+          "TestCase 框架"
+        ],
+        "possible_gap": "该测试只在 filter() 中使用 OuterRef，没有测试 exclude() 或 ~Q()，因此无法触发缺陷。"
+      },
+      {
+        "test_name": "Queries1Tests.test_exclude",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试直接使用了 Item.objects.exclude(...) 和 filter(~Q(...))，展示了 exclude 和 Q 对象的基本用法。",
+        "reusable_parts": [
+          "Item 模型的使用",
+          "exclude 和 Q 对象的组合",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有使用 OuterRef 或子查询，因此无法触发与 OuterRef 解析相关的缺陷。"
+      },
+      {
+        "test_name": "BasicExpressionsTests.test_nested_subquery_outer_ref_2",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "该测试使用了嵌套的 OuterRef 和 Subquery，展示了复杂子查询的构造，与 Issue 中涉及 OuterRef 的上下文相关。",
+        "reusable_parts": [
+          "OuterRef 和 Subquery 的使用模式",
+          "使用 annotate 包装子查询",
+          "assertCountEqual 断言"
+        ],
+        "possible_gap": "该测试没有使用 exclude() 或 ~Q()，因此无法触发缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 annotate 的 Exists 子查询中使用 filter(condition_with_OuterRef)。",
+        "target_pattern": "在 annotate 的 Exists 子查询中使用 exclude(condition_with_OuterRef) 或 filter(~Q(condition_with_OuterRef))。",
+        "reason": "Issue 表明缺陷仅在 exclude 或 filter(~Q(...)) 中触发，而 filter 正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "operator",
+        "current_pattern": "在子查询条件中使用正向逻辑（如 filter(tags__category_id=OuterRef('pk'))）。",
+        "target_pattern": "在子查询条件中使用否定逻辑（如 exclude(...) 或 ~Q(...)）。",
+        "reason": "缺陷与否定操作符（NOT）处理 OuterRef 的方式有关。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行 qs.query 或打印 qs 时是否抛出 ValueError。",
+        "reason": "Issue 中观察到的直接错误是 ValueError 异常。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是子查询部分和 OuterRef 的解析。",
+        "reason": "缺陷可能导致 SQL 生成错误，例如 OuterRef 被错误地绑定到外部查询。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "查询执行后返回的 QuerySet 对象或结果列表。",
+        "reason": "在修复后，查询应能正常执行并返回结果，而非抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "包含 exclude 或 ~Q 的 OuterRef 子查询能够正常执行，不抛出 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的结果集，因为这些可能随实现变化。",
+        "reason": "当前缺陷表现为异常，因此初始断言可以验证不引发该异常。修复后，断言风格应转向验证查询正常执行（例如，不引发异常或返回预期结果）。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Number 和 Item 模型，以及相关的 Tag、Category 等关联模型的数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 类并设置测试数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 Exists、OuterRef、Q 等 Django 表达式类。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切代码位置（具体文件、函数、行号）尚不明确。",
+      "修复后，exclude() 和 filter(~Q(...)) 生成的 SQL 查询具体应如何变化。",
+      "是否还有其他类似的 API 组合（如 annotate 中使用其他聚合表达式）也会触发此缺陷。"
+    ]
+  }
+}

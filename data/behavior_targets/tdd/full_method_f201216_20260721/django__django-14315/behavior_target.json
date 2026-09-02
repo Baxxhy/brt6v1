@@ -1,0 +1,272 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14315",
+  "issue_summary": "PostgreSQL 数据库客户端 runshell 方法在某些情况下未正确使用 os.environ 环境变量，导致传递给子进程的环境变量为空。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要创建 DatabaseClient 实例，并配置其连接设置（如 NAME, USER, HOST, PORT, OPTIONS）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要 mock 或监视 subprocess.Popen 或相关调用，以捕获其 env 参数。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_crash_password_does_not_leak",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "该测试直接调用了 subprocess.run 并处理了 env 参数，展示了如何构建和传递环境变量给子进程，与 Issue 核心问题（env 传递）高度相关。",
+        "reusable_parts": [
+          "PostgreSqlDbshellCommandTestCase 类",
+          "settings_to_cmd_args_env 方法调用",
+          "subprocess.run 调用模式",
+          "assertRaises 和 assertNotIn 断言风格"
+        ],
+        "possible_gap": "该测试主要关注密码泄露，其 env 构建逻辑（if env: env = {**os.environ, **env}）可能位于测试代码中，而非被测的 runshell 方法内部。因此，它可能没有直接触发 runshell 内部的环境变量处理缺陷。"
+      },
+      {
+        "test_name": "test_passfile",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "该测试验证了 settings_to_cmd_args_env 能正确生成包含环境变量（如 PGPASSFILE）的字典，这直接关系到 runshell 方法应接收和使用的 env 数据。",
+        "reusable_parts": [
+          "settings_to_cmd_args_env 的调用方式",
+          "对返回的 (args, env) 元组的断言模式"
+        ],
+        "possible_gap": "该测试只验证了 settings_to_cmd_args_env 的返回值，没有实际调用 runshell 方法并观察其如何将 env 传递给子进程。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 PostgreSQL DatabaseClient 的 runshell 方法时，可能涉及环境变量传递的场景。",
+      "evidence": [
+        "Issue 描述指出 'os.environ is not used and empty env passed to subprocess'",
+        "相关测试（如 test_passfile）展示了通过 settings_to_cmd_args_env 生成环境变量字典 env 的场景。"
+      ],
+      "confidence": "medium"
+    },
+    "error_symptom": {
+      "text": "传递给子进程的环境变量字典为空，而不是包含 os.environ 或预期环境变量的字典。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'postgresql client returns empty dict instead of None for env' 和 'empty env passed to subprocess'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DatabaseClient.runshell",
+        "kind": "method",
+        "source_path": "django/db/backends/postgresql/client.py",
+        "reason": "Issue 直接针对此方法，描述其未正确处理环境变量。"
+      },
+      {
+        "name": "PostgreSqlDbshellCommandTestCase.settings_to_cmd_args_env",
+        "kind": "method",
+        "source_path": "tests/dbshell/test_postgresql.py",
+        "reason": "相关测试使用此方法生成 runshell 的参数和环境变量，是构造触发条件的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/postgresql/client.py",
+        "object": "DatabaseClient.runshell",
+        "lines": "56-64",
+        "reason": "Issue 引用的源码片段 1 正是 runshell 方法，且 Issue 提到 bug 是在特定 commit 中引入的。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试通过 settings_to_cmd_args_env 生成 env 字典，并在测试代码中手动与 os.environ 合并（如 test_crash_password_does_not_leak）。",
+        "target_pattern": "构造一个场景，使得 runshell 方法内部（或其父类方法）在调用 super().runshell(parameters) 时，传递给子进程的 env 参数是空字典 {} 或 None，而不是合并了 os.environ 的字典。",
+        "reason": "Issue 指出 runshell 返回空字典导致 os.environ 未被使用。需要变异测试，使其不依赖测试代码中的手动合并，而是直接考察 runshell 方法内部的环境变量处理逻辑。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 settings_to_cmd_args_env 并断言其返回值，或使用生成的 args/env 调用 subprocess.run。",
+        "target_pattern": "测试应通过 DatabaseClient 实例直接调用 runshell 方法，并观测其内部对 env 的处理和传递。",
+        "reason": "缺陷位于 runshell 方法内部，需要直接调用它来触发路径，而不是仅测试其前置工具函数。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "runshell 方法应正确地将 os.environ 与数据库特定环境变量合并，并将完整的环境变量字典传递给子进程。",
+      "evidence": [
+        "Issue 描述暗示 env 不应为空，应使用 os.environ。",
+        "相关测试 test_crash_password_does_not_leak 中的代码片段 'if env: env = {**os.environ, **env}' 展示了合并环境变量的预期模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "在调用 runshell 或其父类方法前后，观察传递给 subprocess.Popen 或类似调用的 env 参数的值。",
+        "reason": "Issue 的核心是 env 参数为空，观测此值可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观测 os.environ 的内容与最终传递给子进程的环境字典之间的关系（是合并、覆盖还是被忽略）。",
+        "reason": "Issue 明确指出 os.environ 未被使用，需要验证环境变量传递链。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言传递给子进程的环境变量字典包含 os.environ 中的项（或至少不为空）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的环境字典完全等于某个特定值，因为 os.environ 因系统而异。",
+        "reason": "Issue 的期望是 os.environ 被使用，因此断言环境字典包含已知的系统环境变量（如 'PATH'）是稳定且与 Issue 对齐的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "runshell 方法内部或其父类 super().runshell 具体是如何处理 env 参数的？是直接传递了空字典，还是错误地处理了 None 值？",
+    "触发缺陷的确切配置组合是什么？是否所有调用 runshell 的情况都会触发，还是需要特定设置（如使用 OPTIONS 中的某些字段）？",
+    "父类 DatabaseClient.runshell 的默认实现是什么？它期望接收什么样的 env 参数？"
+  ],
+  "raw": {
+    "issue_summary": "PostgreSQL 数据库客户端 runshell 方法在某些情况下未正确使用 os.environ 环境变量，导致传递给子进程的环境变量为空。",
+    "trigger_condition": {
+      "text": "调用 PostgreSQL DatabaseClient 的 runshell 方法时，可能涉及环境变量传递的场景。",
+      "evidence": [
+        "Issue 描述指出 'os.environ is not used and empty env passed to subprocess'",
+        "相关测试（如 test_passfile）展示了通过 settings_to_cmd_args_env 生成环境变量字典 env 的场景。"
+      ],
+      "confidence": "medium"
+    },
+    "error_symptom": {
+      "text": "传递给子进程的环境变量字典为空，而不是包含 os.environ 或预期环境变量的字典。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'postgresql client returns empty dict instead of None for env' 和 'empty env passed to subprocess'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "runshell 方法应正确地将 os.environ 与数据库特定环境变量合并，并将完整的环境变量字典传递给子进程。",
+      "evidence": [
+        "Issue 描述暗示 env 不应为空，应使用 os.environ。",
+        "相关测试 test_crash_password_does_not_leak 中的代码片段 'if env: env = {**os.environ, **env}' 展示了合并环境变量的预期模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DatabaseClient.runshell",
+        "kind": "method",
+        "source_path": "django/db/backends/postgresql/client.py",
+        "reason": "Issue 直接针对此方法，描述其未正确处理环境变量。"
+      },
+      {
+        "name": "PostgreSqlDbshellCommandTestCase.settings_to_cmd_args_env",
+        "kind": "method",
+        "source_path": "tests/dbshell/test_postgresql.py",
+        "reason": "相关测试使用此方法生成 runshell 的参数和环境变量，是构造触发条件的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/postgresql/client.py",
+        "object": "DatabaseClient.runshell",
+        "lines": "56-64",
+        "reason": "Issue 引用的源码片段 1 正是 runshell 方法，且 Issue 提到 bug 是在特定 commit 中引入的。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_crash_password_does_not_leak",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "该测试直接调用了 subprocess.run 并处理了 env 参数，展示了如何构建和传递环境变量给子进程，与 Issue 核心问题（env 传递）高度相关。",
+        "reusable_parts": [
+          "PostgreSqlDbshellCommandTestCase 类",
+          "settings_to_cmd_args_env 方法调用",
+          "subprocess.run 调用模式",
+          "assertRaises 和 assertNotIn 断言风格"
+        ],
+        "possible_gap": "该测试主要关注密码泄露，其 env 构建逻辑（if env: env = {**os.environ, **env}）可能位于测试代码中，而非被测的 runshell 方法内部。因此，它可能没有直接触发 runshell 内部的环境变量处理缺陷。"
+      },
+      {
+        "test_name": "test_passfile",
+        "test_file": "tests/dbshell/test_postgresql.py",
+        "why_relevant": "该测试验证了 settings_to_cmd_args_env 能正确生成包含环境变量（如 PGPASSFILE）的字典，这直接关系到 runshell 方法应接收和使用的 env 数据。",
+        "reusable_parts": [
+          "settings_to_cmd_args_env 的调用方式",
+          "对返回的 (args, env) 元组的断言模式"
+        ],
+        "possible_gap": "该测试只验证了 settings_to_cmd_args_env 的返回值，没有实际调用 runshell 方法并观察其如何将 env 传递给子进程。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试通过 settings_to_cmd_args_env 生成 env 字典，并在测试代码中手动与 os.environ 合并（如 test_crash_password_does_not_leak）。",
+        "target_pattern": "构造一个场景，使得 runshell 方法内部（或其父类方法）在调用 super().runshell(parameters) 时，传递给子进程的 env 参数是空字典 {} 或 None，而不是合并了 os.environ 的字典。",
+        "reason": "Issue 指出 runshell 返回空字典导致 os.environ 未被使用。需要变异测试，使其不依赖测试代码中的手动合并，而是直接考察 runshell 方法内部的环境变量处理逻辑。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 settings_to_cmd_args_env 并断言其返回值，或使用生成的 args/env 调用 subprocess.run。",
+        "target_pattern": "测试应通过 DatabaseClient 实例直接调用 runshell 方法，并观测其内部对 env 的处理和传递。",
+        "reason": "缺陷位于 runshell 方法内部，需要直接调用它来触发路径，而不是仅测试其前置工具函数。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "在调用 runshell 或其父类方法前后，观察传递给 subprocess.Popen 或类似调用的 env 参数的值。",
+        "reason": "Issue 的核心是 env 参数为空，观测此值可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观测 os.environ 的内容与最终传递给子进程的环境字典之间的关系（是合并、覆盖还是被忽略）。",
+        "reason": "Issue 明确指出 os.environ 未被使用，需要验证环境变量传递链。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言传递给子进程的环境变量字典包含 os.environ 中的项（或至少不为空）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的环境字典完全等于某个特定值，因为 os.environ 因系统而异。",
+        "reason": "Issue 的期望是 os.environ 被使用，因此断言环境字典包含已知的系统环境变量（如 'PATH'）是稳定且与 Issue 对齐的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要创建 DatabaseClient 实例，并配置其连接设置（如 NAME, USER, HOST, PORT, OPTIONS）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要 mock 或监视 subprocess.Popen 或相关调用，以捕获其 env 参数。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "runshell 方法内部或其父类 super().runshell 具体是如何处理 env 参数的？是直接传递了空字典，还是错误地处理了 None 值？",
+      "触发缺陷的确切配置组合是什么？是否所有调用 runshell 的情况都会触发，还是需要特定设置（如使用 OPTIONS 中的某些字段）？",
+      "父类 DatabaseClient.runshell 的默认实现是什么？它期望接收什么样的 env 参数？"
+    ]
+  }
+}

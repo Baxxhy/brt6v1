@@ -1,0 +1,300 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-9296",
+  "issue_summary": "Paginator 类缺少 __iter__ 方法，导致无法直接使用 Python 的 for 循环迭代所有页面。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个 Paginator 对象，可以传入简单的列表（如 [1,2,3]）和每页数量。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PaginationTests.test_paginator",
+        "test_file": "tests/pagination/tests.py",
+        "why_relevant": "该测试广泛测试了 Paginator 的构造和各种属性（包括 page_range），是测试 Paginator 核心功能的主要测试。",
+        "reusable_parts": [
+          "Paginator 对象的构造方式（如 Paginator([1,2,3], 2)）",
+          "对 paginator.count, paginator.num_pages, paginator.page_range 的断言风格"
+        ],
+        "possible_gap": "该测试没有尝试直接迭代 Paginator 对象，也没有检查 Paginator 是否可迭代。"
+      },
+      {
+        "test_name": "PaginationTests.test_page_range_iterator",
+        "test_file": "tests/pagination/tests.py",
+        "why_relevant": "该测试专门检查 page_range 属性的类型，与迭代功能间接相关。",
+        "reusable_parts": [
+          "Paginator 对象的简单构造",
+          "使用 assertIsInstance 进行类型检查的风格"
+        ],
+        "possible_gap": "该测试关注的是 page_range 属性本身，而不是 Paginator 对象的可迭代性。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "尝试在 for 循环中直接迭代一个 Paginator 对象，例如 `for page in paginator:`。",
+      "evidence": [
+        "Issue 描述中提到“when you want to iter into all the pages of a Paginator object you to use the page_range function. It would be more logical and naturel to use the normal python of doing that by implementing the iter function”。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Paginator 对象不可迭代，导致 TypeError 或需要绕道使用 page_range 属性。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述暗示当前无法使用“normal python”方式（即 for 循环）迭代 Paginator 对象，必须使用 page_range 函数。这通常意味着对象缺少 __iter__ 方法，在 for 循环中会引发 TypeError。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Paginator.__iter__",
+        "kind": "method",
+        "source_path": "django/core/paginator.py",
+        "reason": "Issue 的核心诉求是为 Paginator 类添加此方法以实现迭代功能。"
+      },
+      {
+        "name": "Paginator.page_range",
+        "kind": "method",
+        "source_path": "django/core/paginator.py",
+        "reason": "Issue 中提到的当前迭代方式，也是建议的 __iter__ 实现中需要调用的方法。"
+      },
+      {
+        "name": "Paginator.page",
+        "kind": "method",
+        "source_path": "django/core/paginator.py",
+        "reason": "建议的 __iter__ 实现中需要调用此方法来生成 Page 对象。"
+      },
+      {
+        "name": "Paginator",
+        "kind": "class",
+        "source_path": "django/core/paginator.py",
+        "reason": "需要被修改以支持迭代功能的目标类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/paginator.py",
+        "object": "Paginator",
+        "lines": "27-125",
+        "reason": "Issue 明确指出 Paginator 类缺少 __iter__ 方法。检索出的源码片段 1 显示了 Paginator 类的结构，其中确实没有 __iter__ 方法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中，通过 `list(paginator.page_range)` 获取页码列表，然后可能再调用 `paginator.page(num)`。",
+        "target_pattern": "在测试中，直接对 Paginator 对象使用 for 循环或 iter() 函数，例如 `for page in paginator:` 或 `list(paginator)`。",
+        "reason": "Issue 的核心是希望用更“Pythonic”的方式（直接迭代对象）替代当前需要显式调用 page_range 的方式。这个变异将测试从使用现有接口切换到尝试使用缺失的接口。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中构造 Paginator 对象后，主要检查其属性（count, num_pages, page_range）或通过 page() 方法获取特定页面。",
+        "target_pattern": "测试中构造 Paginator 对象后，尝试将其视为一个可迭代对象，检查其迭代行为。",
+        "reason": "将测试的关注点从 Paginator 的静态属性转移到其动态的迭代行为上，这是触发缺失 __iter__ 方法的关键。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Paginator 对象应实现 __iter__ 方法，使其可以直接在 for 循环中迭代，每次迭代返回一个 Page 对象。",
+      "evidence": [
+        "Issue 描述中给出了建议的 __iter__ 方法实现：“def __iter__(self): for page_num in self.page_range: yield self.page(page_num)”。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "尝试迭代 Paginator 对象时是否引发 TypeError（例如 'Paginator' object is not iterable）。",
+        "reason": "如果 __iter__ 方法缺失，直接迭代对象会引发 TypeError。这是最直接的错误信号。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "对 Paginator 对象调用 iter() 或使用 for 循环时产生的迭代器及其产生的值（应为 Page 对象）。",
+        "reason": "修复后，迭代应能正常进行，并产生一系列 Page 对象。可以观察迭代器的类型和每次迭代返回的对象类型及内容。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(iter(paginator)) 的结果。",
+        "reason": "可以判断 iter(paginator) 返回的是否是一个合法的迭代器。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Paginator 对象是可迭代的，并且迭代产生的序列与通过 page_range 和 page() 方法手动获取的页面序列一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或过于具体的内部状态。避免断言迭代器本身的类型为某个具体类（如 generator），只需断言它是可迭代的/是迭代器。",
+        "reason": "核心语义是迭代结果应与现有逻辑（page_range + page）的结果一致。使用 equals 比较两个序列（如 list(paginator) 和 [paginator.page(i) for i in paginator.page_range]）是稳定且直接的验证方式。"
+      },
+      {
+        "assertion_goal": "验证对 Paginator 对象调用 iter() 不会引发 TypeError。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言具体的异常消息字符串，因为消息可能因 Python 版本或环境而异。",
+        "reason": "更稳健的断言是确保没有引发 TypeError，或者使用 assertIsInstance(iter(paginator), collections.abc.Iterator)。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 描述中提到的错误在尝试迭代时具体会引发什么异常（TypeError 及其确切消息）？",
+    "修复后，__iter__ 方法是否完全按照 Issue 中的建议实现？是否有其他边界情况（如空列表、单页情况）需要考虑？",
+    "现有的 page_range 属性返回的是 range 对象，在 __iter__ 实现中直接使用它进行迭代是否在所有情况下都正确？"
+  ],
+  "raw": {
+    "issue_summary": "Paginator 类缺少 __iter__ 方法，导致无法直接使用 Python 的 for 循环迭代所有页面。",
+    "trigger_condition": {
+      "text": "尝试在 for 循环中直接迭代一个 Paginator 对象，例如 `for page in paginator:`。",
+      "evidence": [
+        "Issue 描述中提到“when you want to iter into all the pages of a Paginator object you to use the page_range function. It would be more logical and naturel to use the normal python of doing that by implementing the iter function”。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Paginator 对象不可迭代，导致 TypeError 或需要绕道使用 page_range 属性。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述暗示当前无法使用“normal python”方式（即 for 循环）迭代 Paginator 对象，必须使用 page_range 函数。这通常意味着对象缺少 __iter__ 方法，在 for 循环中会引发 TypeError。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "Paginator 对象应实现 __iter__ 方法，使其可以直接在 for 循环中迭代，每次迭代返回一个 Page 对象。",
+      "evidence": [
+        "Issue 描述中给出了建议的 __iter__ 方法实现：“def __iter__(self): for page_num in self.page_range: yield self.page(page_num)”。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Paginator.__iter__",
+        "kind": "method",
+        "source_path": "django/core/paginator.py",
+        "reason": "Issue 的核心诉求是为 Paginator 类添加此方法以实现迭代功能。"
+      },
+      {
+        "name": "Paginator.page_range",
+        "kind": "method",
+        "source_path": "django/core/paginator.py",
+        "reason": "Issue 中提到的当前迭代方式，也是建议的 __iter__ 实现中需要调用的方法。"
+      },
+      {
+        "name": "Paginator.page",
+        "kind": "method",
+        "source_path": "django/core/paginator.py",
+        "reason": "建议的 __iter__ 实现中需要调用此方法来生成 Page 对象。"
+      },
+      {
+        "name": "Paginator",
+        "kind": "class",
+        "source_path": "django/core/paginator.py",
+        "reason": "需要被修改以支持迭代功能的目标类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/paginator.py",
+        "object": "Paginator",
+        "lines": "27-125",
+        "reason": "Issue 明确指出 Paginator 类缺少 __iter__ 方法。检索出的源码片段 1 显示了 Paginator 类的结构，其中确实没有 __iter__ 方法。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PaginationTests.test_paginator",
+        "test_file": "tests/pagination/tests.py",
+        "why_relevant": "该测试广泛测试了 Paginator 的构造和各种属性（包括 page_range），是测试 Paginator 核心功能的主要测试。",
+        "reusable_parts": [
+          "Paginator 对象的构造方式（如 Paginator([1,2,3], 2)）",
+          "对 paginator.count, paginator.num_pages, paginator.page_range 的断言风格"
+        ],
+        "possible_gap": "该测试没有尝试直接迭代 Paginator 对象，也没有检查 Paginator 是否可迭代。"
+      },
+      {
+        "test_name": "PaginationTests.test_page_range_iterator",
+        "test_file": "tests/pagination/tests.py",
+        "why_relevant": "该测试专门检查 page_range 属性的类型，与迭代功能间接相关。",
+        "reusable_parts": [
+          "Paginator 对象的简单构造",
+          "使用 assertIsInstance 进行类型检查的风格"
+        ],
+        "possible_gap": "该测试关注的是 page_range 属性本身，而不是 Paginator 对象的可迭代性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中，通过 `list(paginator.page_range)` 获取页码列表，然后可能再调用 `paginator.page(num)`。",
+        "target_pattern": "在测试中，直接对 Paginator 对象使用 for 循环或 iter() 函数，例如 `for page in paginator:` 或 `list(paginator)`。",
+        "reason": "Issue 的核心是希望用更“Pythonic”的方式（直接迭代对象）替代当前需要显式调用 page_range 的方式。这个变异将测试从使用现有接口切换到尝试使用缺失的接口。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中构造 Paginator 对象后，主要检查其属性（count, num_pages, page_range）或通过 page() 方法获取特定页面。",
+        "target_pattern": "测试中构造 Paginator 对象后，尝试将其视为一个可迭代对象，检查其迭代行为。",
+        "reason": "将测试的关注点从 Paginator 的静态属性转移到其动态的迭代行为上，这是触发缺失 __iter__ 方法的关键。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "尝试迭代 Paginator 对象时是否引发 TypeError（例如 'Paginator' object is not iterable）。",
+        "reason": "如果 __iter__ 方法缺失，直接迭代对象会引发 TypeError。这是最直接的错误信号。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "对 Paginator 对象调用 iter() 或使用 for 循环时产生的迭代器及其产生的值（应为 Page 对象）。",
+        "reason": "修复后，迭代应能正常进行，并产生一系列 Page 对象。可以观察迭代器的类型和每次迭代返回的对象类型及内容。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(iter(paginator)) 的结果。",
+        "reason": "可以判断 iter(paginator) 返回的是否是一个合法的迭代器。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 Paginator 对象是可迭代的，并且迭代产生的序列与通过 page_range 和 page() 方法手动获取的页面序列一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 字符串或过于具体的内部状态。避免断言迭代器本身的类型为某个具体类（如 generator），只需断言它是可迭代的/是迭代器。",
+        "reason": "核心语义是迭代结果应与现有逻辑（page_range + page）的结果一致。使用 equals 比较两个序列（如 list(paginator) 和 [paginator.page(i) for i in paginator.page_range]）是稳定且直接的验证方式。"
+      },
+      {
+        "assertion_goal": "验证对 Paginator 对象调用 iter() 不会引发 TypeError。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言具体的异常消息字符串，因为消息可能因 Python 版本或环境而异。",
+        "reason": "更稳健的断言是确保没有引发 TypeError，或者使用 assertIsInstance(iter(paginator), collections.abc.Iterator)。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个 Paginator 对象，可以传入简单的列表（如 [1,2,3]）和每页数量。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 描述中提到的错误在尝试迭代时具体会引发什么异常（TypeError 及其确切消息）？",
+      "修复后，__iter__ 方法是否完全按照 Issue 中的建议实现？是否有其他边界情况（如空列表、单页情况）需要考虑？",
+      "现有的 page_range 属性返回的是 range 对象，在 __iter__ 实现中直接使用它进行迭代是否在所有情况下都正确？"
+    ]
+  }
+}

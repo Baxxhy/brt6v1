@@ -1,0 +1,302 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pallets__flask-5063",
+  "issue_summary": "flask routes 命令输出未显示路由对应的子域名信息。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 app fixture 和 invoke fixture（或类似机制）来运行 flask routes 命令。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 app.config['SERVER_NAME'] 并注册多个带有不同 subdomain 参数的 Blueprint。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRoutes.test_simple",
+        "test_file": "tests/test_cli.py",
+        "why_relevant": "它直接测试了 flask routes 命令的基本输出，是验证输出格式的起点。",
+        "reusable_parts": [
+          "invoke fixture 的调用方式",
+          "对命令退出码和输出内容的断言风格"
+        ],
+        "possible_gap": "该测试没有设置 SERVER_NAME 或注册带子域名的蓝图，因此无法触发 Issue 描述的问题。"
+      },
+      {
+        "test_name": "test_nesting_subdomains",
+        "test_file": "tests/test_blueprints.py",
+        "why_relevant": "它展示了如何配置 SERVER_NAME 和注册带子域名的蓝图，并验证了子域名路由的访问。",
+        "reusable_parts": [
+          "app.config['SERVER_NAME'] 的设置",
+          "app.register_blueprint 与 subdomain 参数的使用",
+          "client 访问子域名 URL 的方式"
+        ],
+        "possible_gap": "该测试关注的是 HTTP 请求的响应，而不是 flask routes 命令的输出。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "配置 SERVER_NAME 并注册了带有 subdomain 参数的蓝图后，运行 flask routes 命令。",
+      "evidence": [
+        "Issue 中描述了 SERVER_NAME 配置为 'test.local'，并注册了 subdomain='admin' 和 subdomain='test' 的蓝图。",
+        "Issue 中展示了运行 flask routes 命令的输出。",
+        "相关测试 test_nesting_subdomains 和 test_child_and_parent_subdomain 展示了如何配置 SERVER_NAME 和注册带子域名的蓝图。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "flask routes 命令的输出表格缺少一个 'Domain' 列来显示每个路由对应的完整子域名（例如 admin.test.local）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中展示了当前 flask routes 的输出，其中没有 'Domain' 列。",
+        "Issue 中展示了期望的输出，其中包含 'Domain' 列，例如 'admin.test.local'。",
+        "相关测试 TestRoutes.test_simple 和 TestRoutes.test_sort 验证了 routes 命令的输出，但未检查子域名信息。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "flask.cli.routes_command",
+        "kind": "function",
+        "source_path": "src/flask/cli.py",
+        "reason": "这是处理 flask routes 命令的入口点，负责生成路由表输出。"
+      },
+      {
+        "name": "Flask.register_blueprint",
+        "kind": "method",
+        "source_path": "src/flask/app.py",
+        "reason": "Issue 中通过此方法注册带有子域名的蓝图，这是路由与子域名关联的关键。"
+      },
+      {
+        "name": "app.url_map.iter_rules",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 TestRoutes.test_sort 使用了此方法来获取路由规则，可能是 routes 命令内部用于收集路由信息的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/flask/cli.py",
+        "object": "routes_command",
+        "lines": "",
+        "reason": "该函数负责生成 flask routes 命令的输出，当前输出缺少子域名信息，可能在此处需要修改以添加 'Domain' 列。"
+      },
+      {
+        "path": "src/flask/blueprints.py",
+        "object": "BlueprintSetupState",
+        "lines": "",
+        "reason": "蓝图注册时处理子域名信息，可能影响最终路由规则的表示。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能没有设置 SERVER_NAME 或注册带子域名的蓝图。",
+        "target_pattern": "在测试中设置 app.config['SERVER_NAME'] 并注册多个带有不同 subdomain 参数的蓝图。",
+        "reason": "Issue 表明，只有当配置了 SERVER_NAME 并注册了带子域名的蓝图时，flask routes 的输出才缺少子域名信息。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能只调用 invoke(['routes']) 并检查输出顺序。",
+        "target_pattern": "调用 invoke(['routes']) 后，检查输出中是否包含子域名列（例如 'Domain'）以及完整的子域名值（如 'admin.test.local'）。",
+        "reason": "Issue 的核心是输出格式缺失信息，需要变异断言目标以检查新列的存在和内容。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "flask routes 命令的输出应包含一个 'Domain' 列，清晰地显示每个路由对应的完整子域名（例如 admin.test.local）。",
+      "evidence": [
+        "Issue 中用户请求了此功能，并给出了期望的输出示例，其中包含 'Domain' 列。",
+        "相关测试 TestRoutes.test_simple 和 TestRoutes.test_sort 表明 routes 命令支持输出排序和验证，暗示输出格式是可扩展的。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "invoke(['routes']).output 的字符串内容。",
+        "reason": "Issue 的错误现象直接体现在命令输出的文本内容中，观察输出是否包含 'Domain' 列和正确的子域名值是关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "app.url_map 中每个 Rule 对象的 subdomain 属性。",
+        "reason": "路由规则对象内部应存储子域名信息，观察其值有助于理解输出生成时是否使用了该信息。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "flask routes 命令的输出应包含一个标题为 'Domain' 的列。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、格式严格的输出字符串，因为列宽、空格等可能变化。",
+        "reason": "Issue 要求添加新列，断言列标题的存在是稳定且与需求对齐的。"
+      },
+      {
+        "assertion_goal": "对于注册了子域名 'admin' 且 SERVER_NAME 为 'test.local' 的蓝图，其路由在输出中对应的 Domain 值应为 'admin.test.local'。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言输出中行的精确位置或完整行的字符串相等。",
+        "reason": "断言输出中包含预期的完整子域名片段，可以稳定地验证功能是否正确实现，而不依赖于输出的精确排版。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "flask routes 命令内部具体是如何收集和格式化路由信息的，特别是子域名信息是如何从 Rule 对象提取的。",
+    "当蓝图未指定子域名或 SERVER_NAME 未设置时，期望的 'Domain' 列应该显示什么内容（例如空值或 'test.local'）。",
+    "输出表格的列顺序和格式在添加新列后是否还有其他约束或变化。"
+  ],
+  "raw": {
+    "issue_summary": "flask routes 命令输出未显示路由对应的子域名信息。",
+    "trigger_condition": {
+      "text": "配置 SERVER_NAME 并注册了带有 subdomain 参数的蓝图后，运行 flask routes 命令。",
+      "evidence": [
+        "Issue 中描述了 SERVER_NAME 配置为 'test.local'，并注册了 subdomain='admin' 和 subdomain='test' 的蓝图。",
+        "Issue 中展示了运行 flask routes 命令的输出。",
+        "相关测试 test_nesting_subdomains 和 test_child_and_parent_subdomain 展示了如何配置 SERVER_NAME 和注册带子域名的蓝图。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "flask routes 命令的输出表格缺少一个 'Domain' 列来显示每个路由对应的完整子域名（例如 admin.test.local）。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中展示了当前 flask routes 的输出，其中没有 'Domain' 列。",
+        "Issue 中展示了期望的输出，其中包含 'Domain' 列，例如 'admin.test.local'。",
+        "相关测试 TestRoutes.test_simple 和 TestRoutes.test_sort 验证了 routes 命令的输出，但未检查子域名信息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "flask routes 命令的输出应包含一个 'Domain' 列，清晰地显示每个路由对应的完整子域名（例如 admin.test.local）。",
+      "evidence": [
+        "Issue 中用户请求了此功能，并给出了期望的输出示例，其中包含 'Domain' 列。",
+        "相关测试 TestRoutes.test_simple 和 TestRoutes.test_sort 表明 routes 命令支持输出排序和验证，暗示输出格式是可扩展的。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "flask.cli.routes_command",
+        "kind": "function",
+        "source_path": "src/flask/cli.py",
+        "reason": "这是处理 flask routes 命令的入口点，负责生成路由表输出。"
+      },
+      {
+        "name": "Flask.register_blueprint",
+        "kind": "method",
+        "source_path": "src/flask/app.py",
+        "reason": "Issue 中通过此方法注册带有子域名的蓝图，这是路由与子域名关联的关键。"
+      },
+      {
+        "name": "app.url_map.iter_rules",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 TestRoutes.test_sort 使用了此方法来获取路由规则，可能是 routes 命令内部用于收集路由信息的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/flask/cli.py",
+        "object": "routes_command",
+        "lines": "",
+        "reason": "该函数负责生成 flask routes 命令的输出，当前输出缺少子域名信息，可能在此处需要修改以添加 'Domain' 列。"
+      },
+      {
+        "path": "src/flask/blueprints.py",
+        "object": "BlueprintSetupState",
+        "lines": "",
+        "reason": "蓝图注册时处理子域名信息，可能影响最终路由规则的表示。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestRoutes.test_simple",
+        "test_file": "tests/test_cli.py",
+        "why_relevant": "它直接测试了 flask routes 命令的基本输出，是验证输出格式的起点。",
+        "reusable_parts": [
+          "invoke fixture 的调用方式",
+          "对命令退出码和输出内容的断言风格"
+        ],
+        "possible_gap": "该测试没有设置 SERVER_NAME 或注册带子域名的蓝图，因此无法触发 Issue 描述的问题。"
+      },
+      {
+        "test_name": "test_nesting_subdomains",
+        "test_file": "tests/test_blueprints.py",
+        "why_relevant": "它展示了如何配置 SERVER_NAME 和注册带子域名的蓝图，并验证了子域名路由的访问。",
+        "reusable_parts": [
+          "app.config['SERVER_NAME'] 的设置",
+          "app.register_blueprint 与 subdomain 参数的使用",
+          "client 访问子域名 URL 的方式"
+        ],
+        "possible_gap": "该测试关注的是 HTTP 请求的响应，而不是 flask routes 命令的输出。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能没有设置 SERVER_NAME 或注册带子域名的蓝图。",
+        "target_pattern": "在测试中设置 app.config['SERVER_NAME'] 并注册多个带有不同 subdomain 参数的蓝图。",
+        "reason": "Issue 表明，只有当配置了 SERVER_NAME 并注册了带子域名的蓝图时，flask routes 的输出才缺少子域名信息。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能只调用 invoke(['routes']) 并检查输出顺序。",
+        "target_pattern": "调用 invoke(['routes']) 后，检查输出中是否包含子域名列（例如 'Domain'）以及完整的子域名值（如 'admin.test.local'）。",
+        "reason": "Issue 的核心是输出格式缺失信息，需要变异断言目标以检查新列的存在和内容。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "invoke(['routes']).output 的字符串内容。",
+        "reason": "Issue 的错误现象直接体现在命令输出的文本内容中，观察输出是否包含 'Domain' 列和正确的子域名值是关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "app.url_map 中每个 Rule 对象的 subdomain 属性。",
+        "reason": "路由规则对象内部应存储子域名信息，观察其值有助于理解输出生成时是否使用了该信息。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "flask routes 命令的输出应包含一个标题为 'Domain' 的列。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、格式严格的输出字符串，因为列宽、空格等可能变化。",
+        "reason": "Issue 要求添加新列，断言列标题的存在是稳定且与需求对齐的。"
+      },
+      {
+        "assertion_goal": "对于注册了子域名 'admin' 且 SERVER_NAME 为 'test.local' 的蓝图，其路由在输出中对应的 Domain 值应为 'admin.test.local'。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言输出中行的精确位置或完整行的字符串相等。",
+        "reason": "断言输出中包含预期的完整子域名片段，可以稳定地验证功能是否正确实现，而不依赖于输出的精确排版。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 app fixture 和 invoke fixture（或类似机制）来运行 flask routes 命令。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置 app.config['SERVER_NAME'] 并注册多个带有不同 subdomain 参数的 Blueprint。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "flask routes 命令内部具体是如何收集和格式化路由信息的，特别是子域名信息是如何从 Rule 对象提取的。",
+      "当蓝图未指定子域名或 SERVER_NAME 未设置时，期望的 'Domain' 列应该显示什么内容（例如空值或 'test.local'）。",
+      "输出表格的列顺序和格式在添加新列后是否还有其他约束或变化。"
+    ]
+  }
+}

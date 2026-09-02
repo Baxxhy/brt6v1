@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pylint-dev__pylint-7080",
+  "issue_summary": "当使用 --recursive=y 参数时，pylint 忽略了 pyproject.toml 中配置的 ignore-paths 规则。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 tmp_path fixture 创建临时目录结构，包含应被忽略的子目录（如 src/gen/）和不应被忽略的文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "在临时目录中创建 pyproject.toml 文件，并写入 [tool.pylint.MASTER] 部分和 ignore-paths 配置。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或调用 pylint.lint.Run 的相关方法来控制执行，而不是通过子进程。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ignore_path_recursive",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试直接验证了在递归模式下使用 --ignore-paths 命令行参数忽略目录的功能。",
+        "reusable_parts": [
+          "测试结构（self._runtest 调用）",
+          "参数构造模式（--recursive=y 与 --ignore-paths 的组合）",
+          "断言成功退出的模式（code=0）"
+        ],
+        "possible_gap": "该测试使用命令行参数 --ignore-paths，而 Issue 中的配置来自 pyproject.toml 文件。测试可能未覆盖从配置文件读取 ignore-paths 并与递归模式结合的场景。"
+      },
+      {
+        "test_name": "test_ignore_recursive",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试验证了在递归模式下使用 --ignore 参数（非正则路径）忽略目录或文件的功能。",
+        "reusable_parts": [
+          "测试结构",
+          "递归模式与忽略功能的组合测试模式"
+        ],
+        "possible_gap": "该测试使用 --ignore 参数（非正则），而 Issue 使用正则表达式 ignore-paths。测试未覆盖配置文件场景。"
+      },
+      {
+        "test_name": "test_toml_has_config",
+        "test_file": "tests/config/test_find_default_config_files.py",
+        "why_relevant": "该测试涉及 pylint 检测 toml 文件是否包含有效配置的逻辑，与 Issue 中配置来源相关。",
+        "reusable_parts": [
+          "处理 toml 文件的测试模式",
+          "tmp_path fixture 的使用"
+        ],
+        "possible_gap": "该测试仅检查配置是否存在，不涉及配置项（如 ignore-paths）如何被应用，尤其不涉及与递归扫描的交互。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 pyproject.toml 的 [tool.pylint.MASTER] 部分配置了 ignore-paths 正则表达式（例如 \"^src/gen/.*$\"），然后使用 `pylint --recursive=y src/` 命令递归检查 src 目录。",
+      "evidence": [
+        "Issue 中的 Configuration 部分展示了 ignore-paths 配置。",
+        "Issue 中的 Command used 部分展示了触发命令 `pylint --recursive=y src/`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "pylint 输出了大量来自 src/gen/ 目录下文件的 lint 错误，表明 ignore-paths 配置未被应用，本应被忽略的文件被检查了。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中的 Pylint output 部分展示了大量来自 src/gen/about.py, src/gen/design.py 等文件的警告信息。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pylint.lint.Run",
+        "kind": "class",
+        "source_path": "",
+        "reason": "这是 pylint 命令行工具的入口点，负责解析参数、配置和启动检查过程。"
+      },
+      {
+        "name": "pylint.lint._get_new_args",
+        "kind": "function",
+        "source_path": "",
+        "reason": "可能负责处理递归扫描和路径过滤的逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/lint/__init__.py",
+        "object": "函数或方法，负责处理 --recursive 参数和 ignore-paths 配置的集成",
+        "lines": "",
+        "reason": "Issue 表明递归扫描逻辑与配置文件中的路径忽略逻辑存在交互问题。"
+      },
+      {
+        "path": "pylint/config/find_default_config_files.py",
+        "object": "与解析 pyproject.toml 配置相关的函数",
+        "lines": "",
+        "reason": "相关测试 3 涉及 toml 配置文件解析，ignore-paths 配置来自 pyproject.toml。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 2 通过命令行参数（--ignore-paths 或 --ignore）传递忽略规则。",
+        "target_pattern": "将忽略规则（正则表达式）写入一个临时的 pyproject.toml 配置文件，并通过 --recursive=y 扫描包含匹配该规则文件的目录。",
+        "reason": "Issue 的触发条件是配置来自文件而非命令行参数，且与递归模式结合。此变异将测试从命令行参数驱动转向配置文件驱动，以复现缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 使用具体的测试数据目录（regrtest_data/directory）和明确的忽略模式（.*ignored.*）。",
+        "target_pattern": "创建一个包含类似 \"src/gen/\" 目录结构的临时目录，并在 pyproject.toml 中配置匹配该目录的正则表达式忽略规则。",
+        "reason": "需要模拟 Issue 中描述的具体目录结构和正则表达式模式，以触发相同的路径匹配和忽略逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当使用 --recursive=y 参数时，pyproject.toml 中配置的 ignore-paths 规则应被正确应用，匹配该规则的文件路径应被忽略，不产生 lint 输出。",
+      "evidence": [
+        "Issue 中的 Expected behavior 部分明确说明 \"src\\gen\\* should not be checked\"。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "pylint 运行后的标准输出（stdout）或标准错误（stderr）内容。",
+        "reason": "Issue 的核心现象是输出了本应被忽略的文件的警告信息。观察输出中是否包含被忽略路径下的文件警告，可以直接判断 ignore-paths 是否生效。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "pylint 内部在递归扫描文件时实际使用的 ignore-paths 配置值。",
+        "reason": "需要确认从 pyproject.toml 读取的配置是否正确传递到了文件扫描逻辑中。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "递归扫描过程中，对于每个候选文件路径，判断其是否应被忽略的内部状态或函数返回值。",
+        "reason": "可以定位是配置读取问题，还是路径匹配逻辑在递归上下文中的问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pylint 对匹配 ignore-paths 正则表达式的文件路径没有产生任何警告或错误输出。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的输出字符串等于某个特定值，因为输出可能包含其他不相关的警告。",
+        "reason": "Issue 的期望是特定路径的文件不被检查。因此，断言输出中不包含来自这些路径的片段（如 \"src/gen/about.py\"）是稳定且直接相关的。"
+      },
+      {
+        "assertion_goal": "验证 pylint 进程以成功代码退出（例如 code=0），前提是只有被忽略的路径下才有错误。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅依赖退出码，因为如果其他非忽略文件也有错误，退出码可能非零，但这不表示 bug 被触发。",
+        "reason": "相关测试种子使用 code=0 作为成功断言。结合输出内容断言，可以更健壮地判断 ignore-paths 是否生效。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "ignore-paths 配置是在递归扫描开始前被完全忽略，还是在扫描过程中对每个文件的匹配逻辑失效？",
+    "bug 是特定于 pyproject.toml 配置格式，还是同样影响其他配置文件格式（如 .pylintrc）？",
+    "递归扫描和单文件扫描在应用 ignore-paths 时的代码路径具体差异在哪里？"
+  ],
+  "raw": {
+    "issue_summary": "当使用 --recursive=y 参数时，pylint 忽略了 pyproject.toml 中配置的 ignore-paths 规则。",
+    "trigger_condition": {
+      "text": "在 pyproject.toml 的 [tool.pylint.MASTER] 部分配置了 ignore-paths 正则表达式（例如 \"^src/gen/.*$\"），然后使用 `pylint --recursive=y src/` 命令递归检查 src 目录。",
+      "evidence": [
+        "Issue 中的 Configuration 部分展示了 ignore-paths 配置。",
+        "Issue 中的 Command used 部分展示了触发命令 `pylint --recursive=y src/`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "pylint 输出了大量来自 src/gen/ 目录下文件的 lint 错误，表明 ignore-paths 配置未被应用，本应被忽略的文件被检查了。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 中的 Pylint output 部分展示了大量来自 src/gen/about.py, src/gen/design.py 等文件的警告信息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当使用 --recursive=y 参数时，pyproject.toml 中配置的 ignore-paths 规则应被正确应用，匹配该规则的文件路径应被忽略，不产生 lint 输出。",
+      "evidence": [
+        "Issue 中的 Expected behavior 部分明确说明 \"src\\gen\\* should not be checked\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pylint.lint.Run",
+        "kind": "class",
+        "source_path": "",
+        "reason": "这是 pylint 命令行工具的入口点，负责解析参数、配置和启动检查过程。"
+      },
+      {
+        "name": "pylint.lint._get_new_args",
+        "kind": "function",
+        "source_path": "",
+        "reason": "可能负责处理递归扫描和路径过滤的逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "pylint/lint/__init__.py",
+        "object": "函数或方法，负责处理 --recursive 参数和 ignore-paths 配置的集成",
+        "lines": "",
+        "reason": "Issue 表明递归扫描逻辑与配置文件中的路径忽略逻辑存在交互问题。"
+      },
+      {
+        "path": "pylint/config/find_default_config_files.py",
+        "object": "与解析 pyproject.toml 配置相关的函数",
+        "lines": "",
+        "reason": "相关测试 3 涉及 toml 配置文件解析，ignore-paths 配置来自 pyproject.toml。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ignore_path_recursive",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试直接验证了在递归模式下使用 --ignore-paths 命令行参数忽略目录的功能。",
+        "reusable_parts": [
+          "测试结构（self._runtest 调用）",
+          "参数构造模式（--recursive=y 与 --ignore-paths 的组合）",
+          "断言成功退出的模式（code=0）"
+        ],
+        "possible_gap": "该测试使用命令行参数 --ignore-paths，而 Issue 中的配置来自 pyproject.toml 文件。测试可能未覆盖从配置文件读取 ignore-paths 并与递归模式结合的场景。"
+      },
+      {
+        "test_name": "test_ignore_recursive",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试验证了在递归模式下使用 --ignore 参数（非正则路径）忽略目录或文件的功能。",
+        "reusable_parts": [
+          "测试结构",
+          "递归模式与忽略功能的组合测试模式"
+        ],
+        "possible_gap": "该测试使用 --ignore 参数（非正则），而 Issue 使用正则表达式 ignore-paths。测试未覆盖配置文件场景。"
+      },
+      {
+        "test_name": "test_toml_has_config",
+        "test_file": "tests/config/test_find_default_config_files.py",
+        "why_relevant": "该测试涉及 pylint 检测 toml 文件是否包含有效配置的逻辑，与 Issue 中配置来源相关。",
+        "reusable_parts": [
+          "处理 toml 文件的测试模式",
+          "tmp_path fixture 的使用"
+        ],
+        "possible_gap": "该测试仅检查配置是否存在，不涉及配置项（如 ignore-paths）如何被应用，尤其不涉及与递归扫描的交互。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 2 通过命令行参数（--ignore-paths 或 --ignore）传递忽略规则。",
+        "target_pattern": "将忽略规则（正则表达式）写入一个临时的 pyproject.toml 配置文件，并通过 --recursive=y 扫描包含匹配该规则文件的目录。",
+        "reason": "Issue 的触发条件是配置来自文件而非命令行参数，且与递归模式结合。此变异将测试从命令行参数驱动转向配置文件驱动，以复现缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 使用具体的测试数据目录（regrtest_data/directory）和明确的忽略模式（.*ignored.*）。",
+        "target_pattern": "创建一个包含类似 \"src/gen/\" 目录结构的临时目录，并在 pyproject.toml 中配置匹配该目录的正则表达式忽略规则。",
+        "reason": "需要模拟 Issue 中描述的具体目录结构和正则表达式模式，以触发相同的路径匹配和忽略逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "pylint 运行后的标准输出（stdout）或标准错误（stderr）内容。",
+        "reason": "Issue 的核心现象是输出了本应被忽略的文件的警告信息。观察输出中是否包含被忽略路径下的文件警告，可以直接判断 ignore-paths 是否生效。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "pylint 内部在递归扫描文件时实际使用的 ignore-paths 配置值。",
+        "reason": "需要确认从 pyproject.toml 读取的配置是否正确传递到了文件扫描逻辑中。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "递归扫描过程中，对于每个候选文件路径，判断其是否应被忽略的内部状态或函数返回值。",
+        "reason": "可以定位是配置读取问题，还是路径匹配逻辑在递归上下文中的问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pylint 对匹配 ignore-paths 正则表达式的文件路径没有产生任何警告或错误输出。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的输出字符串等于某个特定值，因为输出可能包含其他不相关的警告。",
+        "reason": "Issue 的期望是特定路径的文件不被检查。因此，断言输出中不包含来自这些路径的片段（如 \"src/gen/about.py\"）是稳定且直接相关的。"
+      },
+      {
+        "assertion_goal": "验证 pylint 进程以成功代码退出（例如 code=0），前提是只有被忽略的路径下才有错误。",
+        "preferred_assertion_style": "equals",
+        "avoid": "仅依赖退出码，因为如果其他非忽略文件也有错误，退出码可能非零，但这不表示 bug 被触发。",
+        "reason": "相关测试种子使用 code=0 作为成功断言。结合输出内容断言，可以更健壮地判断 ignore-paths 是否生效。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 tmp_path fixture 创建临时目录结构，包含应被忽略的子目录（如 src/gen/）和不应被忽略的文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "在临时目录中创建 pyproject.toml 文件，并写入 [tool.pylint.MASTER] 部分和 ignore-paths 配置。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或调用 pylint.lint.Run 的相关方法来控制执行，而不是通过子进程。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "ignore-paths 配置是在递归扫描开始前被完全忽略，还是在扫描过程中对每个文件的匹配逻辑失效？",
+      "bug 是特定于 pyproject.toml 配置格式，还是同样影响其他配置文件格式（如 .pylintrc）？",
+      "递归扫描和单文件扫描在应用 ignore-paths 时的代码路径具体差异在哪里？"
+    ]
+  }
+}

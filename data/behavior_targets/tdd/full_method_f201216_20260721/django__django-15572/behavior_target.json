@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15572",
+  "issue_summary": "Django 3.2.4+ 中，当 TEMPLATES 配置的 DIRS 列表包含空字符串时，autoreload 功能失效。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 来设置 TEMPLATES 配置，特别是 DIRS 列表。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 mock.patch 来模拟 reset_loaders 函数，以观察它是否被错误调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个 .py 文件路径作为 template_changed 的输入，该路径应位于项目根目录或由空字符串标准化得到的目录下。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_template_dirs_normalized_to_paths",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "此测试直接验证 get_template_directories() 函数对 DIRS 配置的处理，包括字符串和 Path 对象的标准化。",
+        "reusable_parts": [
+          "@override_settings 装饰器用于设置 TEMPLATES 配置",
+          "TemplateReloadTests 测试类",
+          "使用 Path 对象和字符串混合的 DIRS 配置模式",
+          "assertSetEqual 断言风格"
+        ],
+        "possible_gap": "此测试只验证了正常路径的标准化结果，没有测试包含空字符串的 DIRS 配置。"
+      },
+      {
+        "test_name": "test_template_changed",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "此测试直接调用并验证 template_changed 函数在模板路径更改时的行为（返回 True 并调用 reset_loaders）。",
+        "reusable_parts": [
+          "@mock.patch 装饰器用于模拟 reset_loaders",
+          "使用 Path(__file__).parent 构造测试文件路径",
+          "断言 template_changed 返回 True",
+          "断言 mock_reset 被调用"
+        ],
+        "possible_gap": "此测试使用了一个有效的模板目录（EXTRA_TEMPLATES_DIR），没有测试包含空字符串目录时函数的行为。"
+      },
+      {
+        "test_name": "test_non_template_changed_in_template_directory",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "此测试验证了当文件路径是 Python 文件（.py 后缀）且在模板目录下时，template_changed 应返回 None（不触发 reload）。这与 Issue 中“应用代码更改不应触发 reload”的场景相关。",
+        "reusable_parts": [
+          "嵌套的 @override_settings 装饰器",
+          "使用 ROOT 作为 DIRS 配置",
+          "断言 template_changed 返回 None",
+          "断言 mock_reset 未被调用"
+        ],
+        "possible_gap": "此测试的 DIRS 配置是有效的目录（ROOT），没有包含空字符串。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 项目的 TEMPLATES 设置中，DIRS 列表包含空字符串元素，例如 ['']。",
+      "evidence": [
+        "Issue 描述中明确指出：'DIRS': [''] # wrong will break autoreload。",
+        "Issue 描述中给出了一个错误配置示例：'DIRS': os.getenv(\"TEMPLATES_DIRS\", \"\").split(\",\")，当环境变量为空或仅包含逗号时会产生空字符串。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当应用代码发生更改时，autoreload 不会触发，因为 template_changed() 函数总是返回 True。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述中说明：'The result is that template_changed() will now always return True, preventing the autoreload when the app code changes'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "autoreload.template_changed",
+        "kind": "function",
+        "source_path": "django/template/autoreload.py",
+        "reason": "Issue 的核心问题在于此函数的行为因空字符串路径被标准化而改变，导致总是返回 True。"
+      },
+      {
+        "name": "autoreload.get_template_directories",
+        "kind": "function",
+        "source_path": "django/template/autoreload.py",
+        "reason": "template_changed 函数依赖此函数获取模板目录列表，DIRS 配置中的空字符串会影响此函数的返回值。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/autoreload.py",
+        "object": "template_changed",
+        "lines": "48-54",
+        "reason": "Issue 明确指出问题出在 template_changed 函数，因为路径标准化将空字符串转换为项目根目录，导致条件判断出错。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 TEMPLATES['DIRS'] 配置为有效的路径列表，例如 [EXTRA_TEMPLATES_DIR]、[ROOT]、[str(ROOT) + \"/absolute_str\", ...]。",
+        "target_pattern": "将 TEMPLATES['DIRS'] 配置为包含空字符串的列表，例如 [''] 或 ['/some/path', '']。",
+        "reason": "Issue 明确指出 DIRS 列表中的空字符串是触发条件，这会导致 get_template_directories() 返回包含标准化后根目录的集合，进而影响 template_changed 的判断逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "test_template_changed 中向 template_changed 函数传入一个有效的模板文件路径（如 index.html）。",
+        "target_pattern": "向 template_changed 函数传入一个 Python 文件路径（.py 后缀），该文件位于由空字符串标准化得到的“根目录”下。",
+        "reason": "Issue 描述的问题现象是：当应用代码（.py 文件）更改时，autoreload 不工作。因为空字符串被标准化为根目录，导致任何在根目录下的文件（包括 .py 文件）都被认为在模板目录中，但 template_changed 函数对 .py 文件应直接返回（不触发 reload）。需要验证这种配置下，传入 .py 文件路径时函数的行为是否错误地返回了 True。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使 TEMPLATES DIRS 列表包含空字符串，autoreload 功能也应正常工作，即 template_changed() 函数仅在模板文件发生更改时返回 True，在应用代码更改时不应返回 True。",
+      "evidence": [
+        "Issue 描述暗示了修复方向：之前版本中空字符串与目录比较永远不会匹配，autoreload 正常工作。",
+        "相关测试 test_template_changed 和 test_non_template_changed_in_template_directory 展示了 template_changed 函数在特定路径下应返回 True 或 None 的正常行为。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "autoreload.template_changed(None, a_py_file_path) 的返回值",
+        "reason": "Issue 的核心是 template_changed 函数在特定条件下（DIRS 包含空字符串，文件是 .py 文件）错误地返回了 True。观察其返回值可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "autoreload.get_template_directories() 返回的集合内容",
+        "reason": "需要确认当 DIRS 包含空字符串时，get_template_directories() 是否返回了包含项目根目录（如 Path('.')）的集合，这是导致后续判断出错的根本原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 DIRS 配置包含空字符串且传入 .py 文件路径时，template_changed 应返回 None（或 False），表示不触发 reload。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的返回值集合或复杂的对象相等，因为具体返回值可能是 None 或 False。",
+        "reason": "Issue 期望的行为是应用代码更改不触发 reload，这与现有测试 test_non_template_changed_in_template_directory 的语义一致。"
+      },
+      {
+        "assertion_goal": "get_template_directories() 返回的集合不应包含由空字符串标准化而来的无效或根目录路径（如果这是错误来源）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言集合的精确内容，因为有效的 DIRS 配置可能包含其他路径。",
+        "reason": "Issue 指出空字符串被标准化为项目根目录导致了问题。断言集合中不包含此类路径可以验证配置处理的正确性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "空字符串被标准化后的具体路径是什么？是 Path('.')、Path('/') 还是其他？这取决于 pathlib.Path('') 的行为。",
+    "template_changed 函数在修复后，对于 .py 文件路径是返回 None 还是 False？现有测试显示返回 None。",
+    "除了 DIRS 包含 ['']，是否还有其他配置（如环境变量解析）会产生相同的空字符串问题？",
+    "是否只有在文件路径位于由空字符串标准化得到的目录下时才会触发问题？还是任何 .py 文件都会触发？"
+  ],
+  "raw": {
+    "issue_summary": "Django 3.2.4+ 中，当 TEMPLATES 配置的 DIRS 列表包含空字符串时，autoreload 功能失效。",
+    "trigger_condition": {
+      "text": "在 Django 项目的 TEMPLATES 设置中，DIRS 列表包含空字符串元素，例如 ['']。",
+      "evidence": [
+        "Issue 描述中明确指出：'DIRS': [''] # wrong will break autoreload。",
+        "Issue 描述中给出了一个错误配置示例：'DIRS': os.getenv(\"TEMPLATES_DIRS\", \"\").split(\",\")，当环境变量为空或仅包含逗号时会产生空字符串。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当应用代码发生更改时，autoreload 不会触发，因为 template_changed() 函数总是返回 True。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述中说明：'The result is that template_changed() will now always return True, preventing the autoreload when the app code changes'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使 TEMPLATES DIRS 列表包含空字符串，autoreload 功能也应正常工作，即 template_changed() 函数仅在模板文件发生更改时返回 True，在应用代码更改时不应返回 True。",
+      "evidence": [
+        "Issue 描述暗示了修复方向：之前版本中空字符串与目录比较永远不会匹配，autoreload 正常工作。",
+        "相关测试 test_template_changed 和 test_non_template_changed_in_template_directory 展示了 template_changed 函数在特定路径下应返回 True 或 None 的正常行为。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "autoreload.template_changed",
+        "kind": "function",
+        "source_path": "django/template/autoreload.py",
+        "reason": "Issue 的核心问题在于此函数的行为因空字符串路径被标准化而改变，导致总是返回 True。"
+      },
+      {
+        "name": "autoreload.get_template_directories",
+        "kind": "function",
+        "source_path": "django/template/autoreload.py",
+        "reason": "template_changed 函数依赖此函数获取模板目录列表，DIRS 配置中的空字符串会影响此函数的返回值。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/autoreload.py",
+        "object": "template_changed",
+        "lines": "48-54",
+        "reason": "Issue 明确指出问题出在 template_changed 函数，因为路径标准化将空字符串转换为项目根目录，导致条件判断出错。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_template_dirs_normalized_to_paths",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "此测试直接验证 get_template_directories() 函数对 DIRS 配置的处理，包括字符串和 Path 对象的标准化。",
+        "reusable_parts": [
+          "@override_settings 装饰器用于设置 TEMPLATES 配置",
+          "TemplateReloadTests 测试类",
+          "使用 Path 对象和字符串混合的 DIRS 配置模式",
+          "assertSetEqual 断言风格"
+        ],
+        "possible_gap": "此测试只验证了正常路径的标准化结果，没有测试包含空字符串的 DIRS 配置。"
+      },
+      {
+        "test_name": "test_template_changed",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "此测试直接调用并验证 template_changed 函数在模板路径更改时的行为（返回 True 并调用 reset_loaders）。",
+        "reusable_parts": [
+          "@mock.patch 装饰器用于模拟 reset_loaders",
+          "使用 Path(__file__).parent 构造测试文件路径",
+          "断言 template_changed 返回 True",
+          "断言 mock_reset 被调用"
+        ],
+        "possible_gap": "此测试使用了一个有效的模板目录（EXTRA_TEMPLATES_DIR），没有测试包含空字符串目录时函数的行为。"
+      },
+      {
+        "test_name": "test_non_template_changed_in_template_directory",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "此测试验证了当文件路径是 Python 文件（.py 后缀）且在模板目录下时，template_changed 应返回 None（不触发 reload）。这与 Issue 中“应用代码更改不应触发 reload”的场景相关。",
+        "reusable_parts": [
+          "嵌套的 @override_settings 装饰器",
+          "使用 ROOT 作为 DIRS 配置",
+          "断言 template_changed 返回 None",
+          "断言 mock_reset 未被调用"
+        ],
+        "possible_gap": "此测试的 DIRS 配置是有效的目录（ROOT），没有包含空字符串。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 TEMPLATES['DIRS'] 配置为有效的路径列表，例如 [EXTRA_TEMPLATES_DIR]、[ROOT]、[str(ROOT) + \"/absolute_str\", ...]。",
+        "target_pattern": "将 TEMPLATES['DIRS'] 配置为包含空字符串的列表，例如 [''] 或 ['/some/path', '']。",
+        "reason": "Issue 明确指出 DIRS 列表中的空字符串是触发条件，这会导致 get_template_directories() 返回包含标准化后根目录的集合，进而影响 template_changed 的判断逻辑。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "test_template_changed 中向 template_changed 函数传入一个有效的模板文件路径（如 index.html）。",
+        "target_pattern": "向 template_changed 函数传入一个 Python 文件路径（.py 后缀），该文件位于由空字符串标准化得到的“根目录”下。",
+        "reason": "Issue 描述的问题现象是：当应用代码（.py 文件）更改时，autoreload 不工作。因为空字符串被标准化为根目录，导致任何在根目录下的文件（包括 .py 文件）都被认为在模板目录中，但 template_changed 函数对 .py 文件应直接返回（不触发 reload）。需要验证这种配置下，传入 .py 文件路径时函数的行为是否错误地返回了 True。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "autoreload.template_changed(None, a_py_file_path) 的返回值",
+        "reason": "Issue 的核心是 template_changed 函数在特定条件下（DIRS 包含空字符串，文件是 .py 文件）错误地返回了 True。观察其返回值可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "autoreload.get_template_directories() 返回的集合内容",
+        "reason": "需要确认当 DIRS 包含空字符串时，get_template_directories() 是否返回了包含项目根目录（如 Path('.')）的集合，这是导致后续判断出错的根本原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 DIRS 配置包含空字符串且传入 .py 文件路径时，template_changed 应返回 None（或 False），表示不触发 reload。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的返回值集合或复杂的对象相等，因为具体返回值可能是 None 或 False。",
+        "reason": "Issue 期望的行为是应用代码更改不触发 reload，这与现有测试 test_non_template_changed_in_template_directory 的语义一致。"
+      },
+      {
+        "assertion_goal": "get_template_directories() 返回的集合不应包含由空字符串标准化而来的无效或根目录路径（如果这是错误来源）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言集合的精确内容，因为有效的 DIRS 配置可能包含其他路径。",
+        "reason": "Issue 指出空字符串被标准化为项目根目录导致了问题。断言集合中不包含此类路径可以验证配置处理的正确性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 来设置 TEMPLATES 配置，特别是 DIRS 列表。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 mock.patch 来模拟 reset_loaders 函数，以观察它是否被错误调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个 .py 文件路径作为 template_changed 的输入，该路径应位于项目根目录或由空字符串标准化得到的目录下。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "空字符串被标准化后的具体路径是什么？是 Path('.')、Path('/') 还是其他？这取决于 pathlib.Path('') 的行为。",
+      "template_changed 函数在修复后，对于 .py 文件路径是返回 None 还是 False？现有测试显示返回 None。",
+      "除了 DIRS 包含 ['']，是否还有其他配置（如环境变量解析）会产生相同的空字符串问题？",
+      "是否只有在文件路径位于由空字符串标准化得到的目录下时才会触发问题？还是任何 .py 文件都会触发？"
+    ]
+  }
+}

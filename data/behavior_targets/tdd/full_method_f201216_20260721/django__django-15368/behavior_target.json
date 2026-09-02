@@ -1,0 +1,316 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15368",
+  "issue_summary": "bulk_update() 在处理纯 F('...') 表达式时，会将其字符串表示形式插入 SQL 而非解析为列名。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和至少一个具有两个可更新字段的模型实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要启用查询日志（connection.queries）来检查生成的 SQL。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_update_from_other_field",
+        "test_file": "tests/gis_tests/geoapp/test_expressions.py",
+        "why_relevant": "它测试了使用 F() 表达式更新字段（通过 filter().update()），展示了 F() 表达式的预期行为。",
+        "reusable_parts": [
+          "使用 F() 表达式更新字段的模式",
+          "调用 refresh_from_db() 验证结果",
+          "使用 assertEqual 进行断言"
+        ],
+        "possible_gap": "它使用的是 filter().update() 而非 bulk_update()，且涉及地理字段，可能不是最简单的测试起点。"
+      },
+      {
+        "test_name": "test_simple",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它是 bulk_update 的基本测试，展示了正确的调用模式和断言风格。",
+        "reusable_parts": [
+          "bulk_update 的调用方式",
+          "使用 assertNumQueries",
+          "使用 assertCountEqual 验证结果"
+        ],
+        "possible_gap": "它没有使用 F() 表达式，而是直接赋值字符串。"
+      },
+      {
+        "test_name": "test_custom_db_columns",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它展示了 bulk_update 与 refresh_from_db 结合使用的模式，用于验证更新后的数据库状态。",
+        "reusable_parts": [
+          "模型创建、字段赋值、bulk_update 调用、refresh_from_db、assertEqual 断言"
+        ],
+        "possible_gap": "它没有使用 F() 表达式。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "将一个纯 F(...) 表达式赋值给模型实例字段，然后对该实例调用 bulk_update()。",
+      "evidence": [
+        "Issue 中的 Repro 步骤：`o.c8 = F('name')` 然后 `SelfRef.objects.bulk_update([o], ['c8'])`。",
+        "源码片段 1 显示 bulk_update 在处理字段值时，会检查 `isinstance(attr, Expression)`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 语句中包含了 F() 的字符串表示（如 'F(name)'），而不是解析为对应的列名。数据库字段被更新为字符串 'F(name)'。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中显示：`o.c8` 刷新后为 `'F(name)'`。",
+        "Issue 中显示的 SQL 片段包含 `THEN 'F(name)'`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.bulk_update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "这是 Issue 报告的直接缺陷 API。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 涉及 F 表达式在 bulk_update 中的错误处理。"
+      },
+      {
+        "name": "Model.refresh_from_db",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 的复现步骤和多个相关测试中用于验证数据库状态。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_update",
+        "lines": "639-685",
+        "reason": "Issue 明确指出问题根源在于该函数中过于严格的类型检查 `isinstance(attr, Expression)`，而 F 类可能不是 Expression 的直接子类。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，赋给模型字段的是普通值（如字符串 'test-%s' 或整数 2）。",
+        "target_pattern": "将 F('field_name') 表达式赋给模型字段。",
+        "reason": "Issue 表明，当字段值为 F 表达式对象时，bulk_update 的类型检查可能失败，导致错误处理。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，bulk_update 的 fields 参数是包含普通字段名的列表。",
+        "target_pattern": "fields 参数列表保持不变，但对应的实例字段值已变为 F 表达式。",
+        "reason": "触发缺陷的关键是传入 bulk_update 的对象其字段属性是 F 实例，而非字段参数列表本身的变化。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "bulk_update() 应能正确处理 F() 表达式，将其解析为对应的数据库列引用，从而更新字段为另一列的值。",
+      "evidence": [
+        "Issue 描述指出，如果类型检查更改为 `hasattr(attr, 'resolve_expression')` 或显式检查 `F` 类，问题就会解决。",
+        "相关测试 1 (test_update_from_other_field) 展示了在 filter().update() 上下文中 F() 表达式能正常工作，期望 bulk_update 有类似行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 语句（可通过 connection.queries 获取）。",
+        "reason": "Issue 显示错误症状是 SQL 中包含字符串 'F(name)' 而非列名。观察 SQL 可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 refresh_from_db() 后，模型字段的值。",
+        "reason": "Issue 显示刷新后字段值错误地变成了字符串 'F(name)'。观察该值可以判断更新是否按预期（引用另一列）执行。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 bulk_update 内部，从模型实例获取的字段值（attr）的类型。",
+        "reason": "缺陷根源在于对 F 实例的类型判断。观察其类型有助于理解执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 F() 表达式通过 bulk_update 更新后，目标字段的值等于源字段的值（或相应的解析结果）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串相等，因为 SQL 可能因数据库后端而异。",
+        "reason": "Issue 的核心是语义错误：字段应被更新为另一列的值，而非字符串 'F(name)'。直接断言更新后的字段值是否等于预期值（源字段值）最稳定且与 Issue 对齐。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 不包含 F() 的字符串表示（如 'F(name)'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 语句，只检查是否错误地包含了字面量字符串 'F('。",
+        "reason": "Issue 显示错误的直接表现是 SQL 中错误地插入了字符串 'F(name)'。检查 SQL 片段可以更早、更直接地捕获问题。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "F 类是否确实是 Expression 的子类，或者它是否通过其他机制（如 Combinable）与表达式系统交互。",
+    "除了 F 表达式，其他类型的表达式（如 CombinedExpression）是否也会在 bulk_update 中遇到同样的问题。",
+    "修复后，bulk_update 是否应该支持更复杂的表达式，还是仅限于简单的 F 引用。"
+  ],
+  "raw": {
+    "issue_summary": "bulk_update() 在处理纯 F('...') 表达式时，会将其字符串表示形式插入 SQL 而非解析为列名。",
+    "trigger_condition": {
+      "text": "将一个纯 F(...) 表达式赋值给模型实例字段，然后对该实例调用 bulk_update()。",
+      "evidence": [
+        "Issue 中的 Repro 步骤：`o.c8 = F('name')` 然后 `SelfRef.objects.bulk_update([o], ['c8'])`。",
+        "源码片段 1 显示 bulk_update 在处理字段值时，会检查 `isinstance(attr, Expression)`。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 语句中包含了 F() 的字符串表示（如 'F(name)'），而不是解析为对应的列名。数据库字段被更新为字符串 'F(name)'。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中显示：`o.c8` 刷新后为 `'F(name)'`。",
+        "Issue 中显示的 SQL 片段包含 `THEN 'F(name)'`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "bulk_update() 应能正确处理 F() 表达式，将其解析为对应的数据库列引用，从而更新字段为另一列的值。",
+      "evidence": [
+        "Issue 描述指出，如果类型检查更改为 `hasattr(attr, 'resolve_expression')` 或显式检查 `F` 类，问题就会解决。",
+        "相关测试 1 (test_update_from_other_field) 展示了在 filter().update() 上下文中 F() 表达式能正常工作，期望 bulk_update 有类似行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.bulk_update",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "这是 Issue 报告的直接缺陷 API。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 涉及 F 表达式在 bulk_update 中的错误处理。"
+      },
+      {
+        "name": "Model.refresh_from_db",
+        "kind": "method",
+        "source_path": "django/db/models/base.py",
+        "reason": "Issue 的复现步骤和多个相关测试中用于验证数据库状态。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.bulk_update",
+        "lines": "639-685",
+        "reason": "Issue 明确指出问题根源在于该函数中过于严格的类型检查 `isinstance(attr, Expression)`，而 F 类可能不是 Expression 的直接子类。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_update_from_other_field",
+        "test_file": "tests/gis_tests/geoapp/test_expressions.py",
+        "why_relevant": "它测试了使用 F() 表达式更新字段（通过 filter().update()），展示了 F() 表达式的预期行为。",
+        "reusable_parts": [
+          "使用 F() 表达式更新字段的模式",
+          "调用 refresh_from_db() 验证结果",
+          "使用 assertEqual 进行断言"
+        ],
+        "possible_gap": "它使用的是 filter().update() 而非 bulk_update()，且涉及地理字段，可能不是最简单的测试起点。"
+      },
+      {
+        "test_name": "test_simple",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它是 bulk_update 的基本测试，展示了正确的调用模式和断言风格。",
+        "reusable_parts": [
+          "bulk_update 的调用方式",
+          "使用 assertNumQueries",
+          "使用 assertCountEqual 验证结果"
+        ],
+        "possible_gap": "它没有使用 F() 表达式，而是直接赋值字符串。"
+      },
+      {
+        "test_name": "test_custom_db_columns",
+        "test_file": "tests/queries/test_bulk_update.py",
+        "why_relevant": "它展示了 bulk_update 与 refresh_from_db 结合使用的模式，用于验证更新后的数据库状态。",
+        "reusable_parts": [
+          "模型创建、字段赋值、bulk_update 调用、refresh_from_db、assertEqual 断言"
+        ],
+        "possible_gap": "它没有使用 F() 表达式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中，赋给模型字段的是普通值（如字符串 'test-%s' 或整数 2）。",
+        "target_pattern": "将 F('field_name') 表达式赋给模型字段。",
+        "reason": "Issue 表明，当字段值为 F 表达式对象时，bulk_update 的类型检查可能失败，导致错误处理。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中，bulk_update 的 fields 参数是包含普通字段名的列表。",
+        "target_pattern": "fields 参数列表保持不变，但对应的实例字段值已变为 F 表达式。",
+        "reason": "触发缺陷的关键是传入 bulk_update 的对象其字段属性是 F 实例，而非字段参数列表本身的变化。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 语句（可通过 connection.queries 获取）。",
+        "reason": "Issue 显示错误症状是 SQL 中包含字符串 'F(name)' 而非列名。观察 SQL 可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 refresh_from_db() 后，模型字段的值。",
+        "reason": "Issue 显示刷新后字段值错误地变成了字符串 'F(name)'。观察该值可以判断更新是否按预期（引用另一列）执行。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 bulk_update 内部，从模型实例获取的字段值（attr）的类型。",
+        "reason": "缺陷根源在于对 F 实例的类型判断。观察其类型有助于理解执行路径。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 F() 表达式通过 bulk_update 更新后，目标字段的值等于源字段的值（或相应的解析结果）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串相等，因为 SQL 可能因数据库后端而异。",
+        "reason": "Issue 的核心是语义错误：字段应被更新为另一列的值，而非字符串 'F(name)'。直接断言更新后的字段值是否等于预期值（源字段值）最稳定且与 Issue 对齐。"
+      },
+      {
+        "assertion_goal": "验证生成的 SQL 不包含 F() 的字符串表示（如 'F(name)'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 语句，只检查是否错误地包含了字面量字符串 'F('。",
+        "reason": "Issue 显示错误的直接表现是 SQL 中错误地插入了字符串 'F(name)'。检查 SQL 片段可以更早、更直接地捕获问题。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django TestCase 和至少一个具有两个可更新字段的模型实例。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要启用查询日志（connection.queries）来检查生成的 SQL。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "F 类是否确实是 Expression 的子类，或者它是否通过其他机制（如 Combinable）与表达式系统交互。",
+      "除了 F 表达式，其他类型的表达式（如 CombinedExpression）是否也会在 bulk_update 中遇到同样的问题。",
+      "修复后，bulk_update 是否应该支持更复杂的表达式，还是仅限于简单的 F 引用。"
+    ]
+  }
+}

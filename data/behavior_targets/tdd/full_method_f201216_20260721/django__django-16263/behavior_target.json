@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16263",
+  "issue_summary": "在调用 queryset.count() 时，未使用的注解（annotations）未被移除，导致生成包含不必要聚合的 SQL 语句，可能影响性能。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用一个包含外键关系的模型（如 Book 和 Chapter）来创建注解。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和数据库 fixture 来设置测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 Django 设置以启用数据库连接。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AggregateTestCase.test_count_star",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了 Count 聚合，并使用 assertNumQueries 和 SQL 检查，这与 Issue 关注的 SQL 生成和性能相关。",
+        "reusable_parts": [
+          "使用 Book 模型",
+          "assertNumQueries 上下文管理器",
+          "检查 SQL 片段"
+        ],
+        "possible_gap": "它直接测试 aggregate，而不是 QuerySet.count() 与 annotate 的组合。"
+      },
+      {
+        "test_name": "NonAggregateAnnotationTestCase.test_annotate_with_aggregation",
+        "test_file": "tests/annotations/tests.py",
+        "why_relevant": "它测试了带聚合注解（Count）的 annotate 方法，并遍历结果进行断言。",
+        "reusable_parts": [
+          "Book.objects.annotate 的调用模式",
+          "使用 Count 聚合",
+          "遍历和断言结果"
+        ],
+        "possible_gap": "它测试的是完整查询集的结果，而不是 count() 方法的行为或生成的 SQL。"
+      },
+      {
+        "test_name": "AggregateTestCase.test_non_grouped_annotation_not_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它涉及注解、聚合和 group by 的排除逻辑，与 Issue 中“剥离未使用注解”的概念相关。",
+        "reusable_parts": [
+          "复杂的 annotate、filter、values、aggregate 链",
+          "对查询结果列表的断言"
+        ],
+        "possible_gap": "它关注的是 group by 子句，而不是 count() 查询的优化。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个带有未在过滤、排序或其他注解中引用的聚合注解（如 Count）的 QuerySet 调用 count() 方法。",
+      "evidence": [
+        "Issue 中给出的示例：Book.objects.annotate(Count('chapters')).count()",
+        "Issue 描述提到注解未被用于任何过滤操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 语句包含了不必要的 Count('chapters') 注解，导致查询可能比预期更慢，但返回的计数值与 Book.objects.count() 相同。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述：'produces a SQL statement that includes the Count('chapters'), despite not not being used in any filter operations.'",
+        "Issue 描述：'This should speed up calls to count() with complex annotations.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发问题的操作链起始于 annotate 方法。"
+      },
+      {
+        "name": "QuerySet.count",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是 count() 方法的行为，它应该优化掉未使用的注解。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 示例中使用的聚合函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.count",
+        "lines": "614-625",
+        "reason": "count() 方法调用 self.query.get_count()，可能未在生成计数查询前清理未使用的注解。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._annotate",
+        "lines": "",
+        "reason": "负责处理注解的内部方法，可能与 count() 如何传递或保留注解有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "Book.objects.aggregate(n=Count('*')) 或 Book.objects.annotate(...).filter(...).values(...).aggregate(...)",
+        "target_pattern": "Book.objects.annotate(Count('unused_relation')).count()",
+        "reason": "Issue 的核心触发模式是在 count() 前添加一个未被后续操作引用的聚合注解。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "聚合用于过滤或选择值（如在 test_annotate_with_aggregation 中）。",
+        "target_pattern": "聚合注解不用于任何过滤、排序或其他注解。",
+        "reason": "只有当注解未被引用时，count() 才应将其剥离。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "queryset.count() 应该智能地忽略（剥离）那些未被过滤、其他注解或排序引用的注解，从而生成更高效的 SQL 查询。",
+      "evidence": [
+        "Issue 描述：'Django could be more intelligent about what annotations to include in the query produced by queryset.count(), stripping out any annotations that are not referenced by filters, other annotations or ordering.'",
+        "Issue 提到 select_related 在 count() 查询中被忽略，作为先例。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "执行的 SQL 查询字符串（例如通过 django.db.connection.queries 或 assertNumQueries 捕获）。",
+        "reason": "Issue 的症状是 SQL 语句中包含了不必要的 COUNT 子句，直接检查 SQL 可以确认问题。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "count() 方法返回的整数值。",
+        "reason": "需要确保优化后的 count() 返回与未注解查询相同的结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 count() 查询生成的 SQL 不包含未使用的聚合注解（如 COUNT('chapters')）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为 SQL 格式可能变化。",
+        "reason": "Issue 关注的是 SQL 中是否包含不必要的部分，而不是精确的 SQL 格式。"
+      },
+      {
+        "assertion_goal": "验证带未使用注解的 count() 返回的结果与不带注解的简单 count() 相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的计数值（如等于 6），除非测试数据固定。",
+        "reason": "确保优化不改变计数的正确性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "未使用的注解是否仅指聚合注解（如 Count），还是也包括非聚合注解（如 F 表达式）？",
+    "在 count() 中，'被引用'的确切定义是什么？是否包括通过子查询或条件表达式间接引用？",
+    "剥离注解的具体实现位置和逻辑尚不明确。",
+    "是否所有数据库后端的行为都一致？"
+  ],
+  "raw": {
+    "issue_summary": "在调用 queryset.count() 时，未使用的注解（annotations）未被移除，导致生成包含不必要聚合的 SQL 语句，可能影响性能。",
+    "trigger_condition": {
+      "text": "对一个带有未在过滤、排序或其他注解中引用的聚合注解（如 Count）的 QuerySet 调用 count() 方法。",
+      "evidence": [
+        "Issue 中给出的示例：Book.objects.annotate(Count('chapters')).count()",
+        "Issue 描述提到注解未被用于任何过滤操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 语句包含了不必要的 Count('chapters') 注解，导致查询可能比预期更慢，但返回的计数值与 Book.objects.count() 相同。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 描述：'produces a SQL statement that includes the Count('chapters'), despite not not being used in any filter operations.'",
+        "Issue 描述：'This should speed up calls to count() with complex annotations.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "queryset.count() 应该智能地忽略（剥离）那些未被过滤、其他注解或排序引用的注解，从而生成更高效的 SQL 查询。",
+      "evidence": [
+        "Issue 描述：'Django could be more intelligent about what annotations to include in the query produced by queryset.count(), stripping out any annotations that are not referenced by filters, other annotations or ordering.'",
+        "Issue 提到 select_related 在 count() 查询中被忽略，作为先例。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发问题的操作链起始于 annotate 方法。"
+      },
+      {
+        "name": "QuerySet.count",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是 count() 方法的行为，它应该优化掉未使用的注解。"
+      },
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "django/db/models/aggregates.py",
+        "reason": "Issue 示例中使用的聚合函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.count",
+        "lines": "614-625",
+        "reason": "count() 方法调用 self.query.get_count()，可能未在生成计数查询前清理未使用的注解。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._annotate",
+        "lines": "",
+        "reason": "负责处理注解的内部方法，可能与 count() 如何传递或保留注解有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AggregateTestCase.test_count_star",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了 Count 聚合，并使用 assertNumQueries 和 SQL 检查，这与 Issue 关注的 SQL 生成和性能相关。",
+        "reusable_parts": [
+          "使用 Book 模型",
+          "assertNumQueries 上下文管理器",
+          "检查 SQL 片段"
+        ],
+        "possible_gap": "它直接测试 aggregate，而不是 QuerySet.count() 与 annotate 的组合。"
+      },
+      {
+        "test_name": "NonAggregateAnnotationTestCase.test_annotate_with_aggregation",
+        "test_file": "tests/annotations/tests.py",
+        "why_relevant": "它测试了带聚合注解（Count）的 annotate 方法，并遍历结果进行断言。",
+        "reusable_parts": [
+          "Book.objects.annotate 的调用模式",
+          "使用 Count 聚合",
+          "遍历和断言结果"
+        ],
+        "possible_gap": "它测试的是完整查询集的结果，而不是 count() 方法的行为或生成的 SQL。"
+      },
+      {
+        "test_name": "AggregateTestCase.test_non_grouped_annotation_not_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它涉及注解、聚合和 group by 的排除逻辑，与 Issue 中“剥离未使用注解”的概念相关。",
+        "reusable_parts": [
+          "复杂的 annotate、filter、values、aggregate 链",
+          "对查询结果列表的断言"
+        ],
+        "possible_gap": "它关注的是 group by 子句，而不是 count() 查询的优化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "Book.objects.aggregate(n=Count('*')) 或 Book.objects.annotate(...).filter(...).values(...).aggregate(...)",
+        "target_pattern": "Book.objects.annotate(Count('unused_relation')).count()",
+        "reason": "Issue 的核心触发模式是在 count() 前添加一个未被后续操作引用的聚合注解。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "聚合用于过滤或选择值（如在 test_annotate_with_aggregation 中）。",
+        "target_pattern": "聚合注解不用于任何过滤、排序或其他注解。",
+        "reason": "只有当注解未被引用时，count() 才应将其剥离。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "执行的 SQL 查询字符串（例如通过 django.db.connection.queries 或 assertNumQueries 捕获）。",
+        "reason": "Issue 的症状是 SQL 语句中包含了不必要的 COUNT 子句，直接检查 SQL 可以确认问题。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "count() 方法返回的整数值。",
+        "reason": "需要确保优化后的 count() 返回与未注解查询相同的结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 count() 查询生成的 SQL 不包含未使用的聚合注解（如 COUNT('chapters')）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为 SQL 格式可能变化。",
+        "reason": "Issue 关注的是 SQL 中是否包含不必要的部分，而不是精确的 SQL 格式。"
+      },
+      {
+        "assertion_goal": "验证带未使用注解的 count() 返回的结果与不带注解的简单 count() 相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的计数值（如等于 6），除非测试数据固定。",
+        "reason": "确保优化不改变计数的正确性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用一个包含外键关系的模型（如 Book 和 Chapter）来创建注解。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 和数据库 fixture 来设置测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 Django 设置以启用数据库连接。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "未使用的注解是否仅指聚合注解（如 Count），还是也包括非聚合注解（如 F 表达式）？",
+      "在 count() 中，'被引用'的确切定义是什么？是否包括通过子查询或条件表达式间接引用？",
+      "剥离注解的具体实现位置和逻辑尚不明确。",
+      "是否所有数据库后端的行为都一致？"
+    ]
+  }
+}

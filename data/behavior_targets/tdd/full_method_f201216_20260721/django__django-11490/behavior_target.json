@@ -1,0 +1,336 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11490",
+  "issue_summary": "组合查询（如 union）在多次调用 values()/values_list() 时无法正确更改列列表。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用支持 union 的数据库后端（skipUnlessDBFeature('supports_select_union')）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建 ReservedName 模型实例作为测试数据。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 django.test.TestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "QuerySetSetOperationTests.test_union_with_values",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "该测试直接涉及 ReservedName 模型、union 操作以及 values()/values_list() 调用，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "imports",
+          "TestCase class",
+          "ReservedName.objects.create",
+          "qs1 = ReservedName.objects.all()",
+          "union 操作",
+          "values()/values_list() 调用",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试在 union 后只调用了一次 values() 和一次 values_list()，没有测试对同一组合查询多次调用 values_list() 并更改字段列表的情况。"
+      },
+      {
+        "test_name": "QuerySetSetOperationTests.test_difference_with_values",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "该测试也涉及组合查询（difference）和 values()/values_list()，展示了类似的测试模式。",
+        "reusable_parts": [
+          "imports",
+          "TestCase class",
+          "ReservedName.objects.create",
+          "组合查询操作",
+          "values()/values_list() 调用",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "使用的是 difference 而非 union，且同样没有测试多次调用 values_list() 更改字段列表。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个组合查询（如 union）的结果多次调用 values_list() 并指定不同的字段列表。",
+      "evidence": [
+        "Issue 描述：'Composed queries cannot change the list of columns when values()/values_list() is evaluated multiple times'",
+        "Issue 示例：先调用 .values_list('name', 'order')，再调用 .values_list('order')"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "第二次调用 values_list('order') 返回了错误的列值（返回了 'a' 而不是 2）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 示例输出：print(qs1.union(qs1).values_list('order').get()) 返回 ('a', 2)，而预期应只返回 order 字段的值 2"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ReservedName.objects.create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于创建测试数据。"
+      },
+      {
+        "name": "ReservedName.objects.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于获取基础 QuerySet。"
+      },
+      {
+        "name": "QuerySet.union",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 涉及组合查询。"
+      },
+      {
+        "name": "QuerySet.values_list",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 核心是关于 values_list() 方法在组合查询上的行为。"
+      },
+      {
+        "name": "QuerySet.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 示例中用于获取单个结果。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/compiler.py",
+        "object": "",
+        "lines": "428-433",
+        "reason": "Issue 描述中明确引用了 compiler.py#L428-L433 作为可能的问题位置。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._values",
+        "lines": "",
+        "reason": "values_list() 方法内部调用了 self._values()，这可能与组合查询的列列表缓存或状态管理有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "组合查询后调用一次 values() 或 values_list() 并断言结果。",
+        "target_pattern": "对同一组合查询对象连续调用两次 values_list()，并指定不同的字段列表（例如先 ('name', 'order')，后 ('order')），然后分别获取结果。",
+        "reason": "Issue 明确指出问题出现在多次调用 values()/values_list() 并更改列列表时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "values_list() 调用时传入多个字段（如 'name', 'order', 'id'）。",
+        "target_pattern": "values_list() 调用时传入单个字段（如 'order'）。",
+        "reason": "Issue 示例显示，当第二次调用只传入 'order' 时，返回了错误的列值。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对组合查询多次调用 values()/values_list() 并指定不同的字段列表时，每次调用都应正确返回指定字段的值。",
+      "evidence": [
+        "Issue 描述暗示了期望行为：第一次调用 .values_list('name', 'order') 返回 ('a', 2) 是正确的，但第二次调用 .values_list('order') 应只返回 order 字段的值。",
+        "相关测试 3 和 5 展示了在组合查询后调用 values()/values_list() 并正确获取字段值的模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "第二次调用 qs1.union(qs1).values_list('order').get() 的返回值。",
+        "reason": "Issue 的核心错误是返回值错误，观察此返回值可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "两次 values_list() 调用后生成的 SQL 查询字符串。",
+        "reason": "可能两次调用生成的 SQL 列列表没有正确更新，观察 SQL 有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "第二次调用 .values_list('order').get() 应只返回 order 字段的值（整数 2），而不是一个包含两个值的元组。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 或与第一次调用结果完全相同。",
+        "reason": "Issue 的预期是第二次调用返回正确的单字段值，使用 equals 直接验证返回值。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只影响 union，还是也影响其他组合操作（如 intersection, difference）。",
+    "缺陷是否也影响 values() 方法。",
+    "compiler.py 第 428-433 行的具体代码内容及其与缺陷的确切关系。",
+    "缺陷是否与查询结果的缓存机制有关。"
+  ],
+  "raw": {
+    "issue_summary": "组合查询（如 union）在多次调用 values()/values_list() 时无法正确更改列列表。",
+    "trigger_condition": {
+      "text": "对一个组合查询（如 union）的结果多次调用 values_list() 并指定不同的字段列表。",
+      "evidence": [
+        "Issue 描述：'Composed queries cannot change the list of columns when values()/values_list() is evaluated multiple times'",
+        "Issue 示例：先调用 .values_list('name', 'order')，再调用 .values_list('order')"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "第二次调用 values_list('order') 返回了错误的列值（返回了 'a' 而不是 2）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 示例输出：print(qs1.union(qs1).values_list('order').get()) 返回 ('a', 2)，而预期应只返回 order 字段的值 2"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对组合查询多次调用 values()/values_list() 并指定不同的字段列表时，每次调用都应正确返回指定字段的值。",
+      "evidence": [
+        "Issue 描述暗示了期望行为：第一次调用 .values_list('name', 'order') 返回 ('a', 2) 是正确的，但第二次调用 .values_list('order') 应只返回 order 字段的值。",
+        "相关测试 3 和 5 展示了在组合查询后调用 values()/values_list() 并正确获取字段值的模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ReservedName.objects.create",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于创建测试数据。"
+      },
+      {
+        "name": "ReservedName.objects.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "用于获取基础 QuerySet。"
+      },
+      {
+        "name": "QuerySet.union",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 涉及组合查询。"
+      },
+      {
+        "name": "QuerySet.values_list",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 核心是关于 values_list() 方法在组合查询上的行为。"
+      },
+      {
+        "name": "QuerySet.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 示例中用于获取单个结果。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/compiler.py",
+        "object": "",
+        "lines": "428-433",
+        "reason": "Issue 描述中明确引用了 compiler.py#L428-L433 作为可能的问题位置。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet._values",
+        "lines": "",
+        "reason": "values_list() 方法内部调用了 self._values()，这可能与组合查询的列列表缓存或状态管理有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "QuerySetSetOperationTests.test_union_with_values",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "该测试直接涉及 ReservedName 模型、union 操作以及 values()/values_list() 调用，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "imports",
+          "TestCase class",
+          "ReservedName.objects.create",
+          "qs1 = ReservedName.objects.all()",
+          "union 操作",
+          "values()/values_list() 调用",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试在 union 后只调用了一次 values() 和一次 values_list()，没有测试对同一组合查询多次调用 values_list() 并更改字段列表的情况。"
+      },
+      {
+        "test_name": "QuerySetSetOperationTests.test_difference_with_values",
+        "test_file": "tests/queries/test_qs_combinators.py",
+        "why_relevant": "该测试也涉及组合查询（difference）和 values()/values_list()，展示了类似的测试模式。",
+        "reusable_parts": [
+          "imports",
+          "TestCase class",
+          "ReservedName.objects.create",
+          "组合查询操作",
+          "values()/values_list() 调用",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "使用的是 difference 而非 union，且同样没有测试多次调用 values_list() 更改字段列表。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "组合查询后调用一次 values() 或 values_list() 并断言结果。",
+        "target_pattern": "对同一组合查询对象连续调用两次 values_list()，并指定不同的字段列表（例如先 ('name', 'order')，后 ('order')），然后分别获取结果。",
+        "reason": "Issue 明确指出问题出现在多次调用 values()/values_list() 并更改列列表时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "values_list() 调用时传入多个字段（如 'name', 'order', 'id'）。",
+        "target_pattern": "values_list() 调用时传入单个字段（如 'order'）。",
+        "reason": "Issue 示例显示，当第二次调用只传入 'order' 时，返回了错误的列值。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "第二次调用 qs1.union(qs1).values_list('order').get() 的返回值。",
+        "reason": "Issue 的核心错误是返回值错误，观察此返回值可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "两次 values_list() 调用后生成的 SQL 查询字符串。",
+        "reason": "可能两次调用生成的 SQL 列列表没有正确更新，观察 SQL 有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "第二次调用 .values_list('order').get() 应只返回 order 字段的值（整数 2），而不是一个包含两个值的元组。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 或与第一次调用结果完全相同。",
+        "reason": "Issue 的预期是第二次调用返回正确的单字段值，使用 equals 直接验证返回值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用支持 union 的数据库后端（skipUnlessDBFeature('supports_select_union')）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建 ReservedName 模型实例作为测试数据。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 django.test.TestCase。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只影响 union，还是也影响其他组合操作（如 intersection, difference）。",
+      "缺陷是否也影响 values() 方法。",
+      "compiler.py 第 428-433 行的具体代码内容及其与缺陷的确切关系。",
+      "缺陷是否与查询结果的缓存机制有关。"
+    ]
+  }
+}

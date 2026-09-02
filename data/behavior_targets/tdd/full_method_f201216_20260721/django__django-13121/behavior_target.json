@@ -1,0 +1,352 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13121",
+  "issue_summary": "在 SQLite 和 MySQL 数据库上，对 DurationField 使用仅包含 F 表达式和 timedelta 的注解会导致 decimal.InvalidOperation 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 Experiment 模型，其定义包含 DurationField 字段（estimated_time）。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在 TestCase 中运行，并可能依赖于数据库 fixture 数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "必须配置测试使用 SQLite 或 MySQL 数据库后端。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FTimeDeltaTests.test_duration_with_datetime",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它测试了 DurationField 与 timedelta 在过滤条件中的使用，涉及 Experiment 模型和 F 表达式。",
+        "reusable_parts": [
+          "Experiment 模型导入和 fixture 数据",
+          "使用 datetime.timedelta",
+          "使用 F('estimated_time')"
+        ],
+        "possible_gap": "该测试在 filter 中使用表达式，而非 annotate；且可能使用了不同的数据库后端或表达式包装。"
+      },
+      {
+        "test_name": "FTimeDeltaTests.test_duration_with_datetime_microseconds",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它使用 annotate 和 ExpressionWrapper 将 timedelta 加到 DateTimeField 上，展示了类似的注解模式。",
+        "reusable_parts": [
+          "Experiment.objects.annotate 调用",
+          "使用 datetime.timedelta",
+          "assert 风格"
+        ],
+        "possible_gap": "它使用了 ExpressionWrapper 并指定了 output_field=DateTimeField()，而 Issue 中的 bug 发生在没有使用 ExpressionWrapper 且 output_field 可能未正确推断的情况下。"
+      },
+      {
+        "test_name": "CaseExpressionTests.test_update_duration",
+        "test_file": "tests/expressions_case/tests.py",
+        "why_relevant": "它涉及在 SQLite 上更新 DurationField 并使用 Value(timedelta(...), output_field=DurationField())，强调了在 SQLite 上需要显式设置 output_field。",
+        "reusable_parts": [
+          "对 timedelta 使用 output_field=DurationField() 的模式"
+        ],
+        "possible_gap": "该测试使用 update 和 Case 表达式，而非简单的 annotate 加法。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 SQLite 或 MySQL 后端，对包含 DurationField 的模型使用 QuerySet.annotate，其中注解表达式为 F('duration_field') + datetime.timedelta(...)，且没有使用 ExpressionWrapper 包装。",
+      "evidence": [
+        "Issue 中的代码示例：list(Experiment.objects.annotate(duration=F('estimated_time') + datetime.timedelta(1)))",
+        "Issue 标题指出问题在 SQLite 和 MySQL 上。",
+        "相关测试 1 和 2 展示了使用 ExpressionWrapper 的正常模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 decimal.InvalidOperation 异常，具体为 decimal.ConversionSyntax。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示：decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>]"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的调用入口。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中表达式的一部分。"
+      },
+      {
+        "name": "DurationField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "涉及的字段类型。"
+      },
+      {
+        "name": "BaseDatabaseOperations.convert_durationfield_value",
+        "kind": "method",
+        "source_path": "django/db/backends/base/operations.py",
+        "reason": "traceback 中抛出异常的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/operations.py",
+        "object": "convert_durationfield_value",
+        "lines": "581-583",
+        "reason": "traceback 指向此处，该方法尝试将数据库值转换为 timedelta 时可能处理了不正确的输入格式。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "DurationField",
+        "lines": "1527-1584",
+        "reason": "DurationField 的数据库转换逻辑可能未正确处理来自某些数据库后端（如 SQLite/MySQL）的 F 表达式与 timedelta 运算的结果。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中使用 ExpressionWrapper(F('start') + delta, output_field=DateTimeField()) 或显式设置 output_field。",
+        "target_pattern": "直接使用 annotate(duration=F('estimated_time') + datetime.timedelta(1))，不使用 ExpressionWrapper。",
+        "reason": "Issue 表明当缺少适当的包装或 output_field 推断时，在 SQLite/MySQL 上会触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能在支持微秒精度的后端运行，或使用了排除特定数据的过滤。",
+        "target_pattern": "确保测试在 SQLite 或 MySQL 后端运行。",
+        "reason": "Issue 明确指出问题发生在 SQLite 和 MySQL 上。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 SQLite 和 MySQL 后端，对 DurationField 使用 F 表达式与 timedelta 进行注解应该成功执行并返回正确的结果，而不抛出 decimal.InvalidOperation 异常。",
+      "evidence": [
+        "相关测试 2 和 3 展示了 DurationField 与 datetime 或 timedelta 结合使用的预期成功场景。",
+        "Issue 描述暗示这是一个功能缺陷，而非预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 list(queryset) 或迭代 queryset 时捕获 decimal.InvalidOperation 异常。",
+        "reason": "Issue 中观察到的直接错误现象。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在数据库查询执行前，观察 compiler 为 annotate 表达式生成的 SQL 片段。",
+        "reason": "可能揭示数据库后端如何处理未包装的 F + timedelta 表达式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "观察 annotate 表达式在编译后的 output_field 类型。",
+        "reason": "bug 可能与 output_field 未正确推断为 DurationField 有关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "查询应成功执行，不抛出 decimal.InvalidOperation 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的 repr 输出。",
+        "reason": "Issue 的核心是异常被触发，修复后应不再触发。"
+      },
+      {
+        "assertion_goal": "如果查询成功，注解字段的值应等于模型字段值加上 timedelta。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言与数据库无关的中间表示。",
+        "reason": "验证功能正确性，而不仅仅是异常消失。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "是否所有仅包含 F 表达式和 timedelta 的运算都会失败，还是特定组合？",
+    "PostgreSQL 和 Oracle 是否完全不受影响？",
+    "除了 annotate，其他查询子句（如 filter、update）是否也有相同问题？",
+    "修复后，是否需要在所有类似表达式中显式添加 output_field，还是框架应自动推断？"
+  ],
+  "raw": {
+    "issue_summary": "在 SQLite 和 MySQL 数据库上，对 DurationField 使用仅包含 F 表达式和 timedelta 的注解会导致 decimal.InvalidOperation 异常。",
+    "trigger_condition": {
+      "text": "在 SQLite 或 MySQL 后端，对包含 DurationField 的模型使用 QuerySet.annotate，其中注解表达式为 F('duration_field') + datetime.timedelta(...)，且没有使用 ExpressionWrapper 包装。",
+      "evidence": [
+        "Issue 中的代码示例：list(Experiment.objects.annotate(duration=F('estimated_time') + datetime.timedelta(1)))",
+        "Issue 标题指出问题在 SQLite 和 MySQL 上。",
+        "相关测试 1 和 2 展示了使用 ExpressionWrapper 的正常模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 decimal.InvalidOperation 异常，具体为 decimal.ConversionSyntax。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示：decimal.InvalidOperation: [<class 'decimal.ConversionSyntax'>]"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 SQLite 和 MySQL 后端，对 DurationField 使用 F 表达式与 timedelta 进行注解应该成功执行并返回正确的结果，而不抛出 decimal.InvalidOperation 异常。",
+      "evidence": [
+        "相关测试 2 和 3 展示了 DurationField 与 datetime 或 timedelta 结合使用的预期成功场景。",
+        "Issue 描述暗示这是一个功能缺陷，而非预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发 bug 的调用入口。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中表达式的一部分。"
+      },
+      {
+        "name": "DurationField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "涉及的字段类型。"
+      },
+      {
+        "name": "BaseDatabaseOperations.convert_durationfield_value",
+        "kind": "method",
+        "source_path": "django/db/backends/base/operations.py",
+        "reason": "traceback 中抛出异常的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/operations.py",
+        "object": "convert_durationfield_value",
+        "lines": "581-583",
+        "reason": "traceback 指向此处，该方法尝试将数据库值转换为 timedelta 时可能处理了不正确的输入格式。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "DurationField",
+        "lines": "1527-1584",
+        "reason": "DurationField 的数据库转换逻辑可能未正确处理来自某些数据库后端（如 SQLite/MySQL）的 F 表达式与 timedelta 运算的结果。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "FTimeDeltaTests.test_duration_with_datetime",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它测试了 DurationField 与 timedelta 在过滤条件中的使用，涉及 Experiment 模型和 F 表达式。",
+        "reusable_parts": [
+          "Experiment 模型导入和 fixture 数据",
+          "使用 datetime.timedelta",
+          "使用 F('estimated_time')"
+        ],
+        "possible_gap": "该测试在 filter 中使用表达式，而非 annotate；且可能使用了不同的数据库后端或表达式包装。"
+      },
+      {
+        "test_name": "FTimeDeltaTests.test_duration_with_datetime_microseconds",
+        "test_file": "tests/expressions/tests.py",
+        "why_relevant": "它使用 annotate 和 ExpressionWrapper 将 timedelta 加到 DateTimeField 上，展示了类似的注解模式。",
+        "reusable_parts": [
+          "Experiment.objects.annotate 调用",
+          "使用 datetime.timedelta",
+          "assert 风格"
+        ],
+        "possible_gap": "它使用了 ExpressionWrapper 并指定了 output_field=DateTimeField()，而 Issue 中的 bug 发生在没有使用 ExpressionWrapper 且 output_field 可能未正确推断的情况下。"
+      },
+      {
+        "test_name": "CaseExpressionTests.test_update_duration",
+        "test_file": "tests/expressions_case/tests.py",
+        "why_relevant": "它涉及在 SQLite 上更新 DurationField 并使用 Value(timedelta(...), output_field=DurationField())，强调了在 SQLite 上需要显式设置 output_field。",
+        "reusable_parts": [
+          "对 timedelta 使用 output_field=DurationField() 的模式"
+        ],
+        "possible_gap": "该测试使用 update 和 Case 表达式，而非简单的 annotate 加法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中使用 ExpressionWrapper(F('start') + delta, output_field=DateTimeField()) 或显式设置 output_field。",
+        "target_pattern": "直接使用 annotate(duration=F('estimated_time') + datetime.timedelta(1))，不使用 ExpressionWrapper。",
+        "reason": "Issue 表明当缺少适当的包装或 output_field 推断时，在 SQLite/MySQL 上会触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试可能在支持微秒精度的后端运行，或使用了排除特定数据的过滤。",
+        "target_pattern": "确保测试在 SQLite 或 MySQL 后端运行。",
+        "reason": "Issue 明确指出问题发生在 SQLite 和 MySQL 上。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 list(queryset) 或迭代 queryset 时捕获 decimal.InvalidOperation 异常。",
+        "reason": "Issue 中观察到的直接错误现象。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在数据库查询执行前，观察 compiler 为 annotate 表达式生成的 SQL 片段。",
+        "reason": "可能揭示数据库后端如何处理未包装的 F + timedelta 表达式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "观察 annotate 表达式在编译后的 output_field 类型。",
+        "reason": "bug 可能与 output_field 未正确推断为 DurationField 有关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "查询应成功执行，不抛出 decimal.InvalidOperation 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或精确的 repr 输出。",
+        "reason": "Issue 的核心是异常被触发，修复后应不再触发。"
+      },
+      {
+        "assertion_goal": "如果查询成功，注解字段的值应等于模型字段值加上 timedelta。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言与数据库无关的中间表示。",
+        "reason": "验证功能正确性，而不仅仅是异常消失。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Experiment 模型，其定义包含 DurationField 字段（estimated_time）。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在 TestCase 中运行，并可能依赖于数据库 fixture 数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "必须配置测试使用 SQLite 或 MySQL 数据库后端。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "是否所有仅包含 F 表达式和 timedelta 的运算都会失败，还是特定组合？",
+      "PostgreSQL 和 Oracle 是否完全不受影响？",
+      "除了 annotate，其他查询子句（如 filter、update）是否也有相同问题？",
+      "修复后，是否需要在所有类似表达式中显式添加 output_field，还是框架应自动推断？"
+    ]
+  }
+}

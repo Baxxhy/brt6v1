@@ -1,0 +1,302 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12700",
+  "issue_summary": "SafeExceptionReporterFilter.cleanse_setting 方法在清理敏感设置时，未能递归处理字典以外的可迭代类型（如列表），导致嵌套在列表中的敏感字典键值未被替换为星号。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能用到 @override_settings 装饰器来设置测试用的复杂配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 SafeExceptionReporterFilter 和必要的 settings 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试构造的嵌套数据结构应包含字典，且字典的键名是典型的敏感词（如 'secret'），并放置在列表或元组中。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_cleanse_setting_recurses_in_dictionary",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "它直接测试 cleanse_setting 方法对字典的递归清理功能，是测试该方法的起点。",
+        "reusable_parts": [
+          "导入 SafeExceptionReporterFilter",
+          "创建 reporter_filter 对象",
+          "使用 cleanse_setting 方法",
+          "使用 assertEqual 和 cleansed_substitute 进行断言"
+        ],
+        "possible_gap": "该测试只验证了纯字典的递归清理，没有测试字典嵌套在列表或其他可迭代类型中的情况。"
+      },
+      {
+        "test_name": "test_cleanse_setting_basic",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "它测试了 cleanse_setting 方法的基本行为，包括敏感关键词匹配和直接值替换。",
+        "reusable_parts": [
+          "测试类结构",
+          "基本的断言模式",
+          "对 cleansed_substitute 的引用"
+        ],
+        "possible_gap": "没有涉及复杂嵌套数据结构。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当 Django 设置项的值是一个嵌套了字典的列表或其他非字典可迭代类型，且该设置项的名称包含 'API'、'TOKEN'、'KEY'、'SECRET'、'PASS'、'SIGNATURE' 等敏感关键词（不区分大小写）时，调用 get_safe_settings() 或 cleanse_setting() 方法。",
+      "evidence": [
+        "Issue 中提供了 MY_SETTING 配置示例，其中包含嵌套字典的列表。",
+        "源码片段 3 显示 cleanse_setting 方法只对 dict 类型进行递归处理，其他类型直接返回。",
+        "源码片段 3 显示 hidden_settings 正则表达式用于匹配敏感关键词。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在返回的“安全”设置字典中，嵌套在列表（或其他非字典可迭代结构）内的字典中的敏感键值（如 'secret'、'token'）未被替换为 '********************'，而是以原始明文形式暴露。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 get_safe_settings() 的输出，其中 'something' 和 'else' 列表内的字典值未被清理。",
+        "源码片段 3 的 cleanse_setting 方法逻辑表明，非字典类型的值会直接返回。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SafeExceptionReporterFilter.cleanse_setting",
+        "kind": "method",
+        "source_path": "django/views/debug.py",
+        "reason": "这是直接负责清理设置值的方法，其逻辑缺陷导致了问题。"
+      },
+      {
+        "name": "SafeExceptionReporterFilter.get_safe_settings",
+        "kind": "method",
+        "source_path": "django/views/debug.py",
+        "reason": "这是公开 API，调用 cleanse_setting 来生成安全设置字典，是触发缺陷的入口点之一。"
+      },
+      {
+        "name": "django.views.debug.get_safe_settings",
+        "kind": "function",
+        "source_path": "django/views/debug.py",
+        "reason": "Issue 中提到的旧版 API（Django 3.0 及以下），也用于获取安全设置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/views/debug.py",
+        "object": "SafeExceptionReporterFilter.cleanse_setting",
+        "lines": "83-102",
+        "reason": "该方法仅检查值是否为 dict 类型并进行递归清理，对于 isinstance(value, list) 或其他可迭代类型则直接返回原值，导致嵌套的敏感信息泄露。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试使用简单的字典作为 cleanse_setting 的 value 参数，例如 {'login': 'cooper', 'password': 'secret'}。",
+        "target_pattern": "将 value 参数改为嵌套了字典的列表，例如 [{'foo': 'value'}, {'secret': 'value'}]，或者更复杂的多层嵌套结构。",
+        "reason": "当前代码路径对字典递归，但对列表直接返回。使用列表作为输入可以触发缺陷路径，暴露未清理的嵌套字典。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试可能通过 @override_settings 设置简单的键值对。",
+        "target_pattern": "通过 @override_settings 设置一个包含嵌套列表/字典的复杂配置项，其键名包含敏感词（如 'MY_SECRET_LIST'）。",
+        "reason": "这样可以通过 get_safe_settings() 间接测试 cleanse_setting，并模拟 Issue 中的真实场景。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "cleanse_setting 方法应能递归地遍历并清理所有可迭代数据结构（包括列表、元组等）中的敏感键值，确保任何嵌套层级的敏感信息都被替换为 cleansed_substitute。",
+      "evidence": [
+        "Issue 描述指出 'we only take care of `dict`s but don't take other types of iterables into account'，暗示期望处理其他可迭代类型。",
+        "源码片段 3 中方法的文档字符串提到 'If the value is a dictionary, recursively cleanse...'，但未提及其他可迭代类型，这暗示了功能缺失。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "reporter_filter.cleanse_setting('MY_SECRET_LIST', complex_nested_list) 的返回值，或 get_safe_settings()['MY_SECRET_LIST'] 的值。",
+        "reason": "直接观察清理后的输出，检查嵌套在列表中的字典键值是否被替换为星号。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "使用 pprint.pformat() 或 repr() 观察清理后复杂数据结构的字符串表示。",
+        "reason": "便于直观比较清理前后嵌套结构中敏感值的变化，与 Issue 中的示例输出方式一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言清理后的嵌套列表中，所有敏感键（如 'secret', 'token'）对应的值都等于 cleansed_substitute ('********************')。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言整个复杂数据结构的完整字符串相等，因为内部非敏感值（如 'foo'）应保持不变。",
+        "reason": "直接验证缺陷核心：敏感信息是否被正确屏蔽，同时允许非敏感部分保持原样，使断言稳定且目标明确。"
+      },
+      {
+        "assertion_goal": "断言清理后的结果中不包含原始的敏感明文值。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免硬编码完整的原始值字符串进行 not in 检查，因为原始值可能变化。",
+        "reason": "这是一种补充性的、更宽松的检查，确保敏感信息确实被移除，但不依赖于具体的 cleansed_substitute 字符串。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "cleanse_setting 方法是否应该（或将会）处理除 list 和 tuple 之外的其他可迭代类型（如 set, generator）。",
+    "修复后，对于嵌套非常深或结构混合（如列表套字典套列表）的数据，清理的确切递归逻辑和性能影响。",
+    "CallableSettingWrapper 在修复后的行为是否会有变化。"
+  ],
+  "raw": {
+    "issue_summary": "SafeExceptionReporterFilter.cleanse_setting 方法在清理敏感设置时，未能递归处理字典以外的可迭代类型（如列表），导致嵌套在列表中的敏感字典键值未被替换为星号。",
+    "trigger_condition": {
+      "text": "当 Django 设置项的值是一个嵌套了字典的列表或其他非字典可迭代类型，且该设置项的名称包含 'API'、'TOKEN'、'KEY'、'SECRET'、'PASS'、'SIGNATURE' 等敏感关键词（不区分大小写）时，调用 get_safe_settings() 或 cleanse_setting() 方法。",
+      "evidence": [
+        "Issue 中提供了 MY_SETTING 配置示例，其中包含嵌套字典的列表。",
+        "源码片段 3 显示 cleanse_setting 方法只对 dict 类型进行递归处理，其他类型直接返回。",
+        "源码片段 3 显示 hidden_settings 正则表达式用于匹配敏感关键词。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在返回的“安全”设置字典中，嵌套在列表（或其他非字典可迭代结构）内的字典中的敏感键值（如 'secret'、'token'）未被替换为 '********************'，而是以原始明文形式暴露。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 get_safe_settings() 的输出，其中 'something' 和 'else' 列表内的字典值未被清理。",
+        "源码片段 3 的 cleanse_setting 方法逻辑表明，非字典类型的值会直接返回。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "cleanse_setting 方法应能递归地遍历并清理所有可迭代数据结构（包括列表、元组等）中的敏感键值，确保任何嵌套层级的敏感信息都被替换为 cleansed_substitute。",
+      "evidence": [
+        "Issue 描述指出 'we only take care of `dict`s but don't take other types of iterables into account'，暗示期望处理其他可迭代类型。",
+        "源码片段 3 中方法的文档字符串提到 'If the value is a dictionary, recursively cleanse...'，但未提及其他可迭代类型，这暗示了功能缺失。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SafeExceptionReporterFilter.cleanse_setting",
+        "kind": "method",
+        "source_path": "django/views/debug.py",
+        "reason": "这是直接负责清理设置值的方法，其逻辑缺陷导致了问题。"
+      },
+      {
+        "name": "SafeExceptionReporterFilter.get_safe_settings",
+        "kind": "method",
+        "source_path": "django/views/debug.py",
+        "reason": "这是公开 API，调用 cleanse_setting 来生成安全设置字典，是触发缺陷的入口点之一。"
+      },
+      {
+        "name": "django.views.debug.get_safe_settings",
+        "kind": "function",
+        "source_path": "django/views/debug.py",
+        "reason": "Issue 中提到的旧版 API（Django 3.0 及以下），也用于获取安全设置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/views/debug.py",
+        "object": "SafeExceptionReporterFilter.cleanse_setting",
+        "lines": "83-102",
+        "reason": "该方法仅检查值是否为 dict 类型并进行递归清理，对于 isinstance(value, list) 或其他可迭代类型则直接返回原值，导致嵌套的敏感信息泄露。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_cleanse_setting_recurses_in_dictionary",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "它直接测试 cleanse_setting 方法对字典的递归清理功能，是测试该方法的起点。",
+        "reusable_parts": [
+          "导入 SafeExceptionReporterFilter",
+          "创建 reporter_filter 对象",
+          "使用 cleanse_setting 方法",
+          "使用 assertEqual 和 cleansed_substitute 进行断言"
+        ],
+        "possible_gap": "该测试只验证了纯字典的递归清理，没有测试字典嵌套在列表或其他可迭代类型中的情况。"
+      },
+      {
+        "test_name": "test_cleanse_setting_basic",
+        "test_file": "tests/view_tests/tests/test_debug.py",
+        "why_relevant": "它测试了 cleanse_setting 方法的基本行为，包括敏感关键词匹配和直接值替换。",
+        "reusable_parts": [
+          "测试类结构",
+          "基本的断言模式",
+          "对 cleansed_substitute 的引用"
+        ],
+        "possible_gap": "没有涉及复杂嵌套数据结构。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试使用简单的字典作为 cleanse_setting 的 value 参数，例如 {'login': 'cooper', 'password': 'secret'}。",
+        "target_pattern": "将 value 参数改为嵌套了字典的列表，例如 [{'foo': 'value'}, {'secret': 'value'}]，或者更复杂的多层嵌套结构。",
+        "reason": "当前代码路径对字典递归，但对列表直接返回。使用列表作为输入可以触发缺陷路径，暴露未清理的嵌套字典。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试可能通过 @override_settings 设置简单的键值对。",
+        "target_pattern": "通过 @override_settings 设置一个包含嵌套列表/字典的复杂配置项，其键名包含敏感词（如 'MY_SECRET_LIST'）。",
+        "reason": "这样可以通过 get_safe_settings() 间接测试 cleanse_setting，并模拟 Issue 中的真实场景。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "reporter_filter.cleanse_setting('MY_SECRET_LIST', complex_nested_list) 的返回值，或 get_safe_settings()['MY_SECRET_LIST'] 的值。",
+        "reason": "直接观察清理后的输出，检查嵌套在列表中的字典键值是否被替换为星号。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "使用 pprint.pformat() 或 repr() 观察清理后复杂数据结构的字符串表示。",
+        "reason": "便于直观比较清理前后嵌套结构中敏感值的变化，与 Issue 中的示例输出方式一致。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "断言清理后的嵌套列表中，所有敏感键（如 'secret', 'token'）对应的值都等于 cleansed_substitute ('********************')。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言整个复杂数据结构的完整字符串相等，因为内部非敏感值（如 'foo'）应保持不变。",
+        "reason": "直接验证缺陷核心：敏感信息是否被正确屏蔽，同时允许非敏感部分保持原样，使断言稳定且目标明确。"
+      },
+      {
+        "assertion_goal": "断言清理后的结果中不包含原始的敏感明文值。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免硬编码完整的原始值字符串进行 not in 检查，因为原始值可能变化。",
+        "reason": "这是一种补充性的、更宽松的检查，确保敏感信息确实被移除，但不依赖于具体的 cleansed_substitute 字符串。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的测试基类，并可能用到 @override_settings 装饰器来设置测试用的复杂配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 SafeExceptionReporterFilter 和必要的 settings 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试构造的嵌套数据结构应包含字典，且字典的键名是典型的敏感词（如 'secret'），并放置在列表或元组中。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "cleanse_setting 方法是否应该（或将会）处理除 list 和 tuple 之外的其他可迭代类型（如 set, generator）。",
+      "修复后，对于嵌套非常深或结构混合（如列表套字典套列表）的数据，清理的确切递归逻辑和性能影响。",
+      "CallableSettingWrapper 在修复后的行为是否会有变化。"
+    ]
+  }
+}

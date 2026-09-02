@@ -1,0 +1,292 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "astropy__astropy-13236",
+  "issue_summary": "向 Table 添加结构化 ndarray 时，当前代码会自动将其转换为 NdarrayMixin，但 Issue 认为这已不再必要且应移除。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 astropy.table.Table, numpy, 可能还需要 astropy.table.ndarray_mixin.NdarrayMixin 和 astropy.table.Column。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试构造应创建一个具有结构化 dtype（例如 `dtype=[('x', 'i4'), ('y', 'U2')]`）的 numpy.ndarray。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ndarray_mixin",
+        "test_file": "astropy/table/tests/test_mixin.py",
+        "why_relevant": "该测试直接测试了向 Table 添加结构化数组（包括普通结构化数组和 NdarrayMixin）的行为，并验证了它们被添加为 NdarrayMixin。这与 Issue 讨论的场景高度相关。",
+        "reusable_parts": [
+          "结构化数组 a, b, c 的构造",
+          "Table 的初始化及添加列的操作",
+          "使用 isinstance 检查列是否为 NdarrayMixin 的断言"
+        ],
+        "possible_gap": "该测试验证的是当前（有自动转换）的行为，即 `assert isinstance(t['a'], NdarrayMixin)`。要复现 Issue 的期望（无自动转换），需要变异此断言或观察添加列后的类型变化。"
+      },
+      {
+        "test_name": "test_structured_input",
+        "test_file": "astropy/io/ascii/tests/test_ecsv.py",
+        "why_relevant": "该测试创建了包含结构化 dtype 的 Column 并将其添加到 Table 中，涉及了结构化列的操作。",
+        "reusable_parts": [
+          "创建具有复杂结构化 dtype 的 Column",
+          "将 Column 添加到 Table",
+          "对列属性（dtype, unit, meta）的断言"
+        ],
+        "possible_gap": "该测试直接使用 Column 包装结构化数据，而不是直接添加裸的 ndarray，因此可能不直接触发 Issue 中描述的自动转换路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "向 astropy.table.Table 添加一个具有结构化 dtype（len(dtype) > 1）的 numpy.ndarray 数据。",
+      "evidence": [
+        "Issue 描述中提到：'Currently if you add a structured `np.array` to a Table, it gets turned into an `NdarrayMixin`'",
+        "Issue 中引用的代码片段显示了对 `len(data.dtype) > 1` 的检查。",
+        "相关测试 1 (`test_ndarray_mixin`) 展示了向 Table 添加结构化数组 a, b, c 的操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前行为（自动转换为 NdarrayMixin）是 Issue 作者认为不必要且应改变的。Issue 未报告运行时错误，而是报告了设计上的不理想行为。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'While this mostly works, I am not sure this is necessary or desirable any more'",
+        "Issue 建议添加 FutureWarning 并最终改变行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "astropy.table.Table",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是关于向 Table 添加列的行为。"
+      },
+      {
+        "name": "astropy.table.ndarray_mixin.NdarrayMixin",
+        "kind": "class",
+        "source_path": "astropy/table/ndarray_mixin.py",
+        "reason": "Issue 讨论的是是否将结构化数组自动转换为这个类。"
+      },
+      {
+        "name": "astropy.table.Column",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 期望结构化数组最终被添加为 Column。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "将结构化数组转换为 NdarrayMixin 的代码逻辑",
+        "lines": "",
+        "reason": "Issue 中直接引用了触发转换的代码片段，并建议移除它。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，在添加列之前，数据已经是 NdarrayMixin 视图（如变量 d），或者测试断言添加后列是 NdarrayMixin。",
+        "target_pattern": "使用裸的、未包装的、具有结构化 dtype 的 numpy.ndarray 作为输入添加到 Table。",
+        "reason": "Issue 的核心触发条件是添加一个普通的（非 Column，非 mixin）结构化 ndarray。当前测试中，对 a, b, c 的添加触发了自动转换，但断言验证的是转换后的结果。变异应关注添加前的数据类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "assertion_style",
+        "current_pattern": "相似测试断言添加后的列是 NdarrayMixin 类型 (`assert isinstance(t['a'], NdarrayMixin)`)。",
+        "target_pattern": "断言添加后的列不是 NdarrayMixin 类型（在修复后），或者是普通的 Column/MaskedColumn 类型。",
+        "reason": "Issue 的期望行为是移除自动转换，因此列的类型应改变。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "向 Table 添加结构化 ndarray 时，它应被添加为普通的 Column，而不是自动转换为 NdarrayMixin。",
+      "evidence": [
+        "Issue 提案：'in the future (5.2) the structured array will be added as a `Column`.'",
+        "Issue 建议：'Change the behavior in 5.2 by removing this clause.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(t['column_name']) 或 isinstance(t['column_name'], NdarrayMixin)",
+        "reason": "Issue 的核心是关于列的类型是否被自动转换。观察添加列后的实际类型是判断行为是否符合预期的关键。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings(record=True) 捕获 FutureWarning",
+        "reason": "Issue 建议在过渡期添加 FutureWarning。观察是否有警告发出可以验证代码是否处于过渡状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证向 Table 添加一个结构化 ndarray 后，该列的类型不是 NdarrayMixin（在修复版本中）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串或过于具体的内部属性。",
+        "reason": "断言类型变化直接对应 Issue 描述的行为改变目标，且相对稳定。"
+      },
+      {
+        "assertion_goal": "验证添加的结构化 ndarray 列的数据内容与原始数组一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个 Table 的完整字符串表示（如 pformat 输出），除非 Issue 明确提及。",
+        "reason": "确保行为改变（类型转换与否）不影响数据的正确性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中引用的具体代码片段的确切文件路径和行号未知。",
+    "在移除自动转换后，结构化 ndarray 列的确切类型是什么（是 Column 还是 MaskedColumn 或其他）？",
+    "当前代码库中是否已存在 FutureWarning？测试时是否需要模拟特定版本？",
+    "除了类型变化，移除自动转换是否会影响序列化（I/O）或其他功能？Issue 提到最初引入 NdarrayMixin 是因为序列化问题。"
+  ],
+  "raw": {
+    "issue_summary": "向 Table 添加结构化 ndarray 时，当前代码会自动将其转换为 NdarrayMixin，但 Issue 认为这已不再必要且应移除。",
+    "trigger_condition": {
+      "text": "向 astropy.table.Table 添加一个具有结构化 dtype（len(dtype) > 1）的 numpy.ndarray 数据。",
+      "evidence": [
+        "Issue 描述中提到：'Currently if you add a structured `np.array` to a Table, it gets turned into an `NdarrayMixin`'",
+        "Issue 中引用的代码片段显示了对 `len(data.dtype) > 1` 的检查。",
+        "相关测试 1 (`test_ndarray_mixin`) 展示了向 Table 添加结构化数组 a, b, c 的操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当前行为（自动转换为 NdarrayMixin）是 Issue 作者认为不必要且应改变的。Issue 未报告运行时错误，而是报告了设计上的不理想行为。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'While this mostly works, I am not sure this is necessary or desirable any more'",
+        "Issue 建议添加 FutureWarning 并最终改变行为。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "向 Table 添加结构化 ndarray 时，它应被添加为普通的 Column，而不是自动转换为 NdarrayMixin。",
+      "evidence": [
+        "Issue 提案：'in the future (5.2) the structured array will be added as a `Column`.'",
+        "Issue 建议：'Change the behavior in 5.2 by removing this clause.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "astropy.table.Table",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是关于向 Table 添加列的行为。"
+      },
+      {
+        "name": "astropy.table.ndarray_mixin.NdarrayMixin",
+        "kind": "class",
+        "source_path": "astropy/table/ndarray_mixin.py",
+        "reason": "Issue 讨论的是是否将结构化数组自动转换为这个类。"
+      },
+      {
+        "name": "astropy.table.Column",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 期望结构化数组最终被添加为 Column。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "将结构化数组转换为 NdarrayMixin 的代码逻辑",
+        "lines": "",
+        "reason": "Issue 中直接引用了触发转换的代码片段，并建议移除它。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ndarray_mixin",
+        "test_file": "astropy/table/tests/test_mixin.py",
+        "why_relevant": "该测试直接测试了向 Table 添加结构化数组（包括普通结构化数组和 NdarrayMixin）的行为，并验证了它们被添加为 NdarrayMixin。这与 Issue 讨论的场景高度相关。",
+        "reusable_parts": [
+          "结构化数组 a, b, c 的构造",
+          "Table 的初始化及添加列的操作",
+          "使用 isinstance 检查列是否为 NdarrayMixin 的断言"
+        ],
+        "possible_gap": "该测试验证的是当前（有自动转换）的行为，即 `assert isinstance(t['a'], NdarrayMixin)`。要复现 Issue 的期望（无自动转换），需要变异此断言或观察添加列后的类型变化。"
+      },
+      {
+        "test_name": "test_structured_input",
+        "test_file": "astropy/io/ascii/tests/test_ecsv.py",
+        "why_relevant": "该测试创建了包含结构化 dtype 的 Column 并将其添加到 Table 中，涉及了结构化列的操作。",
+        "reusable_parts": [
+          "创建具有复杂结构化 dtype 的 Column",
+          "将 Column 添加到 Table",
+          "对列属性（dtype, unit, meta）的断言"
+        ],
+        "possible_gap": "该测试直接使用 Column 包装结构化数据，而不是直接添加裸的 ndarray，因此可能不直接触发 Issue 中描述的自动转换路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，在添加列之前，数据已经是 NdarrayMixin 视图（如变量 d），或者测试断言添加后列是 NdarrayMixin。",
+        "target_pattern": "使用裸的、未包装的、具有结构化 dtype 的 numpy.ndarray 作为输入添加到 Table。",
+        "reason": "Issue 的核心触发条件是添加一个普通的（非 Column，非 mixin）结构化 ndarray。当前测试中，对 a, b, c 的添加触发了自动转换，但断言验证的是转换后的结果。变异应关注添加前的数据类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "assertion_style",
+        "current_pattern": "相似测试断言添加后的列是 NdarrayMixin 类型 (`assert isinstance(t['a'], NdarrayMixin)`)。",
+        "target_pattern": "断言添加后的列不是 NdarrayMixin 类型（在修复后），或者是普通的 Column/MaskedColumn 类型。",
+        "reason": "Issue 的期望行为是移除自动转换，因此列的类型应改变。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(t['column_name']) 或 isinstance(t['column_name'], NdarrayMixin)",
+        "reason": "Issue 的核心是关于列的类型是否被自动转换。观察添加列后的实际类型是判断行为是否符合预期的关键。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "warnings.catch_warnings(record=True) 捕获 FutureWarning",
+        "reason": "Issue 建议在过渡期添加 FutureWarning。观察是否有警告发出可以验证代码是否处于过渡状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证向 Table 添加一个结构化 ndarray 后，该列的类型不是 NdarrayMixin（在修复版本中）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串或过于具体的内部属性。",
+        "reason": "断言类型变化直接对应 Issue 描述的行为改变目标，且相对稳定。"
+      },
+      {
+        "assertion_goal": "验证添加的结构化 ndarray 列的数据内容与原始数组一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言整个 Table 的完整字符串表示（如 pformat 输出），除非 Issue 明确提及。",
+        "reason": "确保行为改变（类型转换与否）不影响数据的正确性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 astropy.table.Table, numpy, 可能还需要 astropy.table.ndarray_mixin.NdarrayMixin 和 astropy.table.Column。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试构造应创建一个具有结构化 dtype（例如 `dtype=[('x', 'i4'), ('y', 'U2')]`）的 numpy.ndarray。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中引用的具体代码片段的确切文件路径和行号未知。",
+      "在移除自动转换后，结构化 ndarray 列的确切类型是什么（是 Column 还是 MaskedColumn 或其他）？",
+      "当前代码库中是否已存在 FutureWarning？测试时是否需要模拟特定版本？",
+      "除了类型变化，移除自动转换是否会影响序列化（I/O）或其他功能？Issue 提到最初引入 NdarrayMixin 是因为序列化问题。"
+    ]
+  }
+}

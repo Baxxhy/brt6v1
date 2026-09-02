@@ -1,0 +1,320 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-10908",
+  "issue_summary": "CountVectorizer 在初始化时提供了 vocabulary 参数但未调用 fit 时，get_feature_names() 方法会错误地抛出 NotFittedError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 CountVectorizer 和相关的断言工具（如 assert_raises, assert_equal）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个测试用的语料库（corpus）和一个词汇表（vocabulary）列表或字典。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_feature_names",
+        "test_file": "sklearn/feature_extraction/tests/test_text.py",
+        "why_relevant": "它直接测试了 get_feature_names 方法，包括在未拟合时调用会引发异常的情况。",
+        "reusable_parts": [
+          "imports (CountVectorizer, assert_raises)",
+          "assert_raises 的使用模式来检查异常。",
+          "使用 fit_transform 来拟合向量器。"
+        ],
+        "possible_gap": "该测试没有覆盖通过 vocabulary 参数初始化但未调用 fit 的场景。它测试的是完全没有 vocabulary 的情况。"
+      },
+      {
+        "test_name": "test_countvectorizer_custom_vocabulary",
+        "test_file": "sklearn/feature_extraction/tests/test_text.py",
+        "why_relevant": "它测试了使用自定义 vocabulary 参数初始化 CountVectorizer 的场景。",
+        "reusable_parts": [
+          "使用 vocabulary 参数（dict, list 等）初始化 CountVectorizer 的模式。",
+          "调用 fit 和 transform 的流程。",
+          "检查 vocabulary_ 属性的断言。"
+        ],
+        "possible_gap": "该测试在调用 get_feature_names 之前总是调用了 fit 方法，没有测试未拟合状态。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 vocabulary 参数初始化 CountVectorizer 对象，不调用 fit 方法，直接调用 get_feature_names() 方法。",
+      "evidence": [
+        "Issue 中第 5-7 行：vectorizer = CountVectorizer(vocabulary=vocabulary); vectorizer.get_feature_names() 抛出 NotFittedError。",
+        "源码片段 3 显示 get_feature_names 调用了 _check_vocabulary()，而 _check_vocabulary 可能检查 vocabulary_ 属性是否存在。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 get_feature_names() 时抛出 NotFittedError 异常，提示 'Vocabulary wasn't fitted.'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中第 7 行：vectorizer.get_feature_names() 输出 NotFittedError: CountVectorizer - Vocabulary wasn't fitted."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "CountVectorizer",
+        "kind": "class",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 报告的核心类。"
+      },
+      {
+        "name": "CountVectorizer.get_feature_names",
+        "kind": "method",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 中抛出异常的方法。"
+      },
+      {
+        "name": "CountVectorizer.transform",
+        "kind": "method",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 中展示的在相同条件下能正常工作的方法，其行为可能与 get_feature_names 形成对比。"
+      },
+      {
+        "name": "CountVectorizer._validate_vocabulary",
+        "kind": "method",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 中提到 transform 方法调用它来设置 vocabulary_ 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/feature_extraction/text.py",
+        "object": "CountVectorizer.get_feature_names",
+        "lines": "994-999",
+        "reason": "该方法直接调用了 _check_vocabulary()，而 _check_vocabulary 可能没有正确处理通过 vocabulary 参数初始化但未调用 fit 的情况。"
+      },
+      {
+        "path": "sklearn/feature_extraction/text.py",
+        "object": "VectorizerMixin._check_vocabulary",
+        "lines": "",
+        "reason": "get_feature_names 调用了它，它可能负责检查 vocabulary_ 属性是否存在，但未考虑通过 vocabulary 参数初始化的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，在调用 get_feature_names 之前，总是先调用 fit 或 fit_transform 来设置 vocabulary_ 属性。",
+        "target_pattern": "通过 vocabulary 参数初始化 CountVectorizer 后，不调用 fit 或 fit_transform，直接调用 get_feature_names。",
+        "reason": "Issue 表明，在这种特定的对象状态下（有 vocabulary 参数但未拟合），get_feature_names 会错误地抛出异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，CountVectorizer 初始化时可能不提供 vocabulary 参数，或者提供后立即拟合。",
+        "target_pattern": "CountVectorizer 初始化时提供 vocabulary 参数，但保持未拟合状态。",
+        "reason": "这是触发缺陷的关键配置条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当通过 vocabulary 参数初始化 CountVectorizer 后，即使未调用 fit 方法，get_feature_names() 也应能基于提供的 vocabulary 返回特征名称列表，而不应抛出 NotFittedError。",
+      "evidence": [
+        "Issue 中用户陈述：'I believe that the get_feature_names method should not raise NotFittedError if the vocabulary parameter is provided but the vectorizer has not been trained.'",
+        "Issue 中观察到 transform 方法在相同条件下能正常工作（第 8 行），并设置了 vocabulary_ 属性（第 9 行）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "vectorizer.get_feature_names() 的调用结果（是否抛出 NotFittedError）。",
+        "reason": "Issue 的核心错误现象就是抛出 NotFittedError 异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 get_feature_names 前后，vectorizer.vocabulary_ 属性的存在性和值。",
+        "reason": "Issue 显示 transform 方法会设置 vocabulary_，而 get_feature_names 可能依赖它。观察其状态变化有助于理解缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果 get_feature_names 成功返回，其返回的列表内容是否与提供的 vocabulary 一致。",
+        "reason": "修复后，该方法应能基于提供的 vocabulary 返回正确的特征名列表。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当通过 vocabulary 参数初始化 CountVectorizer 后，调用 get_feature_names 不应抛出 NotFittedError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本中微调。",
+        "reason": "Issue 的核心是异常是否被抛出。使用 assert_raises 或 pytest.raises 来验证在特定条件下没有异常。修复后，这个断言应该失败（即不抛出异常）。"
+      },
+      {
+        "assertion_goal": "get_feature_names 返回的列表应正确映射到提供的 vocabulary。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回列表的完整顺序，如果 vocabulary 是 dict，顺序可能由 sorted 决定。更稳定的是检查集合相等或长度。",
+        "reason": "修复后，该方法应能正常工作并返回正确的特征名。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "_check_vocabulary 方法的确切实现和检查逻辑，因为相关源码片段中没有提供。",
+    "NotFittedError 是在 _check_vocabulary 中抛出的，还是在 get_feature_names 中直接检查 vocabulary_ 后抛出的？",
+    "修复后，get_feature_names 是否应该在调用时隐式地调用 _validate_vocabulary（像 transform 那样）来设置 vocabulary_，还是应该以其他方式工作？"
+  ],
+  "raw": {
+    "issue_summary": "CountVectorizer 在初始化时提供了 vocabulary 参数但未调用 fit 时，get_feature_names() 方法会错误地抛出 NotFittedError 异常。",
+    "trigger_condition": {
+      "text": "使用 vocabulary 参数初始化 CountVectorizer 对象，不调用 fit 方法，直接调用 get_feature_names() 方法。",
+      "evidence": [
+        "Issue 中第 5-7 行：vectorizer = CountVectorizer(vocabulary=vocabulary); vectorizer.get_feature_names() 抛出 NotFittedError。",
+        "源码片段 3 显示 get_feature_names 调用了 _check_vocabulary()，而 _check_vocabulary 可能检查 vocabulary_ 属性是否存在。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 get_feature_names() 时抛出 NotFittedError 异常，提示 'Vocabulary wasn't fitted.'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中第 7 行：vectorizer.get_feature_names() 输出 NotFittedError: CountVectorizer - Vocabulary wasn't fitted."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当通过 vocabulary 参数初始化 CountVectorizer 后，即使未调用 fit 方法，get_feature_names() 也应能基于提供的 vocabulary 返回特征名称列表，而不应抛出 NotFittedError。",
+      "evidence": [
+        "Issue 中用户陈述：'I believe that the get_feature_names method should not raise NotFittedError if the vocabulary parameter is provided but the vectorizer has not been trained.'",
+        "Issue 中观察到 transform 方法在相同条件下能正常工作（第 8 行），并设置了 vocabulary_ 属性（第 9 行）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "CountVectorizer",
+        "kind": "class",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 报告的核心类。"
+      },
+      {
+        "name": "CountVectorizer.get_feature_names",
+        "kind": "method",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 中抛出异常的方法。"
+      },
+      {
+        "name": "CountVectorizer.transform",
+        "kind": "method",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 中展示的在相同条件下能正常工作的方法，其行为可能与 get_feature_names 形成对比。"
+      },
+      {
+        "name": "CountVectorizer._validate_vocabulary",
+        "kind": "method",
+        "source_path": "sklearn/feature_extraction/text.py",
+        "reason": "Issue 中提到 transform 方法调用它来设置 vocabulary_ 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/feature_extraction/text.py",
+        "object": "CountVectorizer.get_feature_names",
+        "lines": "994-999",
+        "reason": "该方法直接调用了 _check_vocabulary()，而 _check_vocabulary 可能没有正确处理通过 vocabulary 参数初始化但未调用 fit 的情况。"
+      },
+      {
+        "path": "sklearn/feature_extraction/text.py",
+        "object": "VectorizerMixin._check_vocabulary",
+        "lines": "",
+        "reason": "get_feature_names 调用了它，它可能负责检查 vocabulary_ 属性是否存在，但未考虑通过 vocabulary 参数初始化的情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_feature_names",
+        "test_file": "sklearn/feature_extraction/tests/test_text.py",
+        "why_relevant": "它直接测试了 get_feature_names 方法，包括在未拟合时调用会引发异常的情况。",
+        "reusable_parts": [
+          "imports (CountVectorizer, assert_raises)",
+          "assert_raises 的使用模式来检查异常。",
+          "使用 fit_transform 来拟合向量器。"
+        ],
+        "possible_gap": "该测试没有覆盖通过 vocabulary 参数初始化但未调用 fit 的场景。它测试的是完全没有 vocabulary 的情况。"
+      },
+      {
+        "test_name": "test_countvectorizer_custom_vocabulary",
+        "test_file": "sklearn/feature_extraction/tests/test_text.py",
+        "why_relevant": "它测试了使用自定义 vocabulary 参数初始化 CountVectorizer 的场景。",
+        "reusable_parts": [
+          "使用 vocabulary 参数（dict, list 等）初始化 CountVectorizer 的模式。",
+          "调用 fit 和 transform 的流程。",
+          "检查 vocabulary_ 属性的断言。"
+        ],
+        "possible_gap": "该测试在调用 get_feature_names 之前总是调用了 fit 方法，没有测试未拟合状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，在调用 get_feature_names 之前，总是先调用 fit 或 fit_transform 来设置 vocabulary_ 属性。",
+        "target_pattern": "通过 vocabulary 参数初始化 CountVectorizer 后，不调用 fit 或 fit_transform，直接调用 get_feature_names。",
+        "reason": "Issue 表明，在这种特定的对象状态下（有 vocabulary 参数但未拟合），get_feature_names 会错误地抛出异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中，CountVectorizer 初始化时可能不提供 vocabulary 参数，或者提供后立即拟合。",
+        "target_pattern": "CountVectorizer 初始化时提供 vocabulary 参数，但保持未拟合状态。",
+        "reason": "这是触发缺陷的关键配置条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "vectorizer.get_feature_names() 的调用结果（是否抛出 NotFittedError）。",
+        "reason": "Issue 的核心错误现象就是抛出 NotFittedError 异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 get_feature_names 前后，vectorizer.vocabulary_ 属性的存在性和值。",
+        "reason": "Issue 显示 transform 方法会设置 vocabulary_，而 get_feature_names 可能依赖它。观察其状态变化有助于理解缺陷。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果 get_feature_names 成功返回，其返回的列表内容是否与提供的 vocabulary 一致。",
+        "reason": "修复后，该方法应能基于提供的 vocabulary 返回正确的特征名列表。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当通过 vocabulary 参数初始化 CountVectorizer 后，调用 get_feature_names 不应抛出 NotFittedError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本中微调。",
+        "reason": "Issue 的核心是异常是否被抛出。使用 assert_raises 或 pytest.raises 来验证在特定条件下没有异常。修复后，这个断言应该失败（即不抛出异常）。"
+      },
+      {
+        "assertion_goal": "get_feature_names 返回的列表应正确映射到提供的 vocabulary。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回列表的完整顺序，如果 vocabulary 是 dict，顺序可能由 sorted 决定。更稳定的是检查集合相等或长度。",
+        "reason": "修复后，该方法应能正常工作并返回正确的特征名。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 CountVectorizer 和相关的断言工具（如 assert_raises, assert_equal）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个测试用的语料库（corpus）和一个词汇表（vocabulary）列表或字典。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "_check_vocabulary 方法的确切实现和检查逻辑，因为相关源码片段中没有提供。",
+      "NotFittedError 是在 _check_vocabulary 中抛出的，还是在 get_feature_names 中直接检查 vocabulary_ 后抛出的？",
+      "修复后，get_feature_names 是否应该在调用时隐式地调用 _validate_vocabulary（像 transform 那样）来设置 vocabulary_，还是应该以其他方式工作？"
+    ]
+  }
+}

@@ -1,0 +1,300 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13658",
+  "issue_summary": "ManagementUtility 在实例化 CommandParser 时未传递已计算的 prog 参数，导致 usage 字符串中的 %(prog)s 错误地引用了 sys.argv[0] 而非 self.prog_name。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要模拟 sys.argv[0] 为 None 或错误值，并传入自定义 argv 给 execute_from_command_line。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或 AdminScriptTestCase 作为测试基类，并可能需 override_settings 设置 INSTALLED_APPS。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 StringIO 捕获输出或错误信息。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_base_run_from_argv",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "该测试涉及 BaseCommand.run_from_argv，它调用 ManagementUtility 或相关命令行解析逻辑，可能触及 CommandParser 的实例化。",
+        "reusable_parts": [
+          "BaseCommand 的构造",
+          "run_from_argv 的调用",
+          "assertRaises 用于检查异常",
+          "StringIO 用于捕获输出"
+        ],
+        "possible_gap": "该测试主要关注异常处理和 traceback，未直接测试 ManagementUtility 中 CommandParser 的 prog 参数传递。"
+      },
+      {
+        "test_name": "test_create_parser_kwargs",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试直接测试 BaseCommand.create_parser() 传递 kwargs 给 CommandParser，与 CommandParser 的构造参数相关。",
+        "reusable_parts": [
+          "BaseCommand().create_parser 的调用",
+          "对 parser 属性的断言（如 epilog）",
+          "测试类结构"
+        ],
+        "possible_gap": "该测试关注的是 BaseCommand 的 create_parser，而非 ManagementUtility 内部的 CommandParser 实例化。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 execute_from_command_line 并传入自定义 argv，其中 argv[0] 与 sys.argv[0] 不同（例如 sys.argv[0] 为 None 或错误值）。",
+      "evidence": [
+        "Issue 描述：'If passing my own argv to execute_from_command_line avoided all the ensuing exceptions, I wouldn't have to modify sys.argv[0] globally as I'm doing in the meantime.'",
+        "源码片段 4 显示 execute_from_command_line 接收 argv 参数并传递给 ManagementUtility。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 sys.argv[0] 不正确（例如为 None）时，在解析 --pythonpath 和 --settings 等选项时可能引发异常，因为 usage 字符串中的 %(prog)s 引用了错误的程序名。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'If passing my own argv to execute_from_command_line avoided all the ensuing exceptions...'",
+        "Issue 指出 %(prog)s 引用 sys.argv[0] 而非 self.prog_name。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "ManagementUtility",
+        "kind": "class",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "Issue 的核心对象，负责封装命令行工具逻辑，其 __init__ 方法计算 prog_name。"
+      },
+      {
+        "name": "CommandParser",
+        "kind": "class",
+        "source_path": "django/core/management/base.py",
+        "reason": "Issue 指出 ManagementUtility 实例化 CommandParser 时未传递 prog 参数。"
+      },
+      {
+        "name": "execute_from_command_line",
+        "kind": "function",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "Issue 中提到的入口函数，用于触发缺陷路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/__init__.py",
+        "object": "ManagementUtility.execute",
+        "lines": "",
+        "reason": "Issue 指出在需要解析 --pythonpath 和 --settings 时，ManagementUtility 实例化 CommandParser 而未传递 prog=self.prog_name。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中调用 run_from_argv 或相关方法时通常使用默认或简单的 argv（如 ['', '']）。",
+        "target_pattern": "调用 execute_from_command_line 或 ManagementUtility 时传入自定义 argv，其中 argv[0] 与 sys.argv[0] 不同（例如 sys.argv[0] 为 None）。",
+        "reason": "Issue 指出当 sys.argv[0] 不正确时，缺陷会显现。通过变异输入 argv 可以触发 ManagementUtility 计算 prog_name 与 sys.argv[0] 不一致的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中可能未显式设置 CommandParser 的 prog 参数。",
+        "target_pattern": "在 ManagementUtility 内部实例化 CommandParser 时，应传递 prog=self.prog_name 参数。",
+        "reason": "Issue 的核心是缺少 prog 参数传递。变异测试以验证传递 prog 参数的影响。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "CommandParser 的 usage 字符串中的 %(prog)s 应正确引用 ManagementUtility 根据传入的 argv 计算出的 self.prog_name，而非 sys.argv[0]。",
+      "evidence": [
+        "Issue 建议的修复：'parser = CommandParser(prog=self.prog_name, usage='%(prog)s subcommand [options] [args]', ...)'",
+        "Issue 描述：'Instead, it should refer to self.prog_name.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "CommandParser 实例的 prog 属性或 usage 字符串格式化后的结果。",
+        "reason": "Issue 涉及 %(prog)s 的解析，观察 prog 属性或格式化后的 usage 可以确认是否引用了正确的程序名。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在解析命令行选项（如 --pythonpath）时是否引发异常（如 AttributeError、TypeError 因 prog 为 None）。",
+        "reason": "Issue 提到会引发异常，观测异常类型和消息可帮助判断缺陷是否触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "CommandParser 的 prog 属性或 usage 字符串中的程序名应与 ManagementUtility 根据传入 argv 计算的 prog_name 一致，而非 sys.argv[0]。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 usage 字符串或无关的 parser 属性。",
+        "reason": "Issue 的核心是程序名引用错误，直接比较 prog 值或格式化后的程序名片段最稳定。"
+      },
+      {
+        "assertion_goal": "当传入自定义 argv 且 sys.argv[0] 不正确时，命令行解析不应引发因 prog 为 None 或错误值导致的异常。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言特定的异常消息全文，因为消息可能随版本变化。",
+        "reason": "Issue 期望避免异常，断言无特定异常类型或消息片段更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "ManagementUtility.execute 方法中实例化 CommandParser 的具体行号和上下文代码未在提供的源码片段中给出。",
+    "当 prog 引用错误时，具体会引发何种异常（如 AttributeError、TypeError 或其他）未在 Issue 中明确说明。",
+    "除了 --pythonpath 和 --settings，是否还有其他命令行选项解析会受到影响不确定。"
+  ],
+  "raw": {
+    "issue_summary": "ManagementUtility 在实例化 CommandParser 时未传递已计算的 prog 参数，导致 usage 字符串中的 %(prog)s 错误地引用了 sys.argv[0] 而非 self.prog_name。",
+    "trigger_condition": {
+      "text": "调用 execute_from_command_line 并传入自定义 argv，其中 argv[0] 与 sys.argv[0] 不同（例如 sys.argv[0] 为 None 或错误值）。",
+      "evidence": [
+        "Issue 描述：'If passing my own argv to execute_from_command_line avoided all the ensuing exceptions, I wouldn't have to modify sys.argv[0] globally as I'm doing in the meantime.'",
+        "源码片段 4 显示 execute_from_command_line 接收 argv 参数并传递给 ManagementUtility。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 sys.argv[0] 不正确（例如为 None）时，在解析 --pythonpath 和 --settings 等选项时可能引发异常，因为 usage 字符串中的 %(prog)s 引用了错误的程序名。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'If passing my own argv to execute_from_command_line avoided all the ensuing exceptions...'",
+        "Issue 指出 %(prog)s 引用 sys.argv[0] 而非 self.prog_name。"
+      ],
+      "confidence": "medium"
+    },
+    "expected_behavior": {
+      "text": "CommandParser 的 usage 字符串中的 %(prog)s 应正确引用 ManagementUtility 根据传入的 argv 计算出的 self.prog_name，而非 sys.argv[0]。",
+      "evidence": [
+        "Issue 建议的修复：'parser = CommandParser(prog=self.prog_name, usage='%(prog)s subcommand [options] [args]', ...)'",
+        "Issue 描述：'Instead, it should refer to self.prog_name.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ManagementUtility",
+        "kind": "class",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "Issue 的核心对象，负责封装命令行工具逻辑，其 __init__ 方法计算 prog_name。"
+      },
+      {
+        "name": "CommandParser",
+        "kind": "class",
+        "source_path": "django/core/management/base.py",
+        "reason": "Issue 指出 ManagementUtility 实例化 CommandParser 时未传递 prog 参数。"
+      },
+      {
+        "name": "execute_from_command_line",
+        "kind": "function",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "Issue 中提到的入口函数，用于触发缺陷路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/__init__.py",
+        "object": "ManagementUtility.execute",
+        "lines": "",
+        "reason": "Issue 指出在需要解析 --pythonpath 和 --settings 时，ManagementUtility 实例化 CommandParser 而未传递 prog=self.prog_name。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_base_run_from_argv",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "该测试涉及 BaseCommand.run_from_argv，它调用 ManagementUtility 或相关命令行解析逻辑，可能触及 CommandParser 的实例化。",
+        "reusable_parts": [
+          "BaseCommand 的构造",
+          "run_from_argv 的调用",
+          "assertRaises 用于检查异常",
+          "StringIO 用于捕获输出"
+        ],
+        "possible_gap": "该测试主要关注异常处理和 traceback，未直接测试 ManagementUtility 中 CommandParser 的 prog 参数传递。"
+      },
+      {
+        "test_name": "test_create_parser_kwargs",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试直接测试 BaseCommand.create_parser() 传递 kwargs 给 CommandParser，与 CommandParser 的构造参数相关。",
+        "reusable_parts": [
+          "BaseCommand().create_parser 的调用",
+          "对 parser 属性的断言（如 epilog）",
+          "测试类结构"
+        ],
+        "possible_gap": "该测试关注的是 BaseCommand 的 create_parser，而非 ManagementUtility 内部的 CommandParser 实例化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中调用 run_from_argv 或相关方法时通常使用默认或简单的 argv（如 ['', '']）。",
+        "target_pattern": "调用 execute_from_command_line 或 ManagementUtility 时传入自定义 argv，其中 argv[0] 与 sys.argv[0] 不同（例如 sys.argv[0] 为 None）。",
+        "reason": "Issue 指出当 sys.argv[0] 不正确时，缺陷会显现。通过变异输入 argv 可以触发 ManagementUtility 计算 prog_name 与 sys.argv[0] 不一致的场景。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中可能未显式设置 CommandParser 的 prog 参数。",
+        "target_pattern": "在 ManagementUtility 内部实例化 CommandParser 时，应传递 prog=self.prog_name 参数。",
+        "reason": "Issue 的核心是缺少 prog 参数传递。变异测试以验证传递 prog 参数的影响。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "CommandParser 实例的 prog 属性或 usage 字符串格式化后的结果。",
+        "reason": "Issue 涉及 %(prog)s 的解析，观察 prog 属性或格式化后的 usage 可以确认是否引用了正确的程序名。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "在解析命令行选项（如 --pythonpath）时是否引发异常（如 AttributeError、TypeError 因 prog 为 None）。",
+        "reason": "Issue 提到会引发异常，观测异常类型和消息可帮助判断缺陷是否触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "CommandParser 的 prog 属性或 usage 字符串中的程序名应与 ManagementUtility 根据传入 argv 计算的 prog_name 一致，而非 sys.argv[0]。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 usage 字符串或无关的 parser 属性。",
+        "reason": "Issue 的核心是程序名引用错误，直接比较 prog 值或格式化后的程序名片段最稳定。"
+      },
+      {
+        "assertion_goal": "当传入自定义 argv 且 sys.argv[0] 不正确时，命令行解析不应引发因 prog 为 None 或错误值导致的异常。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言特定的异常消息全文，因为消息可能随版本变化。",
+        "reason": "Issue 期望避免异常，断言无特定异常类型或消息片段更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要模拟 sys.argv[0] 为 None 或错误值，并传入自定义 argv 给 execute_from_command_line。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 SimpleTestCase 或 AdminScriptTestCase 作为测试基类，并可能需 override_settings 设置 INSTALLED_APPS。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用 StringIO 捕获输出或错误信息。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "ManagementUtility.execute 方法中实例化 CommandParser 的具体行号和上下文代码未在提供的源码片段中给出。",
+      "当 prog 引用错误时，具体会引发何种异常（如 AttributeError、TypeError 或其他）未在 Issue 中明确说明。",
+      "除了 --pythonpath 和 --settings，是否还有其他命令行选项解析会受到影响不确定。"
+    ]
+  }
+}

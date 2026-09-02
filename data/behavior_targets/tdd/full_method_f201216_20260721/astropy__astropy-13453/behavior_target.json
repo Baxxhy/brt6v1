@@ -1,0 +1,316 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "astropy__astropy-13453",
+  "issue_summary": "当使用 astropy 的 write 方法以 HTML 格式输出表格时，formats 参数被忽略，导致列数据未按指定格式显示。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 astropy.table.Table 和 io.StringIO。可能需要导入 astropy.io.ascii 或直接使用 Table.write。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 StringIO 作为输出目标来捕获 write 方法生成的 HTML 字符串。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造一个简单的 Table，包含浮点数列，以便演示格式化效果。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_write_table_html_fill_values",
+        "test_file": "astropy/io/ascii/tests/test_html.py",
+        "why_relevant": "这个测试也使用了 ascii.write 来生成 HTML 输出，并验证了 fill_values 参数的效果。它展示了如何构造 Table、调用 write 并比较输出。",
+        "reusable_parts": [
+          "from astropy.table import Table",
+          "from io import StringIO",
+          "使用 ascii.write 或 Table.write 输出 HTML",
+          "使用 StringIO 捕获输出",
+          "通过 assert buffer_output.getvalue() == buffer_expected.getvalue() 比较输出"
+        ],
+        "possible_gap": "该测试验证的是 fill_values 参数，而不是 formats 参数。它没有测试列数据的自定义格式化。"
+      },
+      {
+        "test_name": "test_raw_html_write",
+        "test_file": "astropy/io/ascii/tests/test_html.py",
+        "why_relevant": "这个测试验证了 HTML writer 的另一个参数 htmldict={'raw_html_cols': ...} 的行为。它展示了如何通过 write 方法的 htmldict 参数传递 HTML 特定的配置。",
+        "reusable_parts": [
+          "使用 Table.write 并指定 format='ascii.html'",
+          "使用 htmldict 参数传递 writer 特定选项",
+          "使用 assert expected in out.getvalue() 进行部分字符串匹配"
+        ],
+        "possible_gap": "该测试关注的是 HTML 转义行为，而不是数值格式化。它没有使用 formats 参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Table.write 方法，设置 format='html' 并提供一个 formats 字典参数（例如 formats={'a': lambda x: f'{x:.2e}'}）来格式化特定列。",
+      "evidence": [
+        "Issue 的 Steps to Reproduce 部分提供了使用 write(sp, format=\"html\", formats={\"a\": lambda x: f\"{x:.2e}\"}) 的代码示例。",
+        "Issue 描述明确指出 \"When writing out an astropy table to HTML format, the `formats` option to the `write()` method seems to be ignored.\""
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HTML 输出中的列数据未按 formats 参数指定的格式进行格式化，而是显示了原始值（例如 1.23875234858e-24）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 HTML 输出，其中 <td>1.23875234858e-24</td> 和 <td>3.2348748432e-15</td> 未格式化为两位小数科学计数法。",
+        "Issue 描述 \"The `formats` argument seems to be ignored and the output is not formatted as required.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "astropy.io.ascii.write",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接关于 write 方法的 formats 参数在 HTML 格式下的行为。"
+      },
+      {
+        "name": "astropy.table.Table.write",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的复现步骤中使用了 Table 实例的 write 方法。"
+      },
+      {
+        "name": "astropy.io.ascii.html.HTML.write",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试代码中使用了 html.HTML().write()，这可能是底层实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/io/ascii/html.py",
+        "object": "HTML writer 类或其 write 方法",
+        "lines": "",
+        "reason": "Issue 特定于 HTML 格式输出，而其他格式（CSV, rst）工作正常，表明问题可能出在 HTML writer 的实现中，它可能没有处理或传递 formats 参数。"
+      },
+      {
+        "path": "astropy/io/ascii/core.py",
+        "object": "write 函数或 BaseWriter 类",
+        "lines": "",
+        "reason": "write 函数是通用入口点，需要将 formats 参数正确分派给特定的 writer（如 HTML writer）。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中调用 write 时可能没有 formats 参数，或者 formats 参数用于其他格式（如 CSV）。",
+        "target_pattern": "在调用 write 时，添加 format='html' 和一个 formats 字典参数，例如 formats={'a': lambda x: f'{x:.2e}'}。",
+        "reason": "Issue 表明 formats 参数在 HTML 格式下被忽略，因此添加此参数是触发缺陷的必要条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试可能使用默认的 HTML writer 配置。",
+        "target_pattern": "可能需要检查或设置 HTML writer 的配置，以确保它能接收并应用 formats 参数（尽管 Issue 表明当前它没有）。",
+        "reason": "formats 参数可能需要在 writer 内部被正确处理，而 HTML writer 可能缺少此逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当使用 format='html' 调用 write 方法并指定 formats 参数时，HTML 输出中的列数据应按照 formats 参数指定的格式进行格式化。",
+      "evidence": [
+        "Issue 的 Expected behavior 部分：\"I expect the HTML table output to respect the formatting given by the `formats` argument.\"",
+        "Issue 展示了使用 format='csv' 和 format='ascii.rst' 时，formats 参数正常工作，输出为 \"1.24e-24\" 和 \"3.23e-15\"。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "write 方法输出到 StringIO 后的字符串内容，特别是包含数据值的 <td> 标签内的文本。",
+        "reason": "缺陷表现为 HTML 输出中数据值未格式化。观察输出字符串中 <td> 标签内的内容可以直接判断 formats 参数是否生效。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "write 方法调用本身是否成功完成（无异常），以及是否返回了任何值（如 writer 对象）。",
+        "reason": "Issue 没有报告异常，只是输出错误。观察调用是否正常完成有助于排除其他错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 HTML 输出字符串中，指定列（如 'a'）的数据单元格（<td>）包含按 formats 参数格式化后的文本（例如 \"1.24e-24\"），而不是原始值（例如 \"1.23875234858e-24\"）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对整个 HTML 字符串进行完全相等断言，因为 HTML 标签的空白、属性顺序等可能变化。",
+        "reason": "Issue 的核心是数据格式化，而不是 HTML 结构。检查格式化后的片段是否出现在输出中更稳定且直接相关。"
+      },
+      {
+        "assertion_goal": "验证对于同一表格和 formats 参数，HTML 输出与 CSV 或 RST 输出在格式化后的数据值上一致（或至少 HTML 输出包含了格式化后的值）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免直接比较不同格式（HTML vs CSV）的完整输出字符串，因为它们的结构完全不同。",
+        "reason": "Issue 表明其他格式工作正常。可以提取 CSV 输出中的格式化值，并检查它们是否出现在 HTML 输出中。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "HTML writer 内部是否完全忽略了 formats 参数，还是部分处理了但最终输出时被覆盖。",
+    "formats 参数是否应该通过 htmldict 或其他特定于 HTML 的参数传递给 writer。",
+    "除了 lambda 函数，其他格式说明符（如字符串格式模板）是否也受影响。",
+    "问题是否只出现在通过 Table.write 调用时，还是直接使用 ascii.write 也一样。"
+  ],
+  "raw": {
+    "issue_summary": "当使用 astropy 的 write 方法以 HTML 格式输出表格时，formats 参数被忽略，导致列数据未按指定格式显示。",
+    "trigger_condition": {
+      "text": "调用 Table.write 方法，设置 format='html' 并提供一个 formats 字典参数（例如 formats={'a': lambda x: f'{x:.2e}'}）来格式化特定列。",
+      "evidence": [
+        "Issue 的 Steps to Reproduce 部分提供了使用 write(sp, format=\"html\", formats={\"a\": lambda x: f\"{x:.2e}\"}) 的代码示例。",
+        "Issue 描述明确指出 \"When writing out an astropy table to HTML format, the `formats` option to the `write()` method seems to be ignored.\""
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HTML 输出中的列数据未按 formats 参数指定的格式进行格式化，而是显示了原始值（例如 1.23875234858e-24）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中展示了 HTML 输出，其中 <td>1.23875234858e-24</td> 和 <td>3.2348748432e-15</td> 未格式化为两位小数科学计数法。",
+        "Issue 描述 \"The `formats` argument seems to be ignored and the output is not formatted as required.\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当使用 format='html' 调用 write 方法并指定 formats 参数时，HTML 输出中的列数据应按照 formats 参数指定的格式进行格式化。",
+      "evidence": [
+        "Issue 的 Expected behavior 部分：\"I expect the HTML table output to respect the formatting given by the `formats` argument.\"",
+        "Issue 展示了使用 format='csv' 和 format='ascii.rst' 时，formats 参数正常工作，输出为 \"1.24e-24\" 和 \"3.23e-15\"。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "astropy.io.ascii.write",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接关于 write 方法的 formats 参数在 HTML 格式下的行为。"
+      },
+      {
+        "name": "astropy.table.Table.write",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的复现步骤中使用了 Table 实例的 write 方法。"
+      },
+      {
+        "name": "astropy.io.ascii.html.HTML.write",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试代码中使用了 html.HTML().write()，这可能是底层实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/io/ascii/html.py",
+        "object": "HTML writer 类或其 write 方法",
+        "lines": "",
+        "reason": "Issue 特定于 HTML 格式输出，而其他格式（CSV, rst）工作正常，表明问题可能出在 HTML writer 的实现中，它可能没有处理或传递 formats 参数。"
+      },
+      {
+        "path": "astropy/io/ascii/core.py",
+        "object": "write 函数或 BaseWriter 类",
+        "lines": "",
+        "reason": "write 函数是通用入口点，需要将 formats 参数正确分派给特定的 writer（如 HTML writer）。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_write_table_html_fill_values",
+        "test_file": "astropy/io/ascii/tests/test_html.py",
+        "why_relevant": "这个测试也使用了 ascii.write 来生成 HTML 输出，并验证了 fill_values 参数的效果。它展示了如何构造 Table、调用 write 并比较输出。",
+        "reusable_parts": [
+          "from astropy.table import Table",
+          "from io import StringIO",
+          "使用 ascii.write 或 Table.write 输出 HTML",
+          "使用 StringIO 捕获输出",
+          "通过 assert buffer_output.getvalue() == buffer_expected.getvalue() 比较输出"
+        ],
+        "possible_gap": "该测试验证的是 fill_values 参数，而不是 formats 参数。它没有测试列数据的自定义格式化。"
+      },
+      {
+        "test_name": "test_raw_html_write",
+        "test_file": "astropy/io/ascii/tests/test_html.py",
+        "why_relevant": "这个测试验证了 HTML writer 的另一个参数 htmldict={'raw_html_cols': ...} 的行为。它展示了如何通过 write 方法的 htmldict 参数传递 HTML 特定的配置。",
+        "reusable_parts": [
+          "使用 Table.write 并指定 format='ascii.html'",
+          "使用 htmldict 参数传递 writer 特定选项",
+          "使用 assert expected in out.getvalue() 进行部分字符串匹配"
+        ],
+        "possible_gap": "该测试关注的是 HTML 转义行为，而不是数值格式化。它没有使用 formats 参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中调用 write 时可能没有 formats 参数，或者 formats 参数用于其他格式（如 CSV）。",
+        "target_pattern": "在调用 write 时，添加 format='html' 和一个 formats 字典参数，例如 formats={'a': lambda x: f'{x:.2e}'}。",
+        "reason": "Issue 表明 formats 参数在 HTML 格式下被忽略，因此添加此参数是触发缺陷的必要条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试可能使用默认的 HTML writer 配置。",
+        "target_pattern": "可能需要检查或设置 HTML writer 的配置，以确保它能接收并应用 formats 参数（尽管 Issue 表明当前它没有）。",
+        "reason": "formats 参数可能需要在 writer 内部被正确处理，而 HTML writer 可能缺少此逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "write 方法输出到 StringIO 后的字符串内容，特别是包含数据值的 <td> 标签内的文本。",
+        "reason": "缺陷表现为 HTML 输出中数据值未格式化。观察输出字符串中 <td> 标签内的内容可以直接判断 formats 参数是否生效。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "write 方法调用本身是否成功完成（无异常），以及是否返回了任何值（如 writer 对象）。",
+        "reason": "Issue 没有报告异常，只是输出错误。观察调用是否正常完成有助于排除其他错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 HTML 输出字符串中，指定列（如 'a'）的数据单元格（<td>）包含按 formats 参数格式化后的文本（例如 \"1.24e-24\"），而不是原始值（例如 \"1.23875234858e-24\"）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对整个 HTML 字符串进行完全相等断言，因为 HTML 标签的空白、属性顺序等可能变化。",
+        "reason": "Issue 的核心是数据格式化，而不是 HTML 结构。检查格式化后的片段是否出现在输出中更稳定且直接相关。"
+      },
+      {
+        "assertion_goal": "验证对于同一表格和 formats 参数，HTML 输出与 CSV 或 RST 输出在格式化后的数据值上一致（或至少 HTML 输出包含了格式化后的值）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免直接比较不同格式（HTML vs CSV）的完整输出字符串，因为它们的结构完全不同。",
+        "reason": "Issue 表明其他格式工作正常。可以提取 CSV 输出中的格式化值，并检查它们是否出现在 HTML 输出中。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 astropy.table.Table 和 io.StringIO。可能需要导入 astropy.io.ascii 或直接使用 Table.write。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 StringIO 作为输出目标来捕获 write 方法生成的 HTML 字符串。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造一个简单的 Table，包含浮点数列，以便演示格式化效果。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "HTML writer 内部是否完全忽略了 formats 参数，还是部分处理了但最终输出时被覆盖。",
+      "formats 参数是否应该通过 htmldict 或其他特定于 HTML 的参数传递给 writer。",
+      "除了 lambda 函数，其他格式说明符（如字符串格式模板）是否也受影响。",
+      "问题是否只出现在通过 Table.write 调用时，还是直接使用 ascii.write 也一样。"
+    ]
+  }
+}

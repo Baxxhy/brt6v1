@@ -1,0 +1,266 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16661",
+  "issue_summary": "ModelAdmin.lookup_allowed() 错误地将外键作为主键的情况视为具体继承，导致允许的查找路径被错误地截断并引发 DisallowedModelAdminLookup 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离模型定义，避免与项目中其他模型冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建测试用的 ModelAdmin 站点（self.site）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在测试中内联定义模型类（Country, Place, Restaurant, Waiter）和 ModelAdmin 子类（WaiterAdmin）。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lookup_allowed_onetoone",
+        "test_file": "tests/modeladmin/tests.py",
+        "why_relevant": "该测试也涉及 ModelAdmin.lookup_allowed 方法，并测试了通过 OneToOneField 和 ForeignKey 的链式查找路径是否被允许，与当前 Issue 的模型关系类似。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "内联模型定义方式",
+          "ModelAdmin 子类定义和实例化",
+          "ma.lookup_allowed 调用和 assertIs 断言风格。"
+        ],
+        "possible_gap": "该测试中的 OneToOneField 不是主键，而 Issue 中的 OneToOneField 被用作主键，这是触发缺陷的关键差异。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当 ModelAdmin 的 list_filter 包含一个通过 OneToOneField（作为主键）和 ForeignKey 链式关联的字段路径（如 'restaurant__place__country'），且调用 lookup_allowed 检查该路径时。",
+      "evidence": [
+        "Issue 中描述了模型关系：Restaurant.place 是 Place 的 OneToOneField 并作为主键，Waiter.restaurant 是 Restaurant 的 ForeignKey，WaiterAdmin.list_filter 包含 'restaurant__place__country'。",
+        "Issue 中调用了 ma.lookup_allowed('restaurant__place__country', 'test_value')。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "lookup_allowed 方法返回 False（或引发 DisallowedModelAdminLookup 异常），导致过滤失败。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的测试断言 self.assertIs(ma.lookup_allowed('restaurant__place__country', 'test_value'), True) 会失败。",
+        "Issue 描述：'admin thinking that having a foreign key field as a primary key is the same as concrete inheritance' 并错误地截断路径。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelAdmin.lookup_allowed",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "这是 Issue 中直接调用的方法，其行为是缺陷的核心。"
+      },
+      {
+        "name": "django.db.models.OneToOneField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及将 OneToOneField 用作主键的特殊情况。"
+      },
+      {
+        "name": "django.db.models.ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及通过 ForeignKey 的链式查找。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "BaseModelAdmin.lookup_allowed",
+        "lines": "439-497",
+        "reason": "Issue 推测缺陷在于该方法将外键作为主键的情况误判为具体继承，导致路径截断。源码片段 2 显示了该方法处理关系查找路径的逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，EmployeeProfile.employee 是普通的 OneToOneField（非主键）。",
+        "target_pattern": "将 OneToOneField 设置为模型的主键（primary_key=True），如 Issue 中 Restaurant.place 字段。",
+        "reason": "Issue 指出缺陷与“foreign key field as a primary key”被误判为“concrete inheritance”有关，改变 OneToOneField 的主键状态可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，查找路径为 'employee__employeeinfo__description' 和 'employee__department__code'。",
+        "target_pattern": "构造一个更长的、涉及作为主键的 OneToOneField 的查找路径，如 'restaurant__place__country'。",
+        "reason": "Issue 中的查找路径更长，且涉及作为主键的 OneToOneField 在中间，可能触发路径截断逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "lookup_allowed 方法应正确识别通过 OneToOneField（作为主键）和 ForeignKey 的链式关系，并允许 list_filter 中定义的完整查找路径 'restaurant__place__country'。",
+      "evidence": [
+        "Issue 中测试的预期是断言返回 True。",
+        "相关测试 1 (test_lookup_allowed_onetoone) 展示了通过 OneToOneField 和 ForeignKey 的链式查找被允许。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "ma.lookup_allowed('restaurant__place__country', 'test_value') 的返回值。",
+        "reason": "Issue 的核心是该方法错误地返回了 False，观察返回值可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 lookup_allowed 方法内部，relation_parts 列表构建后的内容。",
+        "reason": "Issue 推测路径被错误截断（如 'restaurant__place__country' 被截为 'restaurant__country'），观察 relation_parts 可以验证此推测。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 lookup_allowed 对 list_filter 中定义的完整链式查找路径返回 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的异常消息或内部数据结构。",
+        "reason": "Issue 的预期行为是允许该查找，因此应断言返回 True。使用 equals 风格直接且稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "lookup_allowed 方法内部具体哪一行代码导致了将‘外键作为主键’误判为‘具体继承’的逻辑错误。",
+    "除了 lookup_allowed 返回 False，是否一定会引发 DisallowedModelAdminLookup 异常，还是仅导致过滤功能失效。",
+    "该缺陷是否也影响其他类似的模型关系配置（例如，多级 OneToOneField 作为主键的链式查找）。"
+  ],
+  "raw": {
+    "issue_summary": "ModelAdmin.lookup_allowed() 错误地将外键作为主键的情况视为具体继承，导致允许的查找路径被错误地截断并引发 DisallowedModelAdminLookup 异常。",
+    "trigger_condition": {
+      "text": "当 ModelAdmin 的 list_filter 包含一个通过 OneToOneField（作为主键）和 ForeignKey 链式关联的字段路径（如 'restaurant__place__country'），且调用 lookup_allowed 检查该路径时。",
+      "evidence": [
+        "Issue 中描述了模型关系：Restaurant.place 是 Place 的 OneToOneField 并作为主键，Waiter.restaurant 是 Restaurant 的 ForeignKey，WaiterAdmin.list_filter 包含 'restaurant__place__country'。",
+        "Issue 中调用了 ma.lookup_allowed('restaurant__place__country', 'test_value')。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "lookup_allowed 方法返回 False（或引发 DisallowedModelAdminLookup 异常），导致过滤失败。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的测试断言 self.assertIs(ma.lookup_allowed('restaurant__place__country', 'test_value'), True) 会失败。",
+        "Issue 描述：'admin thinking that having a foreign key field as a primary key is the same as concrete inheritance' 并错误地截断路径。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "lookup_allowed 方法应正确识别通过 OneToOneField（作为主键）和 ForeignKey 的链式关系，并允许 list_filter 中定义的完整查找路径 'restaurant__place__country'。",
+      "evidence": [
+        "Issue 中测试的预期是断言返回 True。",
+        "相关测试 1 (test_lookup_allowed_onetoone) 展示了通过 OneToOneField 和 ForeignKey 的链式查找被允许。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelAdmin.lookup_allowed",
+        "kind": "method",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "这是 Issue 中直接调用的方法，其行为是缺陷的核心。"
+      },
+      {
+        "name": "django.db.models.OneToOneField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及将 OneToOneField 用作主键的特殊情况。"
+      },
+      {
+        "name": "django.db.models.ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及通过 ForeignKey 的链式查找。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "BaseModelAdmin.lookup_allowed",
+        "lines": "439-497",
+        "reason": "Issue 推测缺陷在于该方法将外键作为主键的情况误判为具体继承，导致路径截断。源码片段 2 显示了该方法处理关系查找路径的逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lookup_allowed_onetoone",
+        "test_file": "tests/modeladmin/tests.py",
+        "why_relevant": "该测试也涉及 ModelAdmin.lookup_allowed 方法，并测试了通过 OneToOneField 和 ForeignKey 的链式查找路径是否被允许，与当前 Issue 的模型关系类似。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "内联模型定义方式",
+          "ModelAdmin 子类定义和实例化",
+          "ma.lookup_allowed 调用和 assertIs 断言风格。"
+        ],
+        "possible_gap": "该测试中的 OneToOneField 不是主键，而 Issue 中的 OneToOneField 被用作主键，这是触发缺陷的关键差异。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，EmployeeProfile.employee 是普通的 OneToOneField（非主键）。",
+        "target_pattern": "将 OneToOneField 设置为模型的主键（primary_key=True），如 Issue 中 Restaurant.place 字段。",
+        "reason": "Issue 指出缺陷与“foreign key field as a primary key”被误判为“concrete inheritance”有关，改变 OneToOneField 的主键状态可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中，查找路径为 'employee__employeeinfo__description' 和 'employee__department__code'。",
+        "target_pattern": "构造一个更长的、涉及作为主键的 OneToOneField 的查找路径，如 'restaurant__place__country'。",
+        "reason": "Issue 中的查找路径更长，且涉及作为主键的 OneToOneField 在中间，可能触发路径截断逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "ma.lookup_allowed('restaurant__place__country', 'test_value') 的返回值。",
+        "reason": "Issue 的核心是该方法错误地返回了 False，观察返回值可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 lookup_allowed 方法内部，relation_parts 列表构建后的内容。",
+        "reason": "Issue 推测路径被错误截断（如 'restaurant__place__country' 被截为 'restaurant__country'），观察 relation_parts 可以验证此推测。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 lookup_allowed 对 list_filter 中定义的完整链式查找路径返回 True。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的异常消息或内部数据结构。",
+        "reason": "Issue 的预期行为是允许该查找，因此应断言返回 True。使用 equals 风格直接且稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离模型定义，避免与项目中其他模型冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建测试用的 ModelAdmin 站点（self.site）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在测试中内联定义模型类（Country, Place, Restaurant, Waiter）和 ModelAdmin 子类（WaiterAdmin）。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "lookup_allowed 方法内部具体哪一行代码导致了将‘外键作为主键’误判为‘具体继承’的逻辑错误。",
+      "除了 lookup_allowed 返回 False，是否一定会引发 DisallowedModelAdminLookup 异常，还是仅导致过滤功能失效。",
+      "该缺陷是否也影响其他类似的模型关系配置（例如，多级 OneToOneField 作为主键的链式查找）。"
+    ]
+  }
+}

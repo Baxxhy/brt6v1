@@ -1,0 +1,328 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15957",
+  "issue_summary": "Prefetch 对象与切片查询集一起使用时引发 AssertionError: Cannot filter a query once a slice has been taken.",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 和数据库支持。可能需要创建 Category 和 Post 模型（或类似关系）的测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 assertNumQueries 来验证预取减少了查询次数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PrefetchRelatedObjectsTests.test_prefetch_queryset",
+        "test_file": "tests/prefetch_related/test_prefetch_related_objects.py",
+        "why_relevant": "该测试直接使用了 Prefetch 对象，并验证了预取功能。",
+        "reusable_parts": [
+          "Prefetch 对象的构造方式",
+          "prefetch_related_objects 的调用模式",
+          "assertNumQueries 的使用",
+          "assertCountEqual 的断言风格"
+        ],
+        "possible_gap": "该测试中 Prefetch 的 queryset 使用了 filter，但没有使用切片。"
+      },
+      {
+        "test_name": "CustomPrefetchTests.test_nested_prefetch_related_with_duplicate_prefetcher",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "该测试展示了嵌套和复杂的 Prefetch 使用场景，涉及 queryset 参数。",
+        "reusable_parts": [
+          "Prefetch 对象的嵌套使用",
+          "prefetch_related 的链式调用",
+          "assertNumQueries 的使用"
+        ],
+        "possible_gap": "没有涉及切片查询集。"
+      },
+      {
+        "test_name": "SubqueryTests.test_related_sliced_subquery",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试直接使用了切片查询集（Tag.objects.order_by(\"-id\")[:1]）作为 filter 条件的一部分，证明了 Django 在某些上下文中支持切片子查询。",
+        "reusable_parts": [
+          "切片查询集的构造（Model.objects.order_by(...)[:n]）",
+          "filter 中使用切片查询集作为 __in 参数的模式"
+        ],
+        "possible_gap": "该测试是在 filter 条件中使用切片查询集，而不是在 Prefetch 对象的 queryset 参数中。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 prefetch_related 中使用 Prefetch 对象，其 queryset 参数是一个切片查询集（例如 Post.objects.all()[:3]）。",
+      "evidence": [
+        "Issue 中给出的示例代码：Category.objects.prefetch_related(Prefetch('post_set', queryset=Post.objects.all()[:3], to_attr='example_posts',))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "引发 AssertionError: Cannot filter a query once a slice has been taken.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确说明：\"results in AssertionError: Cannot filter a query once a slice has been taken.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.prefetch_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是调用 prefetch_related 方法时出现问题。"
+      },
+      {
+        "name": "django.db.models.query.Prefetch",
+        "kind": "class",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中使用了 Prefetch 类来构造预取参数。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 示例中使用了 .all() 方法，并且切片操作是在其返回的 QuerySet 上进行的。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "prefetch_related",
+        "lines": "1553-1576",
+        "reason": "这是处理 prefetch_related 调用的方法，可能包含对 Prefetch 对象内部 queryset（特别是切片 queryset）的处理逻辑。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "Prefetch",
+        "lines": "2142-2200",
+        "reason": "Prefetch 类负责封装预取信息，其内部可能对传入的 queryset 参数（如切片查询集）处理不当。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Prefetch 的 queryset 参数使用 filter 方法（如 Author.objects.filter(...)）。",
+        "target_pattern": "Prefetch 的 queryset 参数使用切片操作（如 Post.objects.all()[:3]）。",
+        "reason": "Issue 明确指出使用切片查询集会触发错误，而现有测试大多使用 filter。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "Model.objects.prefetch_related(Prefetch('related_field', queryset=...filter(...)))",
+        "target_pattern": "Model.objects.prefetch_related(Prefetch('related_field', queryset=...all()[:N]))",
+        "reason": "Issue 示例展示了在 prefetch_related 调用链中，将切片查询集作为 Prefetch 的 queryset 参数。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Prefetch 对象应能正常与切片查询集一起工作，允许高效地预取有限数量的相关对象，而不引发异常。",
+      "evidence": [
+        "Issue 中描述了使用场景：\"I want to display a list of categories while displaying couple of example objects from each category next to it.\" 以及 \"Prefetching without slicing would prefetch all objects (and there may be thousands of them) instead of the three examples that are needed.\" 这暗示了期望的行为是支持切片以限制预取数量。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行包含切片 Prefetch 的查询集评估（如 list(queryset) 或迭代）时捕获的异常。",
+        "reason": "Issue 描述的错误是 AssertionError，在评估查询集时触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "执行查询时生成的 SQL 语句（通过 connection.queries 或 django.db.connection）。",
+        "reason": "可以观察切片逻辑是否被正确转换为 SQL 的 LIMIT 子句，或者是否在后续过滤操作中引发问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "预取完成后，相关对象的集合（如 category.example_posts）的长度和内容。",
+        "reason": "验证切片是否生效，即是否只预取了指定数量的对象。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用切片 Prefetch 的查询集评估不应引发 AssertionError 或其他异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本或配置下变化。",
+        "reason": "Issue 的核心是异常被引发，修复后应不再引发。因此，初始复现测试应断言 raises，而修复后测试应断言 not raises。"
+      },
+      {
+        "assertion_goal": "预取的相关对象集合应只包含切片指定数量的对象。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言预取对象的完整列表或特定 ID，除非测试数据是固定的。",
+        "reason": "验证切片功能是否按预期工作，即限制了预取数量。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误 AssertionError: Cannot filter a query once a slice has been taken. 的确切触发位置和上下文（是在 prefetch_related 调用时，还是在后续评估查询集时？）。",
+    "Prefetch 内部对切片查询集的处理流程，以及为何会与后续的过滤操作冲突。",
+    "除了 AssertionError，是否还有其他潜在的错误行为或副作用。",
+    "是否所有数据库后端都表现出相同的行为。"
+  ],
+  "raw": {
+    "issue_summary": "Prefetch 对象与切片查询集一起使用时引发 AssertionError: Cannot filter a query once a slice has been taken.",
+    "trigger_condition": {
+      "text": "在 prefetch_related 中使用 Prefetch 对象，其 queryset 参数是一个切片查询集（例如 Post.objects.all()[:3]）。",
+      "evidence": [
+        "Issue 中给出的示例代码：Category.objects.prefetch_related(Prefetch('post_set', queryset=Post.objects.all()[:3], to_attr='example_posts',))"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "引发 AssertionError: Cannot filter a query once a slice has been taken.",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中明确说明：\"results in AssertionError: Cannot filter a query once a slice has been taken.\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Prefetch 对象应能正常与切片查询集一起工作，允许高效地预取有限数量的相关对象，而不引发异常。",
+      "evidence": [
+        "Issue 中描述了使用场景：\"I want to display a list of categories while displaying couple of example objects from each category next to it.\" 以及 \"Prefetching without slicing would prefetch all objects (and there may be thousands of them) instead of the three examples that are needed.\" 这暗示了期望的行为是支持切片以限制预取数量。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.prefetch_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是调用 prefetch_related 方法时出现问题。"
+      },
+      {
+        "name": "django.db.models.query.Prefetch",
+        "kind": "class",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中使用了 Prefetch 类来构造预取参数。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 示例中使用了 .all() 方法，并且切片操作是在其返回的 QuerySet 上进行的。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "prefetch_related",
+        "lines": "1553-1576",
+        "reason": "这是处理 prefetch_related 调用的方法，可能包含对 Prefetch 对象内部 queryset（特别是切片 queryset）的处理逻辑。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "Prefetch",
+        "lines": "2142-2200",
+        "reason": "Prefetch 类负责封装预取信息，其内部可能对传入的 queryset 参数（如切片查询集）处理不当。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PrefetchRelatedObjectsTests.test_prefetch_queryset",
+        "test_file": "tests/prefetch_related/test_prefetch_related_objects.py",
+        "why_relevant": "该测试直接使用了 Prefetch 对象，并验证了预取功能。",
+        "reusable_parts": [
+          "Prefetch 对象的构造方式",
+          "prefetch_related_objects 的调用模式",
+          "assertNumQueries 的使用",
+          "assertCountEqual 的断言风格"
+        ],
+        "possible_gap": "该测试中 Prefetch 的 queryset 使用了 filter，但没有使用切片。"
+      },
+      {
+        "test_name": "CustomPrefetchTests.test_nested_prefetch_related_with_duplicate_prefetcher",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "该测试展示了嵌套和复杂的 Prefetch 使用场景，涉及 queryset 参数。",
+        "reusable_parts": [
+          "Prefetch 对象的嵌套使用",
+          "prefetch_related 的链式调用",
+          "assertNumQueries 的使用"
+        ],
+        "possible_gap": "没有涉及切片查询集。"
+      },
+      {
+        "test_name": "SubqueryTests.test_related_sliced_subquery",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试直接使用了切片查询集（Tag.objects.order_by(\"-id\")[:1]）作为 filter 条件的一部分，证明了 Django 在某些上下文中支持切片子查询。",
+        "reusable_parts": [
+          "切片查询集的构造（Model.objects.order_by(...)[:n]）",
+          "filter 中使用切片查询集作为 __in 参数的模式"
+        ],
+        "possible_gap": "该测试是在 filter 条件中使用切片查询集，而不是在 Prefetch 对象的 queryset 参数中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "Prefetch 的 queryset 参数使用 filter 方法（如 Author.objects.filter(...)）。",
+        "target_pattern": "Prefetch 的 queryset 参数使用切片操作（如 Post.objects.all()[:3]）。",
+        "reason": "Issue 明确指出使用切片查询集会触发错误，而现有测试大多使用 filter。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "Model.objects.prefetch_related(Prefetch('related_field', queryset=...filter(...)))",
+        "target_pattern": "Model.objects.prefetch_related(Prefetch('related_field', queryset=...all()[:N]))",
+        "reason": "Issue 示例展示了在 prefetch_related 调用链中，将切片查询集作为 Prefetch 的 queryset 参数。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "执行包含切片 Prefetch 的查询集评估（如 list(queryset) 或迭代）时捕获的异常。",
+        "reason": "Issue 描述的错误是 AssertionError，在评估查询集时触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "执行查询时生成的 SQL 语句（通过 connection.queries 或 django.db.connection）。",
+        "reason": "可以观察切片逻辑是否被正确转换为 SQL 的 LIMIT 子句，或者是否在后续过滤操作中引发问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "预取完成后，相关对象的集合（如 category.example_posts）的长度和内容。",
+        "reason": "验证切片是否生效，即是否只预取了指定数量的对象。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用切片 Prefetch 的查询集评估不应引发 AssertionError 或其他异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本或配置下变化。",
+        "reason": "Issue 的核心是异常被引发，修复后应不再引发。因此，初始复现测试应断言 raises，而修复后测试应断言 not raises。"
+      },
+      {
+        "assertion_goal": "预取的相关对象集合应只包含切片指定数量的对象。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言预取对象的完整列表或特定 ID，除非测试数据是固定的。",
+        "reason": "验证切片功能是否按预期工作，即限制了预取数量。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 和数据库支持。可能需要创建 Category 和 Post 模型（或类似关系）的测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 assertNumQueries 来验证预取减少了查询次数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "错误 AssertionError: Cannot filter a query once a slice has been taken. 的确切触发位置和上下文（是在 prefetch_related 调用时，还是在后续评估查询集时？）。",
+      "Prefetch 内部对切片查询集的处理流程，以及为何会与后续的过滤操作冲突。",
+      "除了 AssertionError，是否还有其他潜在的错误行为或副作用。",
+      "是否所有数据库后端都表现出相同的行为。"
+    ]
+  }
+}

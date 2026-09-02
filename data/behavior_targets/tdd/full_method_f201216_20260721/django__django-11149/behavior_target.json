@@ -1,0 +1,338 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11149",
+  "issue_summary": "当用户只有查看权限时，ManyToManyField 的自动创建中间模型的 Admin 内联仍然可编辑。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建 Django 项目模型，包含一个带有 ManyToManyField 的主模型和一个关联模型，并使用自动创建的 through 模型定义 TabularInline。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建具有 is_staff=True 的用户，并仅为其分配对相关模型的 view 权限（使用 Permission 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 和 Client 来模拟登录和访问 Admin 页面。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 ROOT_URLCONF 以包含 Admin 站点的 URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inline_change_m2m_noperm",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "它直接测试了用户没有 change 权限时，ManyToMany 内联是否被正确隐藏，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类结构 (TestInlinePermissions)",
+          "使用 override_settings 和 TestCase",
+          "使用 self.client.get 访问 Admin 页面",
+          "使用 assertNotContains 检查响应中是否缺少特定 HTML 片段"
+        ],
+        "possible_gap": "该测试检查的是内联完全不存在，而 Issue 描述的是内联存在但错误地可编辑。可能需要变异权限设置或检查不同的 HTML 片段。"
+      },
+      {
+        "test_name": "test_simple_inline_permissions",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了内联对象在仅有 view 权限时，POST 请求不应修改数据，这涉及到权限检查的核心逻辑。",
+        "reusable_parts": [
+          "创建具有特定权限的用户 (permissionuser)",
+          "使用 self.client.post 提交表单数据",
+          "通过检查对象计数和属性来断言状态未更新"
+        ],
+        "possible_gap": "该测试针对的是 ForeignKey 关系的内联 (Widget)，而非 ManyToMany 的自动创建中间模型。模型和权限配置需要调整。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "用户只有对主模型和关联模型的 view 权限，访问主模型的 Admin 更改页面，其中包含一个通过自动创建的中间模型（through）定义的 TabularInline。",
+      "evidence": [
+        "Issue 描述：用户只有 view only permissions，但可以添加或删除 ManyToMany 关联项。",
+        "Issue 中的 admin.py 代码片段显示使用了 Report.photos.through 作为内联模型。",
+        "相关测试 test_inline_change_m2m_noperm 测试了没有 change 权限时内联不应出现。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 Admin 界面上，用户可以看到并操作（添加/删除）本应只读的 ManyToMany 内联字段。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：用户现在可以随意添加或删除这些项目。",
+        "相关测试 test_inline_change_m2m_change_perm 表明，当有 change 权限时，内联应包含添加/更改/删除控件。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "admin.TabularInline",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 中使用的内联类型，用于定义 ManyToMany 中间模型的内联管理界面。"
+      },
+      {
+        "name": "models.ManyToManyField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中涉及的字段类型，其自动创建的 through 模型是内联的基础。"
+      },
+      {
+        "name": "Permission.objects.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于设置用户权限的 API，对复现权限相关缺陷至关重要。"
+      },
+      {
+        "name": "self.client.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于模拟用户访问 Admin 页面的 API。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "InlineModelAdmin 或其子类（如 TabularInline）中与权限检查相关的逻辑",
+        "lines": "",
+        "reason": "Issue 涉及 Admin 内联的权限控制，特别是针对自动创建的 ManyToMany 中间模型的内联。"
+      },
+      {
+        "path": "django/contrib/admin/helpers.py",
+        "object": "AdminForm 或 InlineAdminFormSet 中与表单渲染和权限相关的逻辑",
+        "lines": "",
+        "reason": "内联表单的渲染和可编辑性可能在此处决定。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，用户可能被授予 add 或 change 权限，或者完全没有相关权限。",
+        "target_pattern": "用户只被授予对主模型和关联模型的 view 权限，但没有 add 或 change 权限。",
+        "reason": "Issue 明确指出用户只有 view only permissions，这是触发错误可编辑性的关键配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试可能使用显式定义的 through 模型或 ForeignKey 内联。",
+        "target_pattern": "使用 ManyToManyField 的自动创建中间模型 (through) 作为内联模型。",
+        "reason": "Issue 中的 admin.py 使用了 `Report.photos.through`，这是自动创建的模型，可能与显式定义的 through 模型有不同的权限处理逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当用户只有 view 权限时，ManyToMany 字段的自动创建中间模型的 Admin 内联应该不可编辑（例如，不显示添加/删除控件或整个内联部分）。",
+      "evidence": [
+        "相关测试 test_inline_change_m2m_noperm 断言不包含内联标题和表单控件。",
+        "相关测试 test_simple_inline_permissions 表明没有相应权限时，POST 请求不应改变对象。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "HTTP 响应内容中是否包含内联表单的添加/删除控件（例如 'Add another' 按钮、DELETE 复选框）的 HTML 片段。",
+        "reason": "Issue 的核心是界面元素错误地出现，观察这些控件的存在与否可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "通过 POST 请求提交内联数据后，中间表（through table）中关联记录的数量或内容是否被改变。",
+        "reason": "即使界面显示可编辑，最终验证数据是否真的被无权限的用户修改，是确认缺陷的最终证据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当用户只有 view 权限时，Admin 更改页面的响应中不包含 ManyToMany 内联的编辑控件。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的 HTML 字符串，因为模板可能变化。",
+        "reason": "Issue 描述的是界面元素错误出现，使用 not_contains 检查关键控件片段（如 'Add another'）是稳定且直接的对齐方式。"
+      },
+      {
+        "assertion_goal": "验证当用户只有 view 权限时，通过 POST 请求尝试修改内联数据不会成功改变数据库状态。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言特定的异常类型或错误消息，除非 Issue 明确提到。",
+        "reason": "这能确保缺陷不仅影响界面，也影响数据完整性。比较操作前后相关对象的数量或属性是稳定的断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只影响 TabularInline，还是也影响 StackedInline？",
+    "权限检查的确切代码位置在哪里？是在 InlineModelAdmin.get_formset 还是其他地方？",
+    "对于自动创建的 through 模型，其对应的 content type 和权限是如何生成和命名的？这可能会影响权限检查逻辑。",
+    "这个回归是在 Django 2.1 引入的，但具体是哪个提交或代码变更导致的？"
+  ],
+  "raw": {
+    "issue_summary": "当用户只有查看权限时，ManyToManyField 的自动创建中间模型的 Admin 内联仍然可编辑。",
+    "trigger_condition": {
+      "text": "用户只有对主模型和关联模型的 view 权限，访问主模型的 Admin 更改页面，其中包含一个通过自动创建的中间模型（through）定义的 TabularInline。",
+      "evidence": [
+        "Issue 描述：用户只有 view only permissions，但可以添加或删除 ManyToMany 关联项。",
+        "Issue 中的 admin.py 代码片段显示使用了 Report.photos.through 作为内联模型。",
+        "相关测试 test_inline_change_m2m_noperm 测试了没有 change 权限时内联不应出现。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 Admin 界面上，用户可以看到并操作（添加/删除）本应只读的 ManyToMany 内联字段。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：用户现在可以随意添加或删除这些项目。",
+        "相关测试 test_inline_change_m2m_change_perm 表明，当有 change 权限时，内联应包含添加/更改/删除控件。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当用户只有 view 权限时，ManyToMany 字段的自动创建中间模型的 Admin 内联应该不可编辑（例如，不显示添加/删除控件或整个内联部分）。",
+      "evidence": [
+        "相关测试 test_inline_change_m2m_noperm 断言不包含内联标题和表单控件。",
+        "相关测试 test_simple_inline_permissions 表明没有相应权限时，POST 请求不应改变对象。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "admin.TabularInline",
+        "kind": "class",
+        "source_path": "django/contrib/admin/options.py",
+        "reason": "Issue 中使用的内联类型，用于定义 ManyToMany 中间模型的内联管理界面。"
+      },
+      {
+        "name": "models.ManyToManyField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中涉及的字段类型，其自动创建的 through 模型是内联的基础。"
+      },
+      {
+        "name": "Permission.objects.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于设置用户权限的 API，对复现权限相关缺陷至关重要。"
+      },
+      {
+        "name": "self.client.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于模拟用户访问 Admin 页面的 API。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/options.py",
+        "object": "InlineModelAdmin 或其子类（如 TabularInline）中与权限检查相关的逻辑",
+        "lines": "",
+        "reason": "Issue 涉及 Admin 内联的权限控制，特别是针对自动创建的 ManyToMany 中间模型的内联。"
+      },
+      {
+        "path": "django/contrib/admin/helpers.py",
+        "object": "AdminForm 或 InlineAdminFormSet 中与表单渲染和权限相关的逻辑",
+        "lines": "",
+        "reason": "内联表单的渲染和可编辑性可能在此处决定。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_inline_change_m2m_noperm",
+        "test_file": "tests/admin_inlines/tests.py",
+        "why_relevant": "它直接测试了用户没有 change 权限时，ManyToMany 内联是否被正确隐藏，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类结构 (TestInlinePermissions)",
+          "使用 override_settings 和 TestCase",
+          "使用 self.client.get 访问 Admin 页面",
+          "使用 assertNotContains 检查响应中是否缺少特定 HTML 片段"
+        ],
+        "possible_gap": "该测试检查的是内联完全不存在，而 Issue 描述的是内联存在但错误地可编辑。可能需要变异权限设置或检查不同的 HTML 片段。"
+      },
+      {
+        "test_name": "test_simple_inline_permissions",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了内联对象在仅有 view 权限时，POST 请求不应修改数据，这涉及到权限检查的核心逻辑。",
+        "reusable_parts": [
+          "创建具有特定权限的用户 (permissionuser)",
+          "使用 self.client.post 提交表单数据",
+          "通过检查对象计数和属性来断言状态未更新"
+        ],
+        "possible_gap": "该测试针对的是 ForeignKey 关系的内联 (Widget)，而非 ManyToMany 的自动创建中间模型。模型和权限配置需要调整。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，用户可能被授予 add 或 change 权限，或者完全没有相关权限。",
+        "target_pattern": "用户只被授予对主模型和关联模型的 view 权限，但没有 add 或 change 权限。",
+        "reason": "Issue 明确指出用户只有 view only permissions，这是触发错误可编辑性的关键配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试可能使用显式定义的 through 模型或 ForeignKey 内联。",
+        "target_pattern": "使用 ManyToManyField 的自动创建中间模型 (through) 作为内联模型。",
+        "reason": "Issue 中的 admin.py 使用了 `Report.photos.through`，这是自动创建的模型，可能与显式定义的 through 模型有不同的权限处理逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "HTTP 响应内容中是否包含内联表单的添加/删除控件（例如 'Add another' 按钮、DELETE 复选框）的 HTML 片段。",
+        "reason": "Issue 的核心是界面元素错误地出现，观察这些控件的存在与否可以直接判断缺陷是否被触发。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "通过 POST 请求提交内联数据后，中间表（through table）中关联记录的数量或内容是否被改变。",
+        "reason": "即使界面显示可编辑，最终验证数据是否真的被无权限的用户修改，是确认缺陷的最终证据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当用户只有 view 权限时，Admin 更改页面的响应中不包含 ManyToMany 内联的编辑控件。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的 HTML 字符串，因为模板可能变化。",
+        "reason": "Issue 描述的是界面元素错误出现，使用 not_contains 检查关键控件片段（如 'Add another'）是稳定且直接的对齐方式。"
+      },
+      {
+        "assertion_goal": "验证当用户只有 view 权限时，通过 POST 请求尝试修改内联数据不会成功改变数据库状态。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言特定的异常类型或错误消息，除非 Issue 明确提到。",
+        "reason": "这能确保缺陷不仅影响界面，也影响数据完整性。比较操作前后相关对象的数量或属性是稳定的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建 Django 项目模型，包含一个带有 ManyToManyField 的主模型和一个关联模型，并使用自动创建的 through 模型定义 TabularInline。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建具有 is_staff=True 的用户，并仅为其分配对相关模型的 view 权限（使用 Permission 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 TestCase 和 Client 来模拟登录和访问 Admin 页面。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 ROOT_URLCONF 以包含 Admin 站点的 URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只影响 TabularInline，还是也影响 StackedInline？",
+      "权限检查的确切代码位置在哪里？是在 InlineModelAdmin.get_formset 还是其他地方？",
+      "对于自动创建的 through 模型，其对应的 content type 和权限是如何生成和命名的？这可能会影响权限检查逻辑。",
+      "这个回归是在 Django 2.1 引入的，但具体是哪个提交或代码变更导致的？"
+    ]
+  }
+}

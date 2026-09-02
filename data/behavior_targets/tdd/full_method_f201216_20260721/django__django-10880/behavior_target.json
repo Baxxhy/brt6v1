@@ -1,0 +1,298 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-10880",
+  "issue_summary": "Count 注解同时包含 Case 条件和 distinct=True 参数时，生成的 SQL 查询语法错误，缺少空格导致 COUNT(DISTINCTCASE WHEN ...)。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django TestCase 并设置数据库。可能需要创建包含适当字段的模型实例以支持 Case 条件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 django.db.models 中的 Count、Case、When 等表达式类。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AggregateTestCase.test_count",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试直接使用了 Count 聚合函数，并测试了 distinct=True 参数。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "aggregate 方法调用",
+          "Count 的使用",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有使用 Case 条件，因此无法触发 Issue 描述的特定组合错误。"
+      },
+      {
+        "test_name": "AggregateTestCase.test_annotation",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试使用了 annotate 与 Count(distinct=True)，并涉及查询集操作。",
+        "reusable_parts": [
+          "annotate 方法调用",
+          "Count 与 distinct=True 的组合",
+          "filter 和 order_by 链式调用",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有在 Count 中使用 Case 条件。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 2.2 上，使用包含 Case 条件和 distinct=True 参数的 Count 注解进行查询。",
+      "evidence": [
+        "Issue 描述：'A Count annotation containing both a Case condition and a distinct=True param produces a query error on Django 2.2 (whatever the db backend).'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询语法错误，至少缺少一个空格，导致类似 'COUNT(DISTINCTCASE WHEN ...)' 的无效 SQL。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 描述：'A space is missing at least (... COUNT(DISTINCTCASE WHEN ...).'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 直接涉及 Count 注解的使用。"
+      },
+      {
+        "name": "Case",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 提到 Count 包含 Case 条件。"
+      },
+      {
+        "name": "annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中使用了 annotate 与 Count 组合。"
+      },
+      {
+        "name": "aggregate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中使用了 aggregate 与 Count 组合。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Case",
+        "lines": "915-988",
+        "reason": "Issue 涉及 Case 表达式与 Count(distinct=True) 的组合，可能在该类的 SQL 生成逻辑中缺少空格处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "Count('field_name', distinct=True)",
+        "target_pattern": "Count(Case(When(...), ...), distinct=True)",
+        "reason": "Issue 指出当 Count 的参数是一个 Case 表达式且 distinct=True 时触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "Model.objects.annotate(count_field=Count('field', distinct=True))",
+        "target_pattern": "Model.objects.annotate(count_field=Count(Case(When(...), ...), distinct=True))",
+        "reason": "需要在 annotate 调用中将 Count 的参数从简单字段名替换为 Case 表达式。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Count 注解应能正确处理同时包含 Case 条件和 distinct=True 参数的情况，生成语法正确的 SQL 查询（例如 COUNT(DISTINCT CASE WHEN ...)）。",
+      "evidence": [
+        "Issue 描述暗示了正确的 SQL 应包含空格，例如 'COUNT(DISTINCT CASE WHEN ...)'。从相关测试推断，Count 与 distinct=True 以及 Case 表达式应能正常工作。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串",
+        "reason": "Issue 明确指出 SQL 语法错误，观察生成的 SQL 可以确认是否出现 'COUNT(DISTINCTCASE' 这样的错误片段。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询时是否引发数据库异常",
+        "reason": "SQL 语法错误通常会导致数据库后端抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 查询字符串中，'COUNT(DISTINCT CASE' 片段应正确出现（即包含空格）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为不同数据库后端可能生成略有差异的 SQL。",
+        "reason": "Issue 的核心是缺少空格导致 'DISTINCTCASE' 连在一起，验证正确片段的存在是稳定且直接相关的。"
+      },
+      {
+        "assertion_goal": "查询应能正常执行而不引发数据库异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息文本，因为不同数据库后端的错误信息可能不同。",
+        "reason": "修复后，查询不应因 SQL 语法错误而失败。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Case 表达式的具体构造方式（例如 When 子句）在 Issue 中没有明确，需要从现有测试或文档中推断。",
+    "错误的确切位置和修复方式未知，仅知道是 SQL 生成时缺少空格。",
+    "是否所有数据库后端（如 SQLite、PostgreSQL、MySQL）都表现出相同的行为。"
+  ],
+  "raw": {
+    "issue_summary": "Count 注解同时包含 Case 条件和 distinct=True 参数时，生成的 SQL 查询语法错误，缺少空格导致 COUNT(DISTINCTCASE WHEN ...)。",
+    "trigger_condition": {
+      "text": "在 Django 2.2 上，使用包含 Case 条件和 distinct=True 参数的 Count 注解进行查询。",
+      "evidence": [
+        "Issue 描述：'A Count annotation containing both a Case condition and a distinct=True param produces a query error on Django 2.2 (whatever the db backend).'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询语法错误，至少缺少一个空格，导致类似 'COUNT(DISTINCTCASE WHEN ...)' 的无效 SQL。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 描述：'A space is missing at least (... COUNT(DISTINCTCASE WHEN ...).'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Count 注解应能正确处理同时包含 Case 条件和 distinct=True 参数的情况，生成语法正确的 SQL 查询（例如 COUNT(DISTINCT CASE WHEN ...)）。",
+      "evidence": [
+        "Issue 描述暗示了正确的 SQL 应包含空格，例如 'COUNT(DISTINCT CASE WHEN ...)'。从相关测试推断，Count 与 distinct=True 以及 Case 表达式应能正常工作。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "Count",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 直接涉及 Count 注解的使用。"
+      },
+      {
+        "name": "Case",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "Issue 提到 Count 包含 Case 条件。"
+      },
+      {
+        "name": "annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中使用了 annotate 与 Count 组合。"
+      },
+      {
+        "name": "aggregate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中使用了 aggregate 与 Count 组合。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/expressions.py",
+        "object": "Case",
+        "lines": "915-988",
+        "reason": "Issue 涉及 Case 表达式与 Count(distinct=True) 的组合，可能在该类的 SQL 生成逻辑中缺少空格处理。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AggregateTestCase.test_count",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试直接使用了 Count 聚合函数，并测试了 distinct=True 参数。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "aggregate 方法调用",
+          "Count 的使用",
+          "assertEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有使用 Case 条件，因此无法触发 Issue 描述的特定组合错误。"
+      },
+      {
+        "test_name": "AggregateTestCase.test_annotation",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "该测试使用了 annotate 与 Count(distinct=True)，并涉及查询集操作。",
+        "reusable_parts": [
+          "annotate 方法调用",
+          "Count 与 distinct=True 的组合",
+          "filter 和 order_by 链式调用",
+          "assertQuerysetEqual 断言风格"
+        ],
+        "possible_gap": "该测试没有在 Count 中使用 Case 条件。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "Count('field_name', distinct=True)",
+        "target_pattern": "Count(Case(When(...), ...), distinct=True)",
+        "reason": "Issue 指出当 Count 的参数是一个 Case 表达式且 distinct=True 时触发 bug。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "Model.objects.annotate(count_field=Count('field', distinct=True))",
+        "target_pattern": "Model.objects.annotate(count_field=Count(Case(When(...), ...), distinct=True))",
+        "reason": "需要在 annotate 调用中将 Count 的参数从简单字段名替换为 Case 表达式。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串",
+        "reason": "Issue 明确指出 SQL 语法错误，观察生成的 SQL 可以确认是否出现 'COUNT(DISTINCTCASE' 这样的错误片段。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "执行查询时是否引发数据库异常",
+        "reason": "SQL 语法错误通常会导致数据库后端抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 查询字符串中，'COUNT(DISTINCT CASE' 片段应正确出现（即包含空格）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为不同数据库后端可能生成略有差异的 SQL。",
+        "reason": "Issue 的核心是缺少空格导致 'DISTINCTCASE' 连在一起，验证正确片段的存在是稳定且直接相关的。"
+      },
+      {
+        "assertion_goal": "查询应能正常执行而不引发数据库异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的异常消息文本，因为不同数据库后端的错误信息可能不同。",
+        "reason": "修复后，查询不应因 SQL 语法错误而失败。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 Django TestCase 并设置数据库。可能需要创建包含适当字段的模型实例以支持 Case 条件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 django.db.models 中的 Count、Case、When 等表达式类。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Case 表达式的具体构造方式（例如 When 子句）在 Issue 中没有明确，需要从现有测试或文档中推断。",
+      "错误的确切位置和修复方式未知，仅知道是 SQL 生成时缺少空格。",
+      "是否所有数据库后端（如 SQLite、PostgreSQL、MySQL）都表现出相同的行为。"
+    ]
+  }
+}

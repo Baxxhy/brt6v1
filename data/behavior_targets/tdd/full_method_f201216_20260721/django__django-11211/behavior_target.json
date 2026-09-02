@@ -1,0 +1,296 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11211",
+  "issue_summary": "当使用 UUID 字段作为主键的模型通过 GenericForeignKey 关联时，prefetch_related 查询无法正确获取关联对象，返回 None。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要继承自 django.test.TestCase 以支持数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在测试中创建使用 UUIDField(primary_key=True) 的模型和使用 GenericForeignKey 指向它的模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 django.contrib.contenttypes.models.ContentType 用于 GenericForeignKey 的定义。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GenericRelationTests.test_prefetch_GFK_nonint_pk",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "该测试直接验证了 prefetch_related 与 GenericForeignKey 在非整数主键模型上的使用，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类结构、使用 prefetch_related('content_object') 的查询模式、通过遍历查询集触发预取的断言模式。"
+        ],
+        "possible_gap": "该测试中关联模型的主键可能不是 UUID 类型，而是其他非整数类型（如字符串）。它可能没有覆盖 UUID 主键这一特定情况。"
+      },
+      {
+        "test_name": "UUIDPrefetchRelated.test_prefetch_related_from_uuid_model_to_uuid_model",
+        "test_file": "tests/prefetch_related/test_uuid.py",
+        "why_relevant": "该测试涉及 UUID 主键模型之间的 prefetch_related，展示了 UUID 模型预取的正确行为模式。",
+        "reusable_parts": [
+          "使用 UUID 主键模型的 fixture 创建、prefetch_related 调用、以及预取后验证关联对象数量的断言风格。"
+        ],
+        "possible_gap": "该测试没有使用 GenericForeignKey，而是普通的 ForeignKey 或 ManyToManyField，因此没有覆盖 GenericForeignKey 的特定逻辑。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个使用 UUIDField 作为主键的模型 Foo，创建一个包含 GenericForeignKey 指向 Foo 的模型 Bar，然后执行 Bar.objects.all().prefetch_related('foo') 查询。",
+      "evidence": [
+        "Issue 中描述了创建模型 Foo 和 Bar 的步骤，并给出了触发查询 Bar.objects.all().prefetch_related('foo')。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "prefetch_related 查询后，访问 Bar 实例的 foo 属性返回 None，而不是预期的 Foo 实例。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中说明 'django orm engine return None for attribute foo'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "prefetch_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接涉及此方法在特定场景下的错误行为。"
+      },
+      {
+        "name": "GenericForeignKey",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是 GenericForeignKey 与 UUID 主键模型配合使用时 prefetch_related 失效。"
+      },
+      {
+        "name": "UUIDField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 指出当关联模型的主键是 UUID 类型时出现问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "prefetch_related",
+        "lines": "989-1009",
+        "reason": "该方法是执行预取操作的核心，可能未正确处理 GenericForeignKey 指向非整数主键（如 UUID）的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用整数或非 UUID 字符串作为主键的模型进行 GenericForeignKey 预取。",
+        "target_pattern": "将关联模型的主键改为 UUIDField，并保持使用 GenericForeignKey 进行预取。",
+        "reason": "Issue 表明当 GenericForeignKey 指向的模型使用 UUID 主键时，预取逻辑可能失效。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中，预取后通过列表推导或 .all() 访问属性来触发预取加载。",
+        "target_pattern": "保持相同的调用链，但确保关联对象的主键是 UUID 类型。",
+        "reason": "调用链本身可能不变，但底层数据类型（UUID vs 整数）的变化可能触发不同的代码路径导致缺陷。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "prefetch_related 查询应能正确获取通过 GenericForeignKey 关联的、使用 UUID 主键的模型实例，访问 foo 属性应返回对应的 Foo 对象。",
+      "evidence": [
+        "Issue 标题和描述暗示 prefetch_related 应该工作。相关测试（如 test_prefetch_GFK_nonint_pk）展示了 prefetch_related 用于 GenericForeignKey 的正常预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "预取查询后，遍历 Bar 查询集并检查每个实例的 foo 属性的值（应为 Foo 实例或 None）。",
+        "reason": "Issue 的核心错误现象是 foo 属性返回 None，直接观察此返回值可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在执行 prefetch_related 查询时生成的 SQL 语句，特别是用于获取关联 Foo 对象的查询。",
+        "reason": "可以检查预取逻辑是否生成了正确的查询来获取 UUID 主键的关联对象，或者查询条件是否有误。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查 Bar 实例的 foo 属性的类型（预期是 Foo 模型实例或 None）。",
+        "reason": "确认返回的是否是预期的模型实例类型，而不是 None 或其他类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 prefetch_related('foo') 查询后，每个 Bar 实例的 foo 属性都指向一个有效的 Foo 模型实例，而不是 None。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 SQL 字符串或具体的 UUID 值，因为 fixture 数据可能变化。",
+        "reason": "直接验证关联对象被正确加载，这与 Issue 描述的预期行为一致，且不依赖于脆弱的实现细节。"
+      },
+      {
+        "assertion_goal": "验证预取操作后，访问 foo 属性不会触发额外的数据库查询（即预取生效）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言固定的查询次数，如果测试设置改变，查询次数可能变化。",
+        "reason": "这可以验证 prefetch_related 机制本身是否正常工作，是功能正确性的一个重要侧面。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只在使用 CharField 存储 UUID 字符串作为 foo_object_id 时触发，还是其他存储方式也有问题？",
+    "prefetch_related 内部处理 GenericForeignKey 时，具体是哪个步骤（如查询构建、结果映射）对 UUID 主键处理不当？",
+    "除了返回 None，是否还有其他错误症状（如异常、警告）？Issue 没有提及。",
+    "是否所有 Django 版本都存在此问题？Issue 未指定版本。"
+  ],
+  "raw": {
+    "issue_summary": "当使用 UUID 字段作为主键的模型通过 GenericForeignKey 关联时，prefetch_related 查询无法正确获取关联对象，返回 None。",
+    "trigger_condition": {
+      "text": "创建一个使用 UUIDField 作为主键的模型 Foo，创建一个包含 GenericForeignKey 指向 Foo 的模型 Bar，然后执行 Bar.objects.all().prefetch_related('foo') 查询。",
+      "evidence": [
+        "Issue 中描述了创建模型 Foo 和 Bar 的步骤，并给出了触发查询 Bar.objects.all().prefetch_related('foo')。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "prefetch_related 查询后，访问 Bar 实例的 foo 属性返回 None，而不是预期的 Foo 实例。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中说明 'django orm engine return None for attribute foo'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "prefetch_related 查询应能正确获取通过 GenericForeignKey 关联的、使用 UUID 主键的模型实例，访问 foo 属性应返回对应的 Foo 对象。",
+      "evidence": [
+        "Issue 标题和描述暗示 prefetch_related 应该工作。相关测试（如 test_prefetch_GFK_nonint_pk）展示了 prefetch_related 用于 GenericForeignKey 的正常预期行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "prefetch_related",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 直接涉及此方法在特定场景下的错误行为。"
+      },
+      {
+        "name": "GenericForeignKey",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是 GenericForeignKey 与 UUID 主键模型配合使用时 prefetch_related 失效。"
+      },
+      {
+        "name": "UUIDField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 指出当关联模型的主键是 UUID 类型时出现问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "prefetch_related",
+        "lines": "989-1009",
+        "reason": "该方法是执行预取操作的核心，可能未正确处理 GenericForeignKey 指向非整数主键（如 UUID）的情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "GenericRelationTests.test_prefetch_GFK_nonint_pk",
+        "test_file": "tests/prefetch_related/tests.py",
+        "why_relevant": "该测试直接验证了 prefetch_related 与 GenericForeignKey 在非整数主键模型上的使用，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "测试类结构、使用 prefetch_related('content_object') 的查询模式、通过遍历查询集触发预取的断言模式。"
+        ],
+        "possible_gap": "该测试中关联模型的主键可能不是 UUID 类型，而是其他非整数类型（如字符串）。它可能没有覆盖 UUID 主键这一特定情况。"
+      },
+      {
+        "test_name": "UUIDPrefetchRelated.test_prefetch_related_from_uuid_model_to_uuid_model",
+        "test_file": "tests/prefetch_related/test_uuid.py",
+        "why_relevant": "该测试涉及 UUID 主键模型之间的 prefetch_related，展示了 UUID 模型预取的正确行为模式。",
+        "reusable_parts": [
+          "使用 UUID 主键模型的 fixture 创建、prefetch_related 调用、以及预取后验证关联对象数量的断言风格。"
+        ],
+        "possible_gap": "该测试没有使用 GenericForeignKey，而是普通的 ForeignKey 或 ManyToManyField，因此没有覆盖 GenericForeignKey 的特定逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用整数或非 UUID 字符串作为主键的模型进行 GenericForeignKey 预取。",
+        "target_pattern": "将关联模型的主键改为 UUIDField，并保持使用 GenericForeignKey 进行预取。",
+        "reason": "Issue 表明当 GenericForeignKey 指向的模型使用 UUID 主键时，预取逻辑可能失效。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中，预取后通过列表推导或 .all() 访问属性来触发预取加载。",
+        "target_pattern": "保持相同的调用链，但确保关联对象的主键是 UUID 类型。",
+        "reason": "调用链本身可能不变，但底层数据类型（UUID vs 整数）的变化可能触发不同的代码路径导致缺陷。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "预取查询后，遍历 Bar 查询集并检查每个实例的 foo 属性的值（应为 Foo 实例或 None）。",
+        "reason": "Issue 的核心错误现象是 foo 属性返回 None，直接观察此返回值可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在执行 prefetch_related 查询时生成的 SQL 语句，特别是用于获取关联 Foo 对象的查询。",
+        "reason": "可以检查预取逻辑是否生成了正确的查询来获取 UUID 主键的关联对象，或者查询条件是否有误。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查 Bar 实例的 foo 属性的类型（预期是 Foo 模型实例或 None）。",
+        "reason": "确认返回的是否是预期的模型实例类型，而不是 None 或其他类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证通过 prefetch_related('foo') 查询后，每个 Bar 实例的 foo 属性都指向一个有效的 Foo 模型实例，而不是 None。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 SQL 字符串或具体的 UUID 值，因为 fixture 数据可能变化。",
+        "reason": "直接验证关联对象被正确加载，这与 Issue 描述的预期行为一致，且不依赖于脆弱的实现细节。"
+      },
+      {
+        "assertion_goal": "验证预取操作后，访问 foo 属性不会触发额外的数据库查询（即预取生效）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言固定的查询次数，如果测试设置改变，查询次数可能变化。",
+        "reason": "这可以验证 prefetch_related 机制本身是否正常工作，是功能正确性的一个重要侧面。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要继承自 django.test.TestCase 以支持数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要在测试中创建使用 UUIDField(primary_key=True) 的模型和使用 GenericForeignKey 指向它的模型。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 django.contrib.contenttypes.models.ContentType 用于 GenericForeignKey 的定义。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只在使用 CharField 存储 UUID 字符串作为 foo_object_id 时触发，还是其他存储方式也有问题？",
+      "prefetch_related 内部处理 GenericForeignKey 时，具体是哪个步骤（如查询构建、结果映射）对 UUID 主键处理不当？",
+      "除了返回 None，是否还有其他错误症状（如异常、警告）？Issue 没有提及。",
+      "是否所有 Django 版本都存在此问题？Issue 未指定版本。"
+    ]
+  }
+}

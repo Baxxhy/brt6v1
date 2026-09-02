@@ -1,0 +1,368 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12663",
+  "issue_summary": "在包含嵌套子查询注解的查询集中使用 SimpleLazyObject 会引发 TypeError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 以提供数据库支持，因为测试涉及模型操作和查询。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建 User、A、B、C 等模型实例作为测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 `django.utils.functional.SimpleLazyObject`、`django.db.models.Subquery`、`OuterRef`。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pickle_model",
+        "test_file": "tests/utils_tests/test_lazyobject.py",
+        "why_relevant": "该测试直接使用了 SimpleLazyObject 包装 Django 模型实例（Category），并进行了序列化操作，与 Issue 中包装 User 模型有相似之处。",
+        "reusable_parts": [
+          "导入 SimpleLazyObject 和 TestCase",
+          "使用 SimpleLazyObject(lambda: model_instance) 的构造模式",
+          "TestCase 框架"
+        ],
+        "possible_gap": "该测试没有涉及 QuerySet 操作、Subquery 注解或 filter 比较，因此无法触发数据库查询路径中的类型转换错误。"
+      },
+      {
+        "test_name": "test_obj_subquery_lookup",
+        "test_file": "tests/postgres_tests/test_hstore.py",
+        "why_relevant": "该测试使用了 `Subquery` 和 `OuterRef` 进行注解，并在 filter 中使用注解字段，与 Issue 中的查询模式高度相似。",
+        "reusable_parts": [
+          "Subquery 和 OuterRef 的使用模式",
+          "QuerySet.annotate(...).filter(...) 的链式调用",
+          "PostgreSQLTestCase 或类似的数据库测试设置"
+        ],
+        "possible_gap": "该测试 filter 中使用的比较值是普通字符串（'b'），而非 SimpleLazyObject 包装的对象，因此不会触发类型错误。"
+      },
+      {
+        "test_name": "test_pickle",
+        "test_file": "tests/utils_tests/test_simplelazyobject.py",
+        "why_relevant": "该测试使用 SimpleLazyObject 包装了 User 模型实例，与 Issue 中的对象类型一致。",
+        "reusable_parts": [
+          "导入 User 模型和 SimpleLazyObject",
+          "创建 User 实例的代码",
+          "使用 lambda 包装对象的模式"
+        ],
+        "possible_gap": "该测试仅关注序列化，完全不涉及数据库查询或 QuerySet 操作。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 QuerySet 的 filter 方法中，将 SimpleLazyObject 包装的 User 实例作为值，与通过 Subquery 和 OuterRef 构建的注解字段进行比较。",
+      "evidence": [
+        "Issue 中的 TestCase 代码：`A.objects.annotate(owner_user=Subquery(owner_user)).filter(owner_user=user)`，其中 `user` 是 `SimpleLazyObject(lambda: User.objects.create_user(\"testuser\"))`。",
+        "Issue 描述指出这是在使用 SimpleLazyObject 的查询集中出现的新行为。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 TypeError: int() argument must be a string, a bytes-like object or a number, not 'SimpleLazyObject'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 显示错误发生在 `django/db/models/fields/__init__.py` 的 `get_prep_value` 方法中，尝试对 SimpleLazyObject 调用 `int(value)` 时失败。",
+        "异常信息明确指出参数类型错误：`not 'SimpleLazyObject'`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SimpleLazyObject",
+        "kind": "class",
+        "source_path": "django/utils/functional.py",
+        "reason": "Issue 的核心是使用 SimpleLazyObject 包装 User 实例导致查询失败。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发错误的调用链起点是 filter 方法，它最终将 SimpleLazyObject 传递给了字段的预处理逻辑。"
+      },
+      {
+        "name": "Subquery",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的测试用例中使用了 Subquery 来构建嵌套注解。"
+      },
+      {
+        "name": "OuterRef",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的测试用例中使用了 OuterRef 来引用外部查询的字段。"
+      },
+      {
+        "name": "Field.get_prep_value",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Traceback 显示错误发生在该方法中，它试图将 SimpleLazyObject 转换为 int。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.get_prep_value",
+        "lines": "968",
+        "reason": "Traceback 指向此处，`get_prep_value` 方法尝试对 SimpleLazyObject 类型的 `value` 调用 `int()`，表明类型检查或解包逻辑可能缺失。"
+      },
+      {
+        "path": "django/db/models/lookups.py",
+        "object": "Lookup.get_prep_lookup",
+        "lines": "70",
+        "reason": "Traceback 显示调用链经过此处，该方法调用了 `lhs.output_field.get_prep_value(self.rhs)`，其中 `self.rhs` 是 SimpleLazyObject。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.build_lookup",
+        "lines": "1123",
+        "reason": "Traceback 显示调用链经过此处，它构建了 Lookup 对象。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 `test_obj_subquery_lookup` 中，filter 条件使用普通字符串字面量 `'b'`。",
+        "target_pattern": "将 filter 条件值替换为 SimpleLazyObject 包装的模型实例（如 User）。",
+        "reason": "Issue 表明当 filter 的值是 SimpleLazyObject 时，会在类型转换路径中引发错误。这个变异将测试引向缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 `test_pickle_model` 中，SimpleLazyObject 包装的 Category 实例被用于序列化，未在查询上下文中使用。",
+        "target_pattern": "将 SimpleLazyObject 包装的模型实例放入一个涉及 Subquery 注解和 filter 的 QuerySet 操作中。",
+        "reason": "缺陷仅在 SimpleLazyObject 参与特定查询构建（尤其是涉及字段值预处理）时触发，需要改变其使用上下文。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "包含嵌套子查询注解的查询集应能正确处理 SimpleLazyObject 参数，成功执行 filter 操作而不引发 TypeError。",
+      "evidence": [
+        "Issue 描述提到：“Prior to 35431298226165986ad07e91f9d3aca721ff38ec it was possible to use a SimpleLazyObject in a queryset as demonstrated below.” 这表明在特定提交之前，该用例是正常工作的。",
+        "Issue 标题和描述暗示这是一个回归（regression），修复后应恢复原有功能。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 `queryset.filter(...)` 调用时捕获异常。",
+        "reason": "Issue 明确报告了 TypeError 异常，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 `Field.get_prep_value` 被调用前，观察传入的 `value` 参数的类型是否为 `SimpleLazyObject`。",
+        "reason": "Traceback 显示错误源于尝试对 SimpleLazyObject 类型进行 int 转换，观察类型可以确认执行路径。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "观察生成的 SQL 查询字符串（例如通过 `str(queryset.query)`），看是否因参数处理失败而生成异常 SQL 或根本没有生成。",
+        "reason": "如果参数预处理失败，可能会影响最终 SQL 的生成，或者导致查询无法编译。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 SimpleLazyObject 作为 filter 值的查询能够正常执行，不抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或特定的查询结果集，因为这些可能因数据库后端或数据变化而不同。",
+        "reason": "Issue 的核心是异常，因此断言不引发特定异常（在修复后）或引发特定异常（在复现时）是最直接的验证方式。修复后，断言应改为不引发异常或正常返回查询结果。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致回归的具体提交 35431298226165986ad07e91f9d3aca721ff38ec 中修改了哪些代码，从而影响了 SimpleLazyObject 的处理逻辑。",
+    "除了 User 模型，SimpleLazyObject 包装其他类型的模型或对象是否也会触发同样的问题。",
+    "在更简单的查询场景（不涉及 Subquery 注解）中使用 SimpleLazyObject 是否也会失败，还是特定于这种复杂注解场景。",
+    "修复后，SimpleLazyObject 应该在查询构建的哪个阶段被正确解析（解包）为其内部包装的值。"
+  ],
+  "raw": {
+    "issue_summary": "在包含嵌套子查询注解的查询集中使用 SimpleLazyObject 会引发 TypeError 异常。",
+    "trigger_condition": {
+      "text": "在 QuerySet 的 filter 方法中，将 SimpleLazyObject 包装的 User 实例作为值，与通过 Subquery 和 OuterRef 构建的注解字段进行比较。",
+      "evidence": [
+        "Issue 中的 TestCase 代码：`A.objects.annotate(owner_user=Subquery(owner_user)).filter(owner_user=user)`，其中 `user` 是 `SimpleLazyObject(lambda: User.objects.create_user(\"testuser\"))`。",
+        "Issue 描述指出这是在使用 SimpleLazyObject 的查询集中出现的新行为。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行查询时抛出 TypeError: int() argument must be a string, a bytes-like object or a number, not 'SimpleLazyObject'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 Traceback 显示错误发生在 `django/db/models/fields/__init__.py` 的 `get_prep_value` 方法中，尝试对 SimpleLazyObject 调用 `int(value)` 时失败。",
+        "异常信息明确指出参数类型错误：`not 'SimpleLazyObject'`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "包含嵌套子查询注解的查询集应能正确处理 SimpleLazyObject 参数，成功执行 filter 操作而不引发 TypeError。",
+      "evidence": [
+        "Issue 描述提到：“Prior to 35431298226165986ad07e91f9d3aca721ff38ec it was possible to use a SimpleLazyObject in a queryset as demonstrated below.” 这表明在特定提交之前，该用例是正常工作的。",
+        "Issue 标题和描述暗示这是一个回归（regression），修复后应恢复原有功能。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "SimpleLazyObject",
+        "kind": "class",
+        "source_path": "django/utils/functional.py",
+        "reason": "Issue 的核心是使用 SimpleLazyObject 包装 User 实例导致查询失败。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "触发错误的调用链起点是 filter 方法，它最终将 SimpleLazyObject 传递给了字段的预处理逻辑。"
+      },
+      {
+        "name": "Subquery",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的测试用例中使用了 Subquery 来构建嵌套注解。"
+      },
+      {
+        "name": "OuterRef",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的测试用例中使用了 OuterRef 来引用外部查询的字段。"
+      },
+      {
+        "name": "Field.get_prep_value",
+        "kind": "method",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Traceback 显示错误发生在该方法中，它试图将 SimpleLazyObject 转换为 int。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field.get_prep_value",
+        "lines": "968",
+        "reason": "Traceback 指向此处，`get_prep_value` 方法尝试对 SimpleLazyObject 类型的 `value` 调用 `int()`，表明类型检查或解包逻辑可能缺失。"
+      },
+      {
+        "path": "django/db/models/lookups.py",
+        "object": "Lookup.get_prep_lookup",
+        "lines": "70",
+        "reason": "Traceback 显示调用链经过此处，该方法调用了 `lhs.output_field.get_prep_value(self.rhs)`，其中 `self.rhs` 是 SimpleLazyObject。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.build_lookup",
+        "lines": "1123",
+        "reason": "Traceback 显示调用链经过此处，它构建了 Lookup 对象。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pickle_model",
+        "test_file": "tests/utils_tests/test_lazyobject.py",
+        "why_relevant": "该测试直接使用了 SimpleLazyObject 包装 Django 模型实例（Category），并进行了序列化操作，与 Issue 中包装 User 模型有相似之处。",
+        "reusable_parts": [
+          "导入 SimpleLazyObject 和 TestCase",
+          "使用 SimpleLazyObject(lambda: model_instance) 的构造模式",
+          "TestCase 框架"
+        ],
+        "possible_gap": "该测试没有涉及 QuerySet 操作、Subquery 注解或 filter 比较，因此无法触发数据库查询路径中的类型转换错误。"
+      },
+      {
+        "test_name": "test_obj_subquery_lookup",
+        "test_file": "tests/postgres_tests/test_hstore.py",
+        "why_relevant": "该测试使用了 `Subquery` 和 `OuterRef` 进行注解，并在 filter 中使用注解字段，与 Issue 中的查询模式高度相似。",
+        "reusable_parts": [
+          "Subquery 和 OuterRef 的使用模式",
+          "QuerySet.annotate(...).filter(...) 的链式调用",
+          "PostgreSQLTestCase 或类似的数据库测试设置"
+        ],
+        "possible_gap": "该测试 filter 中使用的比较值是普通字符串（'b'），而非 SimpleLazyObject 包装的对象，因此不会触发类型错误。"
+      },
+      {
+        "test_name": "test_pickle",
+        "test_file": "tests/utils_tests/test_simplelazyobject.py",
+        "why_relevant": "该测试使用 SimpleLazyObject 包装了 User 模型实例，与 Issue 中的对象类型一致。",
+        "reusable_parts": [
+          "导入 User 模型和 SimpleLazyObject",
+          "创建 User 实例的代码",
+          "使用 lambda 包装对象的模式"
+        ],
+        "possible_gap": "该测试仅关注序列化，完全不涉及数据库查询或 QuerySet 操作。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 `test_obj_subquery_lookup` 中，filter 条件使用普通字符串字面量 `'b'`。",
+        "target_pattern": "将 filter 条件值替换为 SimpleLazyObject 包装的模型实例（如 User）。",
+        "reason": "Issue 表明当 filter 的值是 SimpleLazyObject 时，会在类型转换路径中引发错误。这个变异将测试引向缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 `test_pickle_model` 中，SimpleLazyObject 包装的 Category 实例被用于序列化，未在查询上下文中使用。",
+        "target_pattern": "将 SimpleLazyObject 包装的模型实例放入一个涉及 Subquery 注解和 filter 的 QuerySet 操作中。",
+        "reason": "缺陷仅在 SimpleLazyObject 参与特定查询构建（尤其是涉及字段值预处理）时触发，需要改变其使用上下文。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行 `queryset.filter(...)` 调用时捕获异常。",
+        "reason": "Issue 明确报告了 TypeError 异常，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 `Field.get_prep_value` 被调用前，观察传入的 `value` 参数的类型是否为 `SimpleLazyObject`。",
+        "reason": "Traceback 显示错误源于尝试对 SimpleLazyObject 类型进行 int 转换，观察类型可以确认执行路径。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "观察生成的 SQL 查询字符串（例如通过 `str(queryset.query)`），看是否因参数处理失败而生成异常 SQL 或根本没有生成。",
+        "reason": "如果参数预处理失败，可能会影响最终 SQL 的生成，或者导致查询无法编译。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 SimpleLazyObject 作为 filter 值的查询能够正常执行，不抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的 SQL 字符串或特定的查询结果集，因为这些可能因数据库后端或数据变化而不同。",
+        "reason": "Issue 的核心是异常，因此断言不引发特定异常（在修复后）或引发特定异常（在复现时）是最直接的验证方式。修复后，断言应改为不引发异常或正常返回查询结果。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 以提供数据库支持，因为测试涉及模型操作和查询。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建 User、A、B、C 等模型实例作为测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 `django.utils.functional.SimpleLazyObject`、`django.db.models.Subquery`、`OuterRef`。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致回归的具体提交 35431298226165986ad07e91f9d3aca721ff38ec 中修改了哪些代码，从而影响了 SimpleLazyObject 的处理逻辑。",
+      "除了 User 模型，SimpleLazyObject 包装其他类型的模型或对象是否也会触发同样的问题。",
+      "在更简单的查询场景（不涉及 Subquery 注解）中使用 SimpleLazyObject 是否也会失败，还是特定于这种复杂注解场景。",
+      "修复后，SimpleLazyObject 应该在查询构建的哪个阶段被正确解析（解包）为其内部包装的值。"
+    ]
+  }
+}

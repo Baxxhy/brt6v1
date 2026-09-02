@@ -1,0 +1,272 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13315",
+  "issue_summary": "当 ForeignKey 的 limit_choices_to 参数是一个涉及连接的 Q 对象时，表单字段可能生成重复选项。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 和数据库支持，以创建包含 ForeignKey 和相关模型的测试模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 ModelForm 或 fields_for_model 来生成表单字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "LimitChoicesToTests.test_limit_choices_to_callable_for_fk_rel",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "该测试直接验证了 ForeignKey 的 limit_choices_to 功能，并检查了表单字段的 queryset。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "使用 ModelForm 和 ForeignKey 字段",
+          "assertSequenceEqual 检查 queryset 内容"
+        ],
+        "possible_gap": "该测试使用 callable 作为 limit_choices_to，而非 Issue 中提到的涉及连接的 Q 对象。"
+      },
+      {
+        "test_name": "GetChoicesLimitChoicesToTests.test_get_choices",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试直接测试了 get_choices 方法配合 limit_choices_to 参数的行为。",
+        "reusable_parts": [
+          "assertChoicesEqual 断言风格",
+          "limit_choices_to 作为字典参数的使用"
+        ],
+        "possible_gap": "该测试使用字典作为 limit_choices_to，而非 Q 对象，且不涉及表单生成。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 ForeignKey 字段上设置 limit_choices_to 参数，其值为一个涉及连接（join）的 Q 对象，然后生成或使用该字段的表单字段。",
+      "evidence": [
+        "Issue 描述：'If you pass a Q object as limit_choices_to on a ForeignKey field involving a join, you may end up with duplicate options in your form.'",
+        "源码片段 1 显示 ForeignKey 类有 limit_choices_to 参数。",
+        "源码片段 2 显示 Q 类用于封装过滤器。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "表单字段的选项列表中出现重复项。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述：'you may end up with duplicate options in your form'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.ForeignKey.formfield",
+        "kind": "method",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及 ForeignKey 字段生成表单字段，formfield 方法是生成 ModelChoiceField 的关键。"
+      },
+      {
+        "name": "django.db.models.Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 明确提到 limit_choices_to 参数使用 Q 对象。"
+      },
+      {
+        "name": "django.forms.ModelChoiceField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "源码片段 3 显示 formfield 返回的 form_class 是 ModelChoiceField，其 queryset 可能受 limit_choices_to 影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ForeignKey.formfield",
+        "lines": "984-995",
+        "reason": "该方法负责为 ForeignKey 生成表单字段，并设置 queryset。如果 limit_choices_to 涉及连接，可能在构建 queryset 时导致重复结果。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "limit_choices_to 使用字典或 callable。",
+        "target_pattern": "limit_choices_to 使用一个涉及跨表字段连接的 Q 对象（例如 Q(other_model__field=value)）。",
+        "reason": "Issue 明确指出使用涉及连接的 Q 对象会触发重复选项问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试数据库中存在满足简单过滤条件的对象。",
+        "target_pattern": "测试数据库中存在满足涉及连接的 Q 对象条件的对象，且连接可能导致同一主对象通过不同路径被多次选中。",
+        "reason": "重复选项可能源于 SQL 查询在连接后产生了重复的行。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "表单字段的选项列表应包含不重复的项，即使 limit_choices_to 使用了涉及连接的 Q 对象。",
+      "evidence": [
+        "Issue 描述暗示这是一个需要修复的回归问题，修复后应无重复选项。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "formfield().queryset.query 或 formfield().queryset 的结果列表。",
+        "reason": "观察生成的查询集对应的 SQL 或结果列表，可以检查是否因连接导致重复的 ID 或对象。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "list(formfield().widget.choices) 或 [obj.pk for obj in formfield().queryset]",
+        "reason": "直接观察表单字段的选项列表或主键列表，可以检查是否存在重复项。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "表单字段的选项列表（或对应的 queryset）应包含不重复的元素。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或完整的 repr 输出。",
+        "reason": "Issue 的核心是重复项，应直接断言去重后的列表与原始列表长度相等或内容一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "具体是哪种连接（例如，通过另一个 ForeignKey 或 ManyToManyField）会导致重复。",
+    "重复是出现在所有表单字段渲染中，还是特定于某些小部件（如 Select 或 RadioSelect）。",
+    "修复后的确切行为（例如，是否使用 distinct()）未在 Issue 中明确说明。"
+  ],
+  "raw": {
+    "issue_summary": "当 ForeignKey 的 limit_choices_to 参数是一个涉及连接的 Q 对象时，表单字段可能生成重复选项。",
+    "trigger_condition": {
+      "text": "在 ForeignKey 字段上设置 limit_choices_to 参数，其值为一个涉及连接（join）的 Q 对象，然后生成或使用该字段的表单字段。",
+      "evidence": [
+        "Issue 描述：'If you pass a Q object as limit_choices_to on a ForeignKey field involving a join, you may end up with duplicate options in your form.'",
+        "源码片段 1 显示 ForeignKey 类有 limit_choices_to 参数。",
+        "源码片段 2 显示 Q 类用于封装过滤器。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "表单字段的选项列表中出现重复项。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 描述：'you may end up with duplicate options in your form'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "表单字段的选项列表应包含不重复的项，即使 limit_choices_to 使用了涉及连接的 Q 对象。",
+      "evidence": [
+        "Issue 描述暗示这是一个需要修复的回归问题，修复后应无重复选项。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.ForeignKey.formfield",
+        "kind": "method",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 涉及 ForeignKey 字段生成表单字段，formfield 方法是生成 ModelChoiceField 的关键。"
+      },
+      {
+        "name": "django.db.models.Q",
+        "kind": "class",
+        "source_path": "django/db/models/query_utils.py",
+        "reason": "Issue 明确提到 limit_choices_to 参数使用 Q 对象。"
+      },
+      {
+        "name": "django.forms.ModelChoiceField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "源码片段 3 显示 formfield 返回的 form_class 是 ModelChoiceField，其 queryset 可能受 limit_choices_to 影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/related.py",
+        "object": "ForeignKey.formfield",
+        "lines": "984-995",
+        "reason": "该方法负责为 ForeignKey 生成表单字段，并设置 queryset。如果 limit_choices_to 涉及连接，可能在构建 queryset 时导致重复结果。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "LimitChoicesToTests.test_limit_choices_to_callable_for_fk_rel",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "该测试直接验证了 ForeignKey 的 limit_choices_to 功能，并检查了表单字段的 queryset。",
+        "reusable_parts": [
+          "TestCase 类结构",
+          "使用 ModelForm 和 ForeignKey 字段",
+          "assertSequenceEqual 检查 queryset 内容"
+        ],
+        "possible_gap": "该测试使用 callable 作为 limit_choices_to，而非 Issue 中提到的涉及连接的 Q 对象。"
+      },
+      {
+        "test_name": "GetChoicesLimitChoicesToTests.test_get_choices",
+        "test_file": "tests/model_fields/tests.py",
+        "why_relevant": "该测试直接测试了 get_choices 方法配合 limit_choices_to 参数的行为。",
+        "reusable_parts": [
+          "assertChoicesEqual 断言风格",
+          "limit_choices_to 作为字典参数的使用"
+        ],
+        "possible_gap": "该测试使用字典作为 limit_choices_to，而非 Q 对象，且不涉及表单生成。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "limit_choices_to 使用字典或 callable。",
+        "target_pattern": "limit_choices_to 使用一个涉及跨表字段连接的 Q 对象（例如 Q(other_model__field=value)）。",
+        "reason": "Issue 明确指出使用涉及连接的 Q 对象会触发重复选项问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试数据库中存在满足简单过滤条件的对象。",
+        "target_pattern": "测试数据库中存在满足涉及连接的 Q 对象条件的对象，且连接可能导致同一主对象通过不同路径被多次选中。",
+        "reason": "重复选项可能源于 SQL 查询在连接后产生了重复的行。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "formfield().queryset.query 或 formfield().queryset 的结果列表。",
+        "reason": "观察生成的查询集对应的 SQL 或结果列表，可以检查是否因连接导致重复的 ID 或对象。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "list(formfield().widget.choices) 或 [obj.pk for obj in formfield().queryset]",
+        "reason": "直接观察表单字段的选项列表或主键列表，可以检查是否存在重复项。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "表单字段的选项列表（或对应的 queryset）应包含不重复的元素。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 字符串或完整的 repr 输出。",
+        "reason": "Issue 的核心是重复项，应直接断言去重后的列表与原始列表长度相等或内容一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 Django TestCase 和数据库支持，以创建包含 ForeignKey 和相关模型的测试模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 ModelForm 或 fields_for_model 来生成表单字段。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "具体是哪种连接（例如，通过另一个 ForeignKey 或 ManyToManyField）会导致重复。",
+      "重复是出现在所有表单字段渲染中，还是特定于某些小部件（如 Select 或 RadioSelect）。",
+      "修复后的确切行为（例如，是否使用 distinct()）未在 Issue 中明确说明。"
+    ]
+  }
+}

@@ -1,0 +1,310 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "astropy__astropy-13033",
+  "issue_summary": "TimeSeries 在尝试移除必需列时产生误导性的异常消息。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 TimeSeries, Time, numpy。可能需要使用 pytest 的 raises 上下文管理器。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应构造一个具有 'time' 列和至少一个其他数据列（如 'flux'）的 TimeSeries 对象。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 .copy() 来避免测试间的状态污染，如相关测试 1 所示。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_required_columns",
+        "test_file": "astropy/timeseries/tests/test_sampled.py",
+        "why_relevant": "该测试专门验证 TimeSeries 必需列检查机制，并包含对 remove_column 操作的测试，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "TimeSeries 对象的构造方式（使用 time 参数和 data 字典）",
+          "使用 pytest.raises(ValueError) 捕获异常",
+          "使用 .copy() 来避免修改原始对象",
+          "断言异常消息的模式（assert exc.value.args[0] == ...）"
+        ],
+        "possible_gap": "该测试只检查了默认必需列（仅 'time'）的情况，没有测试用户自定义额外必需列（如 'flux'）的场景。其异常消息断言是针对默认情况的。"
+      },
+      {
+        "test_name": "CommonTimeSeriesTests.test_required_after_stacking",
+        "test_file": "astropy/timeseries/tests/test_common.py",
+        "why_relevant": "测试了在操作（如 remove_columns）后对 TimeSeries 必需列的检查，涉及必需列验证逻辑。",
+        "reusable_parts": [
+          "使用 vstack 和 remove_columns",
+          "使用 pytest.raises(ValueError) 并检查异常消息是否包含特定片段（'TimeSeries object is invalid'）"
+        ],
+        "possible_gap": "测试场景是移除所有列，而非特定必需列；且没有涉及自定义 _required_columns。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个具有额外必需列（除了 'time'）的 TimeSeries 对象，然后尝试移除其中一个必需列。",
+      "evidence": [
+        "Issue 描述：'For a `TimeSeries` object that has additional required columns (in addition to `time`), when codes mistakenly try to remove a required column, the exception it produces is misleading.'",
+        "Issue 中的代码示例：ts._required_columns = [\"time\", \"flux\"]; ts.remove_column(\"flux\")"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError 异常，消息为：'TimeSeries object is invalid - expected 'time' as the first columns but found 'time''。该消息具有误导性，因为它抱怨找到了 'time'，但实际问题是移除了必需列 'flux'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的实际行为描述：'The actual exception message is confusing: `ValueError: TimeSeries object is invalid - expected 'time' as the first columns but found 'time'`'",
+        "相关测试 1 中展示了类似的异常消息模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "TimeSeries.remove_column",
+        "kind": "method",
+        "source_path": "astropy/timeseries/sampled.py",
+        "reason": "Issue 中直接调用了此方法来触发缺陷。"
+      },
+      {
+        "name": "TimeSeries._required_columns",
+        "kind": "attribute",
+        "source_path": "astropy/timeseries/sampled.py",
+        "reason": "Issue 中通过修改此属性来设置额外的必需列。"
+      },
+      {
+        "name": "TimeSeries.__init__",
+        "kind": "method",
+        "source_path": "astropy/timeseries/sampled.py",
+        "reason": "用于构造 TimeSeries 对象。"
+      },
+      {
+        "name": "Time",
+        "kind": "class",
+        "source_path": "astropy/time/core.py",
+        "reason": "用于构造 TimeSeries 的 'time' 参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/timeseries/sampled.py",
+        "object": "TimeSeries",
+        "lines": "",
+        "reason": "TimeSeries 类定义了 _required_columns 属性，并且是 remove_column 方法的调用者（继承自 Table）。缺陷可能在于其验证逻辑或异常消息生成逻辑。"
+      },
+      {
+        "path": "astropy/table/table.py",
+        "object": "Table.remove_column",
+        "lines": "2597-2636",
+        "reason": "remove_column 方法最终调用 remove_columns。TimeSeries 可能重写了相关方法或添加了验证钩子，导致在列被移除后检查必需列时产生误导性消息。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中 TimeSeries 的 _required_columns 属性保持为默认值 ['time']。",
+        "target_pattern": "将 TimeSeries 对象的 _required_columns 属性设置为包含 'time' 和另一个列名（如 'flux'）的列表。",
+        "reason": "Issue 的核心是当有额外必需列时，移除该列会触发误导性异常。修改此状态是触发缺陷路径的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接对 TimeSeries 对象调用 remove_column('time')。",
+        "target_pattern": "对 TimeSeries 对象调用 remove_column('flux')，其中 'flux' 是自定义的必需列之一。",
+        "reason": "移除非 'time' 的必需列是触发特定误导性异常消息的操作。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当尝试移除一个必需列时，应该抛出一个明确告知用户必需列缺失的异常。",
+      "evidence": [
+        "Issue 中的预期行为描述：'An exception that informs the users required columns are missing.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获的 ValueError 异常及其 args[0] 消息字符串。",
+        "reason": "Issue 的核心是异常消息内容具有误导性。观测异常消息是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 remove_column 前后 TimeSeries 对象的 colnames 和 _required_columns 属性。",
+        "reason": "有助于理解操作是否成功移除了列，以及必需列列表的状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当尝试移除一个必需列时，抛出的 ValueError 异常消息应明确提及必需列缺失，而不是关于 'time' 列位置的误导信息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的异常消息字符串与 Issue 中给出的错误消息完全相等，因为修复后的消息会改变。避免断言与 'time' 作为第一列相关的误导性片段。",
+        "reason": "Issue 的预期是异常消息应告知用户必需列缺失。断言消息包含相关语义片段（如 'required'， 'missing'）比断言完整字符串更稳定，且与修复目标一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "在 remove_column 操作中，验证必需列的逻辑具体在哪个方法中执行（是 Table.remove_columns 内部，还是 TimeSeries 的某个钩子或属性设置器）。",
+    "修复后的确切异常消息措辞是什么。",
+    "除了 remove_column，其他修改列结构的操作（如 keep_columns, rename_column）在自定义必需列场景下是否也存在类似问题。",
+    "_required_columns 属性是否设计为公开可修改，或者是否有其他官方 API 来定义额外必需列。"
+  ],
+  "raw": {
+    "issue_summary": "TimeSeries 在尝试移除必需列时产生误导性的异常消息。",
+    "trigger_condition": {
+      "text": "创建一个具有额外必需列（除了 'time'）的 TimeSeries 对象，然后尝试移除其中一个必需列。",
+      "evidence": [
+        "Issue 描述：'For a `TimeSeries` object that has additional required columns (in addition to `time`), when codes mistakenly try to remove a required column, the exception it produces is misleading.'",
+        "Issue 中的代码示例：ts._required_columns = [\"time\", \"flux\"]; ts.remove_column(\"flux\")"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError 异常，消息为：'TimeSeries object is invalid - expected 'time' as the first columns but found 'time''。该消息具有误导性，因为它抱怨找到了 'time'，但实际问题是移除了必需列 'flux'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的实际行为描述：'The actual exception message is confusing: `ValueError: TimeSeries object is invalid - expected 'time' as the first columns but found 'time'`'",
+        "相关测试 1 中展示了类似的异常消息模式。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当尝试移除一个必需列时，应该抛出一个明确告知用户必需列缺失的异常。",
+      "evidence": [
+        "Issue 中的预期行为描述：'An exception that informs the users required columns are missing.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "TimeSeries.remove_column",
+        "kind": "method",
+        "source_path": "astropy/timeseries/sampled.py",
+        "reason": "Issue 中直接调用了此方法来触发缺陷。"
+      },
+      {
+        "name": "TimeSeries._required_columns",
+        "kind": "attribute",
+        "source_path": "astropy/timeseries/sampled.py",
+        "reason": "Issue 中通过修改此属性来设置额外的必需列。"
+      },
+      {
+        "name": "TimeSeries.__init__",
+        "kind": "method",
+        "source_path": "astropy/timeseries/sampled.py",
+        "reason": "用于构造 TimeSeries 对象。"
+      },
+      {
+        "name": "Time",
+        "kind": "class",
+        "source_path": "astropy/time/core.py",
+        "reason": "用于构造 TimeSeries 的 'time' 参数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "astropy/timeseries/sampled.py",
+        "object": "TimeSeries",
+        "lines": "",
+        "reason": "TimeSeries 类定义了 _required_columns 属性，并且是 remove_column 方法的调用者（继承自 Table）。缺陷可能在于其验证逻辑或异常消息生成逻辑。"
+      },
+      {
+        "path": "astropy/table/table.py",
+        "object": "Table.remove_column",
+        "lines": "2597-2636",
+        "reason": "remove_column 方法最终调用 remove_columns。TimeSeries 可能重写了相关方法或添加了验证钩子，导致在列被移除后检查必需列时产生误导性消息。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_required_columns",
+        "test_file": "astropy/timeseries/tests/test_sampled.py",
+        "why_relevant": "该测试专门验证 TimeSeries 必需列检查机制，并包含对 remove_column 操作的测试，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "TimeSeries 对象的构造方式（使用 time 参数和 data 字典）",
+          "使用 pytest.raises(ValueError) 捕获异常",
+          "使用 .copy() 来避免修改原始对象",
+          "断言异常消息的模式（assert exc.value.args[0] == ...）"
+        ],
+        "possible_gap": "该测试只检查了默认必需列（仅 'time'）的情况，没有测试用户自定义额外必需列（如 'flux'）的场景。其异常消息断言是针对默认情况的。"
+      },
+      {
+        "test_name": "CommonTimeSeriesTests.test_required_after_stacking",
+        "test_file": "astropy/timeseries/tests/test_common.py",
+        "why_relevant": "测试了在操作（如 remove_columns）后对 TimeSeries 必需列的检查，涉及必需列验证逻辑。",
+        "reusable_parts": [
+          "使用 vstack 和 remove_columns",
+          "使用 pytest.raises(ValueError) 并检查异常消息是否包含特定片段（'TimeSeries object is invalid'）"
+        ],
+        "possible_gap": "测试场景是移除所有列，而非特定必需列；且没有涉及自定义 _required_columns。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中 TimeSeries 的 _required_columns 属性保持为默认值 ['time']。",
+        "target_pattern": "将 TimeSeries 对象的 _required_columns 属性设置为包含 'time' 和另一个列名（如 'flux'）的列表。",
+        "reason": "Issue 的核心是当有额外必需列时，移除该列会触发误导性异常。修改此状态是触发缺陷路径的关键。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接对 TimeSeries 对象调用 remove_column('time')。",
+        "target_pattern": "对 TimeSeries 对象调用 remove_column('flux')，其中 'flux' 是自定义的必需列之一。",
+        "reason": "移除非 'time' 的必需列是触发特定误导性异常消息的操作。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获的 ValueError 异常及其 args[0] 消息字符串。",
+        "reason": "Issue 的核心是异常消息内容具有误导性。观测异常消息是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用 remove_column 前后 TimeSeries 对象的 colnames 和 _required_columns 属性。",
+        "reason": "有助于理解操作是否成功移除了列，以及必需列列表的状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当尝试移除一个必需列时，抛出的 ValueError 异常消息应明确提及必需列缺失，而不是关于 'time' 列位置的误导信息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的异常消息字符串与 Issue 中给出的错误消息完全相等，因为修复后的消息会改变。避免断言与 'time' 作为第一列相关的误导性片段。",
+        "reason": "Issue 的预期是异常消息应告知用户必需列缺失。断言消息包含相关语义片段（如 'required'， 'missing'）比断言完整字符串更稳定，且与修复目标一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 TimeSeries, Time, numpy。可能需要使用 pytest 的 raises 上下文管理器。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应构造一个具有 'time' 列和至少一个其他数据列（如 'flux'）的 TimeSeries 对象。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 .copy() 来避免测试间的状态污染，如相关测试 1 所示。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "在 remove_column 操作中，验证必需列的逻辑具体在哪个方法中执行（是 Table.remove_columns 内部，还是 TimeSeries 的某个钩子或属性设置器）。",
+      "修复后的确切异常消息措辞是什么。",
+      "除了 remove_column，其他修改列结构的操作（如 keep_columns, rename_column）在自定义必需列场景下是否也存在类似问题。",
+      "_required_columns 属性是否设计为公开可修改，或者是否有其他官方 API 来定义额外必需列。"
+    ]
+  }
+}

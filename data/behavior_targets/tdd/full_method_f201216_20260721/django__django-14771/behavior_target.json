@@ -1,0 +1,300 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14771",
+  "issue_summary": "Django 的 auto-reloader 在重启时没有正确传递 Python 的 -X 命令行选项。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `mock.patch` 来模拟 `sys.argv` 和 `sys._xoptions`，以设置测试的初始命令行环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要 mock `subprocess.call` 来捕获 `restart_with_reloader` 试图执行的命令，而不是真正启动子进程。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 `SimpleTestCase`，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RestartWithReloaderTests.test_python_m_django",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试直接验证了 `restart_with_reloader` 函数如何构建重启命令（`[self.executable, '-Wall', '-m', 'django'] + argv[1:]`），是测试命令行参数传递逻辑的起点。",
+        "reusable_parts": [
+          "测试类结构（SimpleTestCase）",
+          "mock 和 patch 的使用模式",
+          "对 `autoreload.restart_with_reloader` 的调用",
+          "对 `subprocess.call` 参数的断言验证"
+        ],
+        "possible_gap": "该测试只验证了 `-Wall` 选项和 `-m django` 模式，没有包含或验证任何 `-X` 选项的传递。"
+      },
+      {
+        "test_name": "RestartWithReloaderTests.test_manage_py",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试验证了通过 `manage.py` 脚本启动时的参数传递（`[self.executable, '-Wall'] + argv`），展示了另一种启动路径的参数构建逻辑。",
+        "reusable_parts": [
+          "使用 `tempfile.TemporaryDirectory` 创建临时脚本",
+          "mock `__main__.__spec__` 的模式",
+          "对构建的命令行列表进行断言"
+        ],
+        "possible_gap": "同样没有覆盖 `-X` 选项。测试中构建的命令行参数列表是当前进程 `sys.argv` 的简单拼接，可能遗漏了 `sys._xoptions` 对应的 `-X` 参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 `python -X utf8 manage.py runserver` 启动 Django 开发服务器，并启用 auto-reloader（默认行为）。",
+      "evidence": [
+        "Issue 中用户执行了 `winpty python -X utf8 manage.py runserver 0.0.0.0:8005 -v3`，并观察到 `--noreload` 时行为不同。",
+        "Issue 引用了 Python 的 `sys._xoptions` 文档，表明 -X 选项是核心问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 auto-reloader 触发重启时，-X utf8 选项未被传递给新的 Python 进程，导致文件编码等行为与预期不符（例如，`open` 函数的默认编码可能不同）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中显示，带 reloader 时 `open(\"manage.py\", mode=\"r\")` 打印的编码是 `cp936`，而不带 reloader (`--noreload`) 时是 `UTF-8`。这表明 -X utf8 选项在重启后丢失。",
+        "Issue 链接了 Python 文档，说明 -X 选项影响 `open` 等函数的默认行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "autoreload.restart_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "该函数负责重启 Python 进程，是处理命令行参数传递的关键位置。"
+      },
+      {
+        "name": "sys._xoptions",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 明确引用，用于获取和验证 -X 选项。"
+      },
+      {
+        "name": "open",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中使用 `open` 函数来演示 -X utf8 选项对默认编码的影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "restart_with_reloader",
+        "lines": "",
+        "reason": "该函数负责构建重启命令，相关测试（test_python_m_django, test_manage_py）都围绕它进行 mock 和验证，但当前测试未覆盖 -X 选项的传递。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中模拟的 `argv` 是 `['/path/to/main.py', 'runserver']` 或 `['manage.py', 'runserver']`，不包含 `-X` 选项。",
+        "target_pattern": "在 `sys.argv` 或模拟的 `argv` 中插入 `-X utf8` 或其他 `-X` 选项，例如 `['-X', 'utf8', 'manage.py', 'runserver']`。同时，需要确保 `sys._xoptions` 字典中有相应的条目。",
+        "reason": "Issue 表明缺陷触发需要原始的 `-X` 选项存在。当前测试的输入模式过于简单，没有包含这些选项，因此无法触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 `autoreload.restart_with_reloader()`，并验证其内部对 `subprocess.call` 的调用参数。",
+        "target_pattern": "需要在调用 `restart_with_reloader` 之前，设置 `sys.argv` 和 `sys._xoptions` 以模拟带有 `-X` 选项的启动环境。",
+        "reason": "`restart_with_reloader` 函数很可能从 `sys.argv` 和 `sys._xoptions` 中读取原始命令行参数来构建重启命令。当前测试没有设置这些全局状态。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Django 的 auto-reloader 在重启 Python 进程时，应保留并传递所有原始的 -X 命令行选项。",
+      "evidence": [
+        "Issue 中用户期望 `-X utf8` 选项在 reloader 重启后依然生效，使得文件编码保持一致。",
+        "相关测试代码（如 `test_python_m_django`）展示了重启时构建命令行参数的过程，暗示了参数传递的机制。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "config",
+        "expression_hint": "`sys._xoptions` 字典在重启前后的内容，或传递给 `subprocess.call` 的命令行参数列表中是否包含 `-X` 选项。",
+        "reason": "这是判断 `-X` 选项是否被正确捕获和传递的直接证据。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "在重启后的子进程中，`open` 函数（或相关文件操作）使用的默认编码（例如 `locale.getpreferredencoding(False)` 或文件对象的 `.encoding` 属性）。",
+        "reason": "Issue 中通过打印文件编码来直观展示 `-X utf8` 选项是否生效。这是一个可观测的副作用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `restart_with_reloader` 构建的重启命令参数列表中包含了原始的 `-X` 选项及其参数。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、硬编码的命令行列表，因为路径和 Python 可执行文件位置可能变化。",
+        "reason": "核心问题是 `-X` 选项的缺失。断言参数列表包含 `'-X'` 和 `'utf8'`（或相应的值）是稳定且与 Issue 直接对齐的验证方式。"
+      },
+      {
+        "assertion_goal": "验证在模拟的重启环境中，文件操作的默认编码与 `-X utf8` 选项的预期一致（例如是 UTF-8）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言具体的、可能因环境而异的编码字符串字面量（如 'cp936'），而是关注是否与 `-X` 选项的预期一致。",
+        "reason": "这验证了 `-X` 选项传递的功能性结果，而不仅仅是参数列表的机械包含。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "`restart_with_reloader` 函数内部具体如何从 `sys.argv` 和 `sys._xoptions` 提取和组合 `-X` 选项的精确逻辑尚不明确。",
+    "除了 `-X utf8`，其他 `-X` 选项（如 `-X faulthandler`）是否也会受到影响？",
+    "缺陷是否也存在于其他 reloader 实现（如 WatchmanReloader）中？"
+  ],
+  "raw": {
+    "issue_summary": "Django 的 auto-reloader 在重启时没有正确传递 Python 的 -X 命令行选项。",
+    "trigger_condition": {
+      "text": "使用 `python -X utf8 manage.py runserver` 启动 Django 开发服务器，并启用 auto-reloader（默认行为）。",
+      "evidence": [
+        "Issue 中用户执行了 `winpty python -X utf8 manage.py runserver 0.0.0.0:8005 -v3`，并观察到 `--noreload` 时行为不同。",
+        "Issue 引用了 Python 的 `sys._xoptions` 文档，表明 -X 选项是核心问题。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 auto-reloader 触发重启时，-X utf8 选项未被传递给新的 Python 进程，导致文件编码等行为与预期不符（例如，`open` 函数的默认编码可能不同）。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 中显示，带 reloader 时 `open(\"manage.py\", mode=\"r\")` 打印的编码是 `cp936`，而不带 reloader (`--noreload`) 时是 `UTF-8`。这表明 -X utf8 选项在重启后丢失。",
+        "Issue 链接了 Python 文档，说明 -X 选项影响 `open` 等函数的默认行为。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Django 的 auto-reloader 在重启 Python 进程时，应保留并传递所有原始的 -X 命令行选项。",
+      "evidence": [
+        "Issue 中用户期望 `-X utf8` 选项在 reloader 重启后依然生效，使得文件编码保持一致。",
+        "相关测试代码（如 `test_python_m_django`）展示了重启时构建命令行参数的过程，暗示了参数传递的机制。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "autoreload.restart_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "该函数负责重启 Python 进程，是处理命令行参数传递的关键位置。"
+      },
+      {
+        "name": "sys._xoptions",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 明确引用，用于获取和验证 -X 选项。"
+      },
+      {
+        "name": "open",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中使用 `open` 函数来演示 -X utf8 选项对默认编码的影响。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "restart_with_reloader",
+        "lines": "",
+        "reason": "该函数负责构建重启命令，相关测试（test_python_m_django, test_manage_py）都围绕它进行 mock 和验证，但当前测试未覆盖 -X 选项的传递。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RestartWithReloaderTests.test_python_m_django",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试直接验证了 `restart_with_reloader` 函数如何构建重启命令（`[self.executable, '-Wall', '-m', 'django'] + argv[1:]`），是测试命令行参数传递逻辑的起点。",
+        "reusable_parts": [
+          "测试类结构（SimpleTestCase）",
+          "mock 和 patch 的使用模式",
+          "对 `autoreload.restart_with_reloader` 的调用",
+          "对 `subprocess.call` 参数的断言验证"
+        ],
+        "possible_gap": "该测试只验证了 `-Wall` 选项和 `-m django` 模式，没有包含或验证任何 `-X` 选项的传递。"
+      },
+      {
+        "test_name": "RestartWithReloaderTests.test_manage_py",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试验证了通过 `manage.py` 脚本启动时的参数传递（`[self.executable, '-Wall'] + argv`），展示了另一种启动路径的参数构建逻辑。",
+        "reusable_parts": [
+          "使用 `tempfile.TemporaryDirectory` 创建临时脚本",
+          "mock `__main__.__spec__` 的模式",
+          "对构建的命令行列表进行断言"
+        ],
+        "possible_gap": "同样没有覆盖 `-X` 选项。测试中构建的命令行参数列表是当前进程 `sys.argv` 的简单拼接，可能遗漏了 `sys._xoptions` 对应的 `-X` 参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中模拟的 `argv` 是 `['/path/to/main.py', 'runserver']` 或 `['manage.py', 'runserver']`，不包含 `-X` 选项。",
+        "target_pattern": "在 `sys.argv` 或模拟的 `argv` 中插入 `-X utf8` 或其他 `-X` 选项，例如 `['-X', 'utf8', 'manage.py', 'runserver']`。同时，需要确保 `sys._xoptions` 字典中有相应的条目。",
+        "reason": "Issue 表明缺陷触发需要原始的 `-X` 选项存在。当前测试的输入模式过于简单，没有包含这些选项，因此无法触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 `autoreload.restart_with_reloader()`，并验证其内部对 `subprocess.call` 的调用参数。",
+        "target_pattern": "需要在调用 `restart_with_reloader` 之前，设置 `sys.argv` 和 `sys._xoptions` 以模拟带有 `-X` 选项的启动环境。",
+        "reason": "`restart_with_reloader` 函数很可能从 `sys.argv` 和 `sys._xoptions` 中读取原始命令行参数来构建重启命令。当前测试没有设置这些全局状态。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "config",
+        "expression_hint": "`sys._xoptions` 字典在重启前后的内容，或传递给 `subprocess.call` 的命令行参数列表中是否包含 `-X` 选项。",
+        "reason": "这是判断 `-X` 选项是否被正确捕获和传递的直接证据。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "在重启后的子进程中，`open` 函数（或相关文件操作）使用的默认编码（例如 `locale.getpreferredencoding(False)` 或文件对象的 `.encoding` 属性）。",
+        "reason": "Issue 中通过打印文件编码来直观展示 `-X utf8` 选项是否生效。这是一个可观测的副作用。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 `restart_with_reloader` 构建的重启命令参数列表中包含了原始的 `-X` 选项及其参数。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、硬编码的命令行列表，因为路径和 Python 可执行文件位置可能变化。",
+        "reason": "核心问题是 `-X` 选项的缺失。断言参数列表包含 `'-X'` 和 `'utf8'`（或相应的值）是稳定且与 Issue 直接对齐的验证方式。"
+      },
+      {
+        "assertion_goal": "验证在模拟的重启环境中，文件操作的默认编码与 `-X utf8` 选项的预期一致（例如是 UTF-8）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言具体的、可能因环境而异的编码字符串字面量（如 'cp936'），而是关注是否与 `-X` 选项的预期一致。",
+        "reason": "这验证了 `-X` 选项传递的功能性结果，而不仅仅是参数列表的机械包含。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `mock.patch` 来模拟 `sys.argv` 和 `sys._xoptions`，以设置测试的初始命令行环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要 mock `subprocess.call` 来捕获 `restart_with_reloader` 试图执行的命令，而不是真正启动子进程。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 `SimpleTestCase`，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "`restart_with_reloader` 函数内部具体如何从 `sys.argv` 和 `sys._xoptions` 提取和组合 `-X` 选项的精确逻辑尚不明确。",
+      "除了 `-X utf8`，其他 `-X` 选项（如 `-X faulthandler`）是否也会受到影响？",
+      "缺陷是否也存在于其他 reloader 实现（如 WatchmanReloader）中？"
+    ]
+  }
+}

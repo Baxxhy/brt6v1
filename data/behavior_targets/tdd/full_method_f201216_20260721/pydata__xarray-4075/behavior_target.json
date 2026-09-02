@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-4075",
+  "issue_summary": "当传递布尔权重数组给加权均值时，由于权重未正确归一化导致计算结果错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 xarray，构造简单的 DataArray 作为数据和权重。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能使用 pytest 参数化来测试不同的布尔权重组合。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_weighted_mean_no_nan",
+        "test_file": "xarray/tests/test_weighted.py",
+        "why_relevant": "该测试直接测试加权均值，包含权重为 [1, 0] 的用例，与 Issue 中权重包含 0 的情况类似。",
+        "reusable_parts": [
+          "DataArray 构造",
+          "weighted().mean() 调用",
+          "assert_equal 断言风格"
+        ],
+        "possible_gap": "现有测试使用整数列表作为权重，未测试布尔类型的权重数组。"
+      },
+      {
+        "test_name": "test_weighted_mean_equal_weights",
+        "test_file": "xarray/tests/test_weighted.py",
+        "why_relevant": "该测试验证权重相等时的行为，展示了加权均值与普通均值的对比模式。",
+        "reusable_parts": [
+          "DataArray 构造",
+          "xr.full_like 创建权重",
+          "与 da.mean() 结果对比的断言模式"
+        ],
+        "possible_gap": "权重是数值类型（factor），未涉及布尔类型转换问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用布尔类型的 DataArray 作为权重调用 DataArray.weighted().mean()。",
+      "evidence": [
+        "Issue 中的 MCVE 代码：`wgt = xr.DataArray(np.array([1, 1, 0], dtype=np.bool))` 和 `dta.weighted(wgt).mean()`。",
+        "Issue 描述：'Passing a boolean array as weights to the weighted mean returns the wrong result'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "加权均值返回错误数值（2.0 而不是预期的 1.0）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中实际输出：`array(2.)`。",
+        "Issue 中预期输出：`array(1.)`。",
+        "Issue 分析：'sum_of_weights' 计算为 `xr.dot(dta.notnull(), wgt)` 返回布尔值 `array(True)`，导致归一化错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DataArray.weighted",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 中触发缺陷的入口 API。"
+      },
+      {
+        "name": "Weighted.mean",
+        "kind": "method",
+        "source_path": "xarray/core/weighted.py",
+        "reason": "Issue 中直接调用的缺陷方法，其内部计算 `sum_of_weights` 时出现问题。"
+      },
+      {
+        "name": "DataArray.dot",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 指出内部 `sum_of_weights` 计算使用了 `xr.dot`，且当参数为布尔数组时行为异常。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/weighted.py",
+        "object": "Weighted._weighted_mean 或相关内部方法",
+        "lines": "",
+        "reason": "Issue 指出 `sum_of_weights` 的计算（`xr.dot(dta.notnull(), wgt)`）发生在加权均值内部，导致布尔权重未被正确转换为数值。"
+      },
+      {
+        "path": "xarray/core/weighted.py",
+        "object": "mean",
+        "lines": "201-210",
+        "reason": "检索到的源码片段显示 `mean` 方法调用了 `self._implementation(self._weighted_mean, ...)`，缺陷逻辑可能在 `_weighted_mean` 中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用整数或浮点数列表/数组构造权重 DataArray。",
+        "target_pattern": "使用布尔类型的 numpy 数组（dtype=np.bool）构造权重 DataArray。",
+        "reason": "Issue 表明布尔权重是触发缺陷的关键输入类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "权重数组元素为数值（如 [1, 0]）。",
+        "target_pattern": "权重数组元素为布尔值（如 [True, True, False]），对应数值 [1, 1, 0]。",
+        "reason": "布尔值在 dot 运算中可能被当作 True=1 但结果类型仍为布尔，导致归一化分母错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用布尔权重数组计算加权均值时，权重应被正确转换为数值类型进行归一化，返回正确的加权平均值。",
+      "evidence": [
+        "Issue 中预期输出：`array(1.)`。",
+        "Issue 中建议的修正：将权重转换为 int 或 float，例如 `wgt * 1`，使得 `xr.dot(dta.notnull(), wgt * 1)` 返回 `array(2)`。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "da.weighted(wgt).mean().values",
+        "reason": "直接观察加权均值的计算结果是否与预期（如 1.0）匹配。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(xr.dot(dta.notnull(), wgt).values) 或内部 sum_of_weights 的类型",
+        "reason": "Issue 指出问题根源是 dot 积结果类型为布尔而非数值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用布尔权重计算的加权均值应等于使用等效数值权重计算的结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串，因为版本或格式可能变化。",
+        "reason": "Issue 给出了明确的预期数值结果（1.0），且核心是数值计算的正确性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只影响 mean 方法，还是也影响 weighted 模块的其他方法（如 sum）。",
+    "内部 `sum_of_weights` 计算的确切位置和调用链。",
+    "除了布尔权重，其他非数值类型权重（如字符串）是否也有类似问题。"
+  ],
+  "raw": {
+    "issue_summary": "当传递布尔权重数组给加权均值时，由于权重未正确归一化导致计算结果错误。",
+    "trigger_condition": {
+      "text": "使用布尔类型的 DataArray 作为权重调用 DataArray.weighted().mean()。",
+      "evidence": [
+        "Issue 中的 MCVE 代码：`wgt = xr.DataArray(np.array([1, 1, 0], dtype=np.bool))` 和 `dta.weighted(wgt).mean()`。",
+        "Issue 描述：'Passing a boolean array as weights to the weighted mean returns the wrong result'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "加权均值返回错误数值（2.0 而不是预期的 1.0）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中实际输出：`array(2.)`。",
+        "Issue 中预期输出：`array(1.)`。",
+        "Issue 分析：'sum_of_weights' 计算为 `xr.dot(dta.notnull(), wgt)` 返回布尔值 `array(True)`，导致归一化错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用布尔权重数组计算加权均值时，权重应被正确转换为数值类型进行归一化，返回正确的加权平均值。",
+      "evidence": [
+        "Issue 中预期输出：`array(1.)`。",
+        "Issue 中建议的修正：将权重转换为 int 或 float，例如 `wgt * 1`，使得 `xr.dot(dta.notnull(), wgt * 1)` 返回 `array(2)`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DataArray.weighted",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 中触发缺陷的入口 API。"
+      },
+      {
+        "name": "Weighted.mean",
+        "kind": "method",
+        "source_path": "xarray/core/weighted.py",
+        "reason": "Issue 中直接调用的缺陷方法，其内部计算 `sum_of_weights` 时出现问题。"
+      },
+      {
+        "name": "DataArray.dot",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 指出内部 `sum_of_weights` 计算使用了 `xr.dot`，且当参数为布尔数组时行为异常。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/weighted.py",
+        "object": "Weighted._weighted_mean 或相关内部方法",
+        "lines": "",
+        "reason": "Issue 指出 `sum_of_weights` 的计算（`xr.dot(dta.notnull(), wgt)`）发生在加权均值内部，导致布尔权重未被正确转换为数值。"
+      },
+      {
+        "path": "xarray/core/weighted.py",
+        "object": "mean",
+        "lines": "201-210",
+        "reason": "检索到的源码片段显示 `mean` 方法调用了 `self._implementation(self._weighted_mean, ...)`，缺陷逻辑可能在 `_weighted_mean` 中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_weighted_mean_no_nan",
+        "test_file": "xarray/tests/test_weighted.py",
+        "why_relevant": "该测试直接测试加权均值，包含权重为 [1, 0] 的用例，与 Issue 中权重包含 0 的情况类似。",
+        "reusable_parts": [
+          "DataArray 构造",
+          "weighted().mean() 调用",
+          "assert_equal 断言风格"
+        ],
+        "possible_gap": "现有测试使用整数列表作为权重，未测试布尔类型的权重数组。"
+      },
+      {
+        "test_name": "test_weighted_mean_equal_weights",
+        "test_file": "xarray/tests/test_weighted.py",
+        "why_relevant": "该测试验证权重相等时的行为，展示了加权均值与普通均值的对比模式。",
+        "reusable_parts": [
+          "DataArray 构造",
+          "xr.full_like 创建权重",
+          "与 da.mean() 结果对比的断言模式"
+        ],
+        "possible_gap": "权重是数值类型（factor），未涉及布尔类型转换问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用整数或浮点数列表/数组构造权重 DataArray。",
+        "target_pattern": "使用布尔类型的 numpy 数组（dtype=np.bool）构造权重 DataArray。",
+        "reason": "Issue 表明布尔权重是触发缺陷的关键输入类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "权重数组元素为数值（如 [1, 0]）。",
+        "target_pattern": "权重数组元素为布尔值（如 [True, True, False]），对应数值 [1, 1, 0]。",
+        "reason": "布尔值在 dot 运算中可能被当作 True=1 但结果类型仍为布尔，导致归一化分母错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "da.weighted(wgt).mean().values",
+        "reason": "直接观察加权均值的计算结果是否与预期（如 1.0）匹配。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(xr.dot(dta.notnull(), wgt).values) 或内部 sum_of_weights 的类型",
+        "reason": "Issue 指出问题根源是 dot 积结果类型为布尔而非数值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用布尔权重计算的加权均值应等于使用等效数值权重计算的结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 repr 字符串，因为版本或格式可能变化。",
+        "reason": "Issue 给出了明确的预期数值结果（1.0），且核心是数值计算的正确性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 xarray，构造简单的 DataArray 作为数据和权重。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能使用 pytest 参数化来测试不同的布尔权重组合。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只影响 mean 方法，还是也影响 weighted 模块的其他方法（如 sum）。",
+      "内部 `sum_of_weights` 计算的确切位置和调用链。",
+      "除了布尔权重，其他非数值类型权重（如字符串）是否也有类似问题。"
+    ]
+  }
+}

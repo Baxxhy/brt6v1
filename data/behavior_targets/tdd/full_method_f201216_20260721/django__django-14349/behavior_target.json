@@ -1,0 +1,292 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14349",
+  "issue_summary": "在修复了 bpo-43882 的 Python 版本上，URLValidator 对包含换行符的 URL 不再抛出 ValidationError，导致测试失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。可能需要导入 validators 模块和 ValidationError。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境需要是修复了 bpo-43882 的 Python 版本（如 3.10.0b1 或特定分支），以复现问题。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_validators",
+        "test_file": "tests/validators/tests.py",
+        "why_relevant": "这是 Issue 中直接失败的测试。它使用参数化数据驱动的方式测试多个验证器，包括 URLValidator。",
+        "reusable_parts": [
+          "测试类 TestValidators(SimpleTestCase)。",
+          "使用 subTest 进行参数化测试的模式。",
+          "使用 assertRaises 来验证异常抛出的断言风格。",
+          "导入的 validator 和 TEST_DATA 结构。"
+        ],
+        "possible_gap": "TEST_DATA 的具体内容未知，可能不包含触发此特定问题的输入（带换行符的 URL）。需要变异输入数据。"
+      },
+      {
+        "test_name": "ValidatorCustomMessageTests.test_value_placeholder_with_char_field",
+        "test_file": "tests/forms_tests/tests/test_validators.py",
+        "why_relevant": "它包含了对 URLValidator 的多个测试用例，展示了如何将验证器集成到表单中并检查错误消息。",
+        "reusable_parts": [
+          "构造包含 URLValidator 的 CharField 表单的模式。",
+          "使用 form.is_valid() 和 form.errors 进行验证的流程。",
+          "测试用例列表的组织方式。"
+        ],
+        "possible_gap": "测试焦点是自定义错误消息，而非验证器对控制字符的敏感性。现有用例不包含带换行符的 URL。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 URLValidator 验证包含换行符（LF、CR 或制表符）的 URL 字符串。",
+      "evidence": [
+        "Issue 中失败的测试用例：'http://www.djangoproject.com/\\n' 和 'http://[::ffff:192.9.5.5]\\n'。",
+        "Issue 描述：bpo-43882 的修复改变了 URL 拆分行为，会在拆分前剥离所有 LF、CR 和制表符。",
+        "相关测试 2 中包含了 URLValidator 的测试用例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "URLValidator 没有按预期抛出 ValidationError 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的断言失败信息：'AssertionError: ValidationError not raised'。",
+        "相关测试 1 的代码结构：当 expected 是 Exception 子类时，使用 assertRaises(expected)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "URLValidator",
+        "kind": "class",
+        "source_path": "django/core/validators.py",
+        "reason": "Issue 的核心是关于 URLValidator 的行为。"
+      },
+      {
+        "name": "URLValidator.__call__",
+        "kind": "method",
+        "source_path": "django/core/validators.py",
+        "reason": "验证 URL 时调用的方法。"
+      },
+      {
+        "name": "ValidationError",
+        "kind": "class",
+        "source_path": "django/core/exceptions.py",
+        "reason": "验证失败时应抛出的异常类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/validators.py",
+        "object": "URLValidator.regex",
+        "lines": "65-142",
+        "reason": "URL 验证的核心正则表达式可能无法正确处理 Python 底层 URL 拆分行为变化后的输入。Issue 指出 Django 基于拆分后的组件拒绝 URL，但 Python 修复后会在拆分前剥离控制字符。"
+      },
+      {
+        "path": "django/core/validators.py",
+        "object": "URLValidator.__call__",
+        "lines": "",
+        "reason": "该方法负责执行验证逻辑，可能需要对原始输入值进行预处理或额外检查，以应对 Python 行为的变化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中 URLValidator 的输入通常是普通 URL 字符串（如 'no_scheme', 'http://test[.com'）。",
+        "target_pattern": "在 URL 末尾或中间插入换行符（'\\n'）、回车符（'\\r'）或制表符（'\\t'）。",
+        "reason": "Issue 明确指出，在修复了 bpo-43882 的 Python 版本上，这些字符会在 URL 拆分前被剥离，导致验证器接收不到它们，从而无法触发 ValidationError。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "URLValidator 应能检测并拒绝包含换行符等控制字符的 URL。",
+      "evidence": [
+        "Issue 描述中提到的两种修复思路之一：'reject URLs containing the forbidden characters early'。",
+        "相关测试 1 和 2 的测试逻辑表明，对于无效输入，期望抛出 ValidationError。",
+        "源码片段 1 中 URLValidator 继承自 RegexValidator，其正则表达式以 '\\Z' 结尾，旨在匹配字符串末尾。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 URLValidator(value) 时是否抛出 ValidationError 异常。",
+        "reason": "Issue 的核心错误现象是 ValidationError 未被抛出。这是判断缺陷是否被触发的直接指标。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "URLValidator.__call__ 方法在验证成功时的返回值（应为 None）。",
+        "reason": "在验证失败时应抛出异常，验证成功时返回 None。观察返回值有助于理解验证流程。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "传入 URLValidator 的原始 value 字符串与可能经过 Python urlparse 等库处理后的字符串的差异。",
+        "reason": "Issue 提到 Python 的修复会剥离控制字符。观察处理前后的字符串可以确认行为变化。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 URL 包含换行符等控制字符时，URLValidator 会抛出 ValidationError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息内容可能在未来改变。避免断言不相关的属性。",
+        "reason": "Issue 的失败原因是 ValidationError 未被抛出。使用 assertRaises(ValidationError) 直接且稳定地对齐了预期行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "TEST_DATA 中是否原本就包含带控制字符的 URL 测试用例？",
+    "URLValidator 内部是直接使用正则匹配，还是先调用了 Python 的 urlparse 等库进行预处理？",
+    "除了换行符，回车符和制表符是否也会导致相同问题？",
+    "URL 中间（而非末尾）的控制字符是否也会被 Python 剥离并导致验证通过？"
+  ],
+  "raw": {
+    "issue_summary": "在修复了 bpo-43882 的 Python 版本上，URLValidator 对包含换行符的 URL 不再抛出 ValidationError，导致测试失败。",
+    "trigger_condition": {
+      "text": "使用 URLValidator 验证包含换行符（LF、CR 或制表符）的 URL 字符串。",
+      "evidence": [
+        "Issue 中失败的测试用例：'http://www.djangoproject.com/\\n' 和 'http://[::ffff:192.9.5.5]\\n'。",
+        "Issue 描述：bpo-43882 的修复改变了 URL 拆分行为，会在拆分前剥离所有 LF、CR 和制表符。",
+        "相关测试 2 中包含了 URLValidator 的测试用例。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "URLValidator 没有按预期抛出 ValidationError 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的断言失败信息：'AssertionError: ValidationError not raised'。",
+        "相关测试 1 的代码结构：当 expected 是 Exception 子类时，使用 assertRaises(expected)。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "URLValidator 应能检测并拒绝包含换行符等控制字符的 URL。",
+      "evidence": [
+        "Issue 描述中提到的两种修复思路之一：'reject URLs containing the forbidden characters early'。",
+        "相关测试 1 和 2 的测试逻辑表明，对于无效输入，期望抛出 ValidationError。",
+        "源码片段 1 中 URLValidator 继承自 RegexValidator，其正则表达式以 '\\Z' 结尾，旨在匹配字符串末尾。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "URLValidator",
+        "kind": "class",
+        "source_path": "django/core/validators.py",
+        "reason": "Issue 的核心是关于 URLValidator 的行为。"
+      },
+      {
+        "name": "URLValidator.__call__",
+        "kind": "method",
+        "source_path": "django/core/validators.py",
+        "reason": "验证 URL 时调用的方法。"
+      },
+      {
+        "name": "ValidationError",
+        "kind": "class",
+        "source_path": "django/core/exceptions.py",
+        "reason": "验证失败时应抛出的异常类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/validators.py",
+        "object": "URLValidator.regex",
+        "lines": "65-142",
+        "reason": "URL 验证的核心正则表达式可能无法正确处理 Python 底层 URL 拆分行为变化后的输入。Issue 指出 Django 基于拆分后的组件拒绝 URL，但 Python 修复后会在拆分前剥离控制字符。"
+      },
+      {
+        "path": "django/core/validators.py",
+        "object": "URLValidator.__call__",
+        "lines": "",
+        "reason": "该方法负责执行验证逻辑，可能需要对原始输入值进行预处理或额外检查，以应对 Python 行为的变化。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_validators",
+        "test_file": "tests/validators/tests.py",
+        "why_relevant": "这是 Issue 中直接失败的测试。它使用参数化数据驱动的方式测试多个验证器，包括 URLValidator。",
+        "reusable_parts": [
+          "测试类 TestValidators(SimpleTestCase)。",
+          "使用 subTest 进行参数化测试的模式。",
+          "使用 assertRaises 来验证异常抛出的断言风格。",
+          "导入的 validator 和 TEST_DATA 结构。"
+        ],
+        "possible_gap": "TEST_DATA 的具体内容未知，可能不包含触发此特定问题的输入（带换行符的 URL）。需要变异输入数据。"
+      },
+      {
+        "test_name": "ValidatorCustomMessageTests.test_value_placeholder_with_char_field",
+        "test_file": "tests/forms_tests/tests/test_validators.py",
+        "why_relevant": "它包含了对 URLValidator 的多个测试用例，展示了如何将验证器集成到表单中并检查错误消息。",
+        "reusable_parts": [
+          "构造包含 URLValidator 的 CharField 表单的模式。",
+          "使用 form.is_valid() 和 form.errors 进行验证的流程。",
+          "测试用例列表的组织方式。"
+        ],
+        "possible_gap": "测试焦点是自定义错误消息，而非验证器对控制字符的敏感性。现有用例不包含带换行符的 URL。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中 URLValidator 的输入通常是普通 URL 字符串（如 'no_scheme', 'http://test[.com'）。",
+        "target_pattern": "在 URL 末尾或中间插入换行符（'\\n'）、回车符（'\\r'）或制表符（'\\t'）。",
+        "reason": "Issue 明确指出，在修复了 bpo-43882 的 Python 版本上，这些字符会在 URL 拆分前被剥离，导致验证器接收不到它们，从而无法触发 ValidationError。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 URLValidator(value) 时是否抛出 ValidationError 异常。",
+        "reason": "Issue 的核心错误现象是 ValidationError 未被抛出。这是判断缺陷是否被触发的直接指标。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "URLValidator.__call__ 方法在验证成功时的返回值（应为 None）。",
+        "reason": "在验证失败时应抛出异常，验证成功时返回 None。观察返回值有助于理解验证流程。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "传入 URLValidator 的原始 value 字符串与可能经过 Python urlparse 等库处理后的字符串的差异。",
+        "reason": "Issue 提到 Python 的修复会剥离控制字符。观察处理前后的字符串可以确认行为变化。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 URL 包含换行符等控制字符时，URLValidator 会抛出 ValidationError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息内容可能在未来改变。避免断言不相关的属性。",
+        "reason": "Issue 的失败原因是 ValidationError 未被抛出。使用 assertRaises(ValidationError) 直接且稳定地对齐了预期行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 或类似的 Django 测试基类。可能需要导入 validators 模块和 ValidationError。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境需要是修复了 bpo-43882 的 Python 版本（如 3.10.0b1 或特定分支），以复现问题。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "TEST_DATA 中是否原本就包含带控制字符的 URL 测试用例？",
+      "URLValidator 内部是直接使用正则匹配，还是先调用了 Python 的 urlparse 等库进行预处理？",
+      "除了换行符，回车符和制表符是否也会导致相同问题？",
+      "URL 中间（而非末尾）的控制字符是否也会被 Python 剥离并导致验证通过？"
+    ]
+  }
+}

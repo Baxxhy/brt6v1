@@ -1,0 +1,336 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-25747",
+  "issue_summary": "当使用 pandas transform output 配置时，FeatureUnion 与聚合数据的自定义 transformer 组合会引发 ValueError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 pandas、sklearn.base.BaseEstimator/TransformerMixin、sklearn.pipeline.make_union、sklearn._config.set_config。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 pytest.importorskip(\"pandas\") 来确保测试在 pandas 可用时运行。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造一个具有日期时间索引和日期列的 pandas DataFrame 作为输入，以模拟 Issue 中的 groupby 场景。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_feature_union_set_output",
+        "test_file": "sklearn/tests/test_pipeline.py",
+        "why_relevant": "该测试直接验证了 FeatureUnion 在 set_output(transform=\"pandas\") 下的行为，使用了标准 transformer（StandardScaler, PCA）。",
+        "reusable_parts": [
+          "import pandas",
+          "使用 FeatureUnion 和 set_output API",
+          "assert isinstance(X_trans, pd.DataFrame)",
+          "assert_array_equal 检查索引和列名"
+        ],
+        "possible_gap": "该测试使用的 transformer 不改变样本数量（行数），而 Issue 中的自定义 transformer 通过 groupby sum 减少了行数，导致索引长度不匹配。"
+      },
+      {
+        "test_name": "test_transformers_with_pandas_out_but_not_feature_names_out",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试涉及 set_config(transform=\"pandas\") 与返回 DataFrame 但未定义 get_feature_names_out 的 transformer 的兼容性。",
+        "reusable_parts": [
+          "使用 set_output(transform=\"pandas\")",
+          "检查输出是否为 DataFrame",
+          "处理列名"
+        ],
+        "possible_gap": "测试的是 ColumnTransformer 而非 FeatureUnion，且 transformer 不改变数据形状。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 set_config(transform_output=\"pandas\") 配置，然后通过 make_union 创建一个包含自定义 transformer 的 FeatureUnion，该 transformer 的 transform 方法返回一个聚合后行数减少的 pandas DataFrame（例如 groupby sum）。",
+      "evidence": [
+        "Issue 中代码：set_config(transform_output=\"pandas\"); print(make_union(MyTransformer()).fit_transform(data))",
+        "Issue 描述：'When I'm using this combination I got an error. When I use default `numpy` output it works fine.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: Length mismatch: Expected axis has 4 elements, new values have 96 elements。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误堆栈显示 ValueError 在 pandas 的 _validate_set_axis 中抛出，提示长度不匹配。",
+        "错误信息：'ValueError: Length mismatch: Expected axis has 4 elements, new values have 96 elements'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.pipeline.make_union",
+        "kind": "function",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "Issue 中用于创建 FeatureUnion 的快捷函数。"
+      },
+      {
+        "name": "sklearn.base.TransformerMixin",
+        "kind": "class",
+        "source_path": "sklearn/base.py",
+        "reason": "自定义 transformer 继承的 Mixin 类，与 set_output API 相关。"
+      },
+      {
+        "name": "sklearn._config.set_config",
+        "kind": "function",
+        "source_path": "sklearn/_config.py",
+        "reason": "用于设置全局 transform_output 配置。"
+      },
+      {
+        "name": "sklearn.pipeline.Pipeline.transform",
+        "kind": "method",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "FeatureUnion 继承自 Pipeline，其 transform 方法可能涉及输出包装。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/utils/_set_output.py",
+        "object": "_wrap_in_pandas_container",
+        "lines": "",
+        "reason": "错误堆栈显示异常发生在 _wrap_in_pandas_container 中尝试设置 index 时，可能错误地假设了输出 DataFrame 与输入具有相同的行数。"
+      },
+      {
+        "path": "sklearn/pipeline.py",
+        "object": "FeatureUnion",
+        "lines": "",
+        "reason": "FeatureUnion 负责组合多个 transformer 的输出，当配置为 pandas 输出时，可能未正确处理聚合后维度变化的 DataFrame。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的是形状保持不变的 transformer（如 StandardScaler, PCA）和标准数据集（如 iris）。",
+        "target_pattern": "使用一个自定义 transformer，其 transform 方法返回一个聚合后行数减少的 pandas DataFrame（例如 groupby sum）。",
+        "reason": "Issue 表明当 transformer 改变输出行数时，pandas 输出包装会因索引长度不匹配而失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能通过 union.set_output(transform=\"pandas\") 或 set_config(transform_output=\"pandas\") 设置。",
+        "target_pattern": "使用 set_config(transform_output=\"pandas\") 全局配置，然后调用 make_union。",
+        "reason": "Issue 中触发 bug 的配置方式是全局 set_config，而非单个 estimator 的 set_output 方法。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 transform_output 配置为 \"pandas\" 时，FeatureUnion 应能正确处理自定义 transformer 返回的聚合后 pandas DataFrame，不抛出异常。",
+      "evidence": [
+        "Issue 中 Expected Results: 'No error is thrown when using `pandas` transform output.'",
+        "Issue 中代码显示 set_config(transform_output=\"default\") 时工作正常。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 union.fit_transform(data) 时是否抛出 ValueError 及其消息。",
+        "reason": "Issue 的核心错误是抛出 ValueError，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "union.fit_transform(data) 的返回值的类型和形状（特别是 .index 的长度）。",
+        "reason": "在 transform_output=\"default\" 和 \"pandas\" 下，比较返回值的差异，确认 pandas 输出是否正确包装了聚合后的 DataFrame。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(union.fit_transform(data))",
+        "reason": "确认在 transform_output=\"pandas\" 下输出是否为 pandas DataFrame。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 transform_output=\"pandas\" 时，FeatureUnion 与聚合 transformer 组合应能正常执行 transform，不抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串或精确的行数。",
+        "reason": "Issue 期望无错误，因此断言不应引发特定异常（如 ValueError）。使用 pytest.raises 上下文管理器并确保其未触发，或断言操作成功完成。"
+      },
+      {
+        "assertion_goal": "transform 的输出应为 pandas DataFrame，且其索引长度应与聚合后的数据行数一致。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言精确的索引值，除非 Issue 明确指定。",
+        "reason": "修复后应能正确包装 DataFrame，而不强制索引与原始输入相同。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误是否只发生在 make_union 创建的 FeatureUnion 上，还是也发生在直接实例化的 FeatureUnion 上。",
+    "除了 groupby sum，其他改变行数的聚合操作（如 mean, count）是否也会触发同样错误。",
+    "set_config(transform_output=\"pandas\") 与 estimator.set_output(transform=\"pandas\") 在此场景下是否有行为差异。",
+    "具体的修复位置是在 _wrap_in_pandas_container 中处理索引的逻辑，还是在 FeatureUnion 中合并结果的逻辑。"
+  ],
+  "raw": {
+    "issue_summary": "当使用 pandas transform output 配置时，FeatureUnion 与聚合数据的自定义 transformer 组合会引发 ValueError 异常。",
+    "trigger_condition": {
+      "text": "使用 set_config(transform_output=\"pandas\") 配置，然后通过 make_union 创建一个包含自定义 transformer 的 FeatureUnion，该 transformer 的 transform 方法返回一个聚合后行数减少的 pandas DataFrame（例如 groupby sum）。",
+      "evidence": [
+        "Issue 中代码：set_config(transform_output=\"pandas\"); print(make_union(MyTransformer()).fit_transform(data))",
+        "Issue 描述：'When I'm using this combination I got an error. When I use default `numpy` output it works fine.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: Length mismatch: Expected axis has 4 elements, new values have 96 elements。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误堆栈显示 ValueError 在 pandas 的 _validate_set_axis 中抛出，提示长度不匹配。",
+        "错误信息：'ValueError: Length mismatch: Expected axis has 4 elements, new values have 96 elements'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 transform_output 配置为 \"pandas\" 时，FeatureUnion 应能正确处理自定义 transformer 返回的聚合后 pandas DataFrame，不抛出异常。",
+      "evidence": [
+        "Issue 中 Expected Results: 'No error is thrown when using `pandas` transform output.'",
+        "Issue 中代码显示 set_config(transform_output=\"default\") 时工作正常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.pipeline.make_union",
+        "kind": "function",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "Issue 中用于创建 FeatureUnion 的快捷函数。"
+      },
+      {
+        "name": "sklearn.base.TransformerMixin",
+        "kind": "class",
+        "source_path": "sklearn/base.py",
+        "reason": "自定义 transformer 继承的 Mixin 类，与 set_output API 相关。"
+      },
+      {
+        "name": "sklearn._config.set_config",
+        "kind": "function",
+        "source_path": "sklearn/_config.py",
+        "reason": "用于设置全局 transform_output 配置。"
+      },
+      {
+        "name": "sklearn.pipeline.Pipeline.transform",
+        "kind": "method",
+        "source_path": "sklearn/pipeline.py",
+        "reason": "FeatureUnion 继承自 Pipeline，其 transform 方法可能涉及输出包装。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/utils/_set_output.py",
+        "object": "_wrap_in_pandas_container",
+        "lines": "",
+        "reason": "错误堆栈显示异常发生在 _wrap_in_pandas_container 中尝试设置 index 时，可能错误地假设了输出 DataFrame 与输入具有相同的行数。"
+      },
+      {
+        "path": "sklearn/pipeline.py",
+        "object": "FeatureUnion",
+        "lines": "",
+        "reason": "FeatureUnion 负责组合多个 transformer 的输出，当配置为 pandas 输出时，可能未正确处理聚合后维度变化的 DataFrame。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_feature_union_set_output",
+        "test_file": "sklearn/tests/test_pipeline.py",
+        "why_relevant": "该测试直接验证了 FeatureUnion 在 set_output(transform=\"pandas\") 下的行为，使用了标准 transformer（StandardScaler, PCA）。",
+        "reusable_parts": [
+          "import pandas",
+          "使用 FeatureUnion 和 set_output API",
+          "assert isinstance(X_trans, pd.DataFrame)",
+          "assert_array_equal 检查索引和列名"
+        ],
+        "possible_gap": "该测试使用的 transformer 不改变样本数量（行数），而 Issue 中的自定义 transformer 通过 groupby sum 减少了行数，导致索引长度不匹配。"
+      },
+      {
+        "test_name": "test_transformers_with_pandas_out_but_not_feature_names_out",
+        "test_file": "sklearn/compose/tests/test_column_transformer.py",
+        "why_relevant": "该测试涉及 set_config(transform=\"pandas\") 与返回 DataFrame 但未定义 get_feature_names_out 的 transformer 的兼容性。",
+        "reusable_parts": [
+          "使用 set_output(transform=\"pandas\")",
+          "检查输出是否为 DataFrame",
+          "处理列名"
+        ],
+        "possible_gap": "测试的是 ColumnTransformer 而非 FeatureUnion，且 transformer 不改变数据形状。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的是形状保持不变的 transformer（如 StandardScaler, PCA）和标准数据集（如 iris）。",
+        "target_pattern": "使用一个自定义 transformer，其 transform 方法返回一个聚合后行数减少的 pandas DataFrame（例如 groupby sum）。",
+        "reason": "Issue 表明当 transformer 改变输出行数时，pandas 输出包装会因索引长度不匹配而失败。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能通过 union.set_output(transform=\"pandas\") 或 set_config(transform_output=\"pandas\") 设置。",
+        "target_pattern": "使用 set_config(transform_output=\"pandas\") 全局配置，然后调用 make_union。",
+        "reason": "Issue 中触发 bug 的配置方式是全局 set_config，而非单个 estimator 的 set_output 方法。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 union.fit_transform(data) 时是否抛出 ValueError 及其消息。",
+        "reason": "Issue 的核心错误是抛出 ValueError，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "union.fit_transform(data) 的返回值的类型和形状（特别是 .index 的长度）。",
+        "reason": "在 transform_output=\"default\" 和 \"pandas\" 下，比较返回值的差异，确认 pandas 输出是否正确包装了聚合后的 DataFrame。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(union.fit_transform(data))",
+        "reason": "确认在 transform_output=\"pandas\" 下输出是否为 pandas DataFrame。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 transform_output=\"pandas\" 时，FeatureUnion 与聚合 transformer 组合应能正常执行 transform，不抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串或精确的行数。",
+        "reason": "Issue 期望无错误，因此断言不应引发特定异常（如 ValueError）。使用 pytest.raises 上下文管理器并确保其未触发，或断言操作成功完成。"
+      },
+      {
+        "assertion_goal": "transform 的输出应为 pandas DataFrame，且其索引长度应与聚合后的数据行数一致。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言精确的索引值，除非 Issue 明确指定。",
+        "reason": "修复后应能正确包装 DataFrame，而不强制索引与原始输入相同。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 pandas、sklearn.base.BaseEstimator/TransformerMixin、sklearn.pipeline.make_union、sklearn._config.set_config。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 pytest.importorskip(\"pandas\") 来确保测试在 pandas 可用时运行。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "构造一个具有日期时间索引和日期列的 pandas DataFrame 作为输入，以模拟 Issue 中的 groupby 场景。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "错误是否只发生在 make_union 创建的 FeatureUnion 上，还是也发生在直接实例化的 FeatureUnion 上。",
+      "除了 groupby sum，其他改变行数的聚合操作（如 mean, count）是否也会触发同样错误。",
+      "set_config(transform_output=\"pandas\") 与 estimator.set_output(transform=\"pandas\") 在此场景下是否有行为差异。",
+      "具体的修复位置是在 _wrap_in_pandas_container 中处理索引的逻辑，还是在 FeatureUnion 中合并结果的逻辑。"
+    ]
+  }
+}

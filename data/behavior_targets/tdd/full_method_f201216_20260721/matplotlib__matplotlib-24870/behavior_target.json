@@ -1,0 +1,280 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-24870",
+  "issue_summary": "当 contour() 函数接收布尔二维数组输入时，默认生成 8 个等间距层级，导致所有轮廓线重叠，而用户期望自动检测布尔输入并默认设置 levels=[0.5]。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 plt.subplots() 创建图形和坐标轴，使用 numpy 生成测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 numpy 和 matplotlib.pyplot。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_contour_Nlevels",
+        "test_file": "lib/matplotlib/tests/test_contour.py",
+        "why_relevant": "该测试验证了 contour 函数根据标量 levels 参数自动生成层级的行为，涉及层级生成逻辑。",
+        "reusable_parts": [
+          "imports (plt, np)",
+          "测试结构 (fig, ax = plt.subplots())",
+          "调用 ax.contour(z, ...)",
+          "对 cs.levels 的断言"
+        ],
+        "possible_gap": "该测试使用整数数组，不涉及布尔数组输入，也未测试默认 levels 参数（即不传 levels）的行为。"
+      },
+      {
+        "test_name": "test_contour_uniform_z",
+        "test_file": "lib/matplotlib/tests/test_contour.py",
+        "why_relevant": "该测试验证了当输入数组值均匀（所有值相同）时 contour 的行为，涉及对特殊输入数据的处理。",
+        "reusable_parts": [
+          "测试结构 (fig, ax = plt.subplots())",
+          "调用 ax.contour(x, x, z)",
+          "使用 pytest.warns 捕获警告"
+        ],
+        "possible_gap": "该测试关注的是均匀值数组，而非布尔数组，且检查的是警告，而非默认层级设置。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 contour() 函数时传入一个布尔类型的二维数组，且不显式指定 levels 参数。",
+      "evidence": [
+        "Issue 中用户描述：'plt.contour(boolean_2d_array, levels=[.5], ...)' 和 'Without `levels=[.5]`, one gets the default 8 levels...'",
+        "Issue 中示例代码：'subplot(121).contour(im);' 其中 `im` 是布尔数组。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于布尔数组输入，默认生成了 8 个等间距层级（如 0, 0.15, 0.3, ...），导致所有轮廓线绘制在相同位置，视觉上重叠在一起。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述：'resulting in all the contour lines being drawn on top of one another'",
+        "Issue 中图片展示了默认调用（左图）与指定 levels=[.5]（右图）的对比。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.contour",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 直接讨论的是 pyplot.contour 函数的行为。"
+      },
+      {
+        "name": "Axes.contour",
+        "kind": "method",
+        "source_path": "",
+        "reason": "pyplot.contour 内部调用 gca().contour，最终行为由 Axes.contour 实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "plot_types/arrays/contour.py",
+        "object": "levels",
+        "lines": "16-16",
+        "reason": "检索出的源码片段显示默认层级生成逻辑为 `levels = np.linspace(np.min(Z), np.max(Z), 7)`，这可能未考虑布尔数组的特殊性。"
+      },
+      {
+        "path": "lib/matplotlib/pyplot.py",
+        "object": "contour",
+        "lines": "2515-2520",
+        "reason": "这是用户直接调用的入口函数，可能需要添加对输入数据类型的检测逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用数值数组（如 np.arange(12).reshape((3, 4)) 或 np.ones((9, 9))）作为 contour 的输入。",
+        "target_pattern": "使用布尔二维数组作为 contour 的输入，例如通过比较运算生成 (ii+jj) % 20 < 10。",
+        "reason": "Issue 的核心是布尔数组输入触发了不合理的默认层级生成。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中显式指定了 levels 参数（如 levels=5）或完全不指定（依赖默认值）。",
+        "target_pattern": "不指定 levels 参数，以触发默认层级生成逻辑。",
+        "reason": "Issue 描述的问题发生在不显式指定 levels 参数时。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 contour() 函数检测到输入是布尔二维数组时，应自动将默认层级设置为 [0.5]（或 0 到 1 之间的某个值），从而只绘制一条区分 True 和 False 区域的边界线。",
+      "evidence": [
+        "Issue 中提议：'Autodetect boolean inputs to contour, and default levels to [0.5] in that case.'",
+        "Issue 中说明：'for boolean inputs, the only choice that makes sense is to have a single level at 0.5'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "cs.levels",
+        "reason": "返回的 ContourSet 对象的 levels 属性直接反映了实际生成的层级，是判断默认行为是否正确的主要依据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(Z) 或 Z.dtype",
+        "reason": "需要确认输入数组的数据类型是否为布尔型，这是触发预期自动检测的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当输入为布尔数组且未指定 levels 时，生成的层级应接近 [0.5]。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 levels 列表与某个硬编码值完全相等，因为实现可能选择 0.5 或 (0, 1) 区间内的其他值。",
+        "reason": "Issue 指出对于布尔输入，有意义的层级是 0.5 或 0 到 1 之间的某个值。断言应聚焦于层级数量为 1 且值在合理范围内。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "具体的修复方案：是修改 pyplot.contour 还是底层 Axes.contour 的实现逻辑？",
+    "自动检测的确切条件：是否仅基于 dtype == bool？是否考虑其他类似布尔的数据（如 0/1 整数数组）？",
+    "默认层级的确切值：是固定为 [0.5]，还是 (0, 1) 区间内的其他值（如 0.49）？",
+    "现有相关源码片段（contour.py 中的 levels）是否确实是导致问题的确切位置，或者层级生成逻辑在其他地方。"
+  ],
+  "raw": {
+    "issue_summary": "当 contour() 函数接收布尔二维数组输入时，默认生成 8 个等间距层级，导致所有轮廓线重叠，而用户期望自动检测布尔输入并默认设置 levels=[0.5]。",
+    "trigger_condition": {
+      "text": "调用 contour() 函数时传入一个布尔类型的二维数组，且不显式指定 levels 参数。",
+      "evidence": [
+        "Issue 中用户描述：'plt.contour(boolean_2d_array, levels=[.5], ...)' 和 'Without `levels=[.5]`, one gets the default 8 levels...'",
+        "Issue 中示例代码：'subplot(121).contour(im);' 其中 `im` 是布尔数组。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于布尔数组输入，默认生成了 8 个等间距层级（如 0, 0.15, 0.3, ...），导致所有轮廓线绘制在相同位置，视觉上重叠在一起。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述：'resulting in all the contour lines being drawn on top of one another'",
+        "Issue 中图片展示了默认调用（左图）与指定 levels=[.5]（右图）的对比。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 contour() 函数检测到输入是布尔二维数组时，应自动将默认层级设置为 [0.5]（或 0 到 1 之间的某个值），从而只绘制一条区分 True 和 False 区域的边界线。",
+      "evidence": [
+        "Issue 中提议：'Autodetect boolean inputs to contour, and default levels to [0.5] in that case.'",
+        "Issue 中说明：'for boolean inputs, the only choice that makes sense is to have a single level at 0.5'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "plt.contour",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 直接讨论的是 pyplot.contour 函数的行为。"
+      },
+      {
+        "name": "Axes.contour",
+        "kind": "method",
+        "source_path": "",
+        "reason": "pyplot.contour 内部调用 gca().contour，最终行为由 Axes.contour 实现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "plot_types/arrays/contour.py",
+        "object": "levels",
+        "lines": "16-16",
+        "reason": "检索出的源码片段显示默认层级生成逻辑为 `levels = np.linspace(np.min(Z), np.max(Z), 7)`，这可能未考虑布尔数组的特殊性。"
+      },
+      {
+        "path": "lib/matplotlib/pyplot.py",
+        "object": "contour",
+        "lines": "2515-2520",
+        "reason": "这是用户直接调用的入口函数，可能需要添加对输入数据类型的检测逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_contour_Nlevels",
+        "test_file": "lib/matplotlib/tests/test_contour.py",
+        "why_relevant": "该测试验证了 contour 函数根据标量 levels 参数自动生成层级的行为，涉及层级生成逻辑。",
+        "reusable_parts": [
+          "imports (plt, np)",
+          "测试结构 (fig, ax = plt.subplots())",
+          "调用 ax.contour(z, ...)",
+          "对 cs.levels 的断言"
+        ],
+        "possible_gap": "该测试使用整数数组，不涉及布尔数组输入，也未测试默认 levels 参数（即不传 levels）的行为。"
+      },
+      {
+        "test_name": "test_contour_uniform_z",
+        "test_file": "lib/matplotlib/tests/test_contour.py",
+        "why_relevant": "该测试验证了当输入数组值均匀（所有值相同）时 contour 的行为，涉及对特殊输入数据的处理。",
+        "reusable_parts": [
+          "测试结构 (fig, ax = plt.subplots())",
+          "调用 ax.contour(x, x, z)",
+          "使用 pytest.warns 捕获警告"
+        ],
+        "possible_gap": "该测试关注的是均匀值数组，而非布尔数组，且检查的是警告，而非默认层级设置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用数值数组（如 np.arange(12).reshape((3, 4)) 或 np.ones((9, 9))）作为 contour 的输入。",
+        "target_pattern": "使用布尔二维数组作为 contour 的输入，例如通过比较运算生成 (ii+jj) % 20 < 10。",
+        "reason": "Issue 的核心是布尔数组输入触发了不合理的默认层级生成。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中显式指定了 levels 参数（如 levels=5）或完全不指定（依赖默认值）。",
+        "target_pattern": "不指定 levels 参数，以触发默认层级生成逻辑。",
+        "reason": "Issue 描述的问题发生在不显式指定 levels 参数时。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "cs.levels",
+        "reason": "返回的 ContourSet 对象的 levels 属性直接反映了实际生成的层级，是判断默认行为是否正确的主要依据。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(Z) 或 Z.dtype",
+        "reason": "需要确认输入数组的数据类型是否为布尔型，这是触发预期自动检测的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当输入为布尔数组且未指定 levels 时，生成的层级应接近 [0.5]。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 levels 列表与某个硬编码值完全相等，因为实现可能选择 0.5 或 (0, 1) 区间内的其他值。",
+        "reason": "Issue 指出对于布尔输入，有意义的层级是 0.5 或 0 到 1 之间的某个值。断言应聚焦于层级数量为 1 且值在合理范围内。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 plt.subplots() 创建图形和坐标轴，使用 numpy 生成测试数据。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 numpy 和 matplotlib.pyplot。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "具体的修复方案：是修改 pyplot.contour 还是底层 Axes.contour 的实现逻辑？",
+      "自动检测的确切条件：是否仅基于 dtype == bool？是否考虑其他类似布尔的数据（如 0/1 整数数组）？",
+      "默认层级的确切值：是固定为 [0.5]，还是 (0, 1) 区间内的其他值（如 0.49）？",
+      "现有相关源码片段（contour.py 中的 levels）是否确实是导致问题的确切位置，或者层级生成逻辑在其他地方。"
+    ]
+  }
+}

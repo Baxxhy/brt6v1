@@ -1,0 +1,336 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-6992",
+  "issue_summary": "Dataset 在 set_index 后 reset_index 时，_coord_names 集合可能包含比 _variables 字典更多的键，导致 DataVariables 类的假设失效并引发错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 xr.Dataset 构造函数创建包含多个坐标的数据集。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 用于断言和异常捕获。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类可以继承自现有测试类（如 TestDataset）以复用 fixture 或设置。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_reset_index",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "直接测试了 reset_index 方法，包括对多索引的操作。",
+        "reusable_parts": [
+          "imports",
+          "Dataset 构造",
+          "reset_index 调用",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "现有测试可能没有覆盖 reset_index 后 _coord_names 多于 _variables 的特定场景，或者没有使用 drop=True 参数。"
+      },
+      {
+        "test_name": "test_set_index",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "测试了 set_index 方法，这是缺陷触发链的第一步。",
+        "reusable_parts": [
+          "imports",
+          "Dataset 构造",
+          "set_index 调用",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "现有测试可能没有将 set_index 和 reset_index(drop=True) 组合起来，以触发不一致状态。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个包含多个坐标的 Dataset，对其调用 set_index 创建多索引，然后调用 reset_index 并设置 drop=True。",
+      "evidence": [
+        "Issue 中的 MVCE: `ds = xr.Dataset(coords={\"a\": (\"x\", [1, 2, 3]), \"b\": (\"x\", ['a', 'b', 'c'])}); ds.set_index(z=['a', 'b']).reset_index(\"z\", drop=True)`",
+        "源码片段 3 和 4 展示了 set_index 和 reset_index 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: __len__() should return >= 0。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 'Relevant log output' 部分显示了该异常。",
+        "Issue 指出错误来自 dataset.py 第 368 行附近，该行在 DataVariables 类中。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 的核心对象，用于创建数据集。"
+      },
+      {
+        "name": "Dataset.set_index",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "触发缺陷状态的操作之一。"
+      },
+      {
+        "name": "Dataset.reset_index",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "触发缺陷状态的操作之一，特别是 drop=True 时。"
+      },
+      {
+        "name": "DataVariables",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 明确指出其假设被破坏，是错误发生的直接位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.reset_index",
+        "lines": "4108-4182",
+        "reason": "该方法在 drop=True 时更新 _coord_names 和 _variables 的逻辑可能导致两者不一致。"
+      },
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "DataVariables.__len__",
+        "lines": "354-404",
+        "reason": "Issue 提到错误来自第 368 行附近，该行在 DataVariables 类中，其 __len__ 方法依赖于 _variables 和 _coord_names 的关系。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常单独调用 set_index 或 reset_index，或者 reset_index 时不使用 drop=True。",
+        "target_pattern": "先调用 set_index 创建多索引，然后立即调用 reset_index 并设置 drop=True。",
+        "reason": "Issue 的 MVCE 表明这个特定的操作序列会导致内部状态不一致。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中 reset_index 的参数通常是单个维度名或索引名。",
+        "target_pattern": "reset_index 的参数是 set_index 创建的多索引的维度名（如 'z'）。",
+        "reason": "多索引的 reset_index 逻辑更复杂，可能涉及对 _coord_names 和 _variables 的不同处理。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "成功执行 reset_index 操作，Dataset 的内部状态保持一致，_coord_names 集合应是 _variables 字典键的子集，且 DataVariables 类的 __len__ 等方法能正常工作。",
+      "evidence": [
+        "Issue 标题和描述暗示了 _coord_names 不应多于 _variables。",
+        "源码片段 2 中 DataVariables 类的逻辑假设了 _variables 和 _coord_names 的关系。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "操作前后 Dataset 对象的 `_coord_names` 和 `_variables.keys()`。",
+        "reason": "Issue 的核心是这两个集合的不一致，观察它们可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "触发操作后 Dataset 对象的 repr（字符串表示）。",
+        "reason": "Issue 提到这会破坏 repr，观察 repr 是否正常生成或抛出异常。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "尝试访问 Dataset.data_vars 属性或调用 len(ds.data_vars)。",
+        "reason": "DataVariables 类的方法（如 __len__）会因状态不一致而抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在触发操作后，Dataset 的 _coord_names 集合是 _variables 字典键的子集。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 repr 字符串或精确的 _coord_names/_variables 内容，因为具体值可能因实现变化。",
+        "reason": "这直接对应 Issue 描述的根本问题，是稳定的语义断言。"
+      },
+      {
+        "assertion_goal": "验证触发操作后，访问 data_vars 属性或计算其长度不会抛出异常。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 data_vars 的具体内容，除非与缺陷直接相关。",
+        "reason": "Issue 中观察到的错误症状是 DataVariables.__len__ 抛出异常，修复后应正常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "reset_index 方法中更新 `coord_names` 的具体逻辑细节，以及 `drop=True` 时如何与 `_variables` 的更新协调。",
+    "除了 Issue 中的 MVCE，是否还有其他操作序列或输入会导致相同的状态不一致。",
+    "DataVariables 类的哪些具体方法（除了 __len__）会受到此状态不一致的影响。"
+  ],
+  "raw": {
+    "issue_summary": "Dataset 在 set_index 后 reset_index 时，_coord_names 集合可能包含比 _variables 字典更多的键，导致 DataVariables 类的假设失效并引发错误。",
+    "trigger_condition": {
+      "text": "创建一个包含多个坐标的 Dataset，对其调用 set_index 创建多索引，然后调用 reset_index 并设置 drop=True。",
+      "evidence": [
+        "Issue 中的 MVCE: `ds = xr.Dataset(coords={\"a\": (\"x\", [1, 2, 3]), \"b\": (\"x\", ['a', 'b', 'c'])}); ds.set_index(z=['a', 'b']).reset_index(\"z\", drop=True)`",
+        "源码片段 3 和 4 展示了 set_index 和 reset_index 方法。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: __len__() should return >= 0。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 的 'Relevant log output' 部分显示了该异常。",
+        "Issue 指出错误来自 dataset.py 第 368 行附近，该行在 DataVariables 类中。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "成功执行 reset_index 操作，Dataset 的内部状态保持一致，_coord_names 集合应是 _variables 字典键的子集，且 DataVariables 类的 __len__ 等方法能正常工作。",
+      "evidence": [
+        "Issue 标题和描述暗示了 _coord_names 不应多于 _variables。",
+        "源码片段 2 中 DataVariables 类的逻辑假设了 _variables 和 _coord_names 的关系。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.Dataset",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 的核心对象，用于创建数据集。"
+      },
+      {
+        "name": "Dataset.set_index",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "触发缺陷状态的操作之一。"
+      },
+      {
+        "name": "Dataset.reset_index",
+        "kind": "method",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "触发缺陷状态的操作之一，特别是 drop=True 时。"
+      },
+      {
+        "name": "DataVariables",
+        "kind": "class",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "Issue 明确指出其假设被破坏，是错误发生的直接位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "Dataset.reset_index",
+        "lines": "4108-4182",
+        "reason": "该方法在 drop=True 时更新 _coord_names 和 _variables 的逻辑可能导致两者不一致。"
+      },
+      {
+        "path": "xarray/core/dataset.py",
+        "object": "DataVariables.__len__",
+        "lines": "354-404",
+        "reason": "Issue 提到错误来自第 368 行附近，该行在 DataVariables 类中，其 __len__ 方法依赖于 _variables 和 _coord_names 的关系。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_reset_index",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "直接测试了 reset_index 方法，包括对多索引的操作。",
+        "reusable_parts": [
+          "imports",
+          "Dataset 构造",
+          "reset_index 调用",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "现有测试可能没有覆盖 reset_index 后 _coord_names 多于 _variables 的特定场景，或者没有使用 drop=True 参数。"
+      },
+      {
+        "test_name": "test_set_index",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "测试了 set_index 方法，这是缺陷触发链的第一步。",
+        "reusable_parts": [
+          "imports",
+          "Dataset 构造",
+          "set_index 调用",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "现有测试可能没有将 set_index 和 reset_index(drop=True) 组合起来，以触发不一致状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试中通常单独调用 set_index 或 reset_index，或者 reset_index 时不使用 drop=True。",
+        "target_pattern": "先调用 set_index 创建多索引，然后立即调用 reset_index 并设置 drop=True。",
+        "reason": "Issue 的 MVCE 表明这个特定的操作序列会导致内部状态不一致。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试中 reset_index 的参数通常是单个维度名或索引名。",
+        "target_pattern": "reset_index 的参数是 set_index 创建的多索引的维度名（如 'z'）。",
+        "reason": "多索引的 reset_index 逻辑更复杂，可能涉及对 _coord_names 和 _variables 的不同处理。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "操作前后 Dataset 对象的 `_coord_names` 和 `_variables.keys()`。",
+        "reason": "Issue 的核心是这两个集合的不一致，观察它们可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "触发操作后 Dataset 对象的 repr（字符串表示）。",
+        "reason": "Issue 提到这会破坏 repr，观察 repr 是否正常生成或抛出异常。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "尝试访问 Dataset.data_vars 属性或调用 len(ds.data_vars)。",
+        "reason": "DataVariables 类的方法（如 __len__）会因状态不一致而抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在触发操作后，Dataset 的 _coord_names 集合是 _variables 字典键的子集。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 repr 字符串或精确的 _coord_names/_variables 内容，因为具体值可能因实现变化。",
+        "reason": "这直接对应 Issue 描述的根本问题，是稳定的语义断言。"
+      },
+      {
+        "assertion_goal": "验证触发操作后，访问 data_vars 属性或计算其长度不会抛出异常。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言 data_vars 的具体内容，除非与缺陷直接相关。",
+        "reason": "Issue 中观察到的错误症状是 DataVariables.__len__ 抛出异常，修复后应正常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 xr.Dataset 构造函数创建包含多个坐标的数据集。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 用于断言和异常捕获。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类可以继承自现有测试类（如 TestDataset）以复用 fixture 或设置。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "reset_index 方法中更新 `coord_names` 的具体逻辑细节，以及 `drop=True` 时如何与 `_variables` 的更新协调。",
+      "除了 Issue 中的 MVCE，是否还有其他操作序列或输入会导致相同的状态不一致。",
+      "DataVariables 类的哪些具体方法（除了 __len__）会受到此状态不一致的影响。"
+    ]
+  }
+}

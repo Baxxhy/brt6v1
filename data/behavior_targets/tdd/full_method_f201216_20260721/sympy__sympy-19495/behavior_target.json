@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-19495",
+  "issue_summary": "ConditionSet 在包含 ImageSet 时，使用 subs 方法进行变量替换会产生错误结果，疑似将 ConditionSet 的绑定变量与替换变量混淆。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 ConditionSet, ImageSet, imageset, Lambda, S, Interval, Contains, Symbol, Rational 等。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在类似 sympy/sets/tests/ 的测试环境中运行，以利用现有的测试设施。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_subs_CondSet",
+        "test_file": "sympy/sets/tests/test_conditionset.py",
+        "why_relevant": "该测试专门测试 ConditionSet 的 subs 方法，包含多种替换场景，是理解当前 subs 逻辑和构造测试的起点。",
+        "reusable_parts": [
+          "ConditionSet 的构造方式",
+          "subs 方法的调用模式",
+          "assert 风格"
+        ],
+        "possible_gap": "现有测试没有覆盖 base_set 是 ImageSet 的情况，特别是当替换变量出现在 ImageSet 的 Lambda 表达式中时。"
+      },
+      {
+        "test_name": "test_ImageSet",
+        "test_file": "sympy/sets/tests/test_fancysets.py",
+        "why_relevant": "测试了 ImageSet 的基本行为，包括构造和 contains，有助于理解 ImageSet 在 ConditionSet 中作为 base_set 时的预期行为。",
+        "reusable_parts": [
+          "ImageSet 和 imageset 的构造",
+          "使用 Lambda 和 S.Integers"
+        ],
+        "possible_gap": "该测试不涉及 ConditionSet，也没有测试 subs 在嵌套结构中的行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个包含 ImageSet 的 ConditionSet 对象调用 subs 方法，替换一个在 ImageSet 表达式中出现的符号。",
+      "evidence": [
+        "Issue 中 In[74] 创建了 ConditionSet(x, Contains(y, Interval(-1,1)), imageset(Lambda(n, 2*n*pi + asin(y)), S.Integers))，然后 In[75] 对其调用 _.subs(y, Rational(1,3)) 得到错误结果。",
+        "Issue 描述：'if I construct a similar ConditionSet with an ImageSet instead of a FiniteSet, a plain `subs` gives a strange result'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "subs 调用后返回的 ConditionSet 表达式错误，其条件部分似乎错误地引入了 ImageSet 表达式，而不是正确地进行替换。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 Out[75] 显示为 '{1/3 | 1/3 ∊ {2⋅π⋅n + asin(1/3) | n ∊ ℤ} ∧ (1/3 ∈ {2⋅π⋅n + asin(1/3) | n ∊ ℤ})}'，而期望结果应为类似 Out[78] 或 Out[80] 的 '{2⋅π⋅n + asin(1/3) | n ∊ ℤ}'。",
+        "Issue 描述：'It's as if the bound variable `x` of the ConditionSet were mistaken for a `y`.'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ConditionSet",
+        "kind": "class",
+        "source_path": "sympy/sets/conditionset.py",
+        "reason": "Issue 的核心是关于 ConditionSet 对象的 subs 方法行为。"
+      },
+      {
+        "name": "ImageSet",
+        "kind": "class",
+        "source_path": "sympy/sets/fancysets.py",
+        "reason": "Issue 涉及 ConditionSet 的 base_set 是 ImageSet 的情况。"
+      },
+      {
+        "name": "imageset",
+        "kind": "function",
+        "source_path": "sympy/sets/sets.py",
+        "reason": "用于创建 ImageSet，是 Issue 中构造示例的关键函数。"
+      },
+      {
+        "name": "Lambda",
+        "kind": "class",
+        "source_path": "sympy/core/function.py",
+        "reason": "ImageSet 的变换函数使用 Lambda 表示。"
+      },
+      {
+        "name": "subs",
+        "kind": "method",
+        "source_path": "",
+        "reason": "触发缺陷的操作是调用 subs 方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/sets/conditionset.py",
+        "object": "ConditionSet._eval_subs",
+        "lines": "",
+        "reason": "Issue 描述 subs 方法在 ConditionSet 包含 ImageSet 时产生错误结果，_eval_subs 是实现替换逻辑的地方。"
+      },
+      {
+        "path": "sympy/sets/conditionset.py",
+        "object": "ConditionSet",
+        "lines": "21-265",
+        "reason": "相关源码片段 6 包含了 ConditionSet 的类定义和文档，其中提到了关于 dummy symbol 和 subs 的复杂行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 test_subs_CondSet 中，ConditionSet 的 base_set 主要是 FiniteSet 或 Interval。",
+        "target_pattern": "将 base_set 构造为一个 ImageSet，并且替换的符号出现在该 ImageSet 的 Lambda 表达式中。",
+        "reason": "Issue 表明当 base_set 是 ImageSet 且替换变量 y 出现在其表达式中时，subs 会产生错误。这是现有测试未覆盖的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中通常使用简单的条件，如 x < 2。",
+        "target_pattern": "使用 Contains(y, Interval(...)) 这样的条件，其中 y 也是要替换的符号。",
+        "reason": "Issue 中的条件涉及 Contains，且替换变量 y 同时出现在条件和 base_set 的 ImageSet 表达式中，这可能触发特殊的替换逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对包含 ImageSet 的 ConditionSet 调用 subs 方法，应正确替换符号，返回一个结构正确的 ConditionSet 或简化的 ImageSet。",
+      "evidence": [
+        "Issue 中 In[78] 使用 xreplace 和 In[80] 使用 subs(simultaneous=True) 得到了预期的 '{2⋅π⋅n + asin(1/3) | n ∊ ℤ}'。",
+        "Issue 中 In[86]-[88] 显示对纯 ImageSet 的 subs 工作正常，暗示 ConditionSet 的 subs 也应能正确处理其内部的 ImageSet。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 subs 后返回的 ConditionSet 对象的 repr 或结构，特别是其 condition 和 base_set 属性。",
+        "reason": "Issue 中的错误表现为返回的表达式结构错误，观测返回值是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "subs 调用结果的类型，是 ConditionSet、ImageSet 还是其他。",
+        "reason": "期望结果可能是一个 ImageSet（如 Issue 中 xreplace 的结果），而错误结果可能是一个结构混乱的 ConditionSet。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对特定 ConditionSet 调用 subs(y, value) 后，结果应等价于对相同构造使用 xreplace({y: value}) 或 subs(simultaneous=True) 的结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的字符串表示，因为 repr 可能因内部顺序等变化。",
+        "reason": "Issue 表明 xreplace 和 subs(simultaneous=True) 给出了预期结果，而普通 subs 没有。断言两者等价能捕捉到缺陷。"
+      },
+      {
+        "assertion_goal": "替换后，ConditionSet 的 dummy symbol (x) 不应被错误地替换或出现在不应出现的位置。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言具体的、可能变化的 dummy symbol 名称。",
+        "reason": "Issue 描述 'bound variable `x` ... were mistaken for a `y`'，表明 dummy symbol 的处理有误。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切触发条件是否仅限于 ConditionSet 的 base_set 是 ImageSet，并且替换变量同时出现在条件和 ImageSet 表达式中？",
+    "subs 方法内部在处理 ConditionSet 时，对 base_set 是 ImageSet 的情况是否有特殊的分支逻辑？",
+    "除了使用 Contains 条件，其他类型的条件是否也会触发相同问题？",
+    "simultaneous=True 参数为何能避免此问题？其内部实现与普通 subs 有何不同？"
+  ],
+  "raw": {
+    "issue_summary": "ConditionSet 在包含 ImageSet 时，使用 subs 方法进行变量替换会产生错误结果，疑似将 ConditionSet 的绑定变量与替换变量混淆。",
+    "trigger_condition": {
+      "text": "对一个包含 ImageSet 的 ConditionSet 对象调用 subs 方法，替换一个在 ImageSet 表达式中出现的符号。",
+      "evidence": [
+        "Issue 中 In[74] 创建了 ConditionSet(x, Contains(y, Interval(-1,1)), imageset(Lambda(n, 2*n*pi + asin(y)), S.Integers))，然后 In[75] 对其调用 _.subs(y, Rational(1,3)) 得到错误结果。",
+        "Issue 描述：'if I construct a similar ConditionSet with an ImageSet instead of a FiniteSet, a plain `subs` gives a strange result'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "subs 调用后返回的 ConditionSet 表达式错误，其条件部分似乎错误地引入了 ImageSet 表达式，而不是正确地进行替换。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 Out[75] 显示为 '{1/3 | 1/3 ∊ {2⋅π⋅n + asin(1/3) | n ∊ ℤ} ∧ (1/3 ∈ {2⋅π⋅n + asin(1/3) | n ∊ ℤ})}'，而期望结果应为类似 Out[78] 或 Out[80] 的 '{2⋅π⋅n + asin(1/3) | n ∊ ℤ}'。",
+        "Issue 描述：'It's as if the bound variable `x` of the ConditionSet were mistaken for a `y`.'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对包含 ImageSet 的 ConditionSet 调用 subs 方法，应正确替换符号，返回一个结构正确的 ConditionSet 或简化的 ImageSet。",
+      "evidence": [
+        "Issue 中 In[78] 使用 xreplace 和 In[80] 使用 subs(simultaneous=True) 得到了预期的 '{2⋅π⋅n + asin(1/3) | n ∊ ℤ}'。",
+        "Issue 中 In[86]-[88] 显示对纯 ImageSet 的 subs 工作正常，暗示 ConditionSet 的 subs 也应能正确处理其内部的 ImageSet。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ConditionSet",
+        "kind": "class",
+        "source_path": "sympy/sets/conditionset.py",
+        "reason": "Issue 的核心是关于 ConditionSet 对象的 subs 方法行为。"
+      },
+      {
+        "name": "ImageSet",
+        "kind": "class",
+        "source_path": "sympy/sets/fancysets.py",
+        "reason": "Issue 涉及 ConditionSet 的 base_set 是 ImageSet 的情况。"
+      },
+      {
+        "name": "imageset",
+        "kind": "function",
+        "source_path": "sympy/sets/sets.py",
+        "reason": "用于创建 ImageSet，是 Issue 中构造示例的关键函数。"
+      },
+      {
+        "name": "Lambda",
+        "kind": "class",
+        "source_path": "sympy/core/function.py",
+        "reason": "ImageSet 的变换函数使用 Lambda 表示。"
+      },
+      {
+        "name": "subs",
+        "kind": "method",
+        "source_path": "",
+        "reason": "触发缺陷的操作是调用 subs 方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/sets/conditionset.py",
+        "object": "ConditionSet._eval_subs",
+        "lines": "",
+        "reason": "Issue 描述 subs 方法在 ConditionSet 包含 ImageSet 时产生错误结果，_eval_subs 是实现替换逻辑的地方。"
+      },
+      {
+        "path": "sympy/sets/conditionset.py",
+        "object": "ConditionSet",
+        "lines": "21-265",
+        "reason": "相关源码片段 6 包含了 ConditionSet 的类定义和文档，其中提到了关于 dummy symbol 和 subs 的复杂行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_subs_CondSet",
+        "test_file": "sympy/sets/tests/test_conditionset.py",
+        "why_relevant": "该测试专门测试 ConditionSet 的 subs 方法，包含多种替换场景，是理解当前 subs 逻辑和构造测试的起点。",
+        "reusable_parts": [
+          "ConditionSet 的构造方式",
+          "subs 方法的调用模式",
+          "assert 风格"
+        ],
+        "possible_gap": "现有测试没有覆盖 base_set 是 ImageSet 的情况，特别是当替换变量出现在 ImageSet 的 Lambda 表达式中时。"
+      },
+      {
+        "test_name": "test_ImageSet",
+        "test_file": "sympy/sets/tests/test_fancysets.py",
+        "why_relevant": "测试了 ImageSet 的基本行为，包括构造和 contains，有助于理解 ImageSet 在 ConditionSet 中作为 base_set 时的预期行为。",
+        "reusable_parts": [
+          "ImageSet 和 imageset 的构造",
+          "使用 Lambda 和 S.Integers"
+        ],
+        "possible_gap": "该测试不涉及 ConditionSet，也没有测试 subs 在嵌套结构中的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 test_subs_CondSet 中，ConditionSet 的 base_set 主要是 FiniteSet 或 Interval。",
+        "target_pattern": "将 base_set 构造为一个 ImageSet，并且替换的符号出现在该 ImageSet 的 Lambda 表达式中。",
+        "reason": "Issue 表明当 base_set 是 ImageSet 且替换变量 y 出现在其表达式中时，subs 会产生错误。这是现有测试未覆盖的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中通常使用简单的条件，如 x < 2。",
+        "target_pattern": "使用 Contains(y, Interval(...)) 这样的条件，其中 y 也是要替换的符号。",
+        "reason": "Issue 中的条件涉及 Contains，且替换变量 y 同时出现在条件和 base_set 的 ImageSet 表达式中，这可能触发特殊的替换逻辑。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 subs 后返回的 ConditionSet 对象的 repr 或结构，特别是其 condition 和 base_set 属性。",
+        "reason": "Issue 中的错误表现为返回的表达式结构错误，观测返回值是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "subs 调用结果的类型，是 ConditionSet、ImageSet 还是其他。",
+        "reason": "期望结果可能是一个 ImageSet（如 Issue 中 xreplace 的结果），而错误结果可能是一个结构混乱的 ConditionSet。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对特定 ConditionSet 调用 subs(y, value) 后，结果应等价于对相同构造使用 xreplace({y: value}) 或 subs(simultaneous=True) 的结果。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的字符串表示，因为 repr 可能因内部顺序等变化。",
+        "reason": "Issue 表明 xreplace 和 subs(simultaneous=True) 给出了预期结果，而普通 subs 没有。断言两者等价能捕捉到缺陷。"
+      },
+      {
+        "assertion_goal": "替换后，ConditionSet 的 dummy symbol (x) 不应被错误地替换或出现在不应出现的位置。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言具体的、可能变化的 dummy symbol 名称。",
+        "reason": "Issue 描述 'bound variable `x` ... were mistaken for a `y`'，表明 dummy symbol 的处理有误。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 ConditionSet, ImageSet, imageset, Lambda, S, Interval, Contains, Symbol, Rational 等。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在类似 sympy/sets/tests/ 的测试环境中运行，以利用现有的测试设施。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切触发条件是否仅限于 ConditionSet 的 base_set 是 ImageSet，并且替换变量同时出现在条件和 ImageSet 表达式中？",
+      "subs 方法内部在处理 ConditionSet 时，对 base_set 是 ImageSet 的情况是否有特殊的分支逻辑？",
+      "除了使用 Contains 条件，其他类型的条件是否也会触发相同问题？",
+      "simultaneous=True 参数为何能避免此问题？其内部实现与普通 subs 有何不同？"
+    ]
+  }
+}

@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13568",
+  "issue_summary": "当自定义用户模型的 USERNAME_FIELD 字段通过 UniqueConstraint 约束保证唯一性而非 unique=True 时，系统检查 auth.E003 会错误地触发。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离应用，避免模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 @override_settings(AUTH_USER_MODEL='...') 来指定自定义用户模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase，因为不涉及数据库操作（仅运行检查）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 checks 模块和相关的模型字段、约束类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UserModelChecksTests.test_username_non_unique",
+        "test_file": "tests/auth_tests/test_checks.py",
+        "why_relevant": "它直接测试 USERNAME_FIELD 字段非唯一时触发 auth.E003 错误，与 Issue 场景高度相似，只是字段非唯一的原因不同（一个是缺少约束，一个是有 UniqueConstraint 但未被识别）。",
+        "reusable_parts": [
+          "测试类装饰器 @isolate_apps 和 @override_system_checks",
+          "使用 @override_settings 设置 AUTH_USER_MODEL",
+          "在测试方法内动态定义自定义用户模型类",
+          "调用 checks.run_checks() 并断言返回的错误列表包含 auth.E003"
+        ],
+        "possible_gap": "该测试中用户模型的 username 字段没有设置任何唯一性约束（既无 unique=True，也无 UniqueConstraint）。它无法验证当字段通过 UniqueConstraint 约束时，auth.E003 是否被错误触发。"
+      },
+      {
+        "test_name": "ConstraintsTests.test_unique_constraint_with_include",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它展示了如何在模型中使用 UniqueConstraint，包括其定义和检查。",
+        "reusable_parts": [
+          "在 @isolate_apps 装饰器内定义包含 UniqueConstraint 的模型",
+          "调用 Model.check() 进行模型检查",
+          "根据数据库特性断言不同的结果（错误或警告）"
+        ],
+        "possible_gap": "该测试不涉及用户模型或 USERNAME_FIELD，检查的是数据库特性支持性警告（W039），而非 auth.E003 错误。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个自定义用户模型，其 USERNAME_FIELD 字段（例如 username）没有设置 unique=True，但在模型的 Meta.constraints 中包含一个 UniqueConstraint 约束该字段。",
+      "evidence": [
+        "Issue 中描述了用户模型定义：`USERNAME_FIELD = \"username\"` 且 `constraints = [UniqueConstraint(fields=[\"username\"], name=\"user_username_unq\")]`。",
+        "相关测试 1 检查了 USERNAME_FIELD 非唯一时的错误。",
+        "相关测试 4 和 5 展示了 UniqueConstraint 的使用。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行系统检查时，会触发 auth.E003 错误，提示 USERNAME_FIELD 字段必须唯一。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 原文：'Will trigger auth.E003: auth.User: (auth.E003) \\'User.username\\' must be unique because it is named as the \\'USERNAME_FIELD\\'.'",
+        "相关测试 1 中验证了 auth.E003 错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "checks.run_checks",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于运行系统检查，触发 auth.E003 错误。"
+      },
+      {
+        "name": "AbstractBaseUser",
+        "kind": "class",
+        "source_path": "django/contrib/auth/base_user.py",
+        "reason": "自定义用户模型的基类，定义了 USERNAME_FIELD。"
+      },
+      {
+        "name": "UniqueConstraint",
+        "kind": "class",
+        "source_path": "django/db/models/constraints.py",
+        "reason": "用于定义字段唯一性约束，是 Issue 的核心。"
+      },
+      {
+        "name": "Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "执行模型级别的检查，可能包含系统检查逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/checks.py",
+        "object": "check_user_model",
+        "lines": "",
+        "reason": "该函数负责执行用户模型的系统检查，包括 auth.E003。Issue 建议扩展它以检查 UniqueConstraint。"
+      },
+      {
+        "path": "django/contrib/auth/__init__.py",
+        "object": "",
+        "lines": "",
+        "reason": "可能包含与用户模型检查相关的模块。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中定义的用户模型：`username = models.CharField(max_length=30)`（无唯一性约束）。",
+        "target_pattern": "定义用户模型：`username = models.CharField(max_length=30)`（无 unique=True），但在 Meta.constraints 中添加 `UniqueConstraint(fields=[\"username\"], name=\"...\")`。",
+        "reason": "将字段唯一性的保证方式从“无约束”改为“通过 UniqueConstraint 约束”，这是触发 Issue 描述的错误场景的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中直接调用 `checks.run_checks()`。",
+        "target_pattern": "可能也需要调用 `Model.check()` 或确保系统检查运行。",
+        "reason": "Issue 涉及的是系统检查，但模型检查也可能相关。确保检查被执行。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "系统检查 auth.E003 应该识别到 USERNAME_FIELD 字段已通过 UniqueConstraint 约束保证唯一性，从而不触发该错误。",
+      "evidence": [
+        "Issue 原文：'The system check should be extended to check for the presence of USERNAME_FIELD in Model._meta.constraints.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "`errors = checks.run_checks()` 的返回值，特别是其中是否包含 id 为 'auth.E003' 的 Error 对象。",
+        "reason": "Issue 的核心错误现象是 auth.E003 被触发。观察检查结果列表可以直接判断缺陷是否发生。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "检查结果中是否出现 id 为 'auth.W004' 的 Warning 对象。",
+        "reason": "根据相关测试 1，当使用非默认认证后端且 USERNAME_FIELD 不唯一时，会触发 W004 警告。观察此警告有助于理解检查逻辑的完整行为。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "自定义用户模型类的 `_meta.constraints` 属性。",
+        "reason": "确认 UniqueConstraint 是否已正确附加到模型上，这是系统检查应该识别的依据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 USERNAME_FIELD 字段通过 UniqueConstraint 约束时，系统检查结果中不包含 auth.E003 错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误消息字符串相等，因为消息格式可能微调。避免断言检查结果列表完全为空，因为可能包含其他检查项。",
+        "reason": "Issue 期望的行为是 auth.E003 错误消失。断言错误列表中不包含特定 id 的错误更稳定，不依赖具体消息文本。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "系统检查函数 `check_user_model` 的具体实现位置和逻辑细节，以确定如何修改才能识别 UniqueConstraint。",
+    "除了 auth.E003，其他相关的检查（如 auth.W004）在存在 UniqueConstraint 但使用非默认后端时的行为是否也需要调整。",
+    "对于使用 condition、deferrable、include 等参数的复杂 UniqueConstraint，系统检查是否应该以及如何验证其等效于字段级别的唯一性。"
+  ],
+  "raw": {
+    "issue_summary": "当自定义用户模型的 USERNAME_FIELD 字段通过 UniqueConstraint 约束保证唯一性而非 unique=True 时，系统检查 auth.E003 会错误地触发。",
+    "trigger_condition": {
+      "text": "定义一个自定义用户模型，其 USERNAME_FIELD 字段（例如 username）没有设置 unique=True，但在模型的 Meta.constraints 中包含一个 UniqueConstraint 约束该字段。",
+      "evidence": [
+        "Issue 中描述了用户模型定义：`USERNAME_FIELD = \"username\"` 且 `constraints = [UniqueConstraint(fields=[\"username\"], name=\"user_username_unq\")]`。",
+        "相关测试 1 检查了 USERNAME_FIELD 非唯一时的错误。",
+        "相关测试 4 和 5 展示了 UniqueConstraint 的使用。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行系统检查时，会触发 auth.E003 错误，提示 USERNAME_FIELD 字段必须唯一。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 原文：'Will trigger auth.E003: auth.User: (auth.E003) \\'User.username\\' must be unique because it is named as the \\'USERNAME_FIELD\\'.'",
+        "相关测试 1 中验证了 auth.E003 错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "系统检查 auth.E003 应该识别到 USERNAME_FIELD 字段已通过 UniqueConstraint 约束保证唯一性，从而不触发该错误。",
+      "evidence": [
+        "Issue 原文：'The system check should be extended to check for the presence of USERNAME_FIELD in Model._meta.constraints.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "checks.run_checks",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于运行系统检查，触发 auth.E003 错误。"
+      },
+      {
+        "name": "AbstractBaseUser",
+        "kind": "class",
+        "source_path": "django/contrib/auth/base_user.py",
+        "reason": "自定义用户模型的基类，定义了 USERNAME_FIELD。"
+      },
+      {
+        "name": "UniqueConstraint",
+        "kind": "class",
+        "source_path": "django/db/models/constraints.py",
+        "reason": "用于定义字段唯一性约束，是 Issue 的核心。"
+      },
+      {
+        "name": "Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "执行模型级别的检查，可能包含系统检查逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/auth/checks.py",
+        "object": "check_user_model",
+        "lines": "",
+        "reason": "该函数负责执行用户模型的系统检查，包括 auth.E003。Issue 建议扩展它以检查 UniqueConstraint。"
+      },
+      {
+        "path": "django/contrib/auth/__init__.py",
+        "object": "",
+        "lines": "",
+        "reason": "可能包含与用户模型检查相关的模块。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "UserModelChecksTests.test_username_non_unique",
+        "test_file": "tests/auth_tests/test_checks.py",
+        "why_relevant": "它直接测试 USERNAME_FIELD 字段非唯一时触发 auth.E003 错误，与 Issue 场景高度相似，只是字段非唯一的原因不同（一个是缺少约束，一个是有 UniqueConstraint 但未被识别）。",
+        "reusable_parts": [
+          "测试类装饰器 @isolate_apps 和 @override_system_checks",
+          "使用 @override_settings 设置 AUTH_USER_MODEL",
+          "在测试方法内动态定义自定义用户模型类",
+          "调用 checks.run_checks() 并断言返回的错误列表包含 auth.E003"
+        ],
+        "possible_gap": "该测试中用户模型的 username 字段没有设置任何唯一性约束（既无 unique=True，也无 UniqueConstraint）。它无法验证当字段通过 UniqueConstraint 约束时，auth.E003 是否被错误触发。"
+      },
+      {
+        "test_name": "ConstraintsTests.test_unique_constraint_with_include",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它展示了如何在模型中使用 UniqueConstraint，包括其定义和检查。",
+        "reusable_parts": [
+          "在 @isolate_apps 装饰器内定义包含 UniqueConstraint 的模型",
+          "调用 Model.check() 进行模型检查",
+          "根据数据库特性断言不同的结果（错误或警告）"
+        ],
+        "possible_gap": "该测试不涉及用户模型或 USERNAME_FIELD，检查的是数据库特性支持性警告（W039），而非 auth.E003 错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中定义的用户模型：`username = models.CharField(max_length=30)`（无唯一性约束）。",
+        "target_pattern": "定义用户模型：`username = models.CharField(max_length=30)`（无 unique=True），但在 Meta.constraints 中添加 `UniqueConstraint(fields=[\"username\"], name=\"...\")`。",
+        "reason": "将字段唯一性的保证方式从“无约束”改为“通过 UniqueConstraint 约束”，这是触发 Issue 描述的错误场景的关键变异。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 中直接调用 `checks.run_checks()`。",
+        "target_pattern": "可能也需要调用 `Model.check()` 或确保系统检查运行。",
+        "reason": "Issue 涉及的是系统检查，但模型检查也可能相关。确保检查被执行。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "`errors = checks.run_checks()` 的返回值，特别是其中是否包含 id 为 'auth.E003' 的 Error 对象。",
+        "reason": "Issue 的核心错误现象是 auth.E003 被触发。观察检查结果列表可以直接判断缺陷是否发生。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "检查结果中是否出现 id 为 'auth.W004' 的 Warning 对象。",
+        "reason": "根据相关测试 1，当使用非默认认证后端且 USERNAME_FIELD 不唯一时，会触发 W004 警告。观察此警告有助于理解检查逻辑的完整行为。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "自定义用户模型类的 `_meta.constraints` 属性。",
+        "reason": "确认 UniqueConstraint 是否已正确附加到模型上，这是系统检查应该识别的依据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 USERNAME_FIELD 字段通过 UniqueConstraint 约束时，系统检查结果中不包含 auth.E003 错误。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误消息字符串相等，因为消息格式可能微调。避免断言检查结果列表完全为空，因为可能包含其他检查项。",
+        "reason": "Issue 期望的行为是 auth.E003 错误消失。断言错误列表中不包含特定 id 的错误更稳定，不依赖具体消息文本。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离应用，避免模型注册冲突。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 @override_settings(AUTH_USER_MODEL='...') 来指定自定义用户模型。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase，因为不涉及数据库操作（仅运行检查）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 checks 模块和相关的模型字段、约束类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "系统检查函数 `check_user_model` 的具体实现位置和逻辑细节，以确定如何修改才能识别 UniqueConstraint。",
+      "除了 auth.E003，其他相关的检查（如 auth.W004）在存在 UniqueConstraint 但使用非默认后端时的行为是否也需要调整。",
+      "对于使用 condition、deferrable、include 等参数的复杂 UniqueConstraint，系统检查是否应该以及如何验证其等效于字段级别的唯一性。"
+    ]
+  }
+}

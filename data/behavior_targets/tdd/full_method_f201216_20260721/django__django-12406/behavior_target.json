@@ -1,0 +1,326 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12406",
+  "issue_summary": "ModelForm 使用 RadioSelect 小部件渲染外键字段时，即使模型字段设置 blank=False，仍会显示一个默认选中的空白选项。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型，包含一个 ForeignKey 字段，并设置 blank=False。可能还需要创建相关的被引用模型实例。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 ModelForm 来包装该模型，并在 Meta.widgets 中为外键字段指定 RadioSelect。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以支持数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RadioSelectTest.test_render",
+        "test_file": "tests/forms_tests/widget_tests/test_radioselect.py",
+        "why_relevant": "它直接测试 RadioSelect 小部件的渲染，包括处理空白选项（('', '------')）和检查选中状态。",
+        "reusable_parts": [
+          "WidgetTest 基类",
+          "self.check_html 方法",
+          "RadioSelect 小部件的构造方式",
+          "HTML 输出的断言模式"
+        ],
+        "possible_gap": "该测试是通用小部件测试，不涉及 ModelForm 或模型字段约束（如 blank=False）。它显式地提供了一个包含空白选项的 choices 元组。"
+      },
+      {
+        "test_name": "ModelFormBaseTest.test_blank_false_with_null_true_foreign_key_field",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了 ModelForm 中 blank=False, null=True 的外键字段的行为，特别是当表单字段 required=False 时允许清空。",
+        "reusable_parts": [
+          "ModelForm 的创建方式",
+          "使用 ForeignKey 字段的模型",
+          "表单验证和保存的流程"
+        ],
+        "possible_gap": "该测试关注的是表单验证和保存逻辑，而不是 RadioSelect 小部件的渲染输出。它没有使用 RadioSelect 小部件。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 ModelForm，其模型包含一个 blank=False 的外键字段，并将该字段的小部件设置为 RadioSelect，然后渲染这个新表单。",
+      "evidence": [
+        "Issue 中提供了 TestRun 模型和 TestRunForm 的示例代码，其中 data_file 字段是 ForeignKey(blank=False)，且 widgets 设置为 RadioSelect()。",
+        "Issue 描述了渲染 {{test_run_form.data_file}} 的输出。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "渲染的 RadioSelect HTML 包含一个默认选中（checked）且值为空字符串的选项（显示为 '---------'），这看起来像一个有效的选择，但实际上模型不允许空白值。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中给出了渲染的 HTML 片段，显示第一个 <input> 标签有 checked=\"checked\" 属性，且 value=\"\"。",
+        "Issue 原文：'renders {{test_run_form.data_file}} as ...' 并附上了 HTML。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.ModelForm",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 的核心是关于 ModelForm 的行为。"
+      },
+      {
+        "name": "django.forms.widgets.RadioSelect",
+        "kind": "class",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 明确指出问题与 RadioSelect 小部件相关。"
+      },
+      {
+        "name": "django.forms.fields.ModelChoiceField",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "外键字段在 ModelForm 中通常对应 ModelChoiceField，其小部件行为可能与此相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/widgets.py",
+        "object": "RadioSelect",
+        "lines": "",
+        "reason": "Issue 直接指向 RadioSelect 小部件的渲染行为。检索到的源码片段 2 显示了 RadioSelect 类的定义。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelChoiceField",
+        "lines": "",
+        "reason": "ModelForm 中外键字段的默认表单字段是 ModelChoiceField，它负责生成选择项，可能影响 RadioSelect 的初始选中状态。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "widget",
+        "current_pattern": "相似测试中通常使用默认小部件或显式提供 choices 的通用小部件测试。",
+        "target_pattern": "在 ModelForm 的 Meta 内部，将外键字段的小部件显式设置为 RadioSelect()。",
+        "reason": "Issue 的触发条件是在 ModelForm 中为外键字段指定 RadioSelect 小部件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "model_field_constraint",
+        "current_pattern": "相关测试可能使用允许空白或没有特定 blank 约束的模型字段。",
+        "target_pattern": "使用一个模型，其外键字段具有 blank=False 约束。",
+        "reason": "Issue 明确指出问题发生在模型字段 blank=False 时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "form_instance_state",
+        "current_pattern": "测试可能使用绑定数据的表单或编辑现有实例的表单。",
+        "target_pattern": "创建一个新的、未绑定数据的 ModelForm 实例（用于渲染初始表单）。",
+        "reason": "Issue 描述的是 'when rendering a new form from a model'。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当从模型渲染一个新的 ModelForm 时，如果外键字段的 blank=False（即不允许空白选择），RadioSelect 小部件不应包含任何默认选中的 <input> 标签。",
+      "evidence": [
+        "Issue 原文：'Instead, there should be no checked option for RadioSelect's <input> tags when rendering a new form from a model if blank is not a valid selection.'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "form.as_p()、form[field_name] 或直接渲染字段的字符串输出。",
+        "reason": "Issue 的核心错误现象是渲染出的 HTML 包含错误的 checked 属性。观察渲染输出是判断问题是否存在的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "form.fields[field_name].widget.choices 或 form.initial 中该字段的值。",
+        "reason": "需要确认 RadioSelect 小部件接收到的选项列表以及初始选中值是什么，以理解空白选项的来源和选中状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证渲染的 RadioSelect HTML 中，没有任何 <input> 标签具有 checked 属性（当模型字段 blank=False 且表单为新表单时）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的 HTML 字符串相等，因为 HTML 格式（如换行、属性顺序）可能变化。",
+        "reason": "Issue 的期望行为是“没有默认选中的选项”。断言输出中不包含 'checked' 属性片段更稳定，且直接对应问题核心。"
+      },
+      {
+        "assertion_goal": "验证空白选项（value=\"\"）要么不存在，要么存在但未被选中。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言空白选项的标签文本完全等于 '---------'，因为标签文本可能本地化或变化。",
+        "reason": "Issue 显示空白选项存在且被选中是问题。需要验证其状态。更稳定的断言是检查 value=\"\" 的 input 元素是否没有 checked 属性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "问题是否也出现在编辑现有实例的表单中（当外键已有值时）？Issue 主要提到‘new form’。",
+    "RadioSelect 的空白选项是由 ModelChoiceField 自动添加的，还是由 RadioSelect 本身的行为导致的？",
+    "对于 blank=True 的外键字段，RadioSelect 是否应该显示一个默认选中的空白选项？Issue 没有讨论这种情况。",
+    "修复后的确切 HTML 输出是什么？除了没有 checked 属性，空白选项是否应该完全移除？Issue 说‘there should be no checked option’，但没有明确说空白选项条目是否应该存在。"
+  ],
+  "raw": {
+    "issue_summary": "ModelForm 使用 RadioSelect 小部件渲染外键字段时，即使模型字段设置 blank=False，仍会显示一个默认选中的空白选项。",
+    "trigger_condition": {
+      "text": "创建一个 ModelForm，其模型包含一个 blank=False 的外键字段，并将该字段的小部件设置为 RadioSelect，然后渲染这个新表单。",
+      "evidence": [
+        "Issue 中提供了 TestRun 模型和 TestRunForm 的示例代码，其中 data_file 字段是 ForeignKey(blank=False)，且 widgets 设置为 RadioSelect()。",
+        "Issue 描述了渲染 {{test_run_form.data_file}} 的输出。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "渲染的 RadioSelect HTML 包含一个默认选中（checked）且值为空字符串的选项（显示为 '---------'），这看起来像一个有效的选择，但实际上模型不允许空白值。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 中给出了渲染的 HTML 片段，显示第一个 <input> 标签有 checked=\"checked\" 属性，且 value=\"\"。",
+        "Issue 原文：'renders {{test_run_form.data_file}} as ...' 并附上了 HTML。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当从模型渲染一个新的 ModelForm 时，如果外键字段的 blank=False（即不允许空白选择），RadioSelect 小部件不应包含任何默认选中的 <input> 标签。",
+      "evidence": [
+        "Issue 原文：'Instead, there should be no checked option for RadioSelect's <input> tags when rendering a new form from a model if blank is not a valid selection.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.forms.ModelForm",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 的核心是关于 ModelForm 的行为。"
+      },
+      {
+        "name": "django.forms.widgets.RadioSelect",
+        "kind": "class",
+        "source_path": "django/forms/widgets.py",
+        "reason": "Issue 明确指出问题与 RadioSelect 小部件相关。"
+      },
+      {
+        "name": "django.forms.fields.ModelChoiceField",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "外键字段在 ModelForm 中通常对应 ModelChoiceField，其小部件行为可能与此相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/widgets.py",
+        "object": "RadioSelect",
+        "lines": "",
+        "reason": "Issue 直接指向 RadioSelect 小部件的渲染行为。检索到的源码片段 2 显示了 RadioSelect 类的定义。"
+      },
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelChoiceField",
+        "lines": "",
+        "reason": "ModelForm 中外键字段的默认表单字段是 ModelChoiceField，它负责生成选择项，可能影响 RadioSelect 的初始选中状态。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RadioSelectTest.test_render",
+        "test_file": "tests/forms_tests/widget_tests/test_radioselect.py",
+        "why_relevant": "它直接测试 RadioSelect 小部件的渲染，包括处理空白选项（('', '------')）和检查选中状态。",
+        "reusable_parts": [
+          "WidgetTest 基类",
+          "self.check_html 方法",
+          "RadioSelect 小部件的构造方式",
+          "HTML 输出的断言模式"
+        ],
+        "possible_gap": "该测试是通用小部件测试，不涉及 ModelForm 或模型字段约束（如 blank=False）。它显式地提供了一个包含空白选项的 choices 元组。"
+      },
+      {
+        "test_name": "ModelFormBaseTest.test_blank_false_with_null_true_foreign_key_field",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它测试了 ModelForm 中 blank=False, null=True 的外键字段的行为，特别是当表单字段 required=False 时允许清空。",
+        "reusable_parts": [
+          "ModelForm 的创建方式",
+          "使用 ForeignKey 字段的模型",
+          "表单验证和保存的流程"
+        ],
+        "possible_gap": "该测试关注的是表单验证和保存逻辑，而不是 RadioSelect 小部件的渲染输出。它没有使用 RadioSelect 小部件。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "widget",
+        "current_pattern": "相似测试中通常使用默认小部件或显式提供 choices 的通用小部件测试。",
+        "target_pattern": "在 ModelForm 的 Meta 内部，将外键字段的小部件显式设置为 RadioSelect()。",
+        "reason": "Issue 的触发条件是在 ModelForm 中为外键字段指定 RadioSelect 小部件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "model_field_constraint",
+        "current_pattern": "相关测试可能使用允许空白或没有特定 blank 约束的模型字段。",
+        "target_pattern": "使用一个模型，其外键字段具有 blank=False 约束。",
+        "reason": "Issue 明确指出问题发生在模型字段 blank=False 时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "form_instance_state",
+        "current_pattern": "测试可能使用绑定数据的表单或编辑现有实例的表单。",
+        "target_pattern": "创建一个新的、未绑定数据的 ModelForm 实例（用于渲染初始表单）。",
+        "reason": "Issue 描述的是 'when rendering a new form from a model'。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "form.as_p()、form[field_name] 或直接渲染字段的字符串输出。",
+        "reason": "Issue 的核心错误现象是渲染出的 HTML 包含错误的 checked 属性。观察渲染输出是判断问题是否存在的直接方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "form.fields[field_name].widget.choices 或 form.initial 中该字段的值。",
+        "reason": "需要确认 RadioSelect 小部件接收到的选项列表以及初始选中值是什么，以理解空白选项的来源和选中状态。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证渲染的 RadioSelect HTML 中，没有任何 <input> 标签具有 checked 属性（当模型字段 blank=False 且表单为新表单时）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的、具体的 HTML 字符串相等，因为 HTML 格式（如换行、属性顺序）可能变化。",
+        "reason": "Issue 的期望行为是“没有默认选中的选项”。断言输出中不包含 'checked' 属性片段更稳定，且直接对应问题核心。"
+      },
+      {
+        "assertion_goal": "验证空白选项（value=\"\"）要么不存在，要么存在但未被选中。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言空白选项的标签文本完全等于 '---------'，因为标签文本可能本地化或变化。",
+        "reason": "Issue 显示空白选项存在且被选中是问题。需要验证其状态。更稳定的断言是检查 value=\"\" 的 input 元素是否没有 checked 属性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型，包含一个 ForeignKey 字段，并设置 blank=False。可能还需要创建相关的被引用模型实例。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 ModelForm 来包装该模型，并在 Meta.widgets 中为外键字段指定 RadioSelect。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以支持数据库操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "问题是否也出现在编辑现有实例的表单中（当外键已有值时）？Issue 主要提到‘new form’。",
+      "RadioSelect 的空白选项是由 ModelChoiceField 自动添加的，还是由 RadioSelect 本身的行为导致的？",
+      "对于 blank=True 的外键字段，RadioSelect 是否应该显示一个默认选中的空白选项？Issue 没有讨论这种情况。",
+      "修复后的确切 HTML 输出是什么？除了没有 checked 属性，空白选项是否应该完全移除？Issue 说‘there should be no checked option’，但没有明确说空白选项条目是否应该存在。"
+    ]
+  }
+}

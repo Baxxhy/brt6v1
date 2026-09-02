@@ -1,0 +1,326 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-12096",
+  "issue_summary": "implemented_function 的 evalf 方法在嵌套调用时没有递归调用 _imp_ 实现，导致无法数值计算复合函数。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.utilities.lambdify.implemented_function 和 sympy.Function。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试后可能需要清理 _imp_ 属性以避免影响其他测试（如相关测试 1 中的 del f._imp_）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_implemented_function_evalf",
+        "test_file": "sympy/core/tests/test_evalf.py",
+        "why_relevant": "直接测试 implemented_function 的 evalf 行为，包含单个函数调用的数值计算断言。",
+        "reusable_parts": [
+          "from sympy.utilities.lambdify import implemented_function",
+          "f = Function('f'); f = implemented_function(f, lambda x: x + 1)",
+          "assert f(2).evalf() == 3"
+        ],
+        "possible_gap": "只测试了单个函数 f(2).evalf()，没有测试复合函数 f(g(2)).evalf()。"
+      },
+      {
+        "test_name": "test_imps",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "测试 implemented_function 的创建和 lambdify 行为，包含多个函数的定义。",
+        "reusable_parts": [
+          "f = implemented_function('f', lambda x: 2*x)",
+          "g = implemented_function('f', lambda x: math.sqrt(x))",
+          "assert str(f(x)) == str(g(x))"
+        ],
+        "possible_gap": "主要关注 lambdify 和命名冲突，没有直接测试 evalf 对复合函数的数值计算。"
+      },
+      {
+        "test_name": "test_lambdify_imps",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "测试 implemented_function 与 lambdify 的集成，包含基本的数值计算断言。",
+        "reusable_parts": [
+          "f = implemented_function(\"f\", lambda x: x + 100)",
+          "assert lambdify(x, f(x))(0) == 100"
+        ],
+        "possible_gap": "测试的是 lambdify 后的调用，而不是直接的 .evalf() 方法调用。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 implemented_function 创建两个函数 f 和 g，然后对复合表达式 f(g(2)) 调用 .evalf()。",
+      "evidence": [
+        "Issue 中的示例代码：f = implemented_function('f', lambda x: x ** 2); g = implemented_function('g', lambda x: 2 * x); print(f(g(2)).evalf())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对复合函数 f(g(2)) 调用 .evalf() 返回符号表达式 'f(g(2))'，而不是数值结果 16.0。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的输出：f(g(2)).evalf() 返回 f(g(2))，而期望是 16.0"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "implemented_function",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "用于创建带有数值实现的函数，是 Issue 中问题函数的来源。"
+      },
+      {
+        "name": "Function._eval_evalf",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出问题代码在 Function._eval_evalf 中，它没有递归调用 _imp_。"
+      },
+      {
+        "name": "evalf",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心是 evalf 方法在复合函数上的行为不正确。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/function.py",
+        "object": "Function._eval_evalf",
+        "lines": "",
+        "reason": "Issue 明确指出 'The code for this is in `Function._eval_evalf`. It isn't calling evalf recursively on the return of `_imp_`.'"
+      },
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "implemented_function",
+        "lines": "653-699",
+        "reason": "该函数为 UndefinedFunction 附加 _imp_ 属性，是创建问题函数的关键。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中只对单个函数调用 .evalf()，如 f(2).evalf()。",
+        "target_pattern": "对复合函数调用 .evalf()，如 f(g(2)).evalf()。",
+        "reason": "Issue 表明 bug 在嵌套函数调用时触发，单个函数调用工作正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用简单的 lambda 实现，如 lambda x: x + 1。",
+        "target_pattern": "使用 Issue 中的 lambda 实现，如 lambda x: x ** 2 和 lambda x: 2 * x，以匹配具体数值。",
+        "reason": "确保测试能复现 Issue 中描述的精确数值错误（应得 16.0 但得到符号表达式）。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对 implemented_function 的复合表达式调用 .evalf() 应递归计算内部函数并返回数值结果。",
+      "evidence": [
+        "Issue 中单个函数调用 f(2).evalf() 和 g(2).evalf() 能正确返回数值 4.0",
+        "相关测试 1 中 assert f(2).evalf() == 3 表明单个函数应返回数值"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "f(g(2)).evalf() 的返回值类型和值。",
+        "reason": "Issue 的核心错误是返回符号表达式而非数值，观察返回值能直接判断 bug 是否触发。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(f(g(2)).evalf())",
+        "reason": "判断返回值是 Float 类型（正确）还是 Expr 类型（错误）。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(f(g(2)).evalf())",
+        "reason": "Issue 显示错误时返回字符串 'f(g(2))'，观察字符串表示有助于诊断。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "f(g(2)).evalf() 应返回数值 16.0（或接近的浮点数），而不是符号表达式。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的字符串表示，因为浮点数表示可能因精度而异。",
+        "reason": "Issue 明确期望数值结果，使用数值相等断言（如 == 16.0 或近似相等）更稳定。"
+      },
+      {
+        "assertion_goal": "f(g(2)).evalf() 的返回值应是 Float 类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言具体的类名，因为内部类名可能变化。",
+        "reason": "确保返回的是数值类型，而不是符号表达式类型。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Function._eval_evalf 方法的具体实现和递归调用 _imp_ 的确切位置未知。",
+    "除了嵌套两层，更深层的嵌套（如 f(g(h(x)))）是否也有同样的问题。",
+    "如果内部函数 g(2) 本身返回一个符号表达式（而非数值），期望行为是什么。"
+  ],
+  "raw": {
+    "issue_summary": "implemented_function 的 evalf 方法在嵌套调用时没有递归调用 _imp_ 实现，导致无法数值计算复合函数。",
+    "trigger_condition": {
+      "text": "使用 implemented_function 创建两个函数 f 和 g，然后对复合表达式 f(g(2)) 调用 .evalf()。",
+      "evidence": [
+        "Issue 中的示例代码：f = implemented_function('f', lambda x: x ** 2); g = implemented_function('g', lambda x: 2 * x); print(f(g(2)).evalf())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对复合函数 f(g(2)) 调用 .evalf() 返回符号表达式 'f(g(2))'，而不是数值结果 16.0。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的输出：f(g(2)).evalf() 返回 f(g(2))，而期望是 16.0"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对 implemented_function 的复合表达式调用 .evalf() 应递归计算内部函数并返回数值结果。",
+      "evidence": [
+        "Issue 中单个函数调用 f(2).evalf() 和 g(2).evalf() 能正确返回数值 4.0",
+        "相关测试 1 中 assert f(2).evalf() == 3 表明单个函数应返回数值"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "implemented_function",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "用于创建带有数值实现的函数，是 Issue 中问题函数的来源。"
+      },
+      {
+        "name": "Function._eval_evalf",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出问题代码在 Function._eval_evalf 中，它没有递归调用 _imp_。"
+      },
+      {
+        "name": "evalf",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 的核心是 evalf 方法在复合函数上的行为不正确。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/function.py",
+        "object": "Function._eval_evalf",
+        "lines": "",
+        "reason": "Issue 明确指出 'The code for this is in `Function._eval_evalf`. It isn't calling evalf recursively on the return of `_imp_`.'"
+      },
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "implemented_function",
+        "lines": "653-699",
+        "reason": "该函数为 UndefinedFunction 附加 _imp_ 属性，是创建问题函数的关键。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_implemented_function_evalf",
+        "test_file": "sympy/core/tests/test_evalf.py",
+        "why_relevant": "直接测试 implemented_function 的 evalf 行为，包含单个函数调用的数值计算断言。",
+        "reusable_parts": [
+          "from sympy.utilities.lambdify import implemented_function",
+          "f = Function('f'); f = implemented_function(f, lambda x: x + 1)",
+          "assert f(2).evalf() == 3"
+        ],
+        "possible_gap": "只测试了单个函数 f(2).evalf()，没有测试复合函数 f(g(2)).evalf()。"
+      },
+      {
+        "test_name": "test_imps",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "测试 implemented_function 的创建和 lambdify 行为，包含多个函数的定义。",
+        "reusable_parts": [
+          "f = implemented_function('f', lambda x: 2*x)",
+          "g = implemented_function('f', lambda x: math.sqrt(x))",
+          "assert str(f(x)) == str(g(x))"
+        ],
+        "possible_gap": "主要关注 lambdify 和命名冲突，没有直接测试 evalf 对复合函数的数值计算。"
+      },
+      {
+        "test_name": "test_lambdify_imps",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "测试 implemented_function 与 lambdify 的集成，包含基本的数值计算断言。",
+        "reusable_parts": [
+          "f = implemented_function(\"f\", lambda x: x + 100)",
+          "assert lambdify(x, f(x))(0) == 100"
+        ],
+        "possible_gap": "测试的是 lambdify 后的调用，而不是直接的 .evalf() 方法调用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中只对单个函数调用 .evalf()，如 f(2).evalf()。",
+        "target_pattern": "对复合函数调用 .evalf()，如 f(g(2)).evalf()。",
+        "reason": "Issue 表明 bug 在嵌套函数调用时触发，单个函数调用工作正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用简单的 lambda 实现，如 lambda x: x + 1。",
+        "target_pattern": "使用 Issue 中的 lambda 实现，如 lambda x: x ** 2 和 lambda x: 2 * x，以匹配具体数值。",
+        "reason": "确保测试能复现 Issue 中描述的精确数值错误（应得 16.0 但得到符号表达式）。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "f(g(2)).evalf() 的返回值类型和值。",
+        "reason": "Issue 的核心错误是返回符号表达式而非数值，观察返回值能直接判断 bug 是否触发。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(f(g(2)).evalf())",
+        "reason": "判断返回值是 Float 类型（正确）还是 Expr 类型（错误）。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "str(f(g(2)).evalf())",
+        "reason": "Issue 显示错误时返回字符串 'f(g(2))'，观察字符串表示有助于诊断。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "f(g(2)).evalf() 应返回数值 16.0（或接近的浮点数），而不是符号表达式。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的字符串表示，因为浮点数表示可能因精度而异。",
+        "reason": "Issue 明确期望数值结果，使用数值相等断言（如 == 16.0 或近似相等）更稳定。"
+      },
+      {
+        "assertion_goal": "f(g(2)).evalf() 的返回值应是 Float 类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言具体的类名，因为内部类名可能变化。",
+        "reason": "确保返回的是数值类型，而不是符号表达式类型。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy.utilities.lambdify.implemented_function 和 sympy.Function。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试后可能需要清理 _imp_ 属性以避免影响其他测试（如相关测试 1 中的 del f._imp_）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Function._eval_evalf 方法的具体实现和递归调用 _imp_ 的确切位置未知。",
+      "除了嵌套两层，更深层的嵌套（如 f(g(h(x)))）是否也有同样的问题。",
+      "如果内部函数 g(2) 本身返回一个符号表达式（而非数值），期望行为是什么。"
+    ]
+  }
+}

@@ -1,0 +1,284 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-23262",
+  "issue_summary": "SymPy 1.10 中 Python 代码打印机在生成单元素元组时遗漏了逗号，导致返回整数而非元组。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy、inspect 模块。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在现有测试类之外，作为独立函数编写。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lambdify_inspect",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试直接使用 inspect.getsource 检查 lambdify 生成的代码。",
+        "reusable_parts": [
+          "import inspect",
+          "使用 lambdify 和 inspect.getsource 的模式",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试检查的是源代码中是否包含特定表达式片段，而非元组语法的正确性。"
+      },
+      {
+        "test_name": "test_python_functions",
+        "test_file": "sympy/printing/tests/test_python.py",
+        "why_relevant": "该测试涉及 python 代码打印功能，可能包含元组打印逻辑。",
+        "reusable_parts": [
+          "assert python(...) 的断言风格"
+        ],
+        "possible_gap": "该测试未直接测试 lambdify 或单元素元组的打印。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 lambdify 生成一个返回单元素元组的函数，并通过 inspect.getsource 检查其源代码。",
+      "evidence": [
+        "Issue 中 MWE: inspect.getsource(lambdify([], tuple([1])))",
+        "Issue 中说明对于两个或更多元素的元组，生成的代码是正确的。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的函数源代码中，单元素元组缺少逗号，导致返回类型为整数而非元组。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中输出对比：SymPy 1.9 返回 'return (1,)'，SymPy 1.10 返回 'return (1)'。",
+        "Issue 中说明：'Note the missing comma after `1` that causes an integer to be returned instead of a tuple.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 中触发问题的 API 调用。"
+      },
+      {
+        "name": "inspect.getsource",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于检查生成代码的 API。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify",
+        "lines": "",
+        "reason": "Issue 直接涉及 lambdify 函数，且相关源码片段指向该文件。"
+      },
+      {
+        "path": "sympy/printing/python.py",
+        "object": "PythonCodePrinter",
+        "lines": "",
+        "reason": "Issue 标题和描述指向 Python 代码打印机（Python code printer）在处理单元素元组时的问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 lambdify 的输入通常是表达式或符号。",
+        "target_pattern": "lambdify 的输入为一个单元素元组，例如 tuple([1]) 或 (1,)。",
+        "reason": "Issue 表明当 lambdify 返回单元素元组时触发问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "return_value",
+        "current_pattern": "相似测试可能检查数值结果或表达式片段。",
+        "target_pattern": "检查生成的源代码字符串中单元素元组的表示。",
+        "reason": "错误症状体现在生成的源代码字符串中缺少逗号。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "生成的函数源代码中，单元素元组应包含逗号，确保返回类型为元组。",
+      "evidence": [
+        "Issue 中 SymPy 1.9 及以下版本的输出：'def _lambdifygenerated():\\n    return (1,)\\n'",
+        "Issue 中对于多元素元组的正确行为：'def _lambdifygenerated():\\n    return (1, 2)\\n'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "inspect.getsource(f) 返回的字符串",
+        "reason": "Issue 的核心是生成的源代码字符串不正确。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(f()) 或 type(eval(inspect.getsource(f).split('return ')[1]))",
+        "reason": "最终问题是返回类型错误，应观察调用生成函数后的返回类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的源代码字符串中，单元素元组应包含逗号。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对完整源代码字符串进行精确相等断言，因为实现细节可能变化。",
+        "reason": "Issue 表明缺失逗号是问题，检查逗号存在性更稳定。"
+      },
+      {
+        "assertion_goal": "调用生成的函数应返回元组类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免仅断言返回值等于某个整数。",
+        "reason": "确保修复后返回类型正确，与 Issue 中'return type to always be a tuple'的期望一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "bug 的确切位置是在 lambdify 内部还是在底层的 Python 代码打印机中。",
+    "除了单元素元组，是否还有其他边缘情况（如嵌套元组）受影响。",
+    "修复后生成的完整源代码字符串的确切格式（除了逗号外是否还有其他变化）。"
+  ],
+  "raw": {
+    "issue_summary": "SymPy 1.10 中 Python 代码打印机在生成单元素元组时遗漏了逗号，导致返回整数而非元组。",
+    "trigger_condition": {
+      "text": "使用 lambdify 生成一个返回单元素元组的函数，并通过 inspect.getsource 检查其源代码。",
+      "evidence": [
+        "Issue 中 MWE: inspect.getsource(lambdify([], tuple([1])))",
+        "Issue 中说明对于两个或更多元素的元组，生成的代码是正确的。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的函数源代码中，单元素元组缺少逗号，导致返回类型为整数而非元组。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中输出对比：SymPy 1.9 返回 'return (1,)'，SymPy 1.10 返回 'return (1)'。",
+        "Issue 中说明：'Note the missing comma after `1` that causes an integer to be returned instead of a tuple.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "生成的函数源代码中，单元素元组应包含逗号，确保返回类型为元组。",
+      "evidence": [
+        "Issue 中 SymPy 1.9 及以下版本的输出：'def _lambdifygenerated():\\n    return (1,)\\n'",
+        "Issue 中对于多元素元组的正确行为：'def _lambdifygenerated():\\n    return (1, 2)\\n'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 中触发问题的 API 调用。"
+      },
+      {
+        "name": "inspect.getsource",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中用于检查生成代码的 API。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify",
+        "lines": "",
+        "reason": "Issue 直接涉及 lambdify 函数，且相关源码片段指向该文件。"
+      },
+      {
+        "path": "sympy/printing/python.py",
+        "object": "PythonCodePrinter",
+        "lines": "",
+        "reason": "Issue 标题和描述指向 Python 代码打印机（Python code printer）在处理单元素元组时的问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lambdify_inspect",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "该测试直接使用 inspect.getsource 检查 lambdify 生成的代码。",
+        "reusable_parts": [
+          "import inspect",
+          "使用 lambdify 和 inspect.getsource 的模式",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试检查的是源代码中是否包含特定表达式片段，而非元组语法的正确性。"
+      },
+      {
+        "test_name": "test_python_functions",
+        "test_file": "sympy/printing/tests/test_python.py",
+        "why_relevant": "该测试涉及 python 代码打印功能，可能包含元组打印逻辑。",
+        "reusable_parts": [
+          "assert python(...) 的断言风格"
+        ],
+        "possible_gap": "该测试未直接测试 lambdify 或单元素元组的打印。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 lambdify 的输入通常是表达式或符号。",
+        "target_pattern": "lambdify 的输入为一个单元素元组，例如 tuple([1]) 或 (1,)。",
+        "reason": "Issue 表明当 lambdify 返回单元素元组时触发问题。",
+        "confidence": "high"
+      },
+      {
+        "slot": "return_value",
+        "current_pattern": "相似测试可能检查数值结果或表达式片段。",
+        "target_pattern": "检查生成的源代码字符串中单元素元组的表示。",
+        "reason": "错误症状体现在生成的源代码字符串中缺少逗号。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "inspect.getsource(f) 返回的字符串",
+        "reason": "Issue 的核心是生成的源代码字符串不正确。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(f()) 或 type(eval(inspect.getsource(f).split('return ')[1]))",
+        "reason": "最终问题是返回类型错误，应观察调用生成函数后的返回类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的源代码字符串中，单元素元组应包含逗号。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免对完整源代码字符串进行精确相等断言，因为实现细节可能变化。",
+        "reason": "Issue 表明缺失逗号是问题，检查逗号存在性更稳定。"
+      },
+      {
+        "assertion_goal": "调用生成的函数应返回元组类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "避免仅断言返回值等于某个整数。",
+        "reason": "确保修复后返回类型正确，与 Issue 中'return type to always be a tuple'的期望一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy、inspect 模块。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在现有测试类之外，作为独立函数编写。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "bug 的确切位置是在 lambdify 内部还是在底层的 Python 代码打印机中。",
+      "除了单元素元组，是否还有其他边缘情况（如嵌套元组）受影响。",
+      "修复后生成的完整源代码字符串的确切格式（除了逗号外是否还有其他变化）。"
+    ]
+  }
+}

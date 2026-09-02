@@ -1,0 +1,286 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-10949",
+  "issue_summary": "当输入是 pandas DataFrame 且 dtype 为 object 时，check_array 的 warn_on_dtype 参数无法触发 DataConversionWarning。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 pandas 并创建 DataFrame。如果 pandas 不可用，测试应跳过。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用类似相关测试 2 和 5 中的模式，在 try/except 中导入 pandas，失败时使用 SkipTest。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试函数可能位于一个测试类中，或作为独立函数。可以沿用现有测试文件的结构。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_check_array_dtype_warning",
+        "test_file": "sklearn/utils/tests/test_validation.py",
+        "why_relevant": "它直接测试了 check_array 的 warn_on_dtype 参数在各种输入（列表、numpy 数组、稀疏矩阵）下的行为，包括触发警告和不触发警告的场景。",
+        "reusable_parts": [
+          "imports (如 assert_warns, DataConversionWarning)",
+          "check_array 的调用模式",
+          "使用 assert_warns 来验证警告的断言风格",
+          "对 dtype 转换的验证"
+        ],
+        "possible_gap": "该测试没有使用真实的 pandas DataFrame 作为输入。它使用了 MockDataFrame（在相关测试 2 和 3 中）或 numpy 数组，但 MockDataFrame 可能无法完全模拟真实 pandas DataFrame 的所有属性，导致无法复现真实 DataFrame 触发的 bug。"
+      },
+      {
+        "test_name": "test_check_array_pandas_dtype_object_conversion",
+        "test_file": "sklearn/utils/tests/test_validation.py",
+        "why_relevant": "它测试了类 DataFrame 对象（MockDataFrame）的 dtype object 转换，验证了转换确实发生（dtype 变为 float）。",
+        "reusable_parts": [
+          "MockDataFrame 的构造和使用",
+          "对转换后 dtype 的断言（`assert_equal(..., .dtype.kind, \"f\")`）"
+        ],
+        "possible_gap": "它没有测试 warn_on_dtype 参数，只测试了转换是否发生。MockDataFrame 可能缺少真实 pandas DataFrame 的某些属性，影响 `dtype_orig` 的获取。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 check_array，传入一个 dtype 为 object 的 pandas DataFrame，并设置 warn_on_dtype=True。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分：`df = pd.DataFrame([[1, 2, 3], [2, 3, 4]], dtype=object)` 和 `checked = check_array(df, warn_on_dtype=True)`。",
+        "源码片段 1 中 check_array 函数的定义包含 warn_on_dtype 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "没有抛出预期的 DataConversionWarning 警告。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 的 Actual Results 部分：`No warning is thrown`。",
+        "Issue 的 Expected result 部分显示了预期的警告信息：`DataConversionWarning: Data with input dtype object was converted to float64.`。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.utils.validation.check_array",
+        "kind": "function",
+        "source_path": "sklearn/utils/validation.py",
+        "reason": "这是 Issue 中直接调用的函数，其 warn_on_dtype 参数的行为是问题的核心。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/utils/validation.py",
+        "object": "check_array",
+        "lines": "354-584",
+        "reason": "Issue 的核心是 check_array 函数在处理 pandas DataFrame 时 warn_on_dtype 逻辑失效。源码显示警告触发条件依赖于 `dtype_orig` 的获取和比较。对于 DataFrame，`dtype_orig` 的获取可能存在问题（例如，第 381-384 行处理了名为 'dtype' 的列的情况），或者警告触发逻辑（第 578-580 行）在处理 DataFrame 时未能正确执行。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用 numpy 数组（如 X_int64）或稀疏矩阵作为输入。",
+        "target_pattern": "使用真实的 pandas DataFrame，且其底层数据 dtype 为 object。",
+        "reason": "Issue 明确指出 bug 发生在输入是 pandas DataFrame 时。将输入从 numpy 数组变异为 pandas DataFrame 可能触发不同的代码路径，导致 `dtype_orig` 获取或警告逻辑失效。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中在测试 warn_on_dtype 时，明确设置了 `dtype=np.float64`。",
+        "target_pattern": "使用默认的 `dtype=\"numeric\"`（或显式设置 `dtype=\"numeric\"`），因为 Issue 中的示例代码没有显式设置 dtype，会使用默认值 \"numeric\"。",
+        "reason": "当 `dtype=\"numeric\"` 且输入 dtype 为 object 时，源码会将其转换为 float64（第 371-376 行）。这是触发 dtype 转换和潜在警告的条件。测试 1 中显式设置 `dtype=np.float64` 可能绕过了 \"numeric\" 逻辑的某些部分。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 warn_on_dtype=True 且输入数据的 dtype 与输出 dtype 不同时，应抛出 DataConversionWarning 警告。对于 dtype=object 的 DataFrame，转换为 float64 时应触发此警告。",
+      "evidence": [
+        "Issue 的 Expected result 部分显示了预期的警告信息。",
+        "源码片段 1 中第 578-580 行附近的代码逻辑：`if warn_on_dtype and dtype_orig is not None and array.dtype != dtype_orig:` 会触发警告。",
+        "相关测试 1 (test_check_array_dtype_warning) 验证了对于其他数据类型（如整数数组），warn_on_dtype=True 会触发警告。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "调用 check_array 后，检查是否捕获到 DataConversionWarning。",
+        "reason": "Issue 的核心是警告缺失。观测警告是否被触发是判断 bug 是否复现的直接方法。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查 check_array 返回值的 dtype。",
+        "reason": "需要确认 dtype 转换确实发生了（从 object 到 float64），这是触发警告的前提条件之一。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "检查 check_array 内部变量 `dtype_orig` 的值（可能需要插桩）。",
+        "reason": "源码中警告触发条件依赖于 `dtype_orig`（原始 dtype）不为 None 且与输出 dtype 不同。观测 `dtype_orig` 对于 DataFrame 是否正确获取是定位问题的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当传入 dtype=object 的 pandas DataFrame 且 warn_on_dtype=True 时，会抛出 DataConversionWarning。",
+        "preferred_assertion_style": "warns",
+        "avoid": "断言完整的警告消息字符串，因为消息格式可能微调。避免断言与警告无关的返回值属性。",
+        "reason": "Issue 的核心是警告的缺失。使用 `assert_warns(DataConversionWarning, ...)` 或类似方法可以稳定地验证警告是否被触发，而不依赖于可能变化的警告信息细节。"
+      },
+      {
+        "assertion_goal": "验证转换后的数组 dtype 为 float64（或至少是浮点类型）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言精确的 np.float64，如果未来默认浮点类型改变，断言可能失败。",
+        "reason": "确认 dtype 转换已发生，这是警告应该被触发的语义前提。断言 dtype.kind 为 'f'（浮点）比断言具体类型更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "bug 的确切位置：是 `dtype_orig` 获取逻辑（第 381-384 行）的问题，还是警告触发条件（第 578-580 行）的问题，或是其他地方？",
+    "是否所有 pandas DataFrame（无论列名）都会触发此问题，还是特定情况？",
+    "MockDataFrame 在相关测试中工作正常，它与真实 pandas DataFrame 在哪些关键属性上不同导致了行为差异？"
+  ],
+  "raw": {
+    "issue_summary": "当输入是 pandas DataFrame 且 dtype 为 object 时，check_array 的 warn_on_dtype 参数无法触发 DataConversionWarning。",
+    "trigger_condition": {
+      "text": "调用 check_array，传入一个 dtype 为 object 的 pandas DataFrame，并设置 warn_on_dtype=True。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分：`df = pd.DataFrame([[1, 2, 3], [2, 3, 4]], dtype=object)` 和 `checked = check_array(df, warn_on_dtype=True)`。",
+        "源码片段 1 中 check_array 函数的定义包含 warn_on_dtype 参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "没有抛出预期的 DataConversionWarning 警告。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 的 Actual Results 部分：`No warning is thrown`。",
+        "Issue 的 Expected result 部分显示了预期的警告信息：`DataConversionWarning: Data with input dtype object was converted to float64.`。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 warn_on_dtype=True 且输入数据的 dtype 与输出 dtype 不同时，应抛出 DataConversionWarning 警告。对于 dtype=object 的 DataFrame，转换为 float64 时应触发此警告。",
+      "evidence": [
+        "Issue 的 Expected result 部分显示了预期的警告信息。",
+        "源码片段 1 中第 578-580 行附近的代码逻辑：`if warn_on_dtype and dtype_orig is not None and array.dtype != dtype_orig:` 会触发警告。",
+        "相关测试 1 (test_check_array_dtype_warning) 验证了对于其他数据类型（如整数数组），warn_on_dtype=True 会触发警告。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.utils.validation.check_array",
+        "kind": "function",
+        "source_path": "sklearn/utils/validation.py",
+        "reason": "这是 Issue 中直接调用的函数，其 warn_on_dtype 参数的行为是问题的核心。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/utils/validation.py",
+        "object": "check_array",
+        "lines": "354-584",
+        "reason": "Issue 的核心是 check_array 函数在处理 pandas DataFrame 时 warn_on_dtype 逻辑失效。源码显示警告触发条件依赖于 `dtype_orig` 的获取和比较。对于 DataFrame，`dtype_orig` 的获取可能存在问题（例如，第 381-384 行处理了名为 'dtype' 的列的情况），或者警告触发逻辑（第 578-580 行）在处理 DataFrame 时未能正确执行。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_check_array_dtype_warning",
+        "test_file": "sklearn/utils/tests/test_validation.py",
+        "why_relevant": "它直接测试了 check_array 的 warn_on_dtype 参数在各种输入（列表、numpy 数组、稀疏矩阵）下的行为，包括触发警告和不触发警告的场景。",
+        "reusable_parts": [
+          "imports (如 assert_warns, DataConversionWarning)",
+          "check_array 的调用模式",
+          "使用 assert_warns 来验证警告的断言风格",
+          "对 dtype 转换的验证"
+        ],
+        "possible_gap": "该测试没有使用真实的 pandas DataFrame 作为输入。它使用了 MockDataFrame（在相关测试 2 和 3 中）或 numpy 数组，但 MockDataFrame 可能无法完全模拟真实 pandas DataFrame 的所有属性，导致无法复现真实 DataFrame 触发的 bug。"
+      },
+      {
+        "test_name": "test_check_array_pandas_dtype_object_conversion",
+        "test_file": "sklearn/utils/tests/test_validation.py",
+        "why_relevant": "它测试了类 DataFrame 对象（MockDataFrame）的 dtype object 转换，验证了转换确实发生（dtype 变为 float）。",
+        "reusable_parts": [
+          "MockDataFrame 的构造和使用",
+          "对转换后 dtype 的断言（`assert_equal(..., .dtype.kind, \"f\")`）"
+        ],
+        "possible_gap": "它没有测试 warn_on_dtype 参数，只测试了转换是否发生。MockDataFrame 可能缺少真实 pandas DataFrame 的某些属性，影响 `dtype_orig` 的获取。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用 numpy 数组（如 X_int64）或稀疏矩阵作为输入。",
+        "target_pattern": "使用真实的 pandas DataFrame，且其底层数据 dtype 为 object。",
+        "reason": "Issue 明确指出 bug 发生在输入是 pandas DataFrame 时。将输入从 numpy 数组变异为 pandas DataFrame 可能触发不同的代码路径，导致 `dtype_orig` 获取或警告逻辑失效。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中在测试 warn_on_dtype 时，明确设置了 `dtype=np.float64`。",
+        "target_pattern": "使用默认的 `dtype=\"numeric\"`（或显式设置 `dtype=\"numeric\"`），因为 Issue 中的示例代码没有显式设置 dtype，会使用默认值 \"numeric\"。",
+        "reason": "当 `dtype=\"numeric\"` 且输入 dtype 为 object 时，源码会将其转换为 float64（第 371-376 行）。这是触发 dtype 转换和潜在警告的条件。测试 1 中显式设置 `dtype=np.float64` 可能绕过了 \"numeric\" 逻辑的某些部分。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "调用 check_array 后，检查是否捕获到 DataConversionWarning。",
+        "reason": "Issue 的核心是警告缺失。观测警告是否被触发是判断 bug 是否复现的直接方法。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "检查 check_array 返回值的 dtype。",
+        "reason": "需要确认 dtype 转换确实发生了（从 object 到 float64），这是触发警告的前提条件之一。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "检查 check_array 内部变量 `dtype_orig` 的值（可能需要插桩）。",
+        "reason": "源码中警告触发条件依赖于 `dtype_orig`（原始 dtype）不为 None 且与输出 dtype 不同。观测 `dtype_orig` 对于 DataFrame 是否正确获取是定位问题的关键。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当传入 dtype=object 的 pandas DataFrame 且 warn_on_dtype=True 时，会抛出 DataConversionWarning。",
+        "preferred_assertion_style": "warns",
+        "avoid": "断言完整的警告消息字符串，因为消息格式可能微调。避免断言与警告无关的返回值属性。",
+        "reason": "Issue 的核心是警告的缺失。使用 `assert_warns(DataConversionWarning, ...)` 或类似方法可以稳定地验证警告是否被触发，而不依赖于可能变化的警告信息细节。"
+      },
+      {
+        "assertion_goal": "验证转换后的数组 dtype 为 float64（或至少是浮点类型）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言精确的 np.float64，如果未来默认浮点类型改变，断言可能失败。",
+        "reason": "确认 dtype 转换已发生，这是警告应该被触发的语义前提。断言 dtype.kind 为 'f'（浮点）比断言具体类型更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 pandas 并创建 DataFrame。如果 pandas 不可用，测试应跳过。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用类似相关测试 2 和 5 中的模式，在 try/except 中导入 pandas，失败时使用 SkipTest。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试函数可能位于一个测试类中，或作为独立函数。可以沿用现有测试文件的结构。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "bug 的确切位置：是 `dtype_orig` 获取逻辑（第 381-384 行）的问题，还是警告触发条件（第 578-580 行）的问题，或是其他地方？",
+      "是否所有 pandas DataFrame（无论列名）都会触发此问题，还是特定情况？",
+      "MockDataFrame 在相关测试中工作正常，它与真实 pandas DataFrame 在哪些关键属性上不同导致了行为差异？"
+    ]
+  }
+}

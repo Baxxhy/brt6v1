@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12262",
+  "issue_summary": "自定义模板标签在提供带默认值的关键字参数时错误地抛出 TemplateSyntaxError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个自定义的模板标签库（例如在 `tests/template_tests/templatetags/custom.py` 中定义），并使用 `@register.simple_tag` 注册 Issue 中描述的函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 `TagTestCase` 或 `SimpleTestCase` 以获取 `self.engine` 等测试设施。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 `{% load custom %}` 在模板中加载自定义标签库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SimpleTagTests.test_simple_tag_errors",
+        "test_file": "tests/template_tests/test_custom.py",
+        "why_relevant": "该测试专门测试 simple_tag 的各种错误情况，包括意外的关键字参数和重复的关键字参数，与 Issue 描述的错误类型高度相关。",
+        "reusable_parts": [
+          "测试类 `SimpleTagTests` 继承自 `TagTestCase`，可能包含必要的引擎和上下文设置。",
+          "使用 `self.engine.from_string` 和 `self.assertRaisesMessage(TemplateSyntaxError, ...)` 的模式。",
+          "错误消息字符串的断言风格。"
+        ],
+        "possible_gap": "现有测试可能没有覆盖 Issue 中描述的特定场景：函数签名是纯关键字参数（`def hello(*, greeting='hello')`）且带默认值的情况。现有测试 `simple_keyword_only_default` 可能使用了不同的参数组合。"
+      },
+      {
+        "test_name": "SimpleTagTests.test_simple_tags",
+        "test_file": "tests/template_tests/test_custom.py",
+        "why_relevant": "该测试包含了 `simple_keyword_only_default` 和 `simple_keyword_only_param` 的成功用例，展示了如何正确注册和调用带关键字参数的标签。",
+        "reusable_parts": [
+          "模板字符串的构造模式，例如 `{% load custom %}{% simple_keyword_only_default %}`。",
+          "使用 `Context` 对象和 `t.render(c)` 来渲染模板并断言输出。",
+          "测试用例的数据结构（模板字符串，预期结果）。"
+        ],
+        "possible_gap": "该测试只展示了正常工作的用例，没有触发 Issue 中描述的异常情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 @register.simple_tag 装饰器注册一个函数，该函数仅包含带默认值的关键字参数（例如 def hello(*, greeting='hello')），然后在模板中调用该标签并传入该关键字参数（例如 {% hello greeting='hi' %}）。或者，在模板中为同一个关键字参数提供多个值。",
+      "evidence": [
+        "Issue 描述中提供了两个示例：1. `@register.simple_tag def hello(*, greeting='hello'):` 和模板调用 `{% hello greeting='hi' %}`。2. `@register.simple_tag def hi(*, greeting):` 和模板调用 `{% hi greeting='hi' greeting='hello' %}`。",
+        "相关测试 1 中包含了测试 `simple_keyword_only_default` 和 `simple_keyword_only_param` 的用例，表明框架支持关键字参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当传入带默认值的关键字参数时，抛出异常：\"'hello' received unexpected keyword argument 'greeting'\"。当为同一个关键字参数提供多个值时，抛出错误的异常消息：\"'hi' received unexpected keyword argument 'greeting'\"，而不是预期的 \"'hi' received multiple values for keyword argument 'greeting'\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述中明确给出了错误消息：\"'hello' received unexpected keyword argument 'greeting'\" 和 \"'hi' received unexpected keyword argument 'greeting'\"。",
+        "相关测试 1 中包含了类似的错误消息断言，例如 \"'simple_one_default' received unexpected keyword argument 'three'\" 和 \"'simple_unlimited_args_kwargs' received multiple values for keyword argument 'eggs'\"，表明框架有预期的错误消息模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.template.library.Library.simple_tag",
+        "kind": "method",
+        "source_path": "django/template/library.py",
+        "reason": "Issue 中报告的缺陷与使用 @register.simple_tag 装饰器注册的函数有关。"
+      },
+      {
+        "name": "parse_bits",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码片段 1 中显示 `simple_tag` 内部调用了 `parse_bits` 来解析模板标签参数，这可能是参数处理逻辑的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/library.py",
+        "object": "Library.simple_tag",
+        "lines": "100-134",
+        "reason": "Issue 提到 \"the offending line is from 2.0…\"，且源码片段 1 包含了 `simple_tag` 装饰器的实现，其中调用了 `parse_bits` 来处理参数，这很可能是参数解析错误发生的地方。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 2 中 `simple_keyword_only_default` 的调用模式是 `{% simple_keyword_only_default %}`（不传参数，使用默认值）。",
+        "target_pattern": "将调用模式变异为 `{% simple_keyword_only_default kwarg=some_value %}`，即传入一个关键字参数。",
+        "reason": "Issue 表明，当函数定义为带默认值的关键字参数时，传入该参数反而会触发异常。这可能是现有测试未覆盖的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中测试重复关键字参数是针对 `simple_unlimited_args_kwargs` 函数，该函数可能接受 `**kwargs`。",
+        "target_pattern": "将测试对象变异为一个仅接受关键字参数（无 `**kwargs`）的函数，并在模板中为其重复提供同一个关键字参数。",
+        "reason": "Issue 指出，对于仅关键字参数的函数，重复参数会抛出错误的错误消息。这需要测试一个不同的函数签名。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于带默认值的关键字参数，模板标签应能正常接收传入的关键字参数值。对于重复提供的关键字参数，应抛出正确的错误消息，指出收到了多个值。",
+      "evidence": [
+        "Issue 描述中暗示了正确的行为：1. 传入 `greeting='hi'` 应该被接受并使用该值。2. 重复提供 `greeting` 参数应抛出 \"'hi' received multiple values for keyword argument 'greeting'\"。",
+        "相关测试 2 中 `simple_keyword_only_default` 和 `simple_keyword_only_param` 的成功用例表明框架意图支持关键字参数。",
+        "相关测试 1 中对于 `simple_unlimited_args_kwargs` 重复参数的测试期望是抛出 \"'simple_unlimited_args_kwargs' received multiple values for keyword argument 'eggs'\"，这应是一致的行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `self.engine.from_string(template_string).render(context)` 时捕获的 `TemplateSyntaxError` 及其 `args[0]`（错误消息字符串）。",
+        "reason": "Issue 的核心是抛出的异常类型和消息内容不正确。观测异常消息是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "当缺陷修复后，成功渲染的模板输出字符串。",
+        "reason": "为了验证预期行为（即关键字参数被正确接受），需要观测模板渲染的最终结果是否包含了传入的参数值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当向带默认值的关键字参数标签传入该参数时，不应抛出 TemplateSyntaxError，且渲染结果应反映传入的值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能变化的异常消息字符串，除非 Issue 明确给出了修复后的精确消息。",
+        "reason": "Issue 的预期行为是功能正常工作，因此断言应聚焦于渲染输出是否等于预期字符串（包含传入的参数值）。对于错误情况，可以断言异常类型为 TemplateSyntaxError，但消息内容可能随修复而变。"
+      },
+      {
+        "assertion_goal": "当为同一个关键字参数提供多个值时，应抛出 TemplateSyntaxError，且错误消息应包含 'received multiple values for keyword argument' 的语义。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言异常消息的完整精确匹配，因为具体措辞可能调整。",
+        "reason": "Issue 明确指出当前错误消息是错误的，并给出了预期的消息片段。断言消息包含关键片段（如 'multiple values'）比完全匹配更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 `inclusion tags` 是否受同一代码影响，以及是否需要用同样的方式测试。",
+    "函数签名中 `*`（仅关键字参数分隔符）的确切影响，以及它与普通关键字参数在处理上的区别。",
+    "`parse_bits` 函数内部的具体逻辑和导致缺陷的精确行号。",
+    "修复后，对于带默认值的关键字参数，不传参数时是否仍能正常工作（使用默认值）。"
+  ],
+  "raw": {
+    "issue_summary": "自定义模板标签在提供带默认值的关键字参数时错误地抛出 TemplateSyntaxError。",
+    "trigger_condition": {
+      "text": "使用 @register.simple_tag 装饰器注册一个函数，该函数仅包含带默认值的关键字参数（例如 def hello(*, greeting='hello')），然后在模板中调用该标签并传入该关键字参数（例如 {% hello greeting='hi' %}）。或者，在模板中为同一个关键字参数提供多个值。",
+      "evidence": [
+        "Issue 描述中提供了两个示例：1. `@register.simple_tag def hello(*, greeting='hello'):` 和模板调用 `{% hello greeting='hi' %}`。2. `@register.simple_tag def hi(*, greeting):` 和模板调用 `{% hi greeting='hi' greeting='hello' %}`。",
+        "相关测试 1 中包含了测试 `simple_keyword_only_default` 和 `simple_keyword_only_param` 的用例，表明框架支持关键字参数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当传入带默认值的关键字参数时，抛出异常：\"'hello' received unexpected keyword argument 'greeting'\"。当为同一个关键字参数提供多个值时，抛出错误的异常消息：\"'hi' received unexpected keyword argument 'greeting'\"，而不是预期的 \"'hi' received multiple values for keyword argument 'greeting'\"。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述中明确给出了错误消息：\"'hello' received unexpected keyword argument 'greeting'\" 和 \"'hi' received unexpected keyword argument 'greeting'\"。",
+        "相关测试 1 中包含了类似的错误消息断言，例如 \"'simple_one_default' received unexpected keyword argument 'three'\" 和 \"'simple_unlimited_args_kwargs' received multiple values for keyword argument 'eggs'\"，表明框架有预期的错误消息模式。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于带默认值的关键字参数，模板标签应能正常接收传入的关键字参数值。对于重复提供的关键字参数，应抛出正确的错误消息，指出收到了多个值。",
+      "evidence": [
+        "Issue 描述中暗示了正确的行为：1. 传入 `greeting='hi'` 应该被接受并使用该值。2. 重复提供 `greeting` 参数应抛出 \"'hi' received multiple values for keyword argument 'greeting'\"。",
+        "相关测试 2 中 `simple_keyword_only_default` 和 `simple_keyword_only_param` 的成功用例表明框架意图支持关键字参数。",
+        "相关测试 1 中对于 `simple_unlimited_args_kwargs` 重复参数的测试期望是抛出 \"'simple_unlimited_args_kwargs' received multiple values for keyword argument 'eggs'\"，这应是一致的行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.template.library.Library.simple_tag",
+        "kind": "method",
+        "source_path": "django/template/library.py",
+        "reason": "Issue 中报告的缺陷与使用 @register.simple_tag 装饰器注册的函数有关。"
+      },
+      {
+        "name": "parse_bits",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码片段 1 中显示 `simple_tag` 内部调用了 `parse_bits` 来解析模板标签参数，这可能是参数处理逻辑的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/template/library.py",
+        "object": "Library.simple_tag",
+        "lines": "100-134",
+        "reason": "Issue 提到 \"the offending line is from 2.0…\"，且源码片段 1 包含了 `simple_tag` 装饰器的实现，其中调用了 `parse_bits` 来处理参数，这很可能是参数解析错误发生的地方。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "SimpleTagTests.test_simple_tag_errors",
+        "test_file": "tests/template_tests/test_custom.py",
+        "why_relevant": "该测试专门测试 simple_tag 的各种错误情况，包括意外的关键字参数和重复的关键字参数，与 Issue 描述的错误类型高度相关。",
+        "reusable_parts": [
+          "测试类 `SimpleTagTests` 继承自 `TagTestCase`，可能包含必要的引擎和上下文设置。",
+          "使用 `self.engine.from_string` 和 `self.assertRaisesMessage(TemplateSyntaxError, ...)` 的模式。",
+          "错误消息字符串的断言风格。"
+        ],
+        "possible_gap": "现有测试可能没有覆盖 Issue 中描述的特定场景：函数签名是纯关键字参数（`def hello(*, greeting='hello')`）且带默认值的情况。现有测试 `simple_keyword_only_default` 可能使用了不同的参数组合。"
+      },
+      {
+        "test_name": "SimpleTagTests.test_simple_tags",
+        "test_file": "tests/template_tests/test_custom.py",
+        "why_relevant": "该测试包含了 `simple_keyword_only_default` 和 `simple_keyword_only_param` 的成功用例，展示了如何正确注册和调用带关键字参数的标签。",
+        "reusable_parts": [
+          "模板字符串的构造模式，例如 `{% load custom %}{% simple_keyword_only_default %}`。",
+          "使用 `Context` 对象和 `t.render(c)` 来渲染模板并断言输出。",
+          "测试用例的数据结构（模板字符串，预期结果）。"
+        ],
+        "possible_gap": "该测试只展示了正常工作的用例，没有触发 Issue 中描述的异常情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 2 中 `simple_keyword_only_default` 的调用模式是 `{% simple_keyword_only_default %}`（不传参数，使用默认值）。",
+        "target_pattern": "将调用模式变异为 `{% simple_keyword_only_default kwarg=some_value %}`，即传入一个关键字参数。",
+        "reason": "Issue 表明，当函数定义为带默认值的关键字参数时，传入该参数反而会触发异常。这可能是现有测试未覆盖的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 1 中测试重复关键字参数是针对 `simple_unlimited_args_kwargs` 函数，该函数可能接受 `**kwargs`。",
+        "target_pattern": "将测试对象变异为一个仅接受关键字参数（无 `**kwargs`）的函数，并在模板中为其重复提供同一个关键字参数。",
+        "reason": "Issue 指出，对于仅关键字参数的函数，重复参数会抛出错误的错误消息。这需要测试一个不同的函数签名。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 `self.engine.from_string(template_string).render(context)` 时捕获的 `TemplateSyntaxError` 及其 `args[0]`（错误消息字符串）。",
+        "reason": "Issue 的核心是抛出的异常类型和消息内容不正确。观测异常消息是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "当缺陷修复后，成功渲染的模板输出字符串。",
+        "reason": "为了验证预期行为（即关键字参数被正确接受），需要观测模板渲染的最终结果是否包含了传入的参数值。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当向带默认值的关键字参数标签传入该参数时，不应抛出 TemplateSyntaxError，且渲染结果应反映传入的值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、可能变化的异常消息字符串，除非 Issue 明确给出了修复后的精确消息。",
+        "reason": "Issue 的预期行为是功能正常工作，因此断言应聚焦于渲染输出是否等于预期字符串（包含传入的参数值）。对于错误情况，可以断言异常类型为 TemplateSyntaxError，但消息内容可能随修复而变。"
+      },
+      {
+        "assertion_goal": "当为同一个关键字参数提供多个值时，应抛出 TemplateSyntaxError，且错误消息应包含 'received multiple values for keyword argument' 的语义。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言异常消息的完整精确匹配，因为具体措辞可能调整。",
+        "reason": "Issue 明确指出当前错误消息是错误的，并给出了预期的消息片段。断言消息包含关键片段（如 'multiple values'）比完全匹配更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个自定义的模板标签库（例如在 `tests/template_tests/templatetags/custom.py` 中定义），并使用 `@register.simple_tag` 注册 Issue 中描述的函数。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 `TagTestCase` 或 `SimpleTestCase` 以获取 `self.engine` 等测试设施。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 `{% load custom %}` 在模板中加载自定义标签库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 `inclusion tags` 是否受同一代码影响，以及是否需要用同样的方式测试。",
+      "函数签名中 `*`（仅关键字参数分隔符）的确切影响，以及它与普通关键字参数在处理上的区别。",
+      "`parse_bits` 函数内部的具体逻辑和导致缺陷的精确行号。",
+      "修复后，对于带默认值的关键字参数，不传参数时是否仍能正常工作（使用默认值）。"
+    ]
+  }
+}

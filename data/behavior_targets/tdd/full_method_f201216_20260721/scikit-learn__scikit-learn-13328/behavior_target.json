@@ -1,0 +1,288 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13328",
+  "issue_summary": "HuberRegressor.fit 在输入布尔类型 X 时抛出 TypeError，因为内部对布尔数组使用了负号运算符。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要生成回归数据（如使用 make_regression），并将其转换为布尔类型作为 X。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 numpy 和 sklearn 的相关模块（如 sklearn.linear_model.HuberRegressor, sklearn.datasets.make_regression）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_huber_sparse",
+        "test_file": "sklearn/linear_model/tests/test_huber.py",
+        "why_relevant": "它测试了 HuberRegressor 对不同输入格式（稀疏矩阵）的处理，涉及 fit 方法调用和输入数据转换。",
+        "reusable_parts": [
+          "imports (HuberRegressor, make_regression_with_outliers)",
+          "HuberRegressor 对象构造和 fit 调用模式",
+          "assert_array_almost_equal 断言风格"
+        ],
+        "possible_gap": "该测试使用浮点类型的 X（来自 make_regression_with_outliers），没有测试布尔类型输入。"
+      },
+      {
+        "test_name": "test_huber_sample_weights",
+        "test_file": "sklearn/linear_model/tests/test_huber.py",
+        "why_relevant": "它测试了 fit 方法在多种输入和权重下的行为，包含数据准备和模型拟合的完整流程。",
+        "reusable_parts": [
+          "数据生成（make_regression_with_outliers）",
+          "HuberRegressor 的初始化和 fit 调用",
+          "使用 assert_array_almost_equal 比较系数"
+        ],
+        "possible_gap": "测试数据是浮点类型，没有覆盖布尔类型 X 的输入场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用布尔类型的数组（dtype=bool）作为 X 调用 HuberRegressor.fit 方法。",
+      "evidence": [
+        "Issue 中代码片段：`huber = HuberRegressor().fit(X_bool, y)`，其中 `X_bool = X > 0` 是布尔数组。",
+        "Issue 描述：`TypeError` when fitting `HuberRegressor` with boolean predictors."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: The numpy boolean negative, the `-` operator, is not supported, use the `~` operator or the logical_not function instead。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误堆栈显示错误来自 `_huber_loss_and_gradient` 函数中的 `-axis0_safe_slice(X, ~outliers_mask, n_non_outliers)`，对布尔数组 X 应用了负号。",
+        "错误信息原文：`TypeError: The numpy boolean negative, the `-` operator, is not supported...`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "HuberRegressor.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/huber.py",
+        "reason": "这是触发缺陷的直接 API 调用。"
+      },
+      {
+        "name": "_huber_loss_and_gradient",
+        "kind": "function",
+        "source_path": "sklearn/linear_model/huber.py",
+        "reason": "错误堆栈指向此函数内部对布尔数组进行了不支持的操作。"
+      },
+      {
+        "name": "check_X_y",
+        "kind": "function",
+        "source_path": "",
+        "reason": "HuberRegressor.fit 内部调用它进行输入验证和转换，可能影响数据类型处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/huber.py",
+        "object": "_huber_loss_and_gradient",
+        "lines": "",
+        "reason": "错误堆栈显示该函数中对布尔数组 X 使用了负号运算符 `-axis0_safe_slice(X, ~outliers_mask, n_non_outliers)`，而 numpy 布尔数组不支持负号。"
+      },
+      {
+        "path": "sklearn/linear_model/huber.py",
+        "object": "HuberRegressor.fit",
+        "lines": "234-306",
+        "reason": "该方法负责处理输入 X，可能未在调用优化函数前将布尔类型 X 正确转换为浮点类型。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用浮点类型的 X（例如来自 make_regression_with_outliers）。",
+        "target_pattern": "将 X 转换为布尔类型（例如 X_bool = X > 0），保持其他参数不变。",
+        "reason": "Issue 表明布尔类型 X 会触发内部对布尔数组使用负号运算符的错误路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "fit 方法接收的 X 参数是浮点数组。",
+        "target_pattern": "fit 方法接收的 X 参数是布尔数组。",
+        "reason": "HuberRegressor.fit 可能未对布尔类型参数进行适当的类型转换或检查，导致后续计算错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "HuberRegressor.fit 应该能够接受布尔类型的 X，并像 LinearRegression 那样将其内部转换为浮点类型，而不抛出异常。",
+      "evidence": [
+        "Issue 中 Expected Results 部分：`Boolean array is expected to be converted to `float` by `HuberRegressor.fit` as it is done by, say `LinearRegression`.`",
+        "Issue 中代码显示 `X_bool_as_float` 可以正常工作，表明期望布尔数组被自动转换。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 huber.fit(X_bool, y) 时是否抛出 TypeError。",
+        "reason": "Issue 的核心错误现象是抛出特定的 TypeError。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "fit 方法内部接收到的 X 的 dtype（在 check_X_y 之后或进入 _huber_loss_and_gradient 之前）。",
+        "reason": "观察 X 的数据类型是否在流程中被正确转换为浮点类型，以判断转换是否缺失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用布尔类型 X 调用 fit 方法不应抛出 TypeError，应能正常完成拟合。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的系数值或模型属性，因为这些可能因随机数据而变化。",
+        "reason": "Issue 期望布尔数组被接受并转换，因此修复后应不再抛出异常。当前测试应捕获异常，修复后断言无异常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "布尔类型 X 是否应该在 check_X_y 中被转换为浮点类型，还是应该在 _huber_loss_and_gradient 内部处理。",
+    "除了负号运算符，布尔类型 X 是否还会在 HuberRegressor 的其他计算中引发问题。",
+    "修复后，布尔类型 X 拟合得到的系数是否应与对应浮点类型 X 拟合的结果一致。"
+  ],
+  "raw": {
+    "issue_summary": "HuberRegressor.fit 在输入布尔类型 X 时抛出 TypeError，因为内部对布尔数组使用了负号运算符。",
+    "trigger_condition": {
+      "text": "使用布尔类型的数组（dtype=bool）作为 X 调用 HuberRegressor.fit 方法。",
+      "evidence": [
+        "Issue 中代码片段：`huber = HuberRegressor().fit(X_bool, y)`，其中 `X_bool = X > 0` 是布尔数组。",
+        "Issue 描述：`TypeError` when fitting `HuberRegressor` with boolean predictors."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: The numpy boolean negative, the `-` operator, is not supported, use the `~` operator or the logical_not function instead。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误堆栈显示错误来自 `_huber_loss_and_gradient` 函数中的 `-axis0_safe_slice(X, ~outliers_mask, n_non_outliers)`，对布尔数组 X 应用了负号。",
+        "错误信息原文：`TypeError: The numpy boolean negative, the `-` operator, is not supported...`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "HuberRegressor.fit 应该能够接受布尔类型的 X，并像 LinearRegression 那样将其内部转换为浮点类型，而不抛出异常。",
+      "evidence": [
+        "Issue 中 Expected Results 部分：`Boolean array is expected to be converted to `float` by `HuberRegressor.fit` as it is done by, say `LinearRegression`.`",
+        "Issue 中代码显示 `X_bool_as_float` 可以正常工作，表明期望布尔数组被自动转换。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "HuberRegressor.fit",
+        "kind": "method",
+        "source_path": "sklearn/linear_model/huber.py",
+        "reason": "这是触发缺陷的直接 API 调用。"
+      },
+      {
+        "name": "_huber_loss_and_gradient",
+        "kind": "function",
+        "source_path": "sklearn/linear_model/huber.py",
+        "reason": "错误堆栈指向此函数内部对布尔数组进行了不支持的操作。"
+      },
+      {
+        "name": "check_X_y",
+        "kind": "function",
+        "source_path": "",
+        "reason": "HuberRegressor.fit 内部调用它进行输入验证和转换，可能影响数据类型处理。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/linear_model/huber.py",
+        "object": "_huber_loss_and_gradient",
+        "lines": "",
+        "reason": "错误堆栈显示该函数中对布尔数组 X 使用了负号运算符 `-axis0_safe_slice(X, ~outliers_mask, n_non_outliers)`，而 numpy 布尔数组不支持负号。"
+      },
+      {
+        "path": "sklearn/linear_model/huber.py",
+        "object": "HuberRegressor.fit",
+        "lines": "234-306",
+        "reason": "该方法负责处理输入 X，可能未在调用优化函数前将布尔类型 X 正确转换为浮点类型。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_huber_sparse",
+        "test_file": "sklearn/linear_model/tests/test_huber.py",
+        "why_relevant": "它测试了 HuberRegressor 对不同输入格式（稀疏矩阵）的处理，涉及 fit 方法调用和输入数据转换。",
+        "reusable_parts": [
+          "imports (HuberRegressor, make_regression_with_outliers)",
+          "HuberRegressor 对象构造和 fit 调用模式",
+          "assert_array_almost_equal 断言风格"
+        ],
+        "possible_gap": "该测试使用浮点类型的 X（来自 make_regression_with_outliers），没有测试布尔类型输入。"
+      },
+      {
+        "test_name": "test_huber_sample_weights",
+        "test_file": "sklearn/linear_model/tests/test_huber.py",
+        "why_relevant": "它测试了 fit 方法在多种输入和权重下的行为，包含数据准备和模型拟合的完整流程。",
+        "reusable_parts": [
+          "数据生成（make_regression_with_outliers）",
+          "HuberRegressor 的初始化和 fit 调用",
+          "使用 assert_array_almost_equal 比较系数"
+        ],
+        "possible_gap": "测试数据是浮点类型，没有覆盖布尔类型 X 的输入场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用浮点类型的 X（例如来自 make_regression_with_outliers）。",
+        "target_pattern": "将 X 转换为布尔类型（例如 X_bool = X > 0），保持其他参数不变。",
+        "reason": "Issue 表明布尔类型 X 会触发内部对布尔数组使用负号运算符的错误路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "fit 方法接收的 X 参数是浮点数组。",
+        "target_pattern": "fit 方法接收的 X 参数是布尔数组。",
+        "reason": "HuberRegressor.fit 可能未对布尔类型参数进行适当的类型转换或检查，导致后续计算错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 huber.fit(X_bool, y) 时是否抛出 TypeError。",
+        "reason": "Issue 的核心错误现象是抛出特定的 TypeError。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "fit 方法内部接收到的 X 的 dtype（在 check_X_y 之后或进入 _huber_loss_and_gradient 之前）。",
+        "reason": "观察 X 的数据类型是否在流程中被正确转换为浮点类型，以判断转换是否缺失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用布尔类型 X 调用 fit 方法不应抛出 TypeError，应能正常完成拟合。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言具体的系数值或模型属性，因为这些可能因随机数据而变化。",
+        "reason": "Issue 期望布尔数组被接受并转换，因此修复后应不再抛出异常。当前测试应捕获异常，修复后断言无异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要生成回归数据（如使用 make_regression），并将其转换为布尔类型作为 X。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 numpy 和 sklearn 的相关模块（如 sklearn.linear_model.HuberRegressor, sklearn.datasets.make_regression）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "布尔类型 X 是否应该在 check_X_y 中被转换为浮点类型，还是应该在 _huber_loss_and_gradient 内部处理。",
+      "除了负号运算符，布尔类型 X 是否还会在 HuberRegressor 的其他计算中引发问题。",
+      "修复后，布尔类型 X 拟合得到的系数是否应与对应浮点类型 X 拟合的结果一致。"
+    ]
+  }
+}

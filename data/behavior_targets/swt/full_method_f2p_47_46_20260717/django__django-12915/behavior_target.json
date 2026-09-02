@@ -1,0 +1,338 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12915",
+  "issue_summary": "ASGIStaticFilesHandler 缺少异步响应方法 get_response_async，导致处理静态文件请求时抛出 'NoneType' object is not callable 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 ASGIStaticFilesHandler 类，并可能用其包装一个简单的 ASGI 应用。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 STATIC_URL 和 STATICFILES_DIRS 或使用 django.contrib.staticfiles 的测试设置。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应继承自 SimpleTestCase 并使用 async 测试方法，如现有相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 ApplicationCommunicator 进行 ASGI 通信。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ASGITest.test_file_response",
+        "test_file": "tests/asgi/tests.py",
+        "why_relevant": "它测试了 ASGI 应用处理文件响应，使用了 get_asgi_application() 和 ApplicationCommunicator，与触发缺陷所需的 ASGI 环境相似。",
+        "reusable_parts": [
+          "imports",
+          "ApplicationCommunicator 的使用",
+          "async test method 结构",
+          "scope 构造",
+          "await communicator.send_input 和 receive_output 模式"
+        ],
+        "possible_gap": "它测试的是普通的 ASGI 应用，而不是专门使用 ASGIStaticFilesHandler 来处理静态文件请求。"
+      },
+      {
+        "test_name": "ASGITest.test_get_asgi_application",
+        "test_file": "tests/asgi/tests.py",
+        "why_relevant": "它测试了 get_asgi_application() 返回的 ASGI callable 的基本功能，展示了如何构造和测试一个 ASGI HTTP 请求。",
+        "reusable_parts": [
+          "get_asgi_application() 调用",
+          "scope 构造",
+          "async test 框架",
+          "assert 响应状态和头部"
+        ],
+        "possible_gap": "它没有涉及静态文件处理或 ASGIStaticFilesHandler。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 ASGIStaticFilesHandler 处理一个 HTTP 请求，且请求路径匹配静态文件处理条件。",
+      "evidence": [
+        "Issue 描述：'when trying to use the ASGIStaticFilesHandler'",
+        "源码片段 3 显示 __call__ 方法在 scope['type'] == 'http' 且 self._should_handle(scope['path']) 为真时会调用 super().__call__"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: 'NoneType' object is not callable 异常，堆栈跟踪指向 self._middleware_chain(request) 调用。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示：'TypeError: 'NoneType' object is not callable'，发生在 base.py 的 get_response_async 方法中 response = await self._middleware_chain(request) 行"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ASGIStaticFilesHandler",
+        "kind": "class",
+        "source_path": "django/contrib/staticfiles/handlers.py",
+        "reason": "Issue 直接关于这个类缺少异步响应方法。"
+      },
+      {
+        "name": "StaticFilesHandlerMixin",
+        "kind": "class",
+        "source_path": "django/contrib/staticfiles/handlers.py",
+        "reason": "ASGIStaticFilesHandler 继承自它，且它缺少异步方法可能是问题根源。"
+      },
+      {
+        "name": "get_response_async",
+        "kind": "method",
+        "source_path": "django/core/handlers/base.py",
+        "reason": "Issue traceback 显示调用链到达此方法，且它期望一个可调用的 _middleware_chain。"
+      },
+      {
+        "name": "__call__",
+        "kind": "method",
+        "source_path": "django/contrib/staticfiles/handlers.py",
+        "reason": "ASGIStaticFilesHandler 的 __call__ 方法是请求入口点，它调用了 super().__call__ 从而可能触发缺陷路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/staticfiles/handlers.py",
+        "object": "StaticFilesHandlerMixin",
+        "lines": "13-53",
+        "reason": "该类是 ASGIStaticFilesHandler 的父类，包含同步 get_response 方法，但可能缺少异步的 get_response_async 方法，导致 _middleware_chain 未正确初始化。"
+      },
+      {
+        "path": "django/contrib/staticfiles/handlers.py",
+        "object": "ASGIStaticFilesHandler",
+        "lines": "72-88",
+        "reason": "该类是缺陷报告的直接目标，其 __call__ 方法在特定条件下调用 super().__call__，可能暴露了父类方法缺失的问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中使用 get_asgi_application() 获取通用的 ASGI 应用。",
+        "target_pattern": "使用 ASGIStaticFilesHandler 包装一个应用，并请求一个静态文件路径。",
+        "reason": "Issue 明确指出缺陷在使用 ASGIStaticFilesHandler 时触发，而现有测试未使用它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试请求路径如 '/' 或 '/file/'（可能指向动态视图）。",
+        "target_pattern": "请求一个应被静态文件处理器处理的路径（例如，配置了 STATIC_URL 的路径）。",
+        "reason": "源码片段 3 显示 __call__ 方法仅在 _should_handle(scope['path']) 为真时才进入可能触发缺陷的 super().__call__ 分支。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ASGIStaticFilesHandler 应能正确处理匹配的静态文件 HTTP 请求，并返回响应，而不抛出 TypeError。",
+      "evidence": [
+        "Issue 标题 'Add get_response_async for ASGIStaticFilesHandler' 暗示添加该方法后应能正常工作",
+        "源码片段 2 显示 StaticFilesHandlerMixin 有同步的 get_response 方法，暗示 ASGI 版本应有一个对应的异步版本"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在 await communicator.receive_output() 或相关调用周围捕获的异常类型和消息。",
+        "reason": "Issue 报告了明确的 TypeError 和 traceback，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "response_start 或 response_body 的内容，或 communicator.receive_output() 的返回值。",
+        "reason": "如果缺陷未触发，应能收到正常的 HTTP 响应；如果触发，可能收不到响应或收到错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 ASGIStaticFilesHandler 处理静态文件请求时，不会抛出 TypeError: 'NoneType' object is not callable 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串或精确的堆栈行号，因为这些可能在修复后改变。",
+        "reason": "Issue 的核心是特定异常的出现，使用 raises 断言其不存在（或使用 assertNotRaises 风格）能直接对准问题。"
+      },
+      {
+        "assertion_goal": "验证请求能成功完成并返回一个有效的 HTTP 响应（例如状态码 200）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言响应体的完整内容，除非与静态文件内容直接相关。",
+        "reason": "修复后，静态文件请求应正常服务，返回成功状态码是基本要求。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "StaticFilesHandlerMixin 中具体缺少哪个方法或属性导致 _middleware_chain 为 None。",
+    "触发缺陷所需的精确静态文件路径和配置。",
+    "ASGIStaticFilesHandler 的 __init__ 方法是否需要特殊参数。",
+    "修复后 get_response_async 方法的具体实现和签名。"
+  ],
+  "raw": {
+    "issue_summary": "ASGIStaticFilesHandler 缺少异步响应方法 get_response_async，导致处理静态文件请求时抛出 'NoneType' object is not callable 异常。",
+    "trigger_condition": {
+      "text": "使用 ASGIStaticFilesHandler 处理一个 HTTP 请求，且请求路径匹配静态文件处理条件。",
+      "evidence": [
+        "Issue 描述：'when trying to use the ASGIStaticFilesHandler'",
+        "源码片段 3 显示 __call__ 方法在 scope['type'] == 'http' 且 self._should_handle(scope['path']) 为真时会调用 super().__call__"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: 'NoneType' object is not callable 异常，堆栈跟踪指向 self._middleware_chain(request) 调用。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示：'TypeError: 'NoneType' object is not callable'，发生在 base.py 的 get_response_async 方法中 response = await self._middleware_chain(request) 行"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ASGIStaticFilesHandler 应能正确处理匹配的静态文件 HTTP 请求，并返回响应，而不抛出 TypeError。",
+      "evidence": [
+        "Issue 标题 'Add get_response_async for ASGIStaticFilesHandler' 暗示添加该方法后应能正常工作",
+        "源码片段 2 显示 StaticFilesHandlerMixin 有同步的 get_response 方法，暗示 ASGI 版本应有一个对应的异步版本"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ASGIStaticFilesHandler",
+        "kind": "class",
+        "source_path": "django/contrib/staticfiles/handlers.py",
+        "reason": "Issue 直接关于这个类缺少异步响应方法。"
+      },
+      {
+        "name": "StaticFilesHandlerMixin",
+        "kind": "class",
+        "source_path": "django/contrib/staticfiles/handlers.py",
+        "reason": "ASGIStaticFilesHandler 继承自它，且它缺少异步方法可能是问题根源。"
+      },
+      {
+        "name": "get_response_async",
+        "kind": "method",
+        "source_path": "django/core/handlers/base.py",
+        "reason": "Issue traceback 显示调用链到达此方法，且它期望一个可调用的 _middleware_chain。"
+      },
+      {
+        "name": "__call__",
+        "kind": "method",
+        "source_path": "django/contrib/staticfiles/handlers.py",
+        "reason": "ASGIStaticFilesHandler 的 __call__ 方法是请求入口点，它调用了 super().__call__ 从而可能触发缺陷路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/staticfiles/handlers.py",
+        "object": "StaticFilesHandlerMixin",
+        "lines": "13-53",
+        "reason": "该类是 ASGIStaticFilesHandler 的父类，包含同步 get_response 方法，但可能缺少异步的 get_response_async 方法，导致 _middleware_chain 未正确初始化。"
+      },
+      {
+        "path": "django/contrib/staticfiles/handlers.py",
+        "object": "ASGIStaticFilesHandler",
+        "lines": "72-88",
+        "reason": "该类是缺陷报告的直接目标，其 __call__ 方法在特定条件下调用 super().__call__，可能暴露了父类方法缺失的问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ASGITest.test_file_response",
+        "test_file": "tests/asgi/tests.py",
+        "why_relevant": "它测试了 ASGI 应用处理文件响应，使用了 get_asgi_application() 和 ApplicationCommunicator，与触发缺陷所需的 ASGI 环境相似。",
+        "reusable_parts": [
+          "imports",
+          "ApplicationCommunicator 的使用",
+          "async test method 结构",
+          "scope 构造",
+          "await communicator.send_input 和 receive_output 模式"
+        ],
+        "possible_gap": "它测试的是普通的 ASGI 应用，而不是专门使用 ASGIStaticFilesHandler 来处理静态文件请求。"
+      },
+      {
+        "test_name": "ASGITest.test_get_asgi_application",
+        "test_file": "tests/asgi/tests.py",
+        "why_relevant": "它测试了 get_asgi_application() 返回的 ASGI callable 的基本功能，展示了如何构造和测试一个 ASGI HTTP 请求。",
+        "reusable_parts": [
+          "get_asgi_application() 调用",
+          "scope 构造",
+          "async test 框架",
+          "assert 响应状态和头部"
+        ],
+        "possible_gap": "它没有涉及静态文件处理或 ASGIStaticFilesHandler。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中使用 get_asgi_application() 获取通用的 ASGI 应用。",
+        "target_pattern": "使用 ASGIStaticFilesHandler 包装一个应用，并请求一个静态文件路径。",
+        "reason": "Issue 明确指出缺陷在使用 ASGIStaticFilesHandler 时触发，而现有测试未使用它。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "测试请求路径如 '/' 或 '/file/'（可能指向动态视图）。",
+        "target_pattern": "请求一个应被静态文件处理器处理的路径（例如，配置了 STATIC_URL 的路径）。",
+        "reason": "源码片段 3 显示 __call__ 方法仅在 _should_handle(scope['path']) 为真时才进入可能触发缺陷的 super().__call__ 分支。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在 await communicator.receive_output() 或相关调用周围捕获的异常类型和消息。",
+        "reason": "Issue 报告了明确的 TypeError 和 traceback，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "response_start 或 response_body 的内容，或 communicator.receive_output() 的返回值。",
+        "reason": "如果缺陷未触发，应能收到正常的 HTTP 响应；如果触发，可能收不到响应或收到错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 ASGIStaticFilesHandler 处理静态文件请求时，不会抛出 TypeError: 'NoneType' object is not callable 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串或精确的堆栈行号，因为这些可能在修复后改变。",
+        "reason": "Issue 的核心是特定异常的出现，使用 raises 断言其不存在（或使用 assertNotRaises 风格）能直接对准问题。"
+      },
+      {
+        "assertion_goal": "验证请求能成功完成并返回一个有效的 HTTP 响应（例如状态码 200）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言响应体的完整内容，除非与静态文件内容直接相关。",
+        "reason": "修复后，静态文件请求应正常服务，返回成功状态码是基本要求。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 ASGIStaticFilesHandler 类，并可能用其包装一个简单的 ASGI 应用。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 STATIC_URL 和 STATICFILES_DIRS 或使用 django.contrib.staticfiles 的测试设置。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应继承自 SimpleTestCase 并使用 async 测试方法，如现有相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 ApplicationCommunicator 进行 ASGI 通信。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "StaticFilesHandlerMixin 中具体缺少哪个方法或属性导致 _middleware_chain 为 None。",
+      "触发缺陷所需的精确静态文件路径和配置。",
+      "ASGIStaticFilesHandler 的 __init__ 方法是否需要特殊参数。",
+      "修复后 get_response_async 方法的具体实现和签名。"
+    ]
+  }
+}

@@ -1,0 +1,278 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13346",
+  "issue_summary": "在 MySQL、Oracle 和 SQLite 数据库上，JSONField 的 key transform 使用 __in 查找操作符时无法正常工作。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用支持 JSONField 的数据库后端（如 MySQL、Oracle、SQLite），并在测试类上使用 @skipUnlessDBFeature('supports_json_field') 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个包含 JSONField 的测试模型（如检索到的测试中的 NullableJSONModel），并在其中预置一些数据，确保 `field__key=value` 能匹配到记录。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lookups_with_key_transform",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试直接验证 JSONField 上 key transform 与各种查找操作符（如 has_key, has_keys, has_any_keys）的组合使用，与 Issue 中测试 key transform 与 __in 操作符的组合高度相似。",
+        "reusable_parts": [
+          "测试类结构 (TestQuerying)",
+          "使用 NullableJSONModel 作为测试模型",
+          "使用 `**{lookup: value}` 动态构建过滤条件",
+          "assertIs 和 exists() 的断言风格"
+        ],
+        "possible_gap": "该测试没有覆盖 __in 查找操作符，而是测试了 has_key 系列操作符。"
+      },
+      {
+        "test_name": "test_none_key_and_exact_lookup",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试验证了 JSONField 上 key transform 与 exact 查找操作符（`value__a='b'`）的组合，这与 Issue 中 `our_field__key=0` 的等值查找模式相似。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 NullableJSONModel",
+          "使用 `value__a='b'` 的 key transform 加 exact 查找模式",
+          "assertSequenceEqual 断言风格"
+        ],
+        "possible_gap": "该测试只使用了 exact 查找，没有使用 __in 查找，且测试的是特定值 'b' 和 None。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在支持 JSONField 的数据库（MySQL、Oracle、SQLite）上，对 JSONField 使用 key transform 并应用 __in 查找操作符进行过滤，例如 `our_field__key__in=[0]`。",
+      "evidence": [
+        "Issue 描述：'On MySQL, Oracle, and SQLite, __in lookup doesn't work on key transforms.'",
+        "Issue 中示例：first_filter = {'our_field__key__in': [0]}"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 `our_field__key__in=[0]` 过滤返回空结果集，而使用 `our_field__key=0` 过滤返回非空结果集，预期两者应返回相同结果集。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'I would expect that both filters would give me the same queryset but this is not the case.'",
+        "Issue 中示例：len(first_items) 返回 0，len(second_items) 返回 312。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "JSONField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/json.py",
+        "reason": "Issue 涉及从 django_mysql.models.JSONField 迁移到 models.JSONField，且问题与 JSONField 的查找操作符相关。"
+      },
+      {
+        "name": "KeyTransform",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试代码中大量使用 KeyTransform 来处理 JSONField 的 key transform，这是实现 `our_field__key` 查询的核心。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中通过 `OurModel.objects.filter(**first_filter)` 触发问题，是缺陷复现的核心 API 调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/json.py",
+        "object": "JSONField",
+        "lines": "",
+        "reason": "该文件包含 JSONField 类，是处理 JSON 字段查找（包括 key transform 和 __in 操作符）的核心逻辑所在位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中 key transform 与 exact 查找（如 `value__a='b'`）或 has_key 系列查找的组合。",
+        "target_pattern": "将查找操作符替换为 __in，例如 `value__key__in=[some_value]`。",
+        "reason": "Issue 表明 __in 操作符在 key transform 上行为异常，而 exact 查找正常，因此变异操作符可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中查找的值是单个标量（如 'b', None）或列表（用于 has_keys）。",
+        "target_pattern": "使用一个包含单个元素的列表作为 __in 查找的输入，例如 `[0]`。",
+        "reason": "Issue 中触发问题的输入是 `[0]`，这符合 __in 操作符的典型用法，但可能在与 key transform 结合时处理不当。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对 JSONField 的 key transform 使用 __in 查找操作符进行过滤时，应返回与使用等值查找（`our_field__key=value`）语义一致的结果集。",
+      "evidence": [
+        "Issue 描述：'I would expect that both filters would give me the same queryset'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "filter(**filter_dict).count() 或 len(queryset) 的返回值。",
+        "reason": "Issue 的核心现象是使用 __in 和 exact 查找返回的结果集数量不一致，观察返回值可以直接验证问题。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "str(queryset.query) 或 connection.queries 中生成的 SQL 语句。",
+        "reason": "观察生成的 SQL 可以判断 __in 操作符是否被正确转换为 SQL 的 IN 子句，或者是否存在语法/语义错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 `field__key__in=[value]` 过滤得到的结果集与使用 `field__key=value` 过滤得到的结果集相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 SQL 字符串或完整的 repr 字符串，因为不同数据库后端可能生成不同的 SQL。",
+        "reason": "Issue 的预期行为是两种过滤方式结果一致，直接比较结果集（如使用 assertSequenceEqual 或比较 count）是稳定且与 Issue 对齐的断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 JSONField 的 get_transform 方法、KeyTransform 类的某个方法，还是在查询编译/SQL 生成层。",
+    "__in 操作符在其他数据库后端（如 PostgreSQL）上是否正常工作。",
+    "除了整数值 0，其他类型的值（如字符串、布尔值、列表）是否也会触发此问题。"
+  ],
+  "raw": {
+    "issue_summary": "在 MySQL、Oracle 和 SQLite 数据库上，JSONField 的 key transform 使用 __in 查找操作符时无法正常工作。",
+    "trigger_condition": {
+      "text": "在支持 JSONField 的数据库（MySQL、Oracle、SQLite）上，对 JSONField 使用 key transform 并应用 __in 查找操作符进行过滤，例如 `our_field__key__in=[0]`。",
+      "evidence": [
+        "Issue 描述：'On MySQL, Oracle, and SQLite, __in lookup doesn't work on key transforms.'",
+        "Issue 中示例：first_filter = {'our_field__key__in': [0]}"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "使用 `our_field__key__in=[0]` 过滤返回空结果集，而使用 `our_field__key=0` 过滤返回非空结果集，预期两者应返回相同结果集。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'I would expect that both filters would give me the same queryset but this is not the case.'",
+        "Issue 中示例：len(first_items) 返回 0，len(second_items) 返回 312。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对 JSONField 的 key transform 使用 __in 查找操作符进行过滤时，应返回与使用等值查找（`our_field__key=value`）语义一致的结果集。",
+      "evidence": [
+        "Issue 描述：'I would expect that both filters would give me the same queryset'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "JSONField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/json.py",
+        "reason": "Issue 涉及从 django_mysql.models.JSONField 迁移到 models.JSONField，且问题与 JSONField 的查找操作符相关。"
+      },
+      {
+        "name": "KeyTransform",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试代码中大量使用 KeyTransform 来处理 JSONField 的 key transform，这是实现 `our_field__key` 查询的核心。"
+      },
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中通过 `OurModel.objects.filter(**first_filter)` 触发问题，是缺陷复现的核心 API 调用。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/fields/json.py",
+        "object": "JSONField",
+        "lines": "",
+        "reason": "该文件包含 JSONField 类，是处理 JSON 字段查找（包括 key transform 和 __in 操作符）的核心逻辑所在位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lookups_with_key_transform",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试直接验证 JSONField 上 key transform 与各种查找操作符（如 has_key, has_keys, has_any_keys）的组合使用，与 Issue 中测试 key transform 与 __in 操作符的组合高度相似。",
+        "reusable_parts": [
+          "测试类结构 (TestQuerying)",
+          "使用 NullableJSONModel 作为测试模型",
+          "使用 `**{lookup: value}` 动态构建过滤条件",
+          "assertIs 和 exists() 的断言风格"
+        ],
+        "possible_gap": "该测试没有覆盖 __in 查找操作符，而是测试了 has_key 系列操作符。"
+      },
+      {
+        "test_name": "test_none_key_and_exact_lookup",
+        "test_file": "tests/model_fields/test_jsonfield.py",
+        "why_relevant": "该测试验证了 JSONField 上 key transform 与 exact 查找操作符（`value__a='b'`）的组合，这与 Issue 中 `our_field__key=0` 的等值查找模式相似。",
+        "reusable_parts": [
+          "测试类结构",
+          "使用 NullableJSONModel",
+          "使用 `value__a='b'` 的 key transform 加 exact 查找模式",
+          "assertSequenceEqual 断言风格"
+        ],
+        "possible_gap": "该测试只使用了 exact 查找，没有使用 __in 查找，且测试的是特定值 'b' 和 None。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "operator",
+        "current_pattern": "相似测试中 key transform 与 exact 查找（如 `value__a='b'`）或 has_key 系列查找的组合。",
+        "target_pattern": "将查找操作符替换为 __in，例如 `value__key__in=[some_value]`。",
+        "reason": "Issue 表明 __in 操作符在 key transform 上行为异常，而 exact 查找正常，因此变异操作符可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中查找的值是单个标量（如 'b', None）或列表（用于 has_keys）。",
+        "target_pattern": "使用一个包含单个元素的列表作为 __in 查找的输入，例如 `[0]`。",
+        "reason": "Issue 中触发问题的输入是 `[0]`，这符合 __in 操作符的典型用法，但可能在与 key transform 结合时处理不当。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "filter(**filter_dict).count() 或 len(queryset) 的返回值。",
+        "reason": "Issue 的核心现象是使用 __in 和 exact 查找返回的结果集数量不一致，观察返回值可以直接验证问题。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "str(queryset.query) 或 connection.queries 中生成的 SQL 语句。",
+        "reason": "观察生成的 SQL 可以判断 __in 操作符是否被正确转换为 SQL 的 IN 子句，或者是否存在语法/语义错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证使用 `field__key__in=[value]` 过滤得到的结果集与使用 `field__key=value` 过滤得到的结果集相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 SQL 字符串或完整的 repr 字符串，因为不同数据库后端可能生成不同的 SQL。",
+        "reason": "Issue 的预期行为是两种过滤方式结果一致，直接比较结果集（如使用 assertSequenceEqual 或比较 count）是稳定且与 Issue 对齐的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用支持 JSONField 的数据库后端（如 MySQL、Oracle、SQLite），并在测试类上使用 @skipUnlessDBFeature('supports_json_field') 装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个包含 JSONField 的测试模型（如检索到的测试中的 NullableJSONModel），并在其中预置一些数据，确保 `field__key=value` 能匹配到记录。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 JSONField 的 get_transform 方法、KeyTransform 类的某个方法，还是在查询编译/SQL 生成层。",
+      "__in 操作符在其他数据库后端（如 PostgreSQL）上是否正常工作。",
+      "除了整数值 0，其他类型的值（如字符串、布尔值、列表）是否也会触发此问题。"
+    ]
+  }
+}

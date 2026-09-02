@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-5787",
+  "issue_summary": "使用 pytest-xdist 并行执行时，异常链（chained exceptions）的序列化/显示丢失了中间异常信息，只显示最后一个异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 pytest 的 testdir fixture 来创建和运行包含异常链的测试文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要安装并启用 pytest-xdist 插件。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 --tb=long 选项以确保详细的 traceback 输出。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_exc_chain_repr_without_traceback",
+        "test_file": "testing/code/test_excinfo.py",
+        "why_relevant": "这个测试直接验证了异常链（包括 cause 和 context）的表示（repr）生成，与 Issue 中关注的异常链显示问题高度相关。",
+        "reusable_parts": [
+          "使用 pytest.raises 捕获异常链的模式",
+          "使用 excinfo.getrepr() 获取异常表示",
+          "使用 LineMatcher 验证输出片段"
+        ],
+        "possible_gap": "该测试是在单进程环境下验证异常表示，没有涉及跨进程（xdist）的序列化/反序列化场景。"
+      },
+      {
+        "test_name": "test_xdist_longrepr_to_str_issue_241",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "这个测试专门针对 xdist 环境下的报告序列化问题（issue pytest-xdist#241），直接涉及测试报告的 _to_json 和 longrepr 处理。",
+        "reusable_parts": [
+          "使用 testdir 创建测试文件并运行",
+          "获取和检查测试报告 (getreports)",
+          "检查报告对象的序列化字段"
+        ],
+        "possible_gap": "该测试检查的是报告对象的序列化格式，但没有构造包含嵌套异常链的测试用例来触发 Issue 中描述的具体丢失信息问题。"
+      },
+      {
+        "test_name": "test_exception_handling_no_traceback",
+        "test_file": "testing/test_assertion.py",
+        "why_relevant": "这个测试处理了多进程（multiprocessing）场景下的异常链表示问题（#1984），这与 xdist 的跨进程环境有相似之处。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建包含多进程代码的测试",
+          "使用 --tb=long 参数运行测试",
+          "使用 fnmatch_lines 验证输出中包含异常链描述文本"
+        ],
+        "possible_gap": "该测试使用的是 Python 标准库的 multiprocessing，而不是 pytest-xdist 插件，且关注的是异常链中某个异常缺少 traceback 的特殊情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 pytest-xdist 插件（例如通过 -n auto 参数）运行包含嵌套异常链（使用 from 或隐式链接）的测试。",
+      "evidence": [
+        "Issue 中描述了运行测试时使用和不使用 xdist 的对比，使用 xdist 时只显示最后一个异常。",
+        "Issue 中提供了两个测试函数，分别演示了使用 from 和隐式链接的异常链。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当使用 pytest-xdist 并行执行时，测试失败报告中只显示了异常链中的最后一个异常，丢失了前面异常的详细信息（如 traceback 和描述性文本）。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中对比了输出：不使用 xdist 时，报告显示了完整的异常链，包括 'The above exception was the direct cause...' 和 'During handling of the above exception...' 等文本以及每个异常的 traceback。使用 xdist 时，报告只显示了最后一个异常的 traceback 和错误信息。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_pytest._code.ExceptionInfo",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 和 5 中使用了 ExceptionInfo.from_current() 来捕获和操作异常信息，这是 pytest 内部处理异常的核心类。"
+      },
+      {
+        "name": "_pytest._code.ExceptionInfo.getrepr",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 3 和 5 中使用了 getrepr 方法来获取异常的表示，这与异常报告的生成和序列化直接相关。"
+      },
+      {
+        "name": "pytest.raises",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中的测试和多个相关测试都使用了 pytest.raises 来捕获和检查异常。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "pytest-xdist 插件中处理测试报告序列化/反序列化的部分",
+        "lines": "",
+        "reason": "Issue 明确指出问题在使用 pytest-xdist 时出现，表明缺陷可能位于 xdist 插件内部，在将测试结果从工作进程传递回主进程的序列化过程中丢失了异常链信息。"
+      },
+      {
+        "path": "_pytest/_code/code.py 或相关文件",
+        "object": "ExceptionInfo 的序列化方法（如 _to_json）或相关表示方法",
+        "lines": "",
+        "reason": "相关测试 2 (test_xdist_longrepr_to_str_issue_241) 涉及报告序列化 (_to_json) 和 longrepr 字段，这可能与异常信息的跨进程传输有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在单进程（无 xdist）下运行测试。",
+        "target_pattern": "使用 pytest-xdist 插件（例如添加 -n auto 参数）运行测试。",
+        "reason": "Issue 表明缺陷仅在启用 xdist 并行执行时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中的异常链相对简单（如单个 cause 或 context）。",
+        "target_pattern": "构造如 Issue 中所示的深度嵌套异常链（多层 try-except，使用 from 或隐式链接）。",
+        "reason": "Issue 中的测试用例展示了多层嵌套的异常链，这更可能暴露序列化过程中信息丢失的问题。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "使用 pytest-xdist 并行执行时，测试失败报告应能正确序列化和显示完整的异常链信息，包括所有链接的异常及其 traceback。",
+      "evidence": [
+        "Issue 中展示了不使用 xdist 时的正确输出，包含了完整的异常链。",
+        "相关测试 3 (test_exc_chain_repr_without_traceback) 和 4 (test_exception_handling_no_traceback) 表明 pytest 核心功能支持异常链的表示。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "测试失败报告对象的 longrepr 字段或其序列化后的内容（如通过 _to_json 获取）。",
+        "reason": "Issue 的核心是异常链信息在报告序列化/反序列化过程中丢失，观察报告对象的表示可以定位信息丢失的环节。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "excinfo.getrepr() 的输出字符串，特别是其中是否包含 'The above exception was the direct cause...' 或 'During handling of the above exception...' 等描述性文本。",
+        "reason": "这些文本是异常链正确表示的关键标志，它们的缺失表明问题。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "捕获的异常对象（excinfo.value）的 __cause__ 和 __context__ 属性链。",
+        "reason": "需要确认在测试执行过程中，原始的异常链结构是否被正确构建和保持。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在使用 xdist 时，测试失败报告的输出中包含了异常链中所有异常的 traceback 或关键描述信息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、格式化的输出字符串完全相等，因为 traceback 行号等细节可能变化。",
+        "reason": "Issue 关注的是信息的完整性（是否包含），而不是输出的精确格式。使用片段匹配更稳定。"
+      },
+      {
+        "assertion_goal": "验证序列化后的报告对象（如 JSON）中包含了表示异常链的必要结构。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免深度断言复杂的、嵌套的 JSON 结构的每一个字段。",
+        "reason": "需要确认异常链信息没有被序列化过程丢弃，但具体的内部结构可能不是测试的重点。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 pytest-xdist 插件的代码中，还是在 pytest 核心的某个与序列化交互的接口中。",
+    "异常链信息是在序列化（_to_json）、传输还是反序列化（从 JSON 重建）的哪个环节丢失的。",
+    "除了显示的 traceback 文本，报告对象内部的其他字段（如 chain 属性）是否也受到了影响。"
+  ],
+  "raw": {
+    "issue_summary": "使用 pytest-xdist 并行执行时，异常链（chained exceptions）的序列化/显示丢失了中间异常信息，只显示最后一个异常。",
+    "trigger_condition": {
+      "text": "使用 pytest-xdist 插件（例如通过 -n auto 参数）运行包含嵌套异常链（使用 from 或隐式链接）的测试。",
+      "evidence": [
+        "Issue 中描述了运行测试时使用和不使用 xdist 的对比，使用 xdist 时只显示最后一个异常。",
+        "Issue 中提供了两个测试函数，分别演示了使用 from 和隐式链接的异常链。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当使用 pytest-xdist 并行执行时，测试失败报告中只显示了异常链中的最后一个异常，丢失了前面异常的详细信息（如 traceback 和描述性文本）。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中对比了输出：不使用 xdist 时，报告显示了完整的异常链，包括 'The above exception was the direct cause...' 和 'During handling of the above exception...' 等文本以及每个异常的 traceback。使用 xdist 时，报告只显示了最后一个异常的 traceback 和错误信息。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "使用 pytest-xdist 并行执行时，测试失败报告应能正确序列化和显示完整的异常链信息，包括所有链接的异常及其 traceback。",
+      "evidence": [
+        "Issue 中展示了不使用 xdist 时的正确输出，包含了完整的异常链。",
+        "相关测试 3 (test_exc_chain_repr_without_traceback) 和 4 (test_exception_handling_no_traceback) 表明 pytest 核心功能支持异常链的表示。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_pytest._code.ExceptionInfo",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 和 5 中使用了 ExceptionInfo.from_current() 来捕获和操作异常信息，这是 pytest 内部处理异常的核心类。"
+      },
+      {
+        "name": "_pytest._code.ExceptionInfo.getrepr",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试 3 和 5 中使用了 getrepr 方法来获取异常的表示，这与异常报告的生成和序列化直接相关。"
+      },
+      {
+        "name": "pytest.raises",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中的测试和多个相关测试都使用了 pytest.raises 来捕获和检查异常。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "pytest-xdist 插件中处理测试报告序列化/反序列化的部分",
+        "lines": "",
+        "reason": "Issue 明确指出问题在使用 pytest-xdist 时出现，表明缺陷可能位于 xdist 插件内部，在将测试结果从工作进程传递回主进程的序列化过程中丢失了异常链信息。"
+      },
+      {
+        "path": "_pytest/_code/code.py 或相关文件",
+        "object": "ExceptionInfo 的序列化方法（如 _to_json）或相关表示方法",
+        "lines": "",
+        "reason": "相关测试 2 (test_xdist_longrepr_to_str_issue_241) 涉及报告序列化 (_to_json) 和 longrepr 字段，这可能与异常信息的跨进程传输有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_exc_chain_repr_without_traceback",
+        "test_file": "testing/code/test_excinfo.py",
+        "why_relevant": "这个测试直接验证了异常链（包括 cause 和 context）的表示（repr）生成，与 Issue 中关注的异常链显示问题高度相关。",
+        "reusable_parts": [
+          "使用 pytest.raises 捕获异常链的模式",
+          "使用 excinfo.getrepr() 获取异常表示",
+          "使用 LineMatcher 验证输出片段"
+        ],
+        "possible_gap": "该测试是在单进程环境下验证异常表示，没有涉及跨进程（xdist）的序列化/反序列化场景。"
+      },
+      {
+        "test_name": "test_xdist_longrepr_to_str_issue_241",
+        "test_file": "testing/test_reports.py",
+        "why_relevant": "这个测试专门针对 xdist 环境下的报告序列化问题（issue pytest-xdist#241），直接涉及测试报告的 _to_json 和 longrepr 处理。",
+        "reusable_parts": [
+          "使用 testdir 创建测试文件并运行",
+          "获取和检查测试报告 (getreports)",
+          "检查报告对象的序列化字段"
+        ],
+        "possible_gap": "该测试检查的是报告对象的序列化格式，但没有构造包含嵌套异常链的测试用例来触发 Issue 中描述的具体丢失信息问题。"
+      },
+      {
+        "test_name": "test_exception_handling_no_traceback",
+        "test_file": "testing/test_assertion.py",
+        "why_relevant": "这个测试处理了多进程（multiprocessing）场景下的异常链表示问题（#1984），这与 xdist 的跨进程环境有相似之处。",
+        "reusable_parts": [
+          "使用 testdir.makepyfile 创建包含多进程代码的测试",
+          "使用 --tb=long 参数运行测试",
+          "使用 fnmatch_lines 验证输出中包含异常链描述文本"
+        ],
+        "possible_gap": "该测试使用的是 Python 标准库的 multiprocessing，而不是 pytest-xdist 插件，且关注的是异常链中某个异常缺少 traceback 的特殊情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在单进程（无 xdist）下运行测试。",
+        "target_pattern": "使用 pytest-xdist 插件（例如添加 -n auto 参数）运行测试。",
+        "reason": "Issue 表明缺陷仅在启用 xdist 并行执行时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中的异常链相对简单（如单个 cause 或 context）。",
+        "target_pattern": "构造如 Issue 中所示的深度嵌套异常链（多层 try-except，使用 from 或隐式链接）。",
+        "reason": "Issue 中的测试用例展示了多层嵌套的异常链，这更可能暴露序列化过程中信息丢失的问题。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "测试失败报告对象的 longrepr 字段或其序列化后的内容（如通过 _to_json 获取）。",
+        "reason": "Issue 的核心是异常链信息在报告序列化/反序列化过程中丢失，观察报告对象的表示可以定位信息丢失的环节。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "excinfo.getrepr() 的输出字符串，特别是其中是否包含 'The above exception was the direct cause...' 或 'During handling of the above exception...' 等描述性文本。",
+        "reason": "这些文本是异常链正确表示的关键标志，它们的缺失表明问题。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "捕获的异常对象（excinfo.value）的 __cause__ 和 __context__ 属性链。",
+        "reason": "需要确认在测试执行过程中，原始的异常链结构是否被正确构建和保持。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在使用 xdist 时，测试失败报告的输出中包含了异常链中所有异常的 traceback 或关键描述信息。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、格式化的输出字符串完全相等，因为 traceback 行号等细节可能变化。",
+        "reason": "Issue 关注的是信息的完整性（是否包含），而不是输出的精确格式。使用片段匹配更稳定。"
+      },
+      {
+        "assertion_goal": "验证序列化后的报告对象（如 JSON）中包含了表示异常链的必要结构。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免深度断言复杂的、嵌套的 JSON 结构的每一个字段。",
+        "reason": "需要确认异常链信息没有被序列化过程丢弃，但具体的内部结构可能不是测试的重点。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytest 的 testdir fixture 来创建和运行包含异常链的测试文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要安装并启用 pytest-xdist 插件。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 --tb=long 选项以确保详细的 traceback 输出。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 pytest-xdist 插件的代码中，还是在 pytest 核心的某个与序列化交互的接口中。",
+      "异常链信息是在序列化（_to_json）、传输还是反序列化（从 JSON 重建）的哪个环节丢失的。",
+      "除了显示的 traceback 文本，报告对象内部的其他字段（如 chain 属性）是否也受到了影响。"
+    ]
+  }
+}

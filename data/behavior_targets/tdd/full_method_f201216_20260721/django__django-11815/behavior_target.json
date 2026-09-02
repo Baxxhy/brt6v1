@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11815",
+  "issue_summary": "当使用 Enum 对象作为 CharField 的默认值时，生成的迁移文件使用了 Enum 对象的值而非其名称，导致在 Enum 值被翻译后迁移文件出错。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 `SimpleTestCase` 作为测试基类，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 `gettext` 行为以改变惰性字符串的翻译结果。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要导入 `django.db import models`、`enum` 和 `django.utils.translation.gettext_lazy`。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_serialize_enums",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "它直接测试了 Enum 作为 CharField 默认值的序列化行为，展示了当前（有缺陷的）输出模式。",
+        "reusable_parts": [
+          "测试类 `WriterTests` 和 `assertSerializedResultEqual` 方法的使用。",
+          "创建自定义 Enum 类（如 `TextEnum`）和将其用作 `CharField` 默认值的模式。",
+          "调用 `MigrationWriter.serialize` 并检查输出字符串的断言风格。"
+        ],
+        "possible_gap": "该测试使用的 Enum 值是普通字符串（如 `'a-value'`），而非可翻译的惰性字符串对象（如 `_('Good')`）。它没有触发翻译变化导致的值不匹配问题。"
+      },
+      {
+        "test_name": "test_serialize_choices",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "它测试了 `models.TextChoices`（一种特殊的 Enum）的序列化，其默认值被序列化为名称（如 `'B'`），这可能为修复提供参考模式。",
+        "reusable_parts": [
+          "使用 `models.TextChoices` 和 `IntegerChoices` 的模式。",
+          "序列化带 `choices` 和 `default` 的字段的断言方式。"
+        ],
+        "possible_gap": "它测试的是 Django 内置的 `Choices` 类，而非标准的 Python `enum.Enum`。Issue 涉及的是标准 `enum.Enum`。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个模型，其 CharField 的 default 参数设置为一个自定义 Enum 类的成员，该 Enum 成员的值使用了 Django 的 gettext_lazy 翻译。然后生成迁移文件。",
+      "evidence": [
+        "Issue 中提供的示例代码：`status = models.CharField(default=Status.GOOD, max_length=128)`，其中 `Status.GOOD = _('Good')`。",
+        "相关测试 1 展示了使用 Enum 作为 CharField 默认值的序列化模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的迁移文件中，Enum 默认值被序列化为 `Status('Good')` 形式（使用值）。当 `'Good'` 被翻译成其他语言后，运行迁移时会抛出 `ValueError: 'Good' is not a valid Status`。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：`the old migration files raise an error stating that the Enum does not have the corresponding value` 和 `ValueError: 'Good' is not a valid Status`。",
+        "相关测试 1 显示当前序列化结果为 `migrations.test_writer.TextEnum('a-value')`，即使用值构造。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "MigrationWriter.serialize",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中多次调用此函数来序列化字段和默认值，它是生成迁移代码的关键。"
+      },
+      {
+        "name": "django.db.models.CharField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中涉及的字段类型，其默认值的序列化是问题核心。"
+      },
+      {
+        "name": "enum.Enum",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中自定义的 Enum 类，其成员的序列化方式是缺陷所在。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/writer.py",
+        "object": "MigrationWriter.serialize 或相关序列化逻辑",
+        "lines": "",
+        "reason": "负责将模型字段（包括默认值）序列化为迁移文件代码。相关测试 1 表明当前对 Enum 的序列化使用了值，这可能是在这里决定的。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field 或其子类（如 CharField）的序列化相关方法",
+        "lines": "",
+        "reason": "字段默认值的表示可能涉及字段类的序列化逻辑。源码片段 1 和 2 提供了上下文。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 `test_serialize_enums` 中使用普通字符串（如 `'a-value'`）作为 Enum 值。",
+        "target_pattern": "使用 Django 的 `gettext_lazy`（如 `_('Good')`）作为 Enum 值，以模拟可翻译的场景。",
+        "reason": "Issue 的核心是值可翻译且会变化。使用惰性翻译对象可能改变序列化行为或暴露缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中 Enum 值在定义后是固定的。",
+        "target_pattern": "模拟翻译激活后 Enum 值的字符串表示发生变化的状态（例如，通过模拟 `gettext` 返回不同值）。",
+        "reason": "缺陷在翻译变化后才显现，需要构造值不匹配的场景来触发 `ValueError`。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [
+      {
+        "rule": "positive_example_polarity",
+        "severity": "hard",
+        "protected_inputs": [
+          "Good"
+        ],
+        "instruction": "Inputs explicitly described by the Issue as accepted, parsed, or successful must not be used as invalid inputs and must not be placed inside assertRaises/pytest.raises.",
+        "evidence": [
+          "Issue describes 'Good' on a successful/accepted path."
+        ]
+      }
+    ],
+    "audit_warnings": [
+      "Derived polarity audit: do not reinterpret successful Issue example(s) 'Good' as invalid trigger inputs."
+    ]
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "生成的迁移文件应使用 Enum 成员的名称（如 `Status['GOOD']`）而非其值来序列化默认值，以确保翻译变化后迁移仍能正常工作。",
+      "evidence": [
+        "Issue 中建议的修复：`It should be: ('status', models.CharField(default=Status['GOOD'], max_length=128))`。",
+        "相关测试 2 显示对于 `models.TextChoices`，默认值被序列化为名称（如 `'B'`），这暗示了类似的行为期望。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "`MigrationWriter.serialize(field)[0]` 的输出字符串，特别是 `default=` 后面的部分。",
+        "reason": "Issue 的关键在于序列化后的字符串是使用 Enum 值（`Status('Good')`）还是名称（`Status['GOOD']`）。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "尝试使用序列化后的代码（或模拟其执行）来实例化 Enum 或字段时是否抛出 `ValueError`。",
+        "reason": "缺陷的直接表现是运行迁移时因值不匹配而抛出 `ValueError`。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证序列化后的默认值字符串包含 Enum 名称（如 `['GOOD']`）而非其翻译后的值（如 `('Good')`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的序列化字符串完全相等，因为导入路径和格式细节可能变化。",
+        "reason": "Issue 要求使用名称引用，因此断言输出包含 `['GOOD']` 模式是稳定且与修复目标对齐的。"
+      },
+      {
+        "assertion_goal": "验证使用序列化后的代码（在模拟翻译变化后）不会抛出 `ValueError`。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的异常消息文本完全匹配，因为消息可能本地化。",
+        "reason": "当前缺陷会导致 `ValueError`，修复后应不再抛出。但注意：根据规则9，如果修复后应正常，则不应建议 `raises`。这里是从反面验证缺陷存在，实际生成测试时可能需要调整极性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Django 迁移序列化逻辑中处理 `enum.Enum` 和 `gettext_lazy` 交互的确切代码位置。",
+    "除了 `CharField`，其他字段类型使用 Enum 默认值时是否也存在同样问题。",
+    "修复后，对于非翻译的普通字符串 Enum 值，序列化行为是否应保持不变（使用值）还是也改为使用名称。"
+  ],
+  "raw": {
+    "issue_summary": "当使用 Enum 对象作为 CharField 的默认值时，生成的迁移文件使用了 Enum 对象的值而非其名称，导致在 Enum 值被翻译后迁移文件出错。",
+    "trigger_condition": {
+      "text": "创建一个模型，其 CharField 的 default 参数设置为一个自定义 Enum 类的成员，该 Enum 成员的值使用了 Django 的 gettext_lazy 翻译。然后生成迁移文件。",
+      "evidence": [
+        "Issue 中提供的示例代码：`status = models.CharField(default=Status.GOOD, max_length=128)`，其中 `Status.GOOD = _('Good')`。",
+        "相关测试 1 展示了使用 Enum 作为 CharField 默认值的序列化模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的迁移文件中，Enum 默认值被序列化为 `Status('Good')` 形式（使用值）。当 `'Good'` 被翻译成其他语言后，运行迁移时会抛出 `ValueError: 'Good' is not a valid Status`。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：`the old migration files raise an error stating that the Enum does not have the corresponding value` 和 `ValueError: 'Good' is not a valid Status`。",
+        "相关测试 1 显示当前序列化结果为 `migrations.test_writer.TextEnum('a-value')`，即使用值构造。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "生成的迁移文件应使用 Enum 成员的名称（如 `Status['GOOD']`）而非其值来序列化默认值，以确保翻译变化后迁移仍能正常工作。",
+      "evidence": [
+        "Issue 中建议的修复：`It should be: ('status', models.CharField(default=Status['GOOD'], max_length=128))`。",
+        "相关测试 2 显示对于 `models.TextChoices`，默认值被序列化为名称（如 `'B'`），这暗示了类似的行为期望。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "MigrationWriter.serialize",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中多次调用此函数来序列化字段和默认值，它是生成迁移代码的关键。"
+      },
+      {
+        "name": "django.db.models.CharField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/__init__.py",
+        "reason": "Issue 中涉及的字段类型，其默认值的序列化是问题核心。"
+      },
+      {
+        "name": "enum.Enum",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 中自定义的 Enum 类，其成员的序列化方式是缺陷所在。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/writer.py",
+        "object": "MigrationWriter.serialize 或相关序列化逻辑",
+        "lines": "",
+        "reason": "负责将模型字段（包括默认值）序列化为迁移文件代码。相关测试 1 表明当前对 Enum 的序列化使用了值，这可能是在这里决定的。"
+      },
+      {
+        "path": "django/db/models/fields/__init__.py",
+        "object": "Field 或其子类（如 CharField）的序列化相关方法",
+        "lines": "",
+        "reason": "字段默认值的表示可能涉及字段类的序列化逻辑。源码片段 1 和 2 提供了上下文。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_serialize_enums",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "它直接测试了 Enum 作为 CharField 默认值的序列化行为，展示了当前（有缺陷的）输出模式。",
+        "reusable_parts": [
+          "测试类 `WriterTests` 和 `assertSerializedResultEqual` 方法的使用。",
+          "创建自定义 Enum 类（如 `TextEnum`）和将其用作 `CharField` 默认值的模式。",
+          "调用 `MigrationWriter.serialize` 并检查输出字符串的断言风格。"
+        ],
+        "possible_gap": "该测试使用的 Enum 值是普通字符串（如 `'a-value'`），而非可翻译的惰性字符串对象（如 `_('Good')`）。它没有触发翻译变化导致的值不匹配问题。"
+      },
+      {
+        "test_name": "test_serialize_choices",
+        "test_file": "tests/migrations/test_writer.py",
+        "why_relevant": "它测试了 `models.TextChoices`（一种特殊的 Enum）的序列化，其默认值被序列化为名称（如 `'B'`），这可能为修复提供参考模式。",
+        "reusable_parts": [
+          "使用 `models.TextChoices` 和 `IntegerChoices` 的模式。",
+          "序列化带 `choices` 和 `default` 的字段的断言方式。"
+        ],
+        "possible_gap": "它测试的是 Django 内置的 `Choices` 类，而非标准的 Python `enum.Enum`。Issue 涉及的是标准 `enum.Enum`。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 `test_serialize_enums` 中使用普通字符串（如 `'a-value'`）作为 Enum 值。",
+        "target_pattern": "使用 Django 的 `gettext_lazy`（如 `_('Good')`）作为 Enum 值，以模拟可翻译的场景。",
+        "reason": "Issue 的核心是值可翻译且会变化。使用惰性翻译对象可能改变序列化行为或暴露缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中 Enum 值在定义后是固定的。",
+        "target_pattern": "模拟翻译激活后 Enum 值的字符串表示发生变化的状态（例如，通过模拟 `gettext` 返回不同值）。",
+        "reason": "缺陷在翻译变化后才显现，需要构造值不匹配的场景来触发 `ValueError`。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "serialization",
+        "expression_hint": "`MigrationWriter.serialize(field)[0]` 的输出字符串，特别是 `default=` 后面的部分。",
+        "reason": "Issue 的关键在于序列化后的字符串是使用 Enum 值（`Status('Good')`）还是名称（`Status['GOOD']`）。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "尝试使用序列化后的代码（或模拟其执行）来实例化 Enum 或字段时是否抛出 `ValueError`。",
+        "reason": "缺陷的直接表现是运行迁移时因值不匹配而抛出 `ValueError`。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证序列化后的默认值字符串包含 Enum 名称（如 `['GOOD']`）而非其翻译后的值（如 `('Good')`）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的序列化字符串完全相等，因为导入路径和格式细节可能变化。",
+        "reason": "Issue 要求使用名称引用，因此断言输出包含 `['GOOD']` 模式是稳定且与修复目标对齐的。"
+      },
+      {
+        "assertion_goal": "验证使用序列化后的代码（在模拟翻译变化后）不会抛出 `ValueError`。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言具体的异常消息文本完全匹配，因为消息可能本地化。",
+        "reason": "当前缺陷会导致 `ValueError`，修复后应不再抛出。但注意：根据规则9，如果修复后应正常，则不应建议 `raises`。这里是从反面验证缺陷存在，实际生成测试时可能需要调整极性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 `SimpleTestCase` 作为测试基类，如相关测试所示。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟 `gettext` 行为以改变惰性字符串的翻译结果。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要导入 `django.db import models`、`enum` 和 `django.utils.translation.gettext_lazy`。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Django 迁移序列化逻辑中处理 `enum.Enum` 和 `gettext_lazy` 交互的确切代码位置。",
+      "除了 `CharField`，其他字段类型使用 Enum 默认值时是否也存在同样问题。",
+      "修复后，对于非翻译的普通字符串 Enum 值，序列化行为是否应保持不变（使用值）还是也改为使用名称。"
+    ]
+  }
+}

@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-15875",
+  "issue_summary": "is_zero 属性在包含复数的加法表达式上返回错误的 False，而简化后应为 True。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 `sympy` 导入 `I`, `simplify` 以及可能用到的符号和函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 `sympy.core.tests` 的上下文中运行，以复用现有的测试基础设施。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Add_is_zero",
+        "test_file": "sympy/core/tests/test_arit.py",
+        "why_relevant": "该测试直接测试加法表达式的 `is_zero` 属性，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试函数结构",
+          "使用 `symbols` 和 `zero=True` 属性",
+          "对 `(x + y).is_zero` 的断言风格"
+        ],
+        "possible_gap": "该测试只使用了符号变量，没有涉及复数 `I` 和具体的数值表达式计算，可能无法触发 Issue 中的复数相关 bug。"
+      },
+      {
+        "test_name": "test_is_zero",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "该测试广泛测试了矩阵的 `is_zero` 属性，包括返回 `None` 和 `False` 的场景，展示了 `is_zero` 的预期行为模式。",
+        "reusable_parts": [
+          "对不同矩阵类型（Matrix, SparseMatrix, ImmutableMatrix）的测试",
+          "使用 `Symbol` 和属性（如 `nonzero=True`）",
+          "断言 `is_zero == None` 或 `is_zero == False` 的风格"
+        ],
+        "possible_gap": "测试焦点是矩阵，而非 Issue 中的基本表达式（如包含 `I` 的 `Add` 表达式）。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个包含虚数单位 I 和加法的复数表达式，例如 `-2*I + (1 + I)**2`，然后调用其 `is_zero` 属性。",
+      "evidence": [
+        "Issue 中给出的示例：`e = -2*I + (1 + I)**2`，`e.is_zero` 返回 `False`。",
+        "Issue 标题：`is_zero is incorrect on complex integer`。",
+        "Issue 描述：`is_zero should return None if it cannot decide, but should never give the wrong answer.`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "表达式的 `is_zero` 属性返回 `False`，但经过 `simplify` 后，同一表达式的 `is_zero` 属性变为 `True`，表明原始判断错误。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中给出的示例：`e.is_zero` 返回 `False`，`simplify(e).is_zero` 返回 `True`。",
+        "Issue 描述：`This is causing errors in determining the rank of a matrix.`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "is_zero",
+        "kind": "property",
+        "source_path": "",
+        "reason": "Issue 直接报告 `is_zero` 属性在特定复数表达式上行为错误。"
+      },
+      {
+        "name": "simplify",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 示例中使用了 `simplify` 来展示正确结果，表明它可能与 `is_zero` 的逻辑或修复相关。"
+      },
+      {
+        "name": "Add",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 标题和描述提到问题与 `Add` 和复数有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "Add.is_zero",
+        "lines": "",
+        "reason": "Issue 明确指出 `is_zero` 在包含复数的加法表达式上出错。"
+      },
+      {
+        "path": "sympy/assumptions/handlers/sets.py",
+        "object": "Add",
+        "lines": "35-43",
+        "reason": "检索出的源码片段 3 是关于 `Add` 的 `AskIntegerHandler`，可能与复数表达式的整数/零属性判断逻辑有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_Add_is_zero 中使用 `symbols('x y', zero=True)` 创建已知为零的符号。",
+        "target_pattern": "使用包含虚数单位 `I` 和算术运算的复数表达式，如 `-2*I + (1 + I)**2`。",
+        "reason": "Issue 表明 bug 在复数表达式上触发，而非简单的符号。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，表达式或矩阵的元素状态是明确的（如 `zero=True`, `nonzero=True`）。",
+        "target_pattern": "表达式的状态在未经 `simplify` 时是未简化的，其零值属性可能被错误评估。",
+        "reason": "Issue 显示 `simplify` 前后 `is_zero` 结果不同，表明未简化状态下的评估逻辑有缺陷。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于无法确定是否为 0 的表达式，`is_zero` 应返回 `None`；对于可以确定为 0 的表达式，应返回 `True`。不应返回错误的 `False`。",
+      "evidence": [
+        "Issue 描述：`is_zero should return None if it cannot decide, but should never give the wrong answer.`",
+        "相关测试 3 和 4 展示了 `is_zero` 可能返回 `None` 或 `False` 的场景，表明其语义是判断是否为 0。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "表达式 `e.is_zero` 的返回值。",
+        "reason": "Issue 的核心是 `is_zero` 返回了错误的 `False`。观察其返回值可直接判断 bug 是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`simplify(e).is_zero` 的返回值。",
+        "reason": "Issue 使用 `simplify` 后的结果作为正确参照。对比简化前后的返回值可以确认不一致性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 Issue 中的表达式 `e`，`e.is_zero` 和 `simplify(e).is_zero` 的结果应该一致（都应为 `True`），或者前者至少不应是 `False`（如果无法确定，应为 `None`）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经简化的表达式字符串表示，因为这可能不稳定。",
+        "reason": "Issue 表明 `is_zero` 在未简化表达式上给出了错误答案。断言应聚焦于 `is_zero` 属性值的正确性（应为 `True` 或 `None`，而非错误的 `False`）。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "触发 bug 的确切复数表达式模式是否仅限于 `-2*I + (1 + I)**2`，还是有一类类似的表达式。",
+    "`is_zero` 属性在 `Add` 类中的具体实现位置和逻辑。",
+    "修复后，对于无法确定为零的复数表达式，`is_zero` 是应返回 `True`（如果可以证明）还是 `None`。"
+  ],
+  "raw": {
+    "issue_summary": "is_zero 属性在包含复数的加法表达式上返回错误的 False，而简化后应为 True。",
+    "trigger_condition": {
+      "text": "创建一个包含虚数单位 I 和加法的复数表达式，例如 `-2*I + (1 + I)**2`，然后调用其 `is_zero` 属性。",
+      "evidence": [
+        "Issue 中给出的示例：`e = -2*I + (1 + I)**2`，`e.is_zero` 返回 `False`。",
+        "Issue 标题：`is_zero is incorrect on complex integer`。",
+        "Issue 描述：`is_zero should return None if it cannot decide, but should never give the wrong answer.`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "表达式的 `is_zero` 属性返回 `False`，但经过 `simplify` 后，同一表达式的 `is_zero` 属性变为 `True`，表明原始判断错误。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中给出的示例：`e.is_zero` 返回 `False`，`simplify(e).is_zero` 返回 `True`。",
+        "Issue 描述：`This is causing errors in determining the rank of a matrix.`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于无法确定是否为 0 的表达式，`is_zero` 应返回 `None`；对于可以确定为 0 的表达式，应返回 `True`。不应返回错误的 `False`。",
+      "evidence": [
+        "Issue 描述：`is_zero should return None if it cannot decide, but should never give the wrong answer.`",
+        "相关测试 3 和 4 展示了 `is_zero` 可能返回 `None` 或 `False` 的场景，表明其语义是判断是否为 0。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "is_zero",
+        "kind": "property",
+        "source_path": "",
+        "reason": "Issue 直接报告 `is_zero` 属性在特定复数表达式上行为错误。"
+      },
+      {
+        "name": "simplify",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 示例中使用了 `simplify` 来展示正确结果，表明它可能与 `is_zero` 的逻辑或修复相关。"
+      },
+      {
+        "name": "Add",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 标题和描述提到问题与 `Add` 和复数有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "Add.is_zero",
+        "lines": "",
+        "reason": "Issue 明确指出 `is_zero` 在包含复数的加法表达式上出错。"
+      },
+      {
+        "path": "sympy/assumptions/handlers/sets.py",
+        "object": "Add",
+        "lines": "35-43",
+        "reason": "检索出的源码片段 3 是关于 `Add` 的 `AskIntegerHandler`，可能与复数表达式的整数/零属性判断逻辑有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Add_is_zero",
+        "test_file": "sympy/core/tests/test_arit.py",
+        "why_relevant": "该测试直接测试加法表达式的 `is_zero` 属性，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试函数结构",
+          "使用 `symbols` 和 `zero=True` 属性",
+          "对 `(x + y).is_zero` 的断言风格"
+        ],
+        "possible_gap": "该测试只使用了符号变量，没有涉及复数 `I` 和具体的数值表达式计算，可能无法触发 Issue 中的复数相关 bug。"
+      },
+      {
+        "test_name": "test_is_zero",
+        "test_file": "sympy/matrices/tests/test_matrices.py",
+        "why_relevant": "该测试广泛测试了矩阵的 `is_zero` 属性，包括返回 `None` 和 `False` 的场景，展示了 `is_zero` 的预期行为模式。",
+        "reusable_parts": [
+          "对不同矩阵类型（Matrix, SparseMatrix, ImmutableMatrix）的测试",
+          "使用 `Symbol` 和属性（如 `nonzero=True`）",
+          "断言 `is_zero == None` 或 `is_zero == False` 的风格"
+        ],
+        "possible_gap": "测试焦点是矩阵，而非 Issue 中的基本表达式（如包含 `I` 的 `Add` 表达式）。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_Add_is_zero 中使用 `symbols('x y', zero=True)` 创建已知为零的符号。",
+        "target_pattern": "使用包含虚数单位 `I` 和算术运算的复数表达式，如 `-2*I + (1 + I)**2`。",
+        "reason": "Issue 表明 bug 在复数表达式上触发，而非简单的符号。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，表达式或矩阵的元素状态是明确的（如 `zero=True`, `nonzero=True`）。",
+        "target_pattern": "表达式的状态在未经 `simplify` 时是未简化的，其零值属性可能被错误评估。",
+        "reason": "Issue 显示 `simplify` 前后 `is_zero` 结果不同，表明未简化状态下的评估逻辑有缺陷。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "表达式 `e.is_zero` 的返回值。",
+        "reason": "Issue 的核心是 `is_zero` 返回了错误的 `False`。观察其返回值可直接判断 bug 是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`simplify(e).is_zero` 的返回值。",
+        "reason": "Issue 使用 `simplify` 后的结果作为正确参照。对比简化前后的返回值可以确认不一致性。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 Issue 中的表达式 `e`，`e.is_zero` 和 `simplify(e).is_zero` 的结果应该一致（都应为 `True`），或者前者至少不应是 `False`（如果无法确定，应为 `None`）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、未经简化的表达式字符串表示，因为这可能不稳定。",
+        "reason": "Issue 表明 `is_zero` 在未简化表达式上给出了错误答案。断言应聚焦于 `is_zero` 属性值的正确性（应为 `True` 或 `None`，而非错误的 `False`）。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 `sympy` 导入 `I`, `simplify` 以及可能用到的符号和函数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在 `sympy.core.tests` 的上下文中运行，以复用现有的测试基础设施。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "触发 bug 的确切复数表达式模式是否仅限于 `-2*I + (1 + I)**2`，还是有一类类似的表达式。",
+      "`is_zero` 属性在 `Add` 类中的具体实现位置和逻辑。",
+      "修复后，对于无法确定为零的复数表达式，`is_zero` 是应返回 `True`（如果可以证明）还是 `None`。"
+    ]
+  }
+}

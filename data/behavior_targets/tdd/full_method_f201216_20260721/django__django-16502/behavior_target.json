@@ -1,0 +1,286 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16502",
+  "issue_summary": "Django 1.10 及以上版本中，runserver 在处理 HTTP HEAD 请求时返回了响应体，违反了 RFC 2616 规范。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要启动一个实际的 runserver 进程并在单独的线程或子进程中运行测试。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用类似 requests 或 http.client 的库向 localhost 发送 HEAD 请求。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_head",
+        "test_file": "tests/test_client_regress/tests.py",
+        "why_relevant": "它直接测试 HEAD 请求不应返回内容，断言与 Issue 的预期行为一致。",
+        "reusable_parts": [
+          "使用 self.client.head",
+          "断言 response.content 为空",
+          "使用 SimpleTestCase 和 override_settings"
+        ],
+        "possible_gap": "该测试使用 Django 的测试客户端，可能不直接调用 runserver，因此可能无法复现 runserver 特有的缺陷。"
+      },
+      {
+        "test_name": "test_no_head",
+        "test_file": "tests/middleware/tests.py",
+        "why_relevant": "它测试了 HEAD 请求在中间件中的特殊处理，表明 Django 内部有区分 HEAD 和 GET 的逻辑。",
+        "reusable_parts": [
+          "使用 request_factory.head 构造请求",
+          "测试中间件对 HEAD 请求的处理"
+        ],
+        "possible_gap": "该测试关注中间件行为，而非 runserver 的 HTTP 响应生成。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 Django 1.10 到 1.11 之间的版本，启动 runserver，并向其发送一个 HTTP HEAD 请求。",
+      "evidence": [
+        "Issue 中的 STR 步骤：使用 curl -iX HEAD http://127.0.0.1:8000/",
+        "Issue 提到在 Django 1.10 开始出现，1.9.13 不重现。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HTTP HEAD 请求的响应中包含了响应体（HTML 内容），而规范要求 HEAD 请求不应返回响应体。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 Actual 部分显示了返回的 HTML 内容。",
+        "Issue 描述：'response bodies must not be returned for HEAD requests'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "runserver",
+        "kind": "function",
+        "source_path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "reason": "Issue 明确指出 runserver 没有剥离响应体。"
+      },
+      {
+        "name": "WSGIServer",
+        "kind": "class",
+        "source_path": "django/core/servers/basehttp.py",
+        "reason": "检索出的相关源码涉及 WSGIServer，它是 runserver 使用的底层服务器。"
+      },
+      {
+        "name": "client.head",
+        "kind": "method",
+        "source_path": "",
+        "reason": "多个相关测试使用 self.client.head 来发起 HEAD 请求。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "object": "runserver",
+        "lines": "",
+        "reason": "Issue 直接指出 runserver 没有剥离 HEAD 请求的响应体。"
+      },
+      {
+        "path": "django/core/servers/basehttp.py",
+        "object": "WSGIServer",
+        "lines": "67-82",
+        "reason": "检索出的源码片段是 WSGIServer 类，它处理 HTTP 请求，可能与 HEAD 请求处理逻辑相关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试通常在测试客户端或请求工厂的上下文中运行。",
+        "target_pattern": "测试需要在实际运行的 runserver 进程中发送 HEAD 请求。",
+        "reason": "Issue 表明缺陷仅在通过 runserver 处理请求时出现，而不是在测试客户端模拟请求时。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用视图并检查响应对象。",
+        "target_pattern": "需要通过 HTTP 网络请求直接访问 runserver 端点。",
+        "reason": "缺陷可能位于 WSGI 服务器层，该层在测试客户端模拟请求时可能被绕过。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "HTTP HEAD 请求的响应不应包含响应体，只应返回头部信息。",
+      "evidence": [
+        "Issue 中 Expected 部分只显示了 HTTP 头部。",
+        "相关测试 1 中的断言：'A HEAD request doesn't return any content.' 和 self.assertEqual(response.content, b'')。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "HTTP 响应对象的 .content 属性或原始响应体字节。",
+        "reason": "Issue 的核心是 HEAD 响应是否包含内容体。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "发送到网络连接的原始 HTTP 响应字节流。",
+        "reason": "需要确认 runserver 实际发送的数据是否包含正文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对 HEAD 请求的 HTTP 响应体为空。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 字符串相等，因为响应内容可能因视图而异。",
+        "reason": "稳定地检查响应体长度为零，这与规范要求一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 runserver 命令、WSGIServer 实现，还是其他底层 HTTP 处理代码中。",
+    "是否所有视图都会触发此问题，还是仅特定视图。",
+    "修复后，响应体是被完全移除，还是被设置为空字节但 Content-Length 头部可能保留。"
+  ],
+  "raw": {
+    "issue_summary": "Django 1.10 及以上版本中，runserver 在处理 HTTP HEAD 请求时返回了响应体，违反了 RFC 2616 规范。",
+    "trigger_condition": {
+      "text": "使用 Django 1.10 到 1.11 之间的版本，启动 runserver，并向其发送一个 HTTP HEAD 请求。",
+      "evidence": [
+        "Issue 中的 STR 步骤：使用 curl -iX HEAD http://127.0.0.1:8000/",
+        "Issue 提到在 Django 1.10 开始出现，1.9.13 不重现。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HTTP HEAD 请求的响应中包含了响应体（HTML 内容），而规范要求 HEAD 请求不应返回响应体。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中 Actual 部分显示了返回的 HTML 内容。",
+        "Issue 描述：'response bodies must not be returned for HEAD requests'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "HTTP HEAD 请求的响应不应包含响应体，只应返回头部信息。",
+      "evidence": [
+        "Issue 中 Expected 部分只显示了 HTTP 头部。",
+        "相关测试 1 中的断言：'A HEAD request doesn't return any content.' 和 self.assertEqual(response.content, b'')。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "runserver",
+        "kind": "function",
+        "source_path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "reason": "Issue 明确指出 runserver 没有剥离响应体。"
+      },
+      {
+        "name": "WSGIServer",
+        "kind": "class",
+        "source_path": "django/core/servers/basehttp.py",
+        "reason": "检索出的相关源码涉及 WSGIServer，它是 runserver 使用的底层服务器。"
+      },
+      {
+        "name": "client.head",
+        "kind": "method",
+        "source_path": "",
+        "reason": "多个相关测试使用 self.client.head 来发起 HEAD 请求。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "object": "runserver",
+        "lines": "",
+        "reason": "Issue 直接指出 runserver 没有剥离 HEAD 请求的响应体。"
+      },
+      {
+        "path": "django/core/servers/basehttp.py",
+        "object": "WSGIServer",
+        "lines": "67-82",
+        "reason": "检索出的源码片段是 WSGIServer 类，它处理 HTTP 请求，可能与 HEAD 请求处理逻辑相关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_head",
+        "test_file": "tests/test_client_regress/tests.py",
+        "why_relevant": "它直接测试 HEAD 请求不应返回内容，断言与 Issue 的预期行为一致。",
+        "reusable_parts": [
+          "使用 self.client.head",
+          "断言 response.content 为空",
+          "使用 SimpleTestCase 和 override_settings"
+        ],
+        "possible_gap": "该测试使用 Django 的测试客户端，可能不直接调用 runserver，因此可能无法复现 runserver 特有的缺陷。"
+      },
+      {
+        "test_name": "test_no_head",
+        "test_file": "tests/middleware/tests.py",
+        "why_relevant": "它测试了 HEAD 请求在中间件中的特殊处理，表明 Django 内部有区分 HEAD 和 GET 的逻辑。",
+        "reusable_parts": [
+          "使用 request_factory.head 构造请求",
+          "测试中间件对 HEAD 请求的处理"
+        ],
+        "possible_gap": "该测试关注中间件行为，而非 runserver 的 HTTP 响应生成。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试通常在测试客户端或请求工厂的上下文中运行。",
+        "target_pattern": "测试需要在实际运行的 runserver 进程中发送 HEAD 请求。",
+        "reason": "Issue 表明缺陷仅在通过 runserver 处理请求时出现，而不是在测试客户端模拟请求时。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用视图并检查响应对象。",
+        "target_pattern": "需要通过 HTTP 网络请求直接访问 runserver 端点。",
+        "reason": "缺陷可能位于 WSGI 服务器层，该层在测试客户端模拟请求时可能被绕过。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "HTTP 响应对象的 .content 属性或原始响应体字节。",
+        "reason": "Issue 的核心是 HEAD 响应是否包含内容体。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "发送到网络连接的原始 HTTP 响应字节流。",
+        "reason": "需要确认 runserver 实际发送的数据是否包含正文。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证对 HEAD 请求的 HTTP 响应体为空。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 HTML 字符串相等，因为响应内容可能因视图而异。",
+        "reason": "稳定地检查响应体长度为零，这与规范要求一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要启动一个实际的 runserver 进程并在单独的线程或子进程中运行测试。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用类似 requests 或 http.client 的库向 localhost 发送 HEAD 请求。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 runserver 命令、WSGIServer 实现，还是其他底层 HTTP 处理代码中。",
+      "是否所有视图都会触发此问题，还是仅特定视图。",
+      "修复后，响应体是被完全移除，还是被设置为空字节但 Content-Length 头部可能保留。"
+    ]
+  }
+}

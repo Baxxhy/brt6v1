@@ -1,0 +1,300 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-5262",
+  "issue_summary": "EncodedFile 的 mode 属性错误地包含了 'b'，导致依赖 mode 判断写入类型的第三方库（如 youtube-dl）错误地传递 bytes 给 write 方法，从而引发 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 testdir fixture 来创建和运行测试脚本，可能还需要模拟或导入 youtube-dl 的相关逻辑。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造 EncodedFile 实例，并可能设置其底层 buffer 和 encoding。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_typeerror_encodedfile_write",
+        "test_file": "testing/test_capture.py",
+        "why_relevant": "该测试直接验证了向 sys.stdout.write 传递 bytes 对象时，在有/无输出捕获的情况下行为应一致，并捕获了相同的 TypeError。这与当前 Issue 的核心错误（传递 bytes 给 EncodedFile.write）高度相关。",
+        "reusable_parts": [
+          "使用 testdir fixture 创建测试文件",
+          "使用 testdir.runpytest 运行测试",
+          "断言返回码一致",
+          "使用 fnmatch_lines 匹配错误信息"
+        ],
+        "possible_gap": "该测试直接调用 sys.stdout.write(b\"foo\")，而 Issue 中的触发路径是通过第三方库（youtube-dl）间接调用，且涉及 mode 属性的判断。测试没有模拟依赖 mode 属性做决策的调用方。"
+      },
+      {
+        "test_name": "test_write_bytes_to_buffer",
+        "test_file": "testing/test_capture.py",
+        "why_relevant": "该测试涉及向捕获 IO 的 buffer 写入 bytes，并检查最终文本值，与 bytes 写入和编码转换相关。",
+        "reusable_parts": [
+          "使用 capture.CaptureIO 类",
+          "调用 buffer.write 方法",
+          "检查 getvalue() 返回值"
+        ],
+        "possible_gap": "该测试针对 CaptureIO 类，而非 EncodedFile 类，且直接操作 buffer 属性，不涉及 mode 属性或第三方库的调用模式。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当使用 pytest 进行输出捕获时，一个依赖 `out.mode` 属性是否包含 'b' 来决定写入 `bytes` 还是 `str` 的库（如 youtube-dl）向捕获的输出流写入数据。",
+      "evidence": [
+        "Issue 描述：'Youtube-dl looks for `b` in `out.mode` to decide whether to writes `bytes` or `str`.'",
+        "Issue 中的堆栈跟踪显示 youtube_dl.utils.write_string 调用了 out.write(byt)，其中 byt 是 bytes 对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "向 EncodedFile.write 方法传递 bytes 对象时，在 Python 3 下引发 TypeError: write() argument must be str, not bytes。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的堆栈跟踪显示：'TypeError: write() argument must be str, not bytes'",
+        "源码片段 2 显示 write 方法在 Python 3 下对非文本类型对象会抛出 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_pytest.capture.EncodedFile",
+        "kind": "class",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "Issue 直接指出 EncodedFile 的 mode 属性有问题，并且其 write 方法抛出了异常。"
+      },
+      {
+        "name": "_pytest.capture.EncodedFile.write",
+        "kind": "method",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "Issue 中异常的直接来源，是缺陷复现的关键调用点。"
+      },
+      {
+        "name": "_pytest.capture.EncodedFile.mode",
+        "kind": "property",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "Issue 指出 mode 属性是问题的根源，它错误地包含了 'b'。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/capture.py",
+        "object": "EncodedFile",
+        "lines": "425-451",
+        "reason": "Issue 明确指出 EncodedFile 的 mode 属性有问题，并且 write 方法抛出了异常。"
+      },
+      {
+        "path": "src/_pytest/capture.py",
+        "object": "EncodedFile.write",
+        "lines": "432-439",
+        "reason": "该方法在 Python 3 下对传入的 bytes 对象抛出 TypeError，是错误现象的直接来源。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_typeerror_encodedfile_write 中直接调用 sys.stdout.write(b\"foo\")。",
+        "target_pattern": "创建一个模拟对象，其 mode 属性包含 'b'，并调用其 write 方法，或者模拟一个依赖 mode 属性决定写入 bytes 的调用方（如 youtube-dl 的逻辑）。",
+        "reason": "Issue 的触发条件是调用方（如 youtube-dl）看到 mode 包含 'b' 而决定写入 bytes。直接写入 bytes 是结果，但根本原因是 mode 属性的误导。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中使用的可能是普通的 sys.stdout 或 CaptureIO 对象。",
+        "target_pattern": "使用 EncodedFile 对象，并检查其 mode 属性是否包含 'b'。",
+        "reason": "Issue 的核心是 EncodedFile 对象的 mode 属性状态错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "EncodedFile 的 mode 属性不应包含 'b'，以便依赖此属性判断写入类型的库能正确传递 str 对象，或者 EncodedFile.write 方法应能正确处理传入的 bytes 对象。",
+      "evidence": [
+        "Issue 描述：'mode should not include `b` (binary)'",
+        "Issue 隐含的期望是 youtube-dl 等库能正常工作，不抛出 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(obj) 在 EncodedFile.write 方法调用时",
+        "reason": "Issue 中的异常是关于传入对象的类型（bytes vs str）。观察传入对象的类型可以确认调用方是否因 mode 属性而做出了错误决策。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "是否引发 TypeError 及其消息",
+        "reason": "Issue 中观察到的直接错误现象是 TypeError。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "EncodedFile 实例的 mode 属性值",
+        "reason": "Issue 指出 mode 属性错误地包含了 'b'，观察其值可以确认问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当调用方依赖 mode 属性（包含 'b'）决定写入 bytes 时，EncodedFile.write 不会抛出 TypeError，或者 mode 属性本身不包含 'b'。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的异常消息字符串，因为消息可能因 Python 版本或实现细节而变化。",
+        "reason": "当前缺陷行为是抛出 TypeError。修复后，该异常不应被抛出（或者 mode 属性被修正）。因此，在复现缺陷的测试中，应断言会抛出异常；在验证修复的测试中，应断言不会抛出异常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "EncodedFile.mode 属性的具体实现和当前返回值在源码片段中没有显示，需要进一步确认。",
+    "youtube-dl 内部具体如何检查 mode 属性并决定写入类型的精确逻辑。",
+    "修复后的预期行为是 mode 属性被修正，还是 write 方法被修改以接受 bytes，或者两者兼有。"
+  ],
+  "raw": {
+    "issue_summary": "EncodedFile 的 mode 属性错误地包含了 'b'，导致依赖 mode 判断写入类型的第三方库（如 youtube-dl）错误地传递 bytes 给 write 方法，从而引发 TypeError。",
+    "trigger_condition": {
+      "text": "当使用 pytest 进行输出捕获时，一个依赖 `out.mode` 属性是否包含 'b' 来决定写入 `bytes` 还是 `str` 的库（如 youtube-dl）向捕获的输出流写入数据。",
+      "evidence": [
+        "Issue 描述：'Youtube-dl looks for `b` in `out.mode` to decide whether to writes `bytes` or `str`.'",
+        "Issue 中的堆栈跟踪显示 youtube_dl.utils.write_string 调用了 out.write(byt)，其中 byt 是 bytes 对象。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "向 EncodedFile.write 方法传递 bytes 对象时，在 Python 3 下引发 TypeError: write() argument must be str, not bytes。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的堆栈跟踪显示：'TypeError: write() argument must be str, not bytes'",
+        "源码片段 2 显示 write 方法在 Python 3 下对非文本类型对象会抛出 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "EncodedFile 的 mode 属性不应包含 'b'，以便依赖此属性判断写入类型的库能正确传递 str 对象，或者 EncodedFile.write 方法应能正确处理传入的 bytes 对象。",
+      "evidence": [
+        "Issue 描述：'mode should not include `b` (binary)'",
+        "Issue 隐含的期望是 youtube-dl 等库能正常工作，不抛出 TypeError。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "_pytest.capture.EncodedFile",
+        "kind": "class",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "Issue 直接指出 EncodedFile 的 mode 属性有问题，并且其 write 方法抛出了异常。"
+      },
+      {
+        "name": "_pytest.capture.EncodedFile.write",
+        "kind": "method",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "Issue 中异常的直接来源，是缺陷复现的关键调用点。"
+      },
+      {
+        "name": "_pytest.capture.EncodedFile.mode",
+        "kind": "property",
+        "source_path": "src/_pytest/capture.py",
+        "reason": "Issue 指出 mode 属性是问题的根源，它错误地包含了 'b'。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/capture.py",
+        "object": "EncodedFile",
+        "lines": "425-451",
+        "reason": "Issue 明确指出 EncodedFile 的 mode 属性有问题，并且 write 方法抛出了异常。"
+      },
+      {
+        "path": "src/_pytest/capture.py",
+        "object": "EncodedFile.write",
+        "lines": "432-439",
+        "reason": "该方法在 Python 3 下对传入的 bytes 对象抛出 TypeError，是错误现象的直接来源。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_typeerror_encodedfile_write",
+        "test_file": "testing/test_capture.py",
+        "why_relevant": "该测试直接验证了向 sys.stdout.write 传递 bytes 对象时，在有/无输出捕获的情况下行为应一致，并捕获了相同的 TypeError。这与当前 Issue 的核心错误（传递 bytes 给 EncodedFile.write）高度相关。",
+        "reusable_parts": [
+          "使用 testdir fixture 创建测试文件",
+          "使用 testdir.runpytest 运行测试",
+          "断言返回码一致",
+          "使用 fnmatch_lines 匹配错误信息"
+        ],
+        "possible_gap": "该测试直接调用 sys.stdout.write(b\"foo\")，而 Issue 中的触发路径是通过第三方库（youtube-dl）间接调用，且涉及 mode 属性的判断。测试没有模拟依赖 mode 属性做决策的调用方。"
+      },
+      {
+        "test_name": "test_write_bytes_to_buffer",
+        "test_file": "testing/test_capture.py",
+        "why_relevant": "该测试涉及向捕获 IO 的 buffer 写入 bytes，并检查最终文本值，与 bytes 写入和编码转换相关。",
+        "reusable_parts": [
+          "使用 capture.CaptureIO 类",
+          "调用 buffer.write 方法",
+          "检查 getvalue() 返回值"
+        ],
+        "possible_gap": "该测试针对 CaptureIO 类，而非 EncodedFile 类，且直接操作 buffer 属性，不涉及 mode 属性或第三方库的调用模式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_typeerror_encodedfile_write 中直接调用 sys.stdout.write(b\"foo\")。",
+        "target_pattern": "创建一个模拟对象，其 mode 属性包含 'b'，并调用其 write 方法，或者模拟一个依赖 mode 属性决定写入 bytes 的调用方（如 youtube-dl 的逻辑）。",
+        "reason": "Issue 的触发条件是调用方（如 youtube-dl）看到 mode 包含 'b' 而决定写入 bytes。直接写入 bytes 是结果，但根本原因是 mode 属性的误导。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试中使用的可能是普通的 sys.stdout 或 CaptureIO 对象。",
+        "target_pattern": "使用 EncodedFile 对象，并检查其 mode 属性是否包含 'b'。",
+        "reason": "Issue 的核心是 EncodedFile 对象的 mode 属性状态错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "type",
+        "expression_hint": "type(obj) 在 EncodedFile.write 方法调用时",
+        "reason": "Issue 中的异常是关于传入对象的类型（bytes vs str）。观察传入对象的类型可以确认调用方是否因 mode 属性而做出了错误决策。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "是否引发 TypeError 及其消息",
+        "reason": "Issue 中观察到的直接错误现象是 TypeError。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "EncodedFile 实例的 mode 属性值",
+        "reason": "Issue 指出 mode 属性错误地包含了 'b'，观察其值可以确认问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当调用方依赖 mode 属性（包含 'b'）决定写入 bytes 时，EncodedFile.write 不会抛出 TypeError，或者 mode 属性本身不包含 'b'。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的异常消息字符串，因为消息可能因 Python 版本或实现细节而变化。",
+        "reason": "当前缺陷行为是抛出 TypeError。修复后，该异常不应被抛出（或者 mode 属性被修正）。因此，在复现缺陷的测试中，应断言会抛出异常；在验证修复的测试中，应断言不会抛出异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 testdir fixture 来创建和运行测试脚本，可能还需要模拟或导入 youtube-dl 的相关逻辑。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造 EncodedFile 实例，并可能设置其底层 buffer 和 encoding。",
+        "source": "retrieved_source",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "EncodedFile.mode 属性的具体实现和当前返回值在源码片段中没有显示，需要进一步确认。",
+      "youtube-dl 内部具体如何检查 mode 属性并决定写入类型的精确逻辑。",
+      "修复后的预期行为是 mode 属性被修正，还是 write 方法被修改以接受 bytes，或者两者兼有。"
+    ]
+  }
+}

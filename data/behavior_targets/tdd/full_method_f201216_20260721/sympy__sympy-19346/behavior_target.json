@@ -1,0 +1,262 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-19346",
+  "issue_summary": "srepr 函数对 dict 和 set 的打印输出不正确，没有像 list 和 tuple 那样递归打印元素。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 srepr 以及符号（如 from sympy import srepr; from sympy.abc import x, y）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊 fixture 或复杂设置，直接调用函数即可。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_dict",
+        "test_file": "sympy/printing/tests/test_str.py",
+        "why_relevant": "该测试涉及 dict 的字符串表示，使用了 sstr 和 str，与 srepr 同属打印模块，测试结构和输入对象（包含 SymPy 符号的 dict）相似。",
+        "reusable_parts": [
+          "imports (如 from sympy import x, y)",
+          "使用 SymPy 符号构造 dict 的输入模式",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试使用 sstr 和 str，而非 srepr；且测试的是正确输出，而非缺陷输出。"
+      },
+      {
+        "test_name": "test_S_srepr_is_identity",
+        "test_file": "sympy/functions/elementary/tests/test_piecewise.py",
+        "why_relevant": "该测试直接使用了 srepr 函数，并验证了 S(srepr(p)) == p 的 round-trip 属性，与 srepr 的功能相关。",
+        "reusable_parts": [
+          "srepr 的调用方式",
+          "使用 S() 进行求值的模式",
+          "assert p == q 的断言风格"
+        ],
+        "possible_gap": "该测试针对 Piecewise 对象，而非 dict 或 set；且测试的是正确行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 srepr 函数，输入参数为包含 SymPy 对象的 Python dict 或 set。",
+      "evidence": [
+        "Issue 中示例：srepr({x, y}) 和 srepr({x: y})",
+        "Issue 描述：srepr prints the elements in dict and set wrong."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "srepr 对 dict 和 set 的输出没有递归打印其内部元素，而是直接输出 Python 的 repr 形式，导致输出为 {x, y} 和 {x: y}，而不是期望的递归表示。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中示例：srepr({x, y}) 输出 {x, y}，srepr({x: y}) 输出 {x: y}，而 srepr([x,y]) 输出 [Symbol('x'), Symbol('y')]。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "srepr",
+        "kind": "function",
+        "source_path": "sympy/printing/repr.py",
+        "reason": "Issue 直接报告 srepr 函数的问题，是缺陷复现的核心 API。"
+      },
+      {
+        "name": "ReprPrinter.doprint",
+        "kind": "method",
+        "source_path": "sympy/printing/repr.py",
+        "reason": "srepr 函数内部调用 ReprPrinter(settings).doprint(expr)，可能是实现缺陷的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/repr.py",
+        "object": "ReprPrinter",
+        "lines": "",
+        "reason": "srepr 函数调用 ReprPrinter.doprint，该类可能没有正确处理 dict 和 set 类型的打印逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用 list、tuple 或特定 SymPy 对象（如 Piecewise）作为 srepr 输入。",
+        "target_pattern": "使用包含 SymPy 符号的 Python dict 或 set 作为 srepr 输入。",
+        "reason": "Issue 表明缺陷仅在输入为 dict 或 set 时触发，而 list 和 tuple 正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试 test_dict 中 sstr 和 str 的参数是 dict。",
+        "target_pattern": "将 sstr 或 str 的调用替换为 srepr，并保持 dict/set 参数。",
+        "reason": "srepr 是缺陷函数，需要替换 API 调用以触发缺陷路径。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "srepr 函数对 dict 和 set 的输入应该递归打印其内部元素，输出其元素的 srepr 表示形式。",
+      "evidence": [
+        "Issue 中对比：srepr 对 list 和 tuple 能正确打印元素，如 srepr([x,y]) 输出 [Symbol('x'), Symbol('y')]。",
+        "Issue 提问：Is this behavior intended? 暗示期望行为应与 list/tuple 一致。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "repr",
+        "expression_hint": "srepr({x, y}) 和 srepr({x: y}) 的返回值。",
+        "reason": "Issue 的核心是 srepr 对 dict/set 的输出格式错误，直接观察返回值可判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "将 srepr 输出与预期递归表示（如 {Symbol('x'), Symbol('y')}）进行比较。",
+        "reason": "缺陷表现为返回值不符合预期，需要比较实际输出与期望的递归表示。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "srepr 对 dict 或 set 的输出应包含其元素的 srepr 表示（例如 Symbol('x')），而不是直接输出 Python 的 repr（如 x）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的输出字符串完全相等，因为 dict/set 的顺序可能不确定。",
+        "reason": "Issue 期望 dict/set 的元素被递归打印，断言包含关键片段（如 Symbol('x')）更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "srepr 对 dict 和 set 的预期精确输出格式是什么？Issue 只给出了 list/tuple 的示例，未给出 dict/set 修复后的确切输出。",
+    "缺陷是否存在于 ReprPrinter 类的特定方法中？需要进一步代码分析。",
+    "set 的输出顺序是否会影响断言？需要设计顺序无关的断言。"
+  ],
+  "raw": {
+    "issue_summary": "srepr 函数对 dict 和 set 的打印输出不正确，没有像 list 和 tuple 那样递归打印元素。",
+    "trigger_condition": {
+      "text": "调用 srepr 函数，输入参数为包含 SymPy 对象的 Python dict 或 set。",
+      "evidence": [
+        "Issue 中示例：srepr({x, y}) 和 srepr({x: y})",
+        "Issue 描述：srepr prints the elements in dict and set wrong."
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "srepr 对 dict 和 set 的输出没有递归打印其内部元素，而是直接输出 Python 的 repr 形式，导致输出为 {x, y} 和 {x: y}，而不是期望的递归表示。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中示例：srepr({x, y}) 输出 {x, y}，srepr({x: y}) 输出 {x: y}，而 srepr([x,y]) 输出 [Symbol('x'), Symbol('y')]。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "srepr 函数对 dict 和 set 的输入应该递归打印其内部元素，输出其元素的 srepr 表示形式。",
+      "evidence": [
+        "Issue 中对比：srepr 对 list 和 tuple 能正确打印元素，如 srepr([x,y]) 输出 [Symbol('x'), Symbol('y')]。",
+        "Issue 提问：Is this behavior intended? 暗示期望行为应与 list/tuple 一致。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "srepr",
+        "kind": "function",
+        "source_path": "sympy/printing/repr.py",
+        "reason": "Issue 直接报告 srepr 函数的问题，是缺陷复现的核心 API。"
+      },
+      {
+        "name": "ReprPrinter.doprint",
+        "kind": "method",
+        "source_path": "sympy/printing/repr.py",
+        "reason": "srepr 函数内部调用 ReprPrinter(settings).doprint(expr)，可能是实现缺陷的位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/repr.py",
+        "object": "ReprPrinter",
+        "lines": "",
+        "reason": "srepr 函数调用 ReprPrinter.doprint，该类可能没有正确处理 dict 和 set 类型的打印逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_dict",
+        "test_file": "sympy/printing/tests/test_str.py",
+        "why_relevant": "该测试涉及 dict 的字符串表示，使用了 sstr 和 str，与 srepr 同属打印模块，测试结构和输入对象（包含 SymPy 符号的 dict）相似。",
+        "reusable_parts": [
+          "imports (如 from sympy import x, y)",
+          "使用 SymPy 符号构造 dict 的输入模式",
+          "assert 风格"
+        ],
+        "possible_gap": "该测试使用 sstr 和 str，而非 srepr；且测试的是正确输出，而非缺陷输出。"
+      },
+      {
+        "test_name": "test_S_srepr_is_identity",
+        "test_file": "sympy/functions/elementary/tests/test_piecewise.py",
+        "why_relevant": "该测试直接使用了 srepr 函数，并验证了 S(srepr(p)) == p 的 round-trip 属性，与 srepr 的功能相关。",
+        "reusable_parts": [
+          "srepr 的调用方式",
+          "使用 S() 进行求值的模式",
+          "assert p == q 的断言风格"
+        ],
+        "possible_gap": "该测试针对 Piecewise 对象，而非 dict 或 set；且测试的是正确行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用 list、tuple 或特定 SymPy 对象（如 Piecewise）作为 srepr 输入。",
+        "target_pattern": "使用包含 SymPy 符号的 Python dict 或 set 作为 srepr 输入。",
+        "reason": "Issue 表明缺陷仅在输入为 dict 或 set 时触发，而 list 和 tuple 正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试 test_dict 中 sstr 和 str 的参数是 dict。",
+        "target_pattern": "将 sstr 或 str 的调用替换为 srepr，并保持 dict/set 参数。",
+        "reason": "srepr 是缺陷函数，需要替换 API 调用以触发缺陷路径。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "repr",
+        "expression_hint": "srepr({x, y}) 和 srepr({x: y}) 的返回值。",
+        "reason": "Issue 的核心是 srepr 对 dict/set 的输出格式错误，直接观察返回值可判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "将 srepr 输出与预期递归表示（如 {Symbol('x'), Symbol('y')}）进行比较。",
+        "reason": "缺陷表现为返回值不符合预期，需要比较实际输出与期望的递归表示。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "srepr 对 dict 或 set 的输出应包含其元素的 srepr 表示（例如 Symbol('x')），而不是直接输出 Python 的 repr（如 x）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的输出字符串完全相等，因为 dict/set 的顺序可能不确定。",
+        "reason": "Issue 期望 dict/set 的元素被递归打印，断言包含关键片段（如 Symbol('x')）更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 srepr 以及符号（如 from sympy import srepr; from sympy.abc import x, y）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊 fixture 或复杂设置，直接调用函数即可。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "srepr 对 dict 和 set 的预期精确输出格式是什么？Issue 只给出了 list/tuple 的示例，未给出 dict/set 修复后的确切输出。",
+      "缺陷是否存在于 ReprPrinter 类的特定方法中？需要进一步代码分析。",
+      "set 的输出顺序是否会影响断言？需要设计顺序无关的断言。"
+    ]
+  }
+}

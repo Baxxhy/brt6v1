@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15388",
+  "issue_summary": "开发服务器在 settings.py 的 TEMPLATES[0]['DIRS'] 中添加 BASE_DIR 后，文件更改时无法自动重启。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 来动态设置 TEMPLATES 配置，模拟 Issue 中的场景。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或调用开发服务器的运行环境，例如使用 django.test.utils.setup_test_environment 或相关命令。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要使用临时目录和文件来模拟项目文件结构及文件保存事件。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TemplateReloadTests.test_get_template_directories",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "该测试直接调用了 autoreload.get_template_directories()，并验证了返回的模板目录集合。这与监控模板目录更改以触发重启的逻辑相关。",
+        "reusable_parts": [
+          "imports",
+          "class TemplateReloadTests",
+          "@override_settings 装饰器",
+          "使用 autoreload.get_template_directories()",
+          "assertSetEqual 断言风格"
+        ],
+        "possible_gap": "该测试在固定设置下验证目录集合，没有模拟动态添加 BASE_DIR 到 DIRS 的场景，也没有测试开发服务器的重启行为。"
+      },
+      {
+        "test_name": "TemplateReloadTests.test_template_changed",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "该测试模拟了模板文件更改，并检查了 autoreload.template_changed 函数的响应。这是自动重载机制的核心部分。",
+        "reusable_parts": [
+          "imports",
+          "class TemplateReloadTests",
+          "@mock.patch 装饰器",
+          "使用 autoreload.template_changed",
+          "assertTrue 断言风格"
+        ],
+        "possible_gap": "该测试专注于单个模板文件路径的更改检测，没有涉及 settings.py 中 TEMPLATES 配置动态变化对监控列表的影响。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 项目的 settings.py 中，将 BASE_DIR 变量添加到 TEMPLATES[0]['DIRS'] 列表中，然后运行开发服务器并修改文件。",
+      "evidence": [
+        "Issue 描述中提供了详细的复现步骤：'copy the BASE_DIR variable from line 16 and paste it into the empty DIRS list on line 57'，然后运行 runserver 并保存文件。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "开发服务器在检测到文件更改时不会自动重启。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'save a file and watch the dev server *NOT* restart.'，'it won't restart on its own when you save'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "autoreload.get_template_directories",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中多次调用此函数来获取模板目录，这可能与开发服务器监控文件更改的逻辑有关。"
+      },
+      {
+        "name": "autoreload.template_changed",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中测试了此函数，它用于判断模板文件是否更改，是自动重载机制的一部分。"
+      },
+      {
+        "name": "django.contrib.staticfiles.management.commands.runserver",
+        "kind": "module",
+        "source_path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "reason": "iCoRe 检索出的相关源代码指向此文件，开发服务器的运行命令可能在此定义。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/conf/global_settings.py",
+        "object": "TEMPLATES",
+        "lines": "222-222",
+        "reason": "iCoRe 检索出的相关源代码片段显示 TEMPLATES 的全局默认值为空列表，可能与配置处理有关。"
+      },
+      {
+        "path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "object": "runserver",
+        "lines": "",
+        "reason": "iCoRe 检索出的相关源代码指向此文件，开发服务器的自动重载逻辑可能在此实现或调用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 @override_settings 设置固定的 TEMPLATES 配置，例如 DIRS 包含预定义的路径列表。",
+        "target_pattern": "将 TEMPLATES[0]['DIRS'] 设置为包含一个由 BASE_DIR（一个 Path 对象或字符串）构成的列表。",
+        "reason": "Issue 表明，当 DIRS 包含 BASE_DIR 时，开发服务器的自动重载机制失效。因此，需要变异配置来模拟此触发条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 autoreload.get_template_directories() 并断言其返回值。",
+        "target_pattern": "在模拟开发服务器运行上下文中，触发文件保存事件，并观察自动重载是否被调用。",
+        "reason": "Issue 的核心是开发服务器的重启行为，而不仅仅是目录列表是否正确。需要变异以测试整个重载流程。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "开发服务器在检测到项目文件（包括 settings.py）的更改时应自动重启。",
+      "evidence": [
+        "Issue 描述：当从 DIRS 列表中移除 BASE_DIR 后，'notice the development server once again detects changes and restarts'。这表明修复后，文件更改应触发重启。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "开发服务器进程的 is_alive 状态或重启计数器，在模拟文件保存事件前后。",
+        "reason": "Issue 的核心现象是服务器未重启，因此需要观测服务器进程状态是否因文件更改而改变。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "autoreload.get_template_directories() 返回的目录集合，特别是在 settings.TEMPLATES 包含 BASE_DIR 时。",
+        "reason": "自动重载机制可能依赖此目录列表来监控文件。如果列表计算错误（例如，包含非字符串/Path对象），可能导致监控失效。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "运行开发服务器或更改配置时产生的任何警告信息。",
+        "reason": "配置处理可能产生静默错误或警告，这些可能指示问题所在。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 TEMPLATES[0]['DIRS'] 包含 BASE_DIR 时，模拟文件更改应触发开发服务器的重启机制（或相关回调）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的目录路径字符串精确相等，因为 BASE_DIR 的具体值可能因环境而异。",
+        "reason": "Issue 关注的是行为（重启）是否发生，而不是具体的目录值。before_after_relation 可以比较重启触发前后的状态变化。"
+      },
+      {
+        "assertion_goal": "autoreload.get_template_directories() 返回的集合应正确包含由 BASE_DIR 转换而来的 Path 对象。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言返回集合的完整精确匹配，因为其他目录可能也存在。",
+        "reason": "确保 BASE_DIR 被正确纳入监控列表是触发重启的前提。contains_fragment 可以检查目标路径是否存在。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "BASE_DIR 的具体类型（是字符串还是 Path 对象）在添加到 DIRS 时如何影响自动重载逻辑。",
+    "自动重载机制中，是哪个具体函数或条件判断因包含 BASE_DIR 而失效。",
+    "除了 TEMPLATES 配置，是否还有其他相关设置（如 STATICFILES_DIRS）会受类似影响。",
+    "开发服务器不重启的具体内部状态是什么（例如，监控线程停止、事件未分发）。"
+  ],
+  "raw": {
+    "issue_summary": "开发服务器在 settings.py 的 TEMPLATES[0]['DIRS'] 中添加 BASE_DIR 后，文件更改时无法自动重启。",
+    "trigger_condition": {
+      "text": "在 Django 项目的 settings.py 中，将 BASE_DIR 变量添加到 TEMPLATES[0]['DIRS'] 列表中，然后运行开发服务器并修改文件。",
+      "evidence": [
+        "Issue 描述中提供了详细的复现步骤：'copy the BASE_DIR variable from line 16 and paste it into the empty DIRS list on line 57'，然后运行 runserver 并保存文件。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "开发服务器在检测到文件更改时不会自动重启。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'save a file and watch the dev server *NOT* restart.'，'it won't restart on its own when you save'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "开发服务器在检测到项目文件（包括 settings.py）的更改时应自动重启。",
+      "evidence": [
+        "Issue 描述：当从 DIRS 列表中移除 BASE_DIR 后，'notice the development server once again detects changes and restarts'。这表明修复后，文件更改应触发重启。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "autoreload.get_template_directories",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中多次调用此函数来获取模板目录，这可能与开发服务器监控文件更改的逻辑有关。"
+      },
+      {
+        "name": "autoreload.template_changed",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中测试了此函数，它用于判断模板文件是否更改，是自动重载机制的一部分。"
+      },
+      {
+        "name": "django.contrib.staticfiles.management.commands.runserver",
+        "kind": "module",
+        "source_path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "reason": "iCoRe 检索出的相关源代码指向此文件，开发服务器的运行命令可能在此定义。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/conf/global_settings.py",
+        "object": "TEMPLATES",
+        "lines": "222-222",
+        "reason": "iCoRe 检索出的相关源代码片段显示 TEMPLATES 的全局默认值为空列表，可能与配置处理有关。"
+      },
+      {
+        "path": "django/contrib/staticfiles/management/commands/runserver.py",
+        "object": "runserver",
+        "lines": "",
+        "reason": "iCoRe 检索出的相关源代码指向此文件，开发服务器的自动重载逻辑可能在此实现或调用。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TemplateReloadTests.test_get_template_directories",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "该测试直接调用了 autoreload.get_template_directories()，并验证了返回的模板目录集合。这与监控模板目录更改以触发重启的逻辑相关。",
+        "reusable_parts": [
+          "imports",
+          "class TemplateReloadTests",
+          "@override_settings 装饰器",
+          "使用 autoreload.get_template_directories()",
+          "assertSetEqual 断言风格"
+        ],
+        "possible_gap": "该测试在固定设置下验证目录集合，没有模拟动态添加 BASE_DIR 到 DIRS 的场景，也没有测试开发服务器的重启行为。"
+      },
+      {
+        "test_name": "TemplateReloadTests.test_template_changed",
+        "test_file": "tests/template_tests/test_autoreloader.py",
+        "why_relevant": "该测试模拟了模板文件更改，并检查了 autoreload.template_changed 函数的响应。这是自动重载机制的核心部分。",
+        "reusable_parts": [
+          "imports",
+          "class TemplateReloadTests",
+          "@mock.patch 装饰器",
+          "使用 autoreload.template_changed",
+          "assertTrue 断言风格"
+        ],
+        "possible_gap": "该测试专注于单个模板文件路径的更改检测，没有涉及 settings.py 中 TEMPLATES 配置动态变化对监控列表的影响。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 @override_settings 设置固定的 TEMPLATES 配置，例如 DIRS 包含预定义的路径列表。",
+        "target_pattern": "将 TEMPLATES[0]['DIRS'] 设置为包含一个由 BASE_DIR（一个 Path 对象或字符串）构成的列表。",
+        "reason": "Issue 表明，当 DIRS 包含 BASE_DIR 时，开发服务器的自动重载机制失效。因此，需要变异配置来模拟此触发条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接调用 autoreload.get_template_directories() 并断言其返回值。",
+        "target_pattern": "在模拟开发服务器运行上下文中，触发文件保存事件，并观察自动重载是否被调用。",
+        "reason": "Issue 的核心是开发服务器的重启行为，而不仅仅是目录列表是否正确。需要变异以测试整个重载流程。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "开发服务器进程的 is_alive 状态或重启计数器，在模拟文件保存事件前后。",
+        "reason": "Issue 的核心现象是服务器未重启，因此需要观测服务器进程状态是否因文件更改而改变。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "autoreload.get_template_directories() 返回的目录集合，特别是在 settings.TEMPLATES 包含 BASE_DIR 时。",
+        "reason": "自动重载机制可能依赖此目录列表来监控文件。如果列表计算错误（例如，包含非字符串/Path对象），可能导致监控失效。"
+      },
+      {
+        "kind": "warning",
+        "expression_hint": "运行开发服务器或更改配置时产生的任何警告信息。",
+        "reason": "配置处理可能产生静默错误或警告，这些可能指示问题所在。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 TEMPLATES[0]['DIRS'] 包含 BASE_DIR 时，模拟文件更改应触发开发服务器的重启机制（或相关回调）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的目录路径字符串精确相等，因为 BASE_DIR 的具体值可能因环境而异。",
+        "reason": "Issue 关注的是行为（重启）是否发生，而不是具体的目录值。before_after_relation 可以比较重启触发前后的状态变化。"
+      },
+      {
+        "assertion_goal": "autoreload.get_template_directories() 返回的集合应正确包含由 BASE_DIR 转换而来的 Path 对象。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言返回集合的完整精确匹配，因为其他目录可能也存在。",
+        "reason": "确保 BASE_DIR 被正确纳入监控列表是触发重启的前提。contains_fragment 可以检查目标路径是否存在。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @override_settings 来动态设置 TEMPLATES 配置，模拟 Issue 中的场景。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要模拟或调用开发服务器的运行环境，例如使用 django.test.utils.setup_test_environment 或相关命令。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要使用临时目录和文件来模拟项目文件结构及文件保存事件。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "BASE_DIR 的具体类型（是字符串还是 Path 对象）在添加到 DIRS 时如何影响自动重载逻辑。",
+      "自动重载机制中，是哪个具体函数或条件判断因包含 BASE_DIR 而失效。",
+      "除了 TEMPLATES 配置，是否还有其他相关设置（如 STATICFILES_DIRS）会受类似影响。",
+      "开发服务器不重启的具体内部状态是什么（例如，监控线程停止、事件未分发）。"
+    ]
+  }
+}

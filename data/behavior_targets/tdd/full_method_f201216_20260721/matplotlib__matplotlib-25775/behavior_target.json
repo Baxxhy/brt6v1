@@ -1,0 +1,318 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-25775",
+  "issue_summary": "Text 对象缺少像其他 Artist 那样的 per‑artist 抗锯齿设置方法，只能依赖全局 rcParams。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 和 matplotlib.text.Text。可能还需要 matplotlib.rcParams。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的图形上下文中运行，以避免 rcParams 设置污染其他测试。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_default_antialiased",
+        "test_file": "lib/matplotlib/tests/test_patches.py",
+        "why_relevant": "它测试了另一个 Artist（Patch）的 set_antialiased 和 get_antialiased 方法，包括与 rcParams 的交互和 None 重置行为。",
+        "reusable_parts": [
+          "导入 rcParams",
+          "创建 Artist 对象",
+          "调用 set_antialiased 和 get_antialiased",
+          "assert 风格"
+        ],
+        "possible_gap": "它测试的是 Patch 类，而不是 Text 类。Text 类目前没有这些方法，直接移植会引发 AttributeError。"
+      },
+      {
+        "test_name": "test_antialiasing",
+        "test_file": "lib/matplotlib/tests/test_text.py",
+        "why_relevant": "它直接测试 Text 对象的抗锯齿渲染，并设置了全局 rcParams[\"text.antialiased\"]。",
+        "reusable_parts": [
+          "导入 mpl 和 plt",
+          "设置 rcParams",
+          "创建 Figure 和 Text 对象",
+          "使用 image_comparison 装饰器"
+        ],
+        "possible_gap": "它只测试了全局配置下的渲染效果，没有测试 per‑artist 的 set_antialiased/get_antialiased 方法。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 Text 对象，尝试通过 set_antialiased 设置其抗锯齿状态，或通过 get_antialiased 读取其抗锯齿状态。",
+      "evidence": [
+        "Issue 指出 Text 对象总是通过全局 rcParams[\"text.antialias\"] 获取抗锯齿状态，而其他 Artist 可以通过 set_antialiased/get_antialiased 进行 per‑artist 配置。",
+        "源码片段 1 显示 Text 类没有 set_antialiased 或 get_antialiased 方法。",
+        "源码片段 2 显示 Collection 类有 set_antialiased 方法，表明这是其他 Artist 的标准接口。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 Text.set_antialiased 或 Text.get_antialiased 会引发 AttributeError，因为 Text 类没有这些方法。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 明确说明 Text 对象缺少类似其他 Artist 的 getters/setters。",
+        "源码片段 1 中 Text 类的方法列表不包含 set_antialiased 或 get_antialiased。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Text",
+        "kind": "class",
+        "source_path": "lib/matplotlib/text.py",
+        "reason": "Issue 的核心是 Text 类缺少抗锯齿的 per‑artist 设置方法。"
+      },
+      {
+        "name": "set_antialiased",
+        "kind": "method",
+        "source_path": "lib/matplotlib/collections.py",
+        "reason": "这是其他 Artist 已有的标准接口，Issue 要求 Text 也实现类似方法。"
+      },
+      {
+        "name": "get_antialiased",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 要求 Text 有对应的 getter 方法。"
+      },
+      {
+        "name": "rcParams",
+        "kind": "global_var",
+        "source_path": "lib/matplotlib/__init__.py",
+        "reason": "当前 Text 的抗锯齿状态依赖此全局配置，Issue 要求改变这种依赖。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/text.py",
+        "object": "Text",
+        "lines": "95-1336",
+        "reason": "Text 类缺少 set_antialiased 和 get_antialiased 方法，导致无法进行 per‑artist 配置。"
+      },
+      {
+        "path": "lib/matplotlib/text.py",
+        "object": "Text.draw",
+        "lines": "",
+        "reason": "Issue 提到绘制阶段需要访问 GraphicsContext 状态，而不是 rcParams[\"text.antialiased\"]，draw 方法可能包含对全局 rcParams 的硬编码访问。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在 test_antialiasing 中，通过 mpl.rcParams['text.antialiased'] = True 设置全局抗锯齿。",
+        "target_pattern": "不修改全局 rcParams，而是尝试在单个 Text 对象上调用 set_antialiased(True) 或 set_antialiased(False)。",
+        "reason": "Issue 的核心是 per‑artist 配置，变异后应触发对缺失方法的调用，从而暴露 AttributeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 test_default_antialiased 中，对 Patch 对象调用 patch.set_antialiased(...) 和 patch.get_antialiased()。",
+        "target_pattern": "将测试对象从 Patch 替换为 Text，并尝试相同的调用链。",
+        "reason": "直接测试 Text 是否支持与其他 Artist 相同的接口，会因方法缺失而失败。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Text 对象应支持 set_antialiased 和 get_antialiased 方法，允许 per‑artist 配置抗锯齿状态，并在绘制阶段使用该状态。",
+      "evidence": [
+        "Issue 的 Proposed solution 明确要求为 Text 对象添加类似的 getters/setters，并在绘制阶段使用该信息。",
+        "源码片段 2 展示了其他 Artist（如 Collection）已有的 set_antialiased 方法模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 Text().set_antialiased(True) 或 Text().get_antialiased() 时是否引发 AttributeError。",
+        "reason": "这是 Issue 描述的直接症状：Text 缺少这些方法。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Text 对象内部是否有 _antialiaseds 或类似属性，以及绘制时是否使用了 rcParams[\"text.antialiased\"] 的值。",
+        "reason": "Issue 要求绘制阶段使用 per‑artist 状态，而非全局 rcParams。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Text 对象应具有 set_antialiased 和 get_antialiased 方法，且调用它们不会引发 AttributeError。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的渲染图像像素或完整的 repr 字符串。",
+        "reason": "方法的存在性是 Issue 的核心要求，且是稳定的、与实现细节无关的断言。"
+      },
+      {
+        "assertion_goal": "通过 set_antialiased 设置的值应能通过 get_antialiased 正确获取，且与全局 rcParams 设置独立。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的底层属性名或硬编码的默认值。",
+        "reason": "这验证了 per‑artist 配置功能的有效性，是 Issue 期望的行为。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Text 对象的抗锯齿状态在内部应如何存储（例如属性名是 _antialiased 还是 _antialiaseds）。",
+    "Annotation 对象是否需要同步调整（Issue 提到 'adjusting Annotations accordingly, if needed'）。",
+    "具体哪些后端代码需要修改以使用 GraphicsContext 状态而不是 rcParams。"
+  ],
+  "raw": {
+    "issue_summary": "Text 对象缺少像其他 Artist 那样的 per‑artist 抗锯齿设置方法，只能依赖全局 rcParams。",
+    "trigger_condition": {
+      "text": "创建一个 Text 对象，尝试通过 set_antialiased 设置其抗锯齿状态，或通过 get_antialiased 读取其抗锯齿状态。",
+      "evidence": [
+        "Issue 指出 Text 对象总是通过全局 rcParams[\"text.antialias\"] 获取抗锯齿状态，而其他 Artist 可以通过 set_antialiased/get_antialiased 进行 per‑artist 配置。",
+        "源码片段 1 显示 Text 类没有 set_antialiased 或 get_antialiased 方法。",
+        "源码片段 2 显示 Collection 类有 set_antialiased 方法，表明这是其他 Artist 的标准接口。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 Text.set_antialiased 或 Text.get_antialiased 会引发 AttributeError，因为 Text 类没有这些方法。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 明确说明 Text 对象缺少类似其他 Artist 的 getters/setters。",
+        "源码片段 1 中 Text 类的方法列表不包含 set_antialiased 或 get_antialiased。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Text 对象应支持 set_antialiased 和 get_antialiased 方法，允许 per‑artist 配置抗锯齿状态，并在绘制阶段使用该状态。",
+      "evidence": [
+        "Issue 的 Proposed solution 明确要求为 Text 对象添加类似的 getters/setters，并在绘制阶段使用该信息。",
+        "源码片段 2 展示了其他 Artist（如 Collection）已有的 set_antialiased 方法模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Text",
+        "kind": "class",
+        "source_path": "lib/matplotlib/text.py",
+        "reason": "Issue 的核心是 Text 类缺少抗锯齿的 per‑artist 设置方法。"
+      },
+      {
+        "name": "set_antialiased",
+        "kind": "method",
+        "source_path": "lib/matplotlib/collections.py",
+        "reason": "这是其他 Artist 已有的标准接口，Issue 要求 Text 也实现类似方法。"
+      },
+      {
+        "name": "get_antialiased",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 要求 Text 有对应的 getter 方法。"
+      },
+      {
+        "name": "rcParams",
+        "kind": "global_var",
+        "source_path": "lib/matplotlib/__init__.py",
+        "reason": "当前 Text 的抗锯齿状态依赖此全局配置，Issue 要求改变这种依赖。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/text.py",
+        "object": "Text",
+        "lines": "95-1336",
+        "reason": "Text 类缺少 set_antialiased 和 get_antialiased 方法，导致无法进行 per‑artist 配置。"
+      },
+      {
+        "path": "lib/matplotlib/text.py",
+        "object": "Text.draw",
+        "lines": "",
+        "reason": "Issue 提到绘制阶段需要访问 GraphicsContext 状态，而不是 rcParams[\"text.antialiased\"]，draw 方法可能包含对全局 rcParams 的硬编码访问。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_default_antialiased",
+        "test_file": "lib/matplotlib/tests/test_patches.py",
+        "why_relevant": "它测试了另一个 Artist（Patch）的 set_antialiased 和 get_antialiased 方法，包括与 rcParams 的交互和 None 重置行为。",
+        "reusable_parts": [
+          "导入 rcParams",
+          "创建 Artist 对象",
+          "调用 set_antialiased 和 get_antialiased",
+          "assert 风格"
+        ],
+        "possible_gap": "它测试的是 Patch 类，而不是 Text 类。Text 类目前没有这些方法，直接移植会引发 AttributeError。"
+      },
+      {
+        "test_name": "test_antialiasing",
+        "test_file": "lib/matplotlib/tests/test_text.py",
+        "why_relevant": "它直接测试 Text 对象的抗锯齿渲染，并设置了全局 rcParams[\"text.antialiased\"]。",
+        "reusable_parts": [
+          "导入 mpl 和 plt",
+          "设置 rcParams",
+          "创建 Figure 和 Text 对象",
+          "使用 image_comparison 装饰器"
+        ],
+        "possible_gap": "它只测试了全局配置下的渲染效果，没有测试 per‑artist 的 set_antialiased/get_antialiased 方法。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "在 test_antialiasing 中，通过 mpl.rcParams['text.antialiased'] = True 设置全局抗锯齿。",
+        "target_pattern": "不修改全局 rcParams，而是尝试在单个 Text 对象上调用 set_antialiased(True) 或 set_antialiased(False)。",
+        "reason": "Issue 的核心是 per‑artist 配置，变异后应触发对缺失方法的调用，从而暴露 AttributeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "在 test_default_antialiased 中，对 Patch 对象调用 patch.set_antialiased(...) 和 patch.get_antialiased()。",
+        "target_pattern": "将测试对象从 Patch 替换为 Text，并尝试相同的调用链。",
+        "reason": "直接测试 Text 是否支持与其他 Artist 相同的接口，会因方法缺失而失败。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 Text().set_antialiased(True) 或 Text().get_antialiased() 时是否引发 AttributeError。",
+        "reason": "这是 Issue 描述的直接症状：Text 缺少这些方法。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Text 对象内部是否有 _antialiaseds 或类似属性，以及绘制时是否使用了 rcParams[\"text.antialiased\"] 的值。",
+        "reason": "Issue 要求绘制阶段使用 per‑artist 状态，而非全局 rcParams。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Text 对象应具有 set_antialiased 和 get_antialiased 方法，且调用它们不会引发 AttributeError。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的渲染图像像素或完整的 repr 字符串。",
+        "reason": "方法的存在性是 Issue 的核心要求，且是稳定的、与实现细节无关的断言。"
+      },
+      {
+        "assertion_goal": "通过 set_antialiased 设置的值应能通过 get_antialiased 正确获取，且与全局 rcParams 设置独立。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的底层属性名或硬编码的默认值。",
+        "reason": "这验证了 per‑artist 配置功能的有效性，是 Issue 期望的行为。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 matplotlib.pyplot 和 matplotlib.text.Text。可能还需要 matplotlib.rcParams。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的图形上下文中运行，以避免 rcParams 设置污染其他测试。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "Text 对象的抗锯齿状态在内部应如何存储（例如属性名是 _antialiased 还是 _antialiaseds）。",
+      "Annotation 对象是否需要同步调整（Issue 提到 'adjusting Annotations accordingly, if needed'）。",
+      "具体哪些后端代码需要修改以使用 GraphicsContext 状态而不是 rcParams。"
+    ]
+  }
+}

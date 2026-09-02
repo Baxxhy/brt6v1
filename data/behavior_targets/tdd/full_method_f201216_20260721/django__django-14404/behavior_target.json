@@ -1,0 +1,292 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14404",
+  "issue_summary": "catch_all_view() 在 FORCE_SCRIPT_NAME 设置下，重定向时错误地使用了 request.path_info 而非 request.path，导致脚本名被错误地截断。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 和 Client。可能需要创建超级用户并登录以绕过认证（取决于测试的 URL 配置）。需要 override_settings 来设置 ROOT_URLCONF、APPEND_SLASH 和 FORCE_SCRIPT_NAME。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试 URL 配置（ROOT_URLCONF）应包含启用了最终 catch-all 视图的 AdminSite 实例（如 'admin10' 或 'admin'）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminSiteFinalCatchAllPatternTests.test_missing_slash_append_slash_true",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试直接测试了在 APPEND_SLASH=True 时，访问缺少尾部斜杠的已知 URL 的重定向行为，与触发缺陷的条件（APPEND_SLASH=True，访问缺少斜杠的 URL）高度相似。",
+        "reusable_parts": [
+          "测试类 AdminSiteFinalCatchAllPatternTests",
+          "@override_settings(ROOT_URLCONF='admin_views.urls')",
+          "使用 self.client.get 访问 URL",
+          "使用 assertRedirects 断言重定向",
+          "用户登录和 URL 构造模式"
+        ],
+        "possible_gap": "该测试访问的是已知的、存在的 URL（如 changelist），而缺陷发生在访问未知 URL 时触发的 catch_all_view。此外，该测试没有设置 FORCE_SCRIPT_NAME。"
+      },
+      {
+        "test_name": "test_unkown_url_without_trailing_slash_if_not_authenticated_without_final_catch_all_view",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试访问了一个未知的、不以斜杠结尾的 URL，这更接近触发 catch_all_view 的条件。",
+        "reusable_parts": [
+          "测试类 AdminSiteFinalCatchAllPatternTests",
+          "@override_settings(ROOT_URLCONF='admin_views.urls')",
+          "使用 self.client.get 访问未知 URL",
+          "使用 assertRedirects 断言重定向"
+        ],
+        "possible_gap": "该测试没有设置 FORCE_SCRIPT_NAME，且测试名称暗示它可能是在测试没有启用最终 catch-all 视图的情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当 settings.APPEND_SLASH 为 True，且访问一个不以斜杠结尾的未知 URL 时，如果配置了 FORCE_SCRIPT_NAME，catch_all_view 会被触发。",
+      "evidence": [
+        "Issue 描述指出问题与 FORCE_SCRIPT_NAME 相关。",
+        "源码片段 1 显示 catch_all_view 在 APPEND_SLASH 为 True 且 URL 不以 '/' 结尾时会尝试重定向。",
+        "相关测试 1、2、5 都涉及 APPEND_SLASH=True 和缺少尾部斜杠的 URL 访问。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "重定向的 URL 中缺少了脚本名（SCRIPT_NAME），导致重定向到一个错误的、不包含脚本名前缀的路径。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述明确指出：'catch_all_view returns redirect to '%s/' % request.path_info (script name cut off there) instead of '%s/' % request.path (with the script name)'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AdminSite.catch_all_view",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "这是 Issue 直接报告的存在缺陷的函数。"
+      },
+      {
+        "name": "HttpResponsePermanentRedirect",
+        "kind": "class",
+        "source_path": "",
+        "reason": "源码中 catch_all_view 在重定向时返回此类的实例。"
+      },
+      {
+        "name": "resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码中用于解析重定向路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.catch_all_view",
+        "lines": "420-431",
+        "reason": "Issue 直接指向此函数，且源码片段 1 显示其重定向路径构建为 `'%s/' % request.path_info`，这可能是缺陷所在。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中通常只设置 ROOT_URLCONF 和 APPEND_SLASH。",
+        "target_pattern": "在配置中额外添加 FORCE_SCRIPT_NAME 设置，例如 FORCE_SCRIPT_NAME='/myscript'。",
+        "reason": "Issue 明确指出缺陷与 FORCE_SCRIPT_NAME 相关，添加此配置是触发路径构建错误（使用 path_info 而非 path）的必要条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中访问的 URL 是通过 reverse 生成的已知管理 URL。",
+        "target_pattern": "访问一个完全未知的、不以斜杠结尾的 URL 路径，确保触发 catch_all_view 而非其他视图。",
+        "reason": "catch_all_view 是用于处理未知 URL 的最终兜底视图，访问未知 URL 是执行到缺陷代码路径的前提。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 FORCE_SCRIPT_NAME 被设置时，catch_all_view 生成的重定向 URL 应包含完整的脚本名前缀，即应基于 request.path 构建，而非 request.path_info。",
+      "evidence": [
+        "Issue 描述通过对比指出了期望行为：应使用 request.path（包含脚本名）而非 request.path_info（不包含脚本名）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.url 或 response['Location']（如果 response 是重定向）。",
+        "reason": "缺陷表现为重定向 URL 错误，直接观察重定向响应头中的 Location 字段或 response.url 属性可以判断是否包含了正确的脚本名前缀。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.FORCE_SCRIPT_NAME 和 settings.APPEND_SLASH 的值。",
+        "reason": "这两个设置是触发缺陷的必要条件，观测它们可以确认测试环境是否正确配置。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "request.path 与 request.path_info 在 catch_all_view 被调用时的值。",
+        "reason": "Issue 的核心是错误地使用了 path_info 而非 path，观测这两个属性的差异可以验证缺陷是否被触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 FORCE_SCRIPT_NAME 被设置时，对未知且缺少尾部斜杠的 URL 的请求，应被重定向到一个以脚本名开头的、以斜杠结尾的完整 URL。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的重定向 URL 字符串相等。",
+        "reason": "重定向 URL 应包含脚本名前缀和尾部斜杠。使用 contains_fragment 可以稳定地检查这两个关键部分，而不依赖于完整的、可能因其他配置变化的 URL。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "FORCE_SCRIPT_NAME 的具体值应该如何设置才能最好地复现问题。",
+    "访问哪个具体的未知 URL 路径最能可靠地触发 catch_all_view。",
+    "是否需要用户认证才能访问到 catch_all_view，或者未认证时也会触发。",
+    "在重定向发生之前，resolve(path, urlconf) 调用是否会因为路径不包含脚本名而失败，从而影响执行流。"
+  ],
+  "raw": {
+    "issue_summary": "catch_all_view() 在 FORCE_SCRIPT_NAME 设置下，重定向时错误地使用了 request.path_info 而非 request.path，导致脚本名被错误地截断。",
+    "trigger_condition": {
+      "text": "当 settings.APPEND_SLASH 为 True，且访问一个不以斜杠结尾的未知 URL 时，如果配置了 FORCE_SCRIPT_NAME，catch_all_view 会被触发。",
+      "evidence": [
+        "Issue 描述指出问题与 FORCE_SCRIPT_NAME 相关。",
+        "源码片段 1 显示 catch_all_view 在 APPEND_SLASH 为 True 且 URL 不以 '/' 结尾时会尝试重定向。",
+        "相关测试 1、2、5 都涉及 APPEND_SLASH=True 和缺少尾部斜杠的 URL 访问。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "重定向的 URL 中缺少了脚本名（SCRIPT_NAME），导致重定向到一个错误的、不包含脚本名前缀的路径。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述明确指出：'catch_all_view returns redirect to '%s/' % request.path_info (script name cut off there) instead of '%s/' % request.path (with the script name)'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 FORCE_SCRIPT_NAME 被设置时，catch_all_view 生成的重定向 URL 应包含完整的脚本名前缀，即应基于 request.path 构建，而非 request.path_info。",
+      "evidence": [
+        "Issue 描述通过对比指出了期望行为：应使用 request.path（包含脚本名）而非 request.path_info（不包含脚本名）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AdminSite.catch_all_view",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "这是 Issue 直接报告的存在缺陷的函数。"
+      },
+      {
+        "name": "HttpResponsePermanentRedirect",
+        "kind": "class",
+        "source_path": "",
+        "reason": "源码中 catch_all_view 在重定向时返回此类的实例。"
+      },
+      {
+        "name": "resolve",
+        "kind": "function",
+        "source_path": "",
+        "reason": "源码中用于解析重定向路径。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.catch_all_view",
+        "lines": "420-431",
+        "reason": "Issue 直接指向此函数，且源码片段 1 显示其重定向路径构建为 `'%s/' % request.path_info`，这可能是缺陷所在。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminSiteFinalCatchAllPatternTests.test_missing_slash_append_slash_true",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试直接测试了在 APPEND_SLASH=True 时，访问缺少尾部斜杠的已知 URL 的重定向行为，与触发缺陷的条件（APPEND_SLASH=True，访问缺少斜杠的 URL）高度相似。",
+        "reusable_parts": [
+          "测试类 AdminSiteFinalCatchAllPatternTests",
+          "@override_settings(ROOT_URLCONF='admin_views.urls')",
+          "使用 self.client.get 访问 URL",
+          "使用 assertRedirects 断言重定向",
+          "用户登录和 URL 构造模式"
+        ],
+        "possible_gap": "该测试访问的是已知的、存在的 URL（如 changelist），而缺陷发生在访问未知 URL 时触发的 catch_all_view。此外，该测试没有设置 FORCE_SCRIPT_NAME。"
+      },
+      {
+        "test_name": "test_unkown_url_without_trailing_slash_if_not_authenticated_without_final_catch_all_view",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "该测试访问了一个未知的、不以斜杠结尾的 URL，这更接近触发 catch_all_view 的条件。",
+        "reusable_parts": [
+          "测试类 AdminSiteFinalCatchAllPatternTests",
+          "@override_settings(ROOT_URLCONF='admin_views.urls')",
+          "使用 self.client.get 访问未知 URL",
+          "使用 assertRedirects 断言重定向"
+        ],
+        "possible_gap": "该测试没有设置 FORCE_SCRIPT_NAME，且测试名称暗示它可能是在测试没有启用最终 catch-all 视图的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试中通常只设置 ROOT_URLCONF 和 APPEND_SLASH。",
+        "target_pattern": "在配置中额外添加 FORCE_SCRIPT_NAME 设置，例如 FORCE_SCRIPT_NAME='/myscript'。",
+        "reason": "Issue 明确指出缺陷与 FORCE_SCRIPT_NAME 相关，添加此配置是触发路径构建错误（使用 path_info 而非 path）的必要条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中访问的 URL 是通过 reverse 生成的已知管理 URL。",
+        "target_pattern": "访问一个完全未知的、不以斜杠结尾的 URL 路径，确保触发 catch_all_view 而非其他视图。",
+        "reason": "catch_all_view 是用于处理未知 URL 的最终兜底视图，访问未知 URL 是执行到缺陷代码路径的前提。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.url 或 response['Location']（如果 response 是重定向）。",
+        "reason": "缺陷表现为重定向 URL 错误，直接观察重定向响应头中的 Location 字段或 response.url 属性可以判断是否包含了正确的脚本名前缀。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "settings.FORCE_SCRIPT_NAME 和 settings.APPEND_SLASH 的值。",
+        "reason": "这两个设置是触发缺陷的必要条件，观测它们可以确认测试环境是否正确配置。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "request.path 与 request.path_info 在 catch_all_view 被调用时的值。",
+        "reason": "Issue 的核心是错误地使用了 path_info 而非 path，观测这两个属性的差异可以验证缺陷是否被触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 FORCE_SCRIPT_NAME 被设置时，对未知且缺少尾部斜杠的 URL 的请求，应被重定向到一个以脚本名开头的、以斜杠结尾的完整 URL。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的重定向 URL 字符串相等。",
+        "reason": "重定向 URL 应包含脚本名前缀和尾部斜杠。使用 contains_fragment 可以稳定地检查这两个关键部分，而不依赖于完整的、可能因其他配置变化的 URL。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TestCase 和 Client。可能需要创建超级用户并登录以绕过认证（取决于测试的 URL 配置）。需要 override_settings 来设置 ROOT_URLCONF、APPEND_SLASH 和 FORCE_SCRIPT_NAME。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试 URL 配置（ROOT_URLCONF）应包含启用了最终 catch-all 视图的 AdminSite 实例（如 'admin10' 或 'admin'）。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "FORCE_SCRIPT_NAME 的具体值应该如何设置才能最好地复现问题。",
+      "访问哪个具体的未知 URL 路径最能可靠地触发 catch_all_view。",
+      "是否需要用户认证才能访问到 catch_all_view，或者未认证时也会触发。",
+      "在重定向发生之前，resolve(path, urlconf) 调用是否会因为路径不包含脚本名而失败，从而影响执行流。"
+    ]
+  }
+}

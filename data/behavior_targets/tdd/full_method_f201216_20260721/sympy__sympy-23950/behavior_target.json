@@ -1,0 +1,296 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-23950",
+  "issue_summary": "Contains.as_set() 错误地返回 Contains 对象本身，而不是一个集合，导致后续调用 as_relational 时抛出 AttributeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 Symbol, Reals, Contains, Piecewise。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的 Python 会话中运行，以避免缓存影响。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_as_set",
+        "test_file": "sympy/sets/tests/test_contains.py",
+        "why_relevant": "该测试直接测试 Contains.as_set() 方法，并期望它抛出 NotImplementedError。",
+        "reusable_parts": [
+          "imports (Symbol, FiniteSet, Contains)",
+          "raises(NotImplementedError, ...) 断言模式",
+          "Contains 对象的构造方式"
+        ],
+        "possible_gap": "该测试期望 NotImplementedError，但 Issue 表明当前实现返回了 Contains 对象本身，并未抛出异常。因此，该测试可能无法直接复现 Issue 中 Piecewise 触发的 AttributeError。"
+      },
+      {
+        "test_name": "test_contains_basic",
+        "test_file": "sympy/sets/tests/test_contains.py",
+        "why_relevant": "测试 Contains 的基本行为，包括构造和求值。",
+        "reusable_parts": [
+          "imports (Symbol, S)",
+          "Contains 对象的构造和断言模式"
+        ],
+        "possible_gap": "该测试不涉及 as_set 方法或 Piecewise 的使用。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 Contains(x, Reals).as_set() 或在使用 Contains 作为条件构造 Piecewise 时触发。",
+      "evidence": [
+        "Issue 中示例：Contains(x, Reals).as_set() 返回 Contains(x, Reals)。",
+        "Issue 中示例：Piecewise((6, Contains(x, Reals)), (7, True)) 在 eval 中调用 c.as_set().as_relational(x) 时出错。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Contains.as_set() 返回 Contains 对象本身，而不是一个集合对象。当 Piecewise 尝试对 Contains 条件调用 as_set().as_relational(x) 时，会抛出 AttributeError: 'Contains' object has no attribute 'as_relational'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中 traceback 显示 AttributeError: 'Contains' object has no attribute 'as_relational'。",
+        "Issue 中交互示例显示 Contains(x, Reals).as_set() 返回 Contains(x, Reals)。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Contains.as_set",
+        "kind": "method",
+        "source_path": "sympy/sets/contains.py",
+        "reason": "Issue 直接指出 Contains.as_set() 返回错误结果，这是缺陷的核心。"
+      },
+      {
+        "name": "Piecewise.__new__",
+        "kind": "method",
+        "source_path": "sympy/functions/elementary/piecewise.py",
+        "reason": "Issue 中的错误触发于构造 Piecewise 时，其 eval 方法调用了 Contains 条件的 as_set().as_relational(x)。"
+      },
+      {
+        "name": "Contains",
+        "kind": "class",
+        "source_path": "sympy/sets/contains.py",
+        "reason": "缺陷涉及 Contains 类的行为和属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/sets/contains.py",
+        "object": "Contains.as_set",
+        "lines": "47-48",
+        "reason": "源码片段 2 显示 as_set 方法仅抛出 NotImplementedError，但 Issue 表明它实际返回了 Contains 对象本身，说明该方法可能被错误地实现或覆盖。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_as_set 中使用 Contains(x, FiniteSet(y)).as_set() 并期望 NotImplementedError。",
+        "target_pattern": "使用 Contains(x, Reals).as_set() 或将其作为条件传递给 Piecewise。",
+        "reason": "Issue 中的触发条件是 Contains(x, Reals).as_set() 或 Piecewise 中使用 Contains。Reals 是一个无限集合，可能与 FiniteSet 的处理路径不同。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用 as_set() 并检查异常。",
+        "target_pattern": "在 Piecewise 构造的上下文中间接调用 as_set()，即 Piecewise((expr, Contains(...)), ...)。",
+        "reason": "Issue 中的错误是在 Piecewise 内部调用 as_set().as_relational() 时暴露的，这比直接调用 as_set() 更复杂。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Contains.as_set() 应该返回一个有效的集合对象（例如 Interval 或 FiniteSet），该对象具有 as_relational 方法，以便 Piecewise 等函数能正确处理 Contains 条件。",
+      "evidence": [
+        "Issue 描述指出 Contains 是一个布尔值，不是集合，因此 as_set() 返回 Contains 是错误的。",
+        "源码片段 2 显示 as_set 方法当前仅抛出 NotImplementedError，表明预期行为是实现为返回一个集合。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "Contains(x, Reals).as_set() 的返回值及其类型。",
+        "reason": "Issue 明确指出 as_set() 错误地返回了 Contains 对象本身，观察返回值可以确认缺陷。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "构造 Piecewise((6, Contains(x, Reals)), (7, True)) 时是否抛出 AttributeError。",
+        "reason": "Issue 中的 traceback 显示了具体的异常，这是缺陷的直接表现。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Contains(x, Reals).as_set() 返回对象的 __class__.__name__。",
+        "reason": "确认返回的是 Contains 还是某个 Set 子类。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Contains(x, Reals).as_set() 应该返回一个具有 as_relational 方法的对象（即一个 Set 实例）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串相等，因为具体的集合表示可能变化。",
+        "reason": "修复后，as_set() 应返回一个集合对象，而不是 Contains。检查返回类型是否为 Set 的子类是稳定的断言。"
+      },
+      {
+        "assertion_goal": "Piecewise((6, Contains(x, Reals)), (7, True)) 应该被成功构造，而不抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言 Piecewise 的精确值，因为那取决于 Contains 的逻辑求值。",
+        "reason": "当前行为会抛出异常，修复后应不再抛出。使用 raises(AttributeError) 并期望不抛出（或使用 pytest.raises 的否定形式）可以验证修复。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Contains.as_set() 方法在源码中显示为 NotImplementedError，但 Issue 表明它返回了 Contains 对象。需要确认是否有其他代码路径覆盖了此方法。",
+    "对于不同的集合类型（如 FiniteSet, Interval, Reals），as_set() 的行为是否一致？",
+    "Piecewise.eval 中调用 as_set().as_relational(x) 的确切行号和上下文，以更精确地插桩。"
+  ],
+  "raw": {
+    "issue_summary": "Contains.as_set() 错误地返回 Contains 对象本身，而不是一个集合，导致后续调用 as_relational 时抛出 AttributeError。",
+    "trigger_condition": {
+      "text": "调用 Contains(x, Reals).as_set() 或在使用 Contains 作为条件构造 Piecewise 时触发。",
+      "evidence": [
+        "Issue 中示例：Contains(x, Reals).as_set() 返回 Contains(x, Reals)。",
+        "Issue 中示例：Piecewise((6, Contains(x, Reals)), (7, True)) 在 eval 中调用 c.as_set().as_relational(x) 时出错。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "Contains.as_set() 返回 Contains 对象本身，而不是一个集合对象。当 Piecewise 尝试对 Contains 条件调用 as_set().as_relational(x) 时，会抛出 AttributeError: 'Contains' object has no attribute 'as_relational'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中 traceback 显示 AttributeError: 'Contains' object has no attribute 'as_relational'。",
+        "Issue 中交互示例显示 Contains(x, Reals).as_set() 返回 Contains(x, Reals)。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Contains.as_set() 应该返回一个有效的集合对象（例如 Interval 或 FiniteSet），该对象具有 as_relational 方法，以便 Piecewise 等函数能正确处理 Contains 条件。",
+      "evidence": [
+        "Issue 描述指出 Contains 是一个布尔值，不是集合，因此 as_set() 返回 Contains 是错误的。",
+        "源码片段 2 显示 as_set 方法当前仅抛出 NotImplementedError，表明预期行为是实现为返回一个集合。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Contains.as_set",
+        "kind": "method",
+        "source_path": "sympy/sets/contains.py",
+        "reason": "Issue 直接指出 Contains.as_set() 返回错误结果，这是缺陷的核心。"
+      },
+      {
+        "name": "Piecewise.__new__",
+        "kind": "method",
+        "source_path": "sympy/functions/elementary/piecewise.py",
+        "reason": "Issue 中的错误触发于构造 Piecewise 时，其 eval 方法调用了 Contains 条件的 as_set().as_relational(x)。"
+      },
+      {
+        "name": "Contains",
+        "kind": "class",
+        "source_path": "sympy/sets/contains.py",
+        "reason": "缺陷涉及 Contains 类的行为和属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/sets/contains.py",
+        "object": "Contains.as_set",
+        "lines": "47-48",
+        "reason": "源码片段 2 显示 as_set 方法仅抛出 NotImplementedError，但 Issue 表明它实际返回了 Contains 对象本身，说明该方法可能被错误地实现或覆盖。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_as_set",
+        "test_file": "sympy/sets/tests/test_contains.py",
+        "why_relevant": "该测试直接测试 Contains.as_set() 方法，并期望它抛出 NotImplementedError。",
+        "reusable_parts": [
+          "imports (Symbol, FiniteSet, Contains)",
+          "raises(NotImplementedError, ...) 断言模式",
+          "Contains 对象的构造方式"
+        ],
+        "possible_gap": "该测试期望 NotImplementedError，但 Issue 表明当前实现返回了 Contains 对象本身，并未抛出异常。因此，该测试可能无法直接复现 Issue 中 Piecewise 触发的 AttributeError。"
+      },
+      {
+        "test_name": "test_contains_basic",
+        "test_file": "sympy/sets/tests/test_contains.py",
+        "why_relevant": "测试 Contains 的基本行为，包括构造和求值。",
+        "reusable_parts": [
+          "imports (Symbol, S)",
+          "Contains 对象的构造和断言模式"
+        ],
+        "possible_gap": "该测试不涉及 as_set 方法或 Piecewise 的使用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_as_set 中使用 Contains(x, FiniteSet(y)).as_set() 并期望 NotImplementedError。",
+        "target_pattern": "使用 Contains(x, Reals).as_set() 或将其作为条件传递给 Piecewise。",
+        "reason": "Issue 中的触发条件是 Contains(x, Reals).as_set() 或 Piecewise 中使用 Contains。Reals 是一个无限集合，可能与 FiniteSet 的处理路径不同。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接调用 as_set() 并检查异常。",
+        "target_pattern": "在 Piecewise 构造的上下文中间接调用 as_set()，即 Piecewise((expr, Contains(...)), ...)。",
+        "reason": "Issue 中的错误是在 Piecewise 内部调用 as_set().as_relational() 时暴露的，这比直接调用 as_set() 更复杂。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "Contains(x, Reals).as_set() 的返回值及其类型。",
+        "reason": "Issue 明确指出 as_set() 错误地返回了 Contains 对象本身，观察返回值可以确认缺陷。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "构造 Piecewise((6, Contains(x, Reals)), (7, True)) 时是否抛出 AttributeError。",
+        "reason": "Issue 中的 traceback 显示了具体的异常，这是缺陷的直接表现。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "Contains(x, Reals).as_set() 返回对象的 __class__.__name__。",
+        "reason": "确认返回的是 Contains 还是某个 Set 子类。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "Contains(x, Reals).as_set() 应该返回一个具有 as_relational 方法的对象（即一个 Set 实例）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言完整的 repr 字符串相等，因为具体的集合表示可能变化。",
+        "reason": "修复后，as_set() 应返回一个集合对象，而不是 Contains。检查返回类型是否为 Set 的子类是稳定的断言。"
+      },
+      {
+        "assertion_goal": "Piecewise((6, Contains(x, Reals)), (7, True)) 应该被成功构造，而不抛出 AttributeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言 Piecewise 的精确值，因为那取决于 Contains 的逻辑求值。",
+        "reason": "当前行为会抛出异常，修复后应不再抛出。使用 raises(AttributeError) 并期望不抛出（或使用 pytest.raises 的否定形式）可以验证修复。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 Symbol, Reals, Contains, Piecewise。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在独立的 Python 会话中运行，以避免缓存影响。",
+        "source": "inference",
+        "confidence": "low"
+      }
+    ],
+    "uncertainties": [
+      "Contains.as_set() 方法在源码中显示为 NotImplementedError，但 Issue 表明它返回了 Contains 对象。需要确认是否有其他代码路径覆盖了此方法。",
+      "对于不同的集合类型（如 FiniteSet, Interval, Reals），as_set() 的行为是否一致？",
+      "Piecewise.eval 中调用 as_set().as_relational(x) 的确切行号和上下文，以更精确地插桩。"
+    ]
+  }
+}

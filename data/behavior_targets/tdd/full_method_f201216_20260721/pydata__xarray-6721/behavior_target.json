@@ -1,0 +1,336 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-6721",
+  "issue_summary": "访问 zarr 后端 xarray 数据集的 chunks 属性时，会意外地将整个数组加载到内存中。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 zarr 格式的数据集作为测试输入。可以使用远程 URL（如 Issue 中的示例）或本地创建的临时 zarr 文件（使用 `tmp_path`）。本地文件更稳定且避免网络依赖。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要 `requires_zarr` 装饰器来确保环境支持。可能还需要 `pytest.mark.slow` 如果使用远程大型数据集。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "为了观测数据加载，可以考虑使用 `unittest.mock.patch` 来监控 `zarr.core.Array._get_selection` 或 `xarray.core.indexing.LazilyIndexedArray.__array__` 等方法的调用。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_open_dataset_chunking_zarr",
+        "test_file": "xarray/tests/test_backends.py",
+        "why_relevant": "该测试直接涉及使用 zarr 引擎打开数据集并检查分块行为，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "`requires_zarr` 和 `requires_dask` 装饰器",
+          "使用 `tmp_path` 创建临时 zarr 存储",
+          "`open_dataset` 的调用模式",
+          "使用 `xr.testing.assert_chunks_equal` 进行断言"
+        ],
+        "possible_gap": "该测试使用本地生成的、分块明确的数据集，并主要测试 `chunks` 参数的行为。它可能没有直接测试访问 `.chunks` 属性本身是否触发数据加载，也没有使用远程或未分块但惰性加载的数据集。"
+      },
+      {
+        "test_name": "TestDataset.test_chunk",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试直接测试 `Dataset.chunk()` 方法和 `.chunks` 属性，涉及分块逻辑。",
+        "reusable_parts": [
+          "`requires_dask` 装饰器",
+          "`create_test_data` fixture 的使用",
+          "对 `.chunks` 属性值的断言模式",
+          "检查 `chunks` 返回类型的逻辑"
+        ],
+        "possible_gap": "该测试使用内存中的 numpy/dask 数组，不涉及 zarr 后端或惰性加载。它没有测试访问 `.chunks` 属性是否会触发不必要的计算。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 zarr 引擎打开一个远程或本地的数据集（可能未分块但使用惰性加载），然后访问其 .chunks 属性。",
+      "evidence": [
+        "Issue 中的示例代码：`ds = xr.open_dataset(url, engine='zarr')` 和 `ds.chunks`。",
+        "Issue 日志显示调用链从 `Dataset.chunks` 开始，最终到达 `ZarrArrayWrapper.__getitem__` 和 `zarr.core.Array.get_basic_selection`，表明数据被实际读取。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "访问 .chunks 属性时，整个数据集被加载到内存，导致内存使用激增，在大型数据集上可能引发性能问题或内存不足。Issue 日志以 KeyboardInterrupt 结束，表明操作耗时过长。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 标题：'Accessing chunks on zarr backed xarray seems to load entire array into memory'。",
+        "Issue 日志显示调用栈深入到了 zarr 的数据获取层（`_chunk_getitems`），并最终在等待网络/IO 时被中断。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.open_dataset",
+        "kind": "function",
+        "source_path": "xarray/backends/zarr.py",
+        "reason": "用于打开 zarr 后端的数据集，是触发缺陷的入口。"
+      },
+      {
+        "name": "Dataset.chunks",
+        "kind": "property",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "直接触发缺陷的属性访问。"
+      },
+      {
+        "name": "get_chunksizes",
+        "kind": "function",
+        "source_path": "xarray/core/common.py",
+        "reason": "被 Dataset.chunks 调用，其内部逻辑导致了对 Variable.data 的访问，进而可能触发数据加载。"
+      },
+      {
+        "name": "Variable.data",
+        "kind": "property",
+        "source_path": "xarray/core/variable.py",
+        "reason": "在 get_chunksizes 中被访问，对于惰性数组，其 getter 可能触发计算。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/common.py",
+        "object": "get_chunksizes",
+        "lines": "2020-2034",
+        "reason": "该函数遍历 variables 并检查 `if hasattr(v.data, \"chunks\")`。对于惰性加载的 zarr 数据，访问 `v.data` 可能触发 `Variable.data` 属性的计算路径，最终导致数据加载。"
+      },
+      {
+        "path": "xarray/core/variable.py",
+        "object": "Variable.data",
+        "lines": "338-342",
+        "reason": "其 getter 逻辑为：如果 `_data` 是 duck array 则返回 `_data`，否则返回 `self.values`。对于 zarr 后端，`_data` 可能不是 duck array，从而进入 `self.values` 路径，而 `values` 属性会调用 `_as_array_or_item` 和 `np.asarray`，强制加载数据。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用的是本地、明确分块的 dask 数组或 numpy 数组。",
+        "target_pattern": "使用 zarr 引擎打开的、可能未分块但支持惰性加载的远程或本地数据集。",
+        "reason": "Issue 明确指出缺陷发生在 zarr 后端，且数据集可能未分块。将测试对象从 dask/numpy 数组替换为 zarr 数据集，可能触发 `Variable.data` 属性中导致数据加载的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中通常在调用 `.chunk()` 方法后访问 `.chunks` 属性。",
+        "target_pattern": "在打开数据集后，不调用 `.chunk()`，直接访问 `.chunks` 属性。",
+        "reason": "Issue 的触发步骤是 `open_dataset` 后直接访问 `.chunks`。直接访问属性是缺陷触发的关键操作，而 `.chunk()` 方法可能会改变内部数据表示。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "访问 .chunks 属性应仅检查底层 DataArrays 的编码信息，不应触发数据的实际加载。",
+      "evidence": [
+        "Issue 中用户期望：'According to @rabernat accessing the chunks attribute should simply inspect the `encoding` attribute on the underlying DataArrays.'。",
+        "相关源码 `get_chunksizes` 函数逻辑是检查 `v.data` 是否有 `chunks` 属性，然后访问 `v.chunksizes`，这表明其设计意图是检查元数据而非加载数据。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "performance",
+        "expression_hint": "在访问 `ds.chunks` 前后，监控内存使用量或记录操作耗时。或者，检查底层 zarr 数组是否被实际读取（例如，通过 mock `zarr.core.Array._get_selection` 或记录网络请求）。",
+        "reason": "缺陷的核心表现是性能问题（整个数组被加载）。观测内存/时间变化或底层存储的读取调用可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 `ds.chunks` 的返回值类型和内容。对于惰性 zarr 数据，期望返回类似 `{'dim': (chunk_size, ...)}` 的字典，而不是 `None` 或引发计算。",
+        "reason": "验证 `.chunks` 属性是否成功返回了分块信息而没有触发数据加载。如果返回 `None` 或空字典，可能表明另一种错误。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "检查关键对象（如 `ds['var'].data` 或 `ds['var']._data`）在访问 `.chunks` 前后的类型变化（例如，从 `LazilyIndexedArray` 变为 `NumpyIndexingAdapter` 或 `np.ndarray`）。",
+        "reason": "缺陷可能导致惰性表示被具体化为内存中的数组。观测数据对象的类型变化是直接的证据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "访问 `.chunks` 属性不应导致底层 zarr 存储的数据被完整读取。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 `.chunks` 字典值完全等于某个特定值，因为分块大小可能依赖于存储。避免断言不相关的属性。",
+        "reason": "缺陷是关于副作用（数据加载）而非返回值本身。断言应侧重于验证没有发生非预期的数据加载操作（例如，通过 mock 或观测点确认读取调用次数为0或仅限元数据）。"
+      },
+      {
+        "assertion_goal": "对于 zarr 后端的数据集，`.chunks` 属性应返回有效的分块字典（非空且与编码一致），而不是 `None` 或引发异常。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回的字典与某个硬编码值完全相等。",
+        "reason": "在修复后，`.chunks` 应能正确工作并返回分块信息。断言其返回类型为 `Mapping` 且包含预期维度是稳定且与 Issue 相关的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切边界条件：是否所有 zarr 后端数据集都会触发此问题？还是仅特定配置（如未分块但惰性加载）？",
+    "修复后的正确实现路径：`.chunks` 属性是否应该直接读取 `encoding['chunks']`，还是通过其他方式获取分块信息而不触及 `Variable.data`？",
+    "对于非 zarr 后端（如 netCDF）的惰性数据集，是否也存在类似问题？"
+  ],
+  "raw": {
+    "issue_summary": "访问 zarr 后端 xarray 数据集的 chunks 属性时，会意外地将整个数组加载到内存中。",
+    "trigger_condition": {
+      "text": "使用 zarr 引擎打开一个远程或本地的数据集（可能未分块但使用惰性加载），然后访问其 .chunks 属性。",
+      "evidence": [
+        "Issue 中的示例代码：`ds = xr.open_dataset(url, engine='zarr')` 和 `ds.chunks`。",
+        "Issue 日志显示调用链从 `Dataset.chunks` 开始，最终到达 `ZarrArrayWrapper.__getitem__` 和 `zarr.core.Array.get_basic_selection`，表明数据被实际读取。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "访问 .chunks 属性时，整个数据集被加载到内存，导致内存使用激增，在大型数据集上可能引发性能问题或内存不足。Issue 日志以 KeyboardInterrupt 结束，表明操作耗时过长。",
+      "symptom_type": "performance",
+      "evidence": [
+        "Issue 标题：'Accessing chunks on zarr backed xarray seems to load entire array into memory'。",
+        "Issue 日志显示调用栈深入到了 zarr 的数据获取层（`_chunk_getitems`），并最终在等待网络/IO 时被中断。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "访问 .chunks 属性应仅检查底层 DataArrays 的编码信息，不应触发数据的实际加载。",
+      "evidence": [
+        "Issue 中用户期望：'According to @rabernat accessing the chunks attribute should simply inspect the `encoding` attribute on the underlying DataArrays.'。",
+        "相关源码 `get_chunksizes` 函数逻辑是检查 `v.data` 是否有 `chunks` 属性，然后访问 `v.chunksizes`，这表明其设计意图是检查元数据而非加载数据。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.open_dataset",
+        "kind": "function",
+        "source_path": "xarray/backends/zarr.py",
+        "reason": "用于打开 zarr 后端的数据集，是触发缺陷的入口。"
+      },
+      {
+        "name": "Dataset.chunks",
+        "kind": "property",
+        "source_path": "xarray/core/dataset.py",
+        "reason": "直接触发缺陷的属性访问。"
+      },
+      {
+        "name": "get_chunksizes",
+        "kind": "function",
+        "source_path": "xarray/core/common.py",
+        "reason": "被 Dataset.chunks 调用，其内部逻辑导致了对 Variable.data 的访问，进而可能触发数据加载。"
+      },
+      {
+        "name": "Variable.data",
+        "kind": "property",
+        "source_path": "xarray/core/variable.py",
+        "reason": "在 get_chunksizes 中被访问，对于惰性数组，其 getter 可能触发计算。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/common.py",
+        "object": "get_chunksizes",
+        "lines": "2020-2034",
+        "reason": "该函数遍历 variables 并检查 `if hasattr(v.data, \"chunks\")`。对于惰性加载的 zarr 数据，访问 `v.data` 可能触发 `Variable.data` 属性的计算路径，最终导致数据加载。"
+      },
+      {
+        "path": "xarray/core/variable.py",
+        "object": "Variable.data",
+        "lines": "338-342",
+        "reason": "其 getter 逻辑为：如果 `_data` 是 duck array 则返回 `_data`，否则返回 `self.values`。对于 zarr 后端，`_data` 可能不是 duck array，从而进入 `self.values` 路径，而 `values` 属性会调用 `_as_array_or_item` 和 `np.asarray`，强制加载数据。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_open_dataset_chunking_zarr",
+        "test_file": "xarray/tests/test_backends.py",
+        "why_relevant": "该测试直接涉及使用 zarr 引擎打开数据集并检查分块行为，与 Issue 场景高度相关。",
+        "reusable_parts": [
+          "`requires_zarr` 和 `requires_dask` 装饰器",
+          "使用 `tmp_path` 创建临时 zarr 存储",
+          "`open_dataset` 的调用模式",
+          "使用 `xr.testing.assert_chunks_equal` 进行断言"
+        ],
+        "possible_gap": "该测试使用本地生成的、分块明确的数据集，并主要测试 `chunks` 参数的行为。它可能没有直接测试访问 `.chunks` 属性本身是否触发数据加载，也没有使用远程或未分块但惰性加载的数据集。"
+      },
+      {
+        "test_name": "TestDataset.test_chunk",
+        "test_file": "xarray/tests/test_dataset.py",
+        "why_relevant": "该测试直接测试 `Dataset.chunk()` 方法和 `.chunks` 属性，涉及分块逻辑。",
+        "reusable_parts": [
+          "`requires_dask` 装饰器",
+          "`create_test_data` fixture 的使用",
+          "对 `.chunks` 属性值的断言模式",
+          "检查 `chunks` 返回类型的逻辑"
+        ],
+        "possible_gap": "该测试使用内存中的 numpy/dask 数组，不涉及 zarr 后端或惰性加载。它没有测试访问 `.chunks` 属性是否会触发不必要的计算。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用的是本地、明确分块的 dask 数组或 numpy 数组。",
+        "target_pattern": "使用 zarr 引擎打开的、可能未分块但支持惰性加载的远程或本地数据集。",
+        "reason": "Issue 明确指出缺陷发生在 zarr 后端，且数据集可能未分块。将测试对象从 dask/numpy 数组替换为 zarr 数据集，可能触发 `Variable.data` 属性中导致数据加载的路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中通常在调用 `.chunk()` 方法后访问 `.chunks` 属性。",
+        "target_pattern": "在打开数据集后，不调用 `.chunk()`，直接访问 `.chunks` 属性。",
+        "reason": "Issue 的触发步骤是 `open_dataset` 后直接访问 `.chunks`。直接访问属性是缺陷触发的关键操作，而 `.chunk()` 方法可能会改变内部数据表示。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "performance",
+        "expression_hint": "在访问 `ds.chunks` 前后，监控内存使用量或记录操作耗时。或者，检查底层 zarr 数组是否被实际读取（例如，通过 mock `zarr.core.Array._get_selection` 或记录网络请求）。",
+        "reason": "缺陷的核心表现是性能问题（整个数组被加载）。观测内存/时间变化或底层存储的读取调用可以确认缺陷是否被触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "观察 `ds.chunks` 的返回值类型和内容。对于惰性 zarr 数据，期望返回类似 `{'dim': (chunk_size, ...)}` 的字典，而不是 `None` 或引发计算。",
+        "reason": "验证 `.chunks` 属性是否成功返回了分块信息而没有触发数据加载。如果返回 `None` 或空字典，可能表明另一种错误。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "检查关键对象（如 `ds['var'].data` 或 `ds['var']._data`）在访问 `.chunks` 前后的类型变化（例如，从 `LazilyIndexedArray` 变为 `NumpyIndexingAdapter` 或 `np.ndarray`）。",
+        "reason": "缺陷可能导致惰性表示被具体化为内存中的数组。观测数据对象的类型变化是直接的证据。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "访问 `.chunks` 属性不应导致底层 zarr 存储的数据被完整读取。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 `.chunks` 字典值完全等于某个特定值，因为分块大小可能依赖于存储。避免断言不相关的属性。",
+        "reason": "缺陷是关于副作用（数据加载）而非返回值本身。断言应侧重于验证没有发生非预期的数据加载操作（例如，通过 mock 或观测点确认读取调用次数为0或仅限元数据）。"
+      },
+      {
+        "assertion_goal": "对于 zarr 后端的数据集，`.chunks` 属性应返回有效的分块字典（非空且与编码一致），而不是 `None` 或引发异常。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回的字典与某个硬编码值完全相等。",
+        "reason": "在修复后，`.chunks` 应能正确工作并返回分块信息。断言其返回类型为 `Mapping` 且包含预期维度是稳定且与 Issue 相关的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 zarr 格式的数据集作为测试输入。可以使用远程 URL（如 Issue 中的示例）或本地创建的临时 zarr 文件（使用 `tmp_path`）。本地文件更稳定且避免网络依赖。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要 `requires_zarr` 装饰器来确保环境支持。可能还需要 `pytest.mark.slow` 如果使用远程大型数据集。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "为了观测数据加载，可以考虑使用 `unittest.mock.patch` 来监控 `zarr.core.Array._get_selection` 或 `xarray.core.indexing.LazilyIndexedArray.__array__` 等方法的调用。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切边界条件：是否所有 zarr 后端数据集都会触发此问题？还是仅特定配置（如未分块但惰性加载）？",
+      "修复后的正确实现路径：`.chunks` 属性是否应该直接读取 `encoding['chunks']`，还是通过其他方式获取分块信息而不触及 `Variable.data`？",
+      "对于非 zarr 后端（如 netCDF）的惰性数据集，是否也存在类似问题？"
+    ]
+  }
+}

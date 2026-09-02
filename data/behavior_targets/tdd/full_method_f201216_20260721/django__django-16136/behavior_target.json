@@ -1,0 +1,422 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16136",
+  "issue_summary": "当仅定义异步post方法的View子类收到GET请求时，会抛出TypeError: object HttpResponseNotAllowed can't be used in 'await' expression异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用异步测试客户端（async_client）和异步测试用例（例如继承自SimpleTestCase并定义async def测试方法）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置ROOT_URLCONF指向包含问题视图的URL配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类可能需要使用@override_settings装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入django.views.View和django.http.HttpResponseNotAllowed。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AsyncRequestFactoryTest.test_request_factory",
+        "test_file": "tests/test_client/tests.py",
+        "why_relevant": "这个测试直接涉及异步视图和HttpResponseNotAllowed。它在一个异步函数中调用返回HttpResponseNotAllowed的异步视图，并检查状态码。",
+        "reusable_parts": [
+          "异步测试函数的定义（async def）",
+          "使用HttpResponseNotAllowed",
+          "对response.status_code的断言"
+        ],
+        "possible_gap": "该测试中，async_generic_view是手动定义的函数，而不是一个继承自View的类。它直接返回HttpResponseNotAllowed，没有经过View.dispatch等流程。"
+      },
+      {
+        "test_name": "ViewTests.test_mixed_views_raise_error",
+        "test_file": "tests/async/tests.py",
+        "why_relevant": "这个测试检查混合（同步和异步）HTTP处理器的View类，确保其被正确拒绝。它涉及View.as_view()和异步方法定义。",
+        "reusable_parts": [
+          "定义继承自View的类",
+          "定义异步方法（async def post）",
+          "调用as_view()",
+          "使用assertRaisesMessage"
+        ],
+        "possible_gap": "该测试关注的是配置错误（混合视图），而Issue中的视图是纯异步的（仅一个异步post方法），并且测试没有触发对不被允许方法的请求。"
+      },
+      {
+        "test_name": "AsyncHandlerRequestTests.test_async_view",
+        "test_file": "tests/handlers/tests.py",
+        "why_relevant": "这个测试调用一个异步视图并检查响应，展示了异步视图测试的基本模式。",
+        "reusable_parts": [
+          "异步测试客户端self.async_client的使用",
+          "await self.async_client.get()调用",
+          "对response.status_code的断言"
+        ],
+        "possible_gap": "该测试访问的是一个正常工作的异步视图，没有测试方法不被允许（返回HttpResponseNotAllowed）的场景。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个继承自django.views.View的类，该类仅包含一个异步的post方法（没有定义get方法）。然后向该视图发送一个GET请求。",
+      "evidence": [
+        "Issue描述：'When defining a simple View subclass with only an async \"post\" method, GET requests to this view cause the following exception'",
+        "Issue提供的复现代码：class Demo(View): async def post(self, request): return HttpResponse(\"ok\")",
+        "源码片段2显示View类包含http_method_names列表，其中包括'get'和'post'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "服务器返回500错误，并抛出TypeError: object HttpResponseNotAllowed can't be used in 'await' expression异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中的异常堆栈：'TypeError: object HttpResponseNotAllowed can't be used in 'await' expression'",
+        "Issue中的服务器日志：'Internal Server Error: /demo'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.views.View",
+        "kind": "class",
+        "source_path": "django/views/generic/base.py",
+        "reason": "Issue中出错的视图继承自此类。"
+      },
+      {
+        "name": "django.views.View.as_view",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "这是视图的入口点，Issue中通过Demo.as_view()创建视图。源码片段5显示其处理异步视图标记。"
+      },
+      {
+        "name": "django.views.View.dispatch",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "View类中负责根据请求方法调用对应处理函数（如post）的方法。"
+      },
+      {
+        "name": "django.views.View.http_method_not_allowed",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "View类中处理不被允许的HTTP方法的方法，可能返回HttpResponseNotAllowed。"
+      },
+      {
+        "name": "django.http.response.HttpResponseNotAllowed",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "异常信息直接提及此对象，它是方法不被允许时的标准响应。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/views/generic/base.py",
+        "object": "View.dispatch",
+        "lines": "",
+        "reason": "dispatch方法负责路由请求到正确的处理器（如post）或调用http_method_not_allowed。当视图是异步的但请求方法不被允许时，可能错误地尝试await一个非协程对象（HttpResponseNotAllowed）。"
+      },
+      {
+        "path": "django/views/generic/base.py",
+        "object": "View.http_method_not_allowed",
+        "lines": "",
+        "reason": "此方法返回HttpResponseNotAllowed。如果视图被标记为异步，但此方法返回的是同步响应对象，可能在后续处理中引发问题。"
+      },
+      {
+        "path": "django/views/generic/base.py",
+        "object": "View.as_view",
+        "lines": "80-122",
+        "reason": "源码片段5显示as_view方法会根据cls.view_is_async标记视图是否为协程。这可能影响后续对视图返回值的处理方式。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试1中，直接在一个异步函数内根据请求方法返回HttpResponseNotAllowed或HttpResponse。",
+        "target_pattern": "创建一个继承自View的类，只定义异步post方法，然后通过as_view()创建视图，并向其发送GET请求。",
+        "reason": "Issue的触发路径涉及完整的View类调度流程，而不仅仅是直接函数调用。需要变异以使用类视图和标准URL调度。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试3中，MixedView同时定义了同步get和异步post方法，导致as_view()直接抛出ImproperlyConfigured。",
+        "target_pattern": "创建一个PureAsyncView，只定义异步post方法（不定义get），然后调用as_view()。这应该不会在配置时抛出错误，但会在处理GET请求时出错。",
+        "reason": "Issue中的视图是纯异步的（仅一个异步处理器），这与混合视图不同，需要通过变异来匹配。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试4中，async_client.get()调用一个正常工作的异步视图（'/async_regular/'）。",
+        "target_pattern": "async_client.get()调用一个仅支持POST的异步视图（如Issue中的'/demo'）。",
+        "reason": "需要将请求方法从视图支持的方法（POST）变异为不支持的方法（GET），以触发http_method_not_allowed路径。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当向仅支持异步POST方法的视图发送GET请求时，应正常返回一个HttpResponseNotAllowed响应（状态码405），而不应抛出TypeError异常。",
+      "evidence": [
+        "源码片段1显示HttpResponseNotAllowed是一个正常的HttpResponse子类，状态码为405，用于表示方法不被允许。",
+        "Issue描述暗示期望的行为是处理不被允许的HTTP方法，而不是崩溃。",
+        "相关测试1中，async_generic_view在请求方法不匹配时返回HttpResponseNotAllowed，并期望其正常工作。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在await self.async_client.get('/demo/')调用周围捕获异常。",
+        "reason": "Issue的核心现象是TypeError异常。观测是否抛出此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果未抛出异常，检查响应的类型（type(response)）和状态码（response.status_code）。",
+        "reason": "修复后，期望返回一个HttpResponseNotAllowed对象，状态码应为405。观测返回值可以区分正常行为和异常行为。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在视图的http_method_not_allowed方法内部或dispatch方法返回后，观察返回值的类型。",
+        "reason": "关键问题是HttpResponseNotAllowed（一个同步响应对象）在异步上下文中被如何处理。观测其类型和上下文可以定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "向仅支持异步POST的视图发送GET请求不应抛出TypeError异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本中微调。",
+        "reason": "Issue的核心是异常，断言不抛出特定异常与期望行为（正常返回405响应）一致。可以先使用assertNotRaises或检查无异常。"
+      },
+      {
+        "assertion_goal": "向仅支持异步POST的视图发送GET请求应返回状态码为405的响应。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的响应体内容或headers，除非Issue明确指定。",
+        "reason": "HttpResponseNotAllowed的标准状态码是405。这是一个稳定且与功能相关的断言点。"
+      },
+      {
+        "assertion_goal": "返回的响应对象应是HttpResponseNotAllowed（或其子类）的实例。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言具体的repr或str输出。",
+        "reason": "这验证了正确的响应类型被返回，而不依赖于可能变化的字符串表示。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "HttpResponseNotAllowed类本身是否缺少__await__方法或其他使其能在异步上下文中工作的属性？",
+    "View.dispatch方法在处理异步视图时，对http_method_not_allowed返回值的具体处理逻辑是什么？",
+    "除了仅定义异步post方法外，定义其他异步方法（如async put）并请求不被允许的方法是否也会触发相同问题？",
+    "问题是否只发生在使用开发服务器（runserver）时，还是在使用测试客户端时也能复现？相关测试1似乎没有遇到此问题。"
+  ],
+  "raw": {
+    "issue_summary": "当仅定义异步post方法的View子类收到GET请求时，会抛出TypeError: object HttpResponseNotAllowed can't be used in 'await' expression异常。",
+    "trigger_condition": {
+      "text": "定义一个继承自django.views.View的类，该类仅包含一个异步的post方法（没有定义get方法）。然后向该视图发送一个GET请求。",
+      "evidence": [
+        "Issue描述：'When defining a simple View subclass with only an async \"post\" method, GET requests to this view cause the following exception'",
+        "Issue提供的复现代码：class Demo(View): async def post(self, request): return HttpResponse(\"ok\")",
+        "源码片段2显示View类包含http_method_names列表，其中包括'get'和'post'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "服务器返回500错误，并抛出TypeError: object HttpResponseNotAllowed can't be used in 'await' expression异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中的异常堆栈：'TypeError: object HttpResponseNotAllowed can't be used in 'await' expression'",
+        "Issue中的服务器日志：'Internal Server Error: /demo'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当向仅支持异步POST方法的视图发送GET请求时，应正常返回一个HttpResponseNotAllowed响应（状态码405），而不应抛出TypeError异常。",
+      "evidence": [
+        "源码片段1显示HttpResponseNotAllowed是一个正常的HttpResponse子类，状态码为405，用于表示方法不被允许。",
+        "Issue描述暗示期望的行为是处理不被允许的HTTP方法，而不是崩溃。",
+        "相关测试1中，async_generic_view在请求方法不匹配时返回HttpResponseNotAllowed，并期望其正常工作。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.views.View",
+        "kind": "class",
+        "source_path": "django/views/generic/base.py",
+        "reason": "Issue中出错的视图继承自此类。"
+      },
+      {
+        "name": "django.views.View.as_view",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "这是视图的入口点，Issue中通过Demo.as_view()创建视图。源码片段5显示其处理异步视图标记。"
+      },
+      {
+        "name": "django.views.View.dispatch",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "View类中负责根据请求方法调用对应处理函数（如post）的方法。"
+      },
+      {
+        "name": "django.views.View.http_method_not_allowed",
+        "kind": "method",
+        "source_path": "django/views/generic/base.py",
+        "reason": "View类中处理不被允许的HTTP方法的方法，可能返回HttpResponseNotAllowed。"
+      },
+      {
+        "name": "django.http.response.HttpResponseNotAllowed",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "异常信息直接提及此对象，它是方法不被允许时的标准响应。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/views/generic/base.py",
+        "object": "View.dispatch",
+        "lines": "",
+        "reason": "dispatch方法负责路由请求到正确的处理器（如post）或调用http_method_not_allowed。当视图是异步的但请求方法不被允许时，可能错误地尝试await一个非协程对象（HttpResponseNotAllowed）。"
+      },
+      {
+        "path": "django/views/generic/base.py",
+        "object": "View.http_method_not_allowed",
+        "lines": "",
+        "reason": "此方法返回HttpResponseNotAllowed。如果视图被标记为异步，但此方法返回的是同步响应对象，可能在后续处理中引发问题。"
+      },
+      {
+        "path": "django/views/generic/base.py",
+        "object": "View.as_view",
+        "lines": "80-122",
+        "reason": "源码片段5显示as_view方法会根据cls.view_is_async标记视图是否为协程。这可能影响后续对视图返回值的处理方式。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AsyncRequestFactoryTest.test_request_factory",
+        "test_file": "tests/test_client/tests.py",
+        "why_relevant": "这个测试直接涉及异步视图和HttpResponseNotAllowed。它在一个异步函数中调用返回HttpResponseNotAllowed的异步视图，并检查状态码。",
+        "reusable_parts": [
+          "异步测试函数的定义（async def）",
+          "使用HttpResponseNotAllowed",
+          "对response.status_code的断言"
+        ],
+        "possible_gap": "该测试中，async_generic_view是手动定义的函数，而不是一个继承自View的类。它直接返回HttpResponseNotAllowed，没有经过View.dispatch等流程。"
+      },
+      {
+        "test_name": "ViewTests.test_mixed_views_raise_error",
+        "test_file": "tests/async/tests.py",
+        "why_relevant": "这个测试检查混合（同步和异步）HTTP处理器的View类，确保其被正确拒绝。它涉及View.as_view()和异步方法定义。",
+        "reusable_parts": [
+          "定义继承自View的类",
+          "定义异步方法（async def post）",
+          "调用as_view()",
+          "使用assertRaisesMessage"
+        ],
+        "possible_gap": "该测试关注的是配置错误（混合视图），而Issue中的视图是纯异步的（仅一个异步post方法），并且测试没有触发对不被允许方法的请求。"
+      },
+      {
+        "test_name": "AsyncHandlerRequestTests.test_async_view",
+        "test_file": "tests/handlers/tests.py",
+        "why_relevant": "这个测试调用一个异步视图并检查响应，展示了异步视图测试的基本模式。",
+        "reusable_parts": [
+          "异步测试客户端self.async_client的使用",
+          "await self.async_client.get()调用",
+          "对response.status_code的断言"
+        ],
+        "possible_gap": "该测试访问的是一个正常工作的异步视图，没有测试方法不被允许（返回HttpResponseNotAllowed）的场景。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试1中，直接在一个异步函数内根据请求方法返回HttpResponseNotAllowed或HttpResponse。",
+        "target_pattern": "创建一个继承自View的类，只定义异步post方法，然后通过as_view()创建视图，并向其发送GET请求。",
+        "reason": "Issue的触发路径涉及完整的View类调度流程，而不仅仅是直接函数调用。需要变异以使用类视图和标准URL调度。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试3中，MixedView同时定义了同步get和异步post方法，导致as_view()直接抛出ImproperlyConfigured。",
+        "target_pattern": "创建一个PureAsyncView，只定义异步post方法（不定义get），然后调用as_view()。这应该不会在配置时抛出错误，但会在处理GET请求时出错。",
+        "reason": "Issue中的视图是纯异步的（仅一个异步处理器），这与混合视图不同，需要通过变异来匹配。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试4中，async_client.get()调用一个正常工作的异步视图（'/async_regular/'）。",
+        "target_pattern": "async_client.get()调用一个仅支持POST的异步视图（如Issue中的'/demo'）。",
+        "reason": "需要将请求方法从视图支持的方法（POST）变异为不支持的方法（GET），以触发http_method_not_allowed路径。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在await self.async_client.get('/demo/')调用周围捕获异常。",
+        "reason": "Issue的核心现象是TypeError异常。观测是否抛出此异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果未抛出异常，检查响应的类型（type(response)）和状态码（response.status_code）。",
+        "reason": "修复后，期望返回一个HttpResponseNotAllowed对象，状态码应为405。观测返回值可以区分正常行为和异常行为。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在视图的http_method_not_allowed方法内部或dispatch方法返回后，观察返回值的类型。",
+        "reason": "关键问题是HttpResponseNotAllowed（一个同步响应对象）在异步上下文中被如何处理。观测其类型和上下文可以定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "向仅支持异步POST的视图发送GET请求不应抛出TypeError异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本中微调。",
+        "reason": "Issue的核心是异常，断言不抛出特定异常与期望行为（正常返回405响应）一致。可以先使用assertNotRaises或检查无异常。"
+      },
+      {
+        "assertion_goal": "向仅支持异步POST的视图发送GET请求应返回状态码为405的响应。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的响应体内容或headers，除非Issue明确指定。",
+        "reason": "HttpResponseNotAllowed的标准状态码是405。这是一个稳定且与功能相关的断言点。"
+      },
+      {
+        "assertion_goal": "返回的响应对象应是HttpResponseNotAllowed（或其子类）的实例。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言具体的repr或str输出。",
+        "reason": "这验证了正确的响应类型被返回，而不依赖于可能变化的字符串表示。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用异步测试客户端（async_client）和异步测试用例（例如继承自SimpleTestCase并定义async def测试方法）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要配置ROOT_URLCONF指向包含问题视图的URL配置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类可能需要使用@override_settings装饰器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入django.views.View和django.http.HttpResponseNotAllowed。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "HttpResponseNotAllowed类本身是否缺少__await__方法或其他使其能在异步上下文中工作的属性？",
+      "View.dispatch方法在处理异步视图时，对http_method_not_allowed返回值的具体处理逻辑是什么？",
+      "除了仅定义异步post方法外，定义其他异步方法（如async put）并请求不被允许的方法是否也会触发相同问题？",
+      "问题是否只发生在使用开发服务器（runserver）时，还是在使用测试客户端时也能复现？相关测试1似乎没有遇到此问题。"
+    ]
+  }
+}

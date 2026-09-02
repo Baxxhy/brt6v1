@@ -1,0 +1,282 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15731",
+  "issue_summary": "inspect.signature() 在 manager 方法上返回了错误的签名信息。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型（如 Person）及其默认 manager (`objects`)。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 Django 的 TestCase 以设置数据库环境，因为 Manager 与模型相关。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要导入 inspect 模块。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_preserve_signature",
+        "test_file": "tests/decorators/tests.py",
+        "why_relevant": "该测试直接涉及装饰器对方法签名的保留，与 Issue 的核心问题（元数据未正确复制）高度相关。",
+        "reusable_parts": [
+          "装饰器测试的类结构",
+          "可能涉及签名检查的断言模式"
+        ],
+        "possible_gap": "该测试可能针对通用装饰器，而非 Django Manager 特定的装饰/方法复制机制。"
+      },
+      {
+        "test_name": "test_manager_use_queryset_methods",
+        "test_file": "tests/custom_managers/tests.py",
+        "why_relevant": "该测试验证了自定义 Manager 正确使用了 QuerySet 的方法，与 Issue 中 Manager 方法应具有正确签名的上下文一致。",
+        "reusable_parts": [
+          "Person 模型和自定义 Manager/QuerySet 的测试夹具",
+          "对 Manager 方法调用的模式"
+        ],
+        "possible_gap": "该测试侧重于功能调用和结果，未检查方法签名或元数据。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对 Django 模型 manager 上的方法（如 bulk_create）调用 inspect.signature()。",
+      "evidence": [
+        "Issue 中：`print(inspect.signature(Person.objects.bulk_create))`",
+        "Issue 中：`inspect.signature returns incorrect signature information when used on queryset methods`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "inspect.signature() 返回了通用的 `(*args, **kwargs)` 签名，而不是方法实际的参数签名（如 `(objs, batch_size=None, ignore_conflicts=False)`）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中：`# actual: (*args, **kwargs)`",
+        "Issue 中：`# expected: (objs, batch_size=None, ignore_conflicts=False)`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "inspect.signature",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了此函数在特定对象上返回错误结果。"
+      },
+      {
+        "name": "Person.objects.bulk_create",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中用于演示问题的具体 API 调用。"
+      },
+      {
+        "name": "django.db.models.manager.Manager._get_queryset_methods",
+        "kind": "method",
+        "source_path": "django/db/models/manager.py",
+        "reason": "Issue 中提到的缺陷位置（第84行附近）涉及将 QuerySet 方法复制到 Manager 的装饰器逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/manager.py",
+        "object": "Manager._get_queryset_methods 或相关装饰器逻辑",
+        "lines": "84",
+        "reason": "Issue 描述明确指出问题源于此文件第84行附近的代码，该代码手动分配 name 和 docstring 而未使用 functools.wraps 复制完整元数据。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中调用 Manager 方法并断言其功能结果（如查询结果）。",
+        "target_pattern": "在测试中调用 inspect.signature() 来检查 Manager 方法的签名。",
+        "reason": "Issue 的触发条件是使用 inspect.signature 检查 Manager 方法，而非直接调用其功能。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "使用自定义 Manager 和 QuerySet 进行功能测试。",
+        "target_pattern": "使用默认的 `Model.objects` manager（即 `Manager` 实例）进行签名检查。",
+        "reason": "Issue 示例使用的是 `Person.objects`（默认 manager），而非自定义 manager。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "inspect.signature() 应返回 manager 方法（如 bulk_create）正确的参数签名，与其底层 QuerySet 方法的签名一致。",
+      "evidence": [
+        "Issue 中：`# expected: (objs, batch_size=None, ignore_conflicts=False)`",
+        "相关源码 3 中显示了 bulk_create 方法的实际签名。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "inspect.signature(Person.objects.bulk_create)",
+        "reason": "Issue 的核心错误现象是此调用的返回值不正确。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "str(inspect.signature(Person.objects.bulk_create))",
+        "reason": "Issue 中通过打印签名的字符串表示来展示错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "inspect.signature() 在 Manager 方法上返回的签名应与其底层 QuerySet 方法的签名匹配。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、硬编码的签名字符串，因为参数列表可能随版本变化。",
+        "reason": "Issue 期望签名正确，但具体参数列表可能扩展（如相关源码 3 中的 bulk_create 参数比 Issue 中提到的更多）。更稳定的断言是比较 Manager 方法签名与 QuerySet 方法签名是否相等。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 `bulk_create` 预期签名 `(objs, batch_size=None, ignore_conflicts=False)` 可能不完整（相关源码 3 显示更多参数）。修复后正确的签名具体是什么？",
+    "除了 bulk_create，此缺陷是否影响 Manager 上所有从 QuerySet 复制的方法？",
+    "使用 `functools.wraps` 是否足以修复问题，或者还需要其他改动？"
+  ],
+  "raw": {
+    "issue_summary": "inspect.signature() 在 manager 方法上返回了错误的签名信息。",
+    "trigger_condition": {
+      "text": "对 Django 模型 manager 上的方法（如 bulk_create）调用 inspect.signature()。",
+      "evidence": [
+        "Issue 中：`print(inspect.signature(Person.objects.bulk_create))`",
+        "Issue 中：`inspect.signature returns incorrect signature information when used on queryset methods`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "inspect.signature() 返回了通用的 `(*args, **kwargs)` 签名，而不是方法实际的参数签名（如 `(objs, batch_size=None, ignore_conflicts=False)`）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中：`# actual: (*args, **kwargs)`",
+        "Issue 中：`# expected: (objs, batch_size=None, ignore_conflicts=False)`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "inspect.signature() 应返回 manager 方法（如 bulk_create）正确的参数签名，与其底层 QuerySet 方法的签名一致。",
+      "evidence": [
+        "Issue 中：`# expected: (objs, batch_size=None, ignore_conflicts=False)`",
+        "相关源码 3 中显示了 bulk_create 方法的实际签名。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "inspect.signature",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了此函数在特定对象上返回错误结果。"
+      },
+      {
+        "name": "Person.objects.bulk_create",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中用于演示问题的具体 API 调用。"
+      },
+      {
+        "name": "django.db.models.manager.Manager._get_queryset_methods",
+        "kind": "method",
+        "source_path": "django/db/models/manager.py",
+        "reason": "Issue 中提到的缺陷位置（第84行附近）涉及将 QuerySet 方法复制到 Manager 的装饰器逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/manager.py",
+        "object": "Manager._get_queryset_methods 或相关装饰器逻辑",
+        "lines": "84",
+        "reason": "Issue 描述明确指出问题源于此文件第84行附近的代码，该代码手动分配 name 和 docstring 而未使用 functools.wraps 复制完整元数据。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_preserve_signature",
+        "test_file": "tests/decorators/tests.py",
+        "why_relevant": "该测试直接涉及装饰器对方法签名的保留，与 Issue 的核心问题（元数据未正确复制）高度相关。",
+        "reusable_parts": [
+          "装饰器测试的类结构",
+          "可能涉及签名检查的断言模式"
+        ],
+        "possible_gap": "该测试可能针对通用装饰器，而非 Django Manager 特定的装饰/方法复制机制。"
+      },
+      {
+        "test_name": "test_manager_use_queryset_methods",
+        "test_file": "tests/custom_managers/tests.py",
+        "why_relevant": "该测试验证了自定义 Manager 正确使用了 QuerySet 的方法，与 Issue 中 Manager 方法应具有正确签名的上下文一致。",
+        "reusable_parts": [
+          "Person 模型和自定义 Manager/QuerySet 的测试夹具",
+          "对 Manager 方法调用的模式"
+        ],
+        "possible_gap": "该测试侧重于功能调用和结果，未检查方法签名或元数据。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "call_chain",
+        "current_pattern": "在测试中调用 Manager 方法并断言其功能结果（如查询结果）。",
+        "target_pattern": "在测试中调用 inspect.signature() 来检查 Manager 方法的签名。",
+        "reason": "Issue 的触发条件是使用 inspect.signature 检查 Manager 方法，而非直接调用其功能。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "使用自定义 Manager 和 QuerySet 进行功能测试。",
+        "target_pattern": "使用默认的 `Model.objects` manager（即 `Manager` 实例）进行签名检查。",
+        "reason": "Issue 示例使用的是 `Person.objects`（默认 manager），而非自定义 manager。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "inspect.signature(Person.objects.bulk_create)",
+        "reason": "Issue 的核心错误现象是此调用的返回值不正确。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "str(inspect.signature(Person.objects.bulk_create))",
+        "reason": "Issue 中通过打印签名的字符串表示来展示错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "inspect.signature() 在 Manager 方法上返回的签名应与其底层 QuerySet 方法的签名匹配。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、硬编码的签名字符串，因为参数列表可能随版本变化。",
+        "reason": "Issue 期望签名正确，但具体参数列表可能扩展（如相关源码 3 中的 bulk_create 参数比 Issue 中提到的更多）。更稳定的断言是比较 Manager 方法签名与 QuerySet 方法签名是否相等。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个简单的 Django 模型（如 Person）及其默认 manager (`objects`)。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 Django 的 TestCase 以设置数据库环境，因为 Manager 与模型相关。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要导入 inspect 模块。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 `bulk_create` 预期签名 `(objs, batch_size=None, ignore_conflicts=False)` 可能不完整（相关源码 3 显示更多参数）。修复后正确的签名具体是什么？",
+      "除了 bulk_create，此缺陷是否影响 Manager 上所有从 QuerySet 复制的方法？",
+      "使用 `functools.wraps` 是否足以修复问题，或者还需要其他改动？"
+    ]
+  }
+}

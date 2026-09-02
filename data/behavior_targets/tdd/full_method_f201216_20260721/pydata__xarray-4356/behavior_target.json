@@ -1,0 +1,276 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-4356",
+  "issue_summary": "DataArray.sum 在传入多个维度并指定 min_count 参数时出错。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 construct_dataarray 辅助函数构造包含 NaN 值的 DataArray，以测试 skipna 和 min_count 逻辑。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 和 xarray 相关模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_min_count",
+        "test_file": "xarray/tests/test_duck_array_ops.py",
+        "why_relevant": "该测试专门测试了 sum 和 prod 方法在指定 min_count 参数时的行为，与 Issue 的核心参数 min_count 直接相关。",
+        "reusable_parts": [
+          "construct_dataarray 构造方法",
+          "getattr(da, func) 调用模式",
+          "min_count 参数的传递",
+          "assert_allclose 断言风格"
+        ],
+        "possible_gap": "该测试的 aggdim 参数只测试了单个维度（None 或 \"x\"），没有测试同时指定多个维度（列表或元组）的情况，而这正是 Issue 触发条件。"
+      },
+      {
+        "test_name": "test_multiple_dims",
+        "test_file": "xarray/tests/test_duck_array_ops.py",
+        "why_relevant": "该测试专门测试了 sum 和 prod 方法在传入多个维度（元组）时的行为，与 Issue 的另一个核心条件（多维度）直接相关。",
+        "reusable_parts": [
+          "construct_dataarray 构造方法",
+          "多维度参数（元组）的传递方式",
+          "链式调用作为预期结果的模式",
+          "assert_allclose 断言风格"
+        ],
+        "possible_gap": "该测试没有包含 min_count 参数，因此没有触发 Issue 中描述的错误路径。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对 DataArray 调用 sum 方法，dim 参数传入包含多个维度的列表或元组，并同时指定 min_count 参数（例如 min_count=1）。",
+      "evidence": [
+        "Issue 中的示例代码：`da.sum([\"dim_0\", \"dim_1\"], min_count=1)`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用时出现错误（可能是异常）。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 标题和描述表明 `sum` with `min_count` errors when passing more than one dim。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "DataArray.sum",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 直接报告了 DataArray.sum 方法在特定参数下的问题。"
+      },
+      {
+        "name": "xarray.core.nanops._maybe_null_out",
+        "kind": "function",
+        "source_path": "xarray/core/nanops.py",
+        "reason": "Issue 中提到的解决方案链接指向此函数，用于计算有效元素数量，可能与 min_count 逻辑相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/nanops.py",
+        "object": "_maybe_null_out",
+        "lines": "",
+        "reason": "Issue 中明确指出了该函数中计算有效元素数量的逻辑可能是问题所在，并建议了具体代码修改。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "test_min_count 中 dim 参数为单个维度（如 \"x\"）或 None。",
+        "target_pattern": "dim 参数应为包含多个维度的列表或元组（如 [\"dim_0\", \"dim_1\"] 或 (\"x\", \"y\")）。",
+        "reason": "Issue 明确指出错误发生在传递多个维度时。将单个维度参数变异为多个维度参数，同时保持 min_count 参数，可能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_multiple_dims 中 sum 调用不包含 min_count 参数。",
+        "target_pattern": "在 sum 调用中添加 min_count 参数（例如 min_count=1）。",
+        "reason": "Issue 表明 min_count 参数在多维归约时存在问题。在已有的多维度测试调用中加入 min_count 参数，可能触发缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "DataArray.sum 方法在指定多个维度和 min_count 参数时应能正确计算有效元素数量并返回结果，而不抛出错误。",
+      "evidence": [
+        "Issue 描述暗示 min_count 参数在多维情况下应该可用，并提出了一个潜在的修复方案。相关测试 test_min_count 和 test_multiple_dims 表明 sum 方法支持 min_count 参数和多维归约，但可能未组合测试。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 da.sum([\"dim_0\", \"dim_1\"], min_count=1) 时是否抛出异常及其类型和消息。",
+        "reason": "Issue 的核心现象是调用出错。观测异常是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 da.sum([\"dim_0\", \"dim_1\"], min_count=1) 的返回值（如果未抛出异常），并与链式归约结果或预期值比较。",
+        "reason": "如果修复后调用成功，需要验证返回值的正确性，确保 min_count 逻辑在多维情况下工作正常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在指定多个维度和 min_count 参数时，sum 方法不会抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能随版本变化。",
+        "reason": "Issue 的核心是调用出错。修复后，调用应正常进行。因此，在缺陷版本中，断言会抛出异常；在修复版本中，断言应不抛出异常。此处提示的是修复后的目标（不抛出异常），但测试生成时需根据上下文决定极性。"
+      },
+      {
+        "assertion_goal": "验证在指定多个维度和 min_count 参数时，sum 方法的返回值与预期（如链式归约结果）在容差范围内相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回对象的完整 repr 或精确浮点相等。",
+        "reason": "如果调用成功，需要确保计算结果正确，这涉及到 min_count 逻辑在多维归约中的正确应用。使用容差比较更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误的具体异常类型和消息是什么？Issue 中没有提供。",
+    "除了 sum 方法，prod 方法或其他归约方法（如 mean）是否也存在相同问题？Issue 只提到了 sum。",
+    "Issue 中建议的修复方案（修改 nanops.py）是否完全正确？需要后续验证。",
+    "min_count 参数在 skipna=False 时的行为是否也受影响？"
+  ],
+  "raw": {
+    "issue_summary": "DataArray.sum 在传入多个维度并指定 min_count 参数时出错。",
+    "trigger_condition": {
+      "text": "对 DataArray 调用 sum 方法，dim 参数传入包含多个维度的列表或元组，并同时指定 min_count 参数（例如 min_count=1）。",
+      "evidence": [
+        "Issue 中的示例代码：`da.sum([\"dim_0\", \"dim_1\"], min_count=1)`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用时出现错误（可能是异常）。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 标题和描述表明 `sum` with `min_count` errors when passing more than one dim。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "DataArray.sum 方法在指定多个维度和 min_count 参数时应能正确计算有效元素数量并返回结果，而不抛出错误。",
+      "evidence": [
+        "Issue 描述暗示 min_count 参数在多维情况下应该可用，并提出了一个潜在的修复方案。相关测试 test_min_count 和 test_multiple_dims 表明 sum 方法支持 min_count 参数和多维归约，但可能未组合测试。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "DataArray.sum",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "Issue 直接报告了 DataArray.sum 方法在特定参数下的问题。"
+      },
+      {
+        "name": "xarray.core.nanops._maybe_null_out",
+        "kind": "function",
+        "source_path": "xarray/core/nanops.py",
+        "reason": "Issue 中提到的解决方案链接指向此函数，用于计算有效元素数量，可能与 min_count 逻辑相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/nanops.py",
+        "object": "_maybe_null_out",
+        "lines": "",
+        "reason": "Issue 中明确指出了该函数中计算有效元素数量的逻辑可能是问题所在，并建议了具体代码修改。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_min_count",
+        "test_file": "xarray/tests/test_duck_array_ops.py",
+        "why_relevant": "该测试专门测试了 sum 和 prod 方法在指定 min_count 参数时的行为，与 Issue 的核心参数 min_count 直接相关。",
+        "reusable_parts": [
+          "construct_dataarray 构造方法",
+          "getattr(da, func) 调用模式",
+          "min_count 参数的传递",
+          "assert_allclose 断言风格"
+        ],
+        "possible_gap": "该测试的 aggdim 参数只测试了单个维度（None 或 \"x\"），没有测试同时指定多个维度（列表或元组）的情况，而这正是 Issue 触发条件。"
+      },
+      {
+        "test_name": "test_multiple_dims",
+        "test_file": "xarray/tests/test_duck_array_ops.py",
+        "why_relevant": "该测试专门测试了 sum 和 prod 方法在传入多个维度（元组）时的行为，与 Issue 的另一个核心条件（多维度）直接相关。",
+        "reusable_parts": [
+          "construct_dataarray 构造方法",
+          "多维度参数（元组）的传递方式",
+          "链式调用作为预期结果的模式",
+          "assert_allclose 断言风格"
+        ],
+        "possible_gap": "该测试没有包含 min_count 参数，因此没有触发 Issue 中描述的错误路径。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "test_min_count 中 dim 参数为单个维度（如 \"x\"）或 None。",
+        "target_pattern": "dim 参数应为包含多个维度的列表或元组（如 [\"dim_0\", \"dim_1\"] 或 (\"x\", \"y\")）。",
+        "reason": "Issue 明确指出错误发生在传递多个维度时。将单个维度参数变异为多个维度参数，同时保持 min_count 参数，可能触发缺陷。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_multiple_dims 中 sum 调用不包含 min_count 参数。",
+        "target_pattern": "在 sum 调用中添加 min_count 参数（例如 min_count=1）。",
+        "reason": "Issue 表明 min_count 参数在多维归约时存在问题。在已有的多维度测试调用中加入 min_count 参数，可能触发缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 da.sum([\"dim_0\", \"dim_1\"], min_count=1) 时是否抛出异常及其类型和消息。",
+        "reason": "Issue 的核心现象是调用出错。观测异常是判断缺陷是否被触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 da.sum([\"dim_0\", \"dim_1\"], min_count=1) 的返回值（如果未抛出异常），并与链式归约结果或预期值比较。",
+        "reason": "如果修复后调用成功，需要验证返回值的正确性，确保 min_count 逻辑在多维情况下工作正常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在指定多个维度和 min_count 参数时，sum 方法不会抛出异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能随版本变化。",
+        "reason": "Issue 的核心是调用出错。修复后，调用应正常进行。因此，在缺陷版本中，断言会抛出异常；在修复版本中，断言应不抛出异常。此处提示的是修复后的目标（不抛出异常），但测试生成时需根据上下文决定极性。"
+      },
+      {
+        "assertion_goal": "验证在指定多个维度和 min_count 参数时，sum 方法的返回值与预期（如链式归约结果）在容差范围内相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回对象的完整 repr 或精确浮点相等。",
+        "reason": "如果调用成功，需要确保计算结果正确，这涉及到 min_count 逻辑在多维归约中的正确应用。使用容差比较更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 construct_dataarray 辅助函数构造包含 NaN 值的 DataArray，以测试 skipna 和 min_count 逻辑。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 pytest 和 xarray 相关模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "错误的具体异常类型和消息是什么？Issue 中没有提供。",
+      "除了 sum 方法，prod 方法或其他归约方法（如 mean）是否也存在相同问题？Issue 只提到了 sum。",
+      "Issue 中建议的修复方案（修改 nanops.py）是否完全正确？需要后续验证。",
+      "min_count 参数在 skipna=False 时的行为是否也受影响？"
+    ]
+  }
+}

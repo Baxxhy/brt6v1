@@ -1,0 +1,358 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13496",
+  "issue_summary": "IsolationForest 类没有在 __init__ 中暴露其继承自 BaseBagging 的 warm_start 参数，导致用户难以发现和使用增量训练功能。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sklearn.ensemble.IsolationForest 和用于生成或加载数据集的功能（如 sklearn.datasets.make_blobs 或 load_iris）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 pytest 的 filterwarnings 来忽略关于 contamination 或 behaviour 参数的弃用警告。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应构造一个无监督场景，即只使用 X，不关心 y（或 y=None）。",
+        "source": "inference",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_warm_start",
+        "test_file": "sklearn/ensemble/tests/test_bagging.py",
+        "why_relevant": "该测试验证了 BaggingClassifier（同样继承自 BaseBagging）的 warm_start 功能，包括增量增加 n_estimators 和结果一致性。",
+        "reusable_parts": [
+          "测试结构：创建分类器 -> 设置 warm_start=True -> 循环增加 n_estimators 并调用 fit -> 断言结果。",
+          "使用的数据集生成（make_hastie_10_2）。",
+          "断言风格（assert_equal, assert_array_almost_equal）。"
+        ],
+        "possible_gap": "该测试针对 BaggingClassifier，而非 IsolationForest。IsolationForest 是无监督异常检测模型，其 fit 方法签名（y=None）和内部逻辑可能不同。"
+      },
+      {
+        "test_name": "test_warm_start_equivalence",
+        "test_file": "sklearn/ensemble/tests/test_bagging.py",
+        "why_relevant": "该测试验证了 warm start 模式下的训练结果与一次性训练等价，这是 warm_start 功能的核心语义。",
+        "reusable_parts": [
+          "测试逻辑：比较 warm_start 分步训练与一次性训练的结果。",
+          "使用 train_test_split 划分数据集。",
+          "断言预测结果相等。"
+        ],
+        "possible_gap": "同样针对 BaggingClassifier，且测试的是分类预测结果。IsolationForest 的输出是异常分数或预测标签，需要调整断言目标。"
+      },
+      {
+        "test_name": "test_max_samples_attribute",
+        "test_file": "sklearn/ensemble/tests/test_iforest.py",
+        "why_relevant": "这是 IsolationForest 的现有测试，展示了如何构造 IsolationForest 对象、调用 fit 方法以及进行断言。",
+        "reusable_parts": [
+          "IsolationForest 的导入和实例化。",
+          "使用 iris 数据集。",
+          "调用 fit 方法。",
+          "pytest 的标记（filterwarnings）。"
+        ],
+        "possible_gap": "该测试完全不涉及 warm_start 功能。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 IsolationForest 实例，尝试通过设置 warm_start=True 和递增 n_estimators 来使用增量训练（warm start）功能。",
+      "evidence": [
+        "Issue 中提到：'Even though this parameter is not exposed in `__init__()` , it gets inherited from `BaseBagging` and one can use it by changing it to `True` after initialization. To make it work, you have to also increment `n_estimators` on every iteration.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "没有直接的错误或异常。问题是可用性缺陷：warm_start 参数没有在 IsolationForest 的构造函数中公开，导致其功能对用户不透明，难以发现和使用。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 中提到：'It took me a while to notice that it actually works, and I had to inspect the source code of both `IsolationForest` and `BaseBagging`.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.ensemble.IsolationForest",
+        "kind": "class",
+        "source_path": "sklearn/ensemble/iforest.py",
+        "reason": "这是 Issue 报告的核心类，其 __init__ 方法缺少 warm_start 参数。"
+      },
+      {
+        "name": "sklearn.ensemble.IsolationForest.__init__",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/iforest.py",
+        "reason": "需要检查其参数列表，并确认是否应添加 warm_start。"
+      },
+      {
+        "name": "sklearn.ensemble.BaseBagging",
+        "kind": "class",
+        "source_path": "sklearn/ensemble/bagging.py",
+        "reason": "IsolationForest 继承自 BaseBagging，而 warm_start 参数定义在 BaseBagging.__init__ 中。"
+      },
+      {
+        "name": "sklearn.ensemble.IsolationForest.fit",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/iforest.py",
+        "reason": "warm start 功能在调用 fit 方法时体现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/ensemble/iforest.py",
+        "object": "IsolationForest.__init__",
+        "lines": "167-193",
+        "reason": "IsolationForest 的 __init__ 方法在调用 super().__init__ 时，没有传递 warm_start 参数给 BaseBagging 的构造函数。根据源码片段 5，super().__init__ 调用中缺少 warm_start 参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试（如 test_warm_start）中，BaggingClassifier 在 __init__ 中直接指定 warm_start=True。",
+        "target_pattern": "对于 IsolationForest，由于 __init__ 未暴露 warm_start，需要先创建对象，然后通过 object.warm_start = True 来设置属性。",
+        "reason": "Issue 明确指出当前需要通过修改实例属性来启用 warm_start。这是触发“功能可用但接口隐蔽”这一问题的关键操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，在循环内通过 set_params(n_estimators=new_value) 来增加树的数量。",
+        "target_pattern": "根据 Issue 描述，需要手动递增 n_estimators 属性（例如 clf.n_estimators += 5）或使用 set_params。",
+        "reason": "这是使用 warm_start 功能的必要步骤：在每次调用 fit 前增加估计器数量。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试使用有监督分类数据集（make_hastie_10_2）和分类器。",
+        "target_pattern": "测试需要使用无监督的异常检测数据集（或通用数据集，忽略 y）和 IsolationForest 模型。",
+        "reason": "IsolationForest 是无监督模型，其 fit 方法对 y 的处理（y=None）和预测输出与分类器不同。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "IsolationForest 的 __init__ 方法应该公开 warm_start 参数（默认 False），允许用户像使用 RandomForestClassifier 一样方便地启用增量训练。",
+      "evidence": [
+        "Issue 中建议：'expose `warm_start` in `IsolationForest.__init__()`, default `False`;'",
+        "源码片段 4 (RandomForestClassifier) 显示其 __init__ 包含了 warm_start 参数。",
+        "源码片段 2 (BaseBagging) 显示其 __init__ 已经定义了 warm_start 参数。",
+        "Issue 提到：'document it in the same way as it is documented for `RandomForestClassifier`'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "len(clf.estimators_) 或 clf.n_estimators",
+        "reason": "在 warm_start 模式下，多次调用 fit 后，estimators_ 列表的长度应该逐步增加，而不是被重置。这是 warm_start 功能是否生效的核心观测点。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "clf.score_samples(X) 或 clf.predict(X) 的结果",
+        "reason": "比较 warm_start 分步训练后的模型输出与一次性训练（warm_start=False）的模型输出是否一致或足够接近，以验证功能正确性。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "clf.warm_start 属性的值",
+        "reason": "确认在通过实例属性设置后，warm_start 标志是否被正确设置为 True。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 warm_start=True 且递增 n_estimators 后调用 fit，模型会增加新的估计器，而不是从头开始训练整个森林。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的异常分数数值（可能因随机性变化）。",
+        "reason": "warm_start 的核心语义是重用已有估计器并添加新的，断言估计器数量的变化能稳定地验证这一行为。"
+      },
+      {
+        "assertion_goal": "通过 warm_start 分步训练得到的模型，其预测/评分能力应与一次性训练（warm_start=False）的模型在统计上等价。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言模型内部所有属性完全一致（如每个树的随机状态），因为增量训练可能引入随机性差异。",
+        "reason": "功能等价性是用户关心的最终结果，断言预测输出（如异常标签）的一致性更稳定且与用户期望对齐。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "IsolationForest 的 fit 方法内部在 warm_start=True 时，是否完全遵循 BaseBagging 的逻辑，是否存在特定于 IsolationForest 的障碍？",
+    "在 warm_start 模式下，IsolationForest 的某些属性（如 offset_, max_samples_）的更新逻辑是否正确？",
+    "当前代码中，IsolationForest.__init__ 调用 super().__init__ 时未传递 warm_start，这是疏忽还是有意为之？如果传递默认值 False，是否会有副作用？"
+  ],
+  "raw": {
+    "issue_summary": "IsolationForest 类没有在 __init__ 中暴露其继承自 BaseBagging 的 warm_start 参数，导致用户难以发现和使用增量训练功能。",
+    "trigger_condition": {
+      "text": "创建一个 IsolationForest 实例，尝试通过设置 warm_start=True 和递增 n_estimators 来使用增量训练（warm start）功能。",
+      "evidence": [
+        "Issue 中提到：'Even though this parameter is not exposed in `__init__()` , it gets inherited from `BaseBagging` and one can use it by changing it to `True` after initialization. To make it work, you have to also increment `n_estimators` on every iteration.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "没有直接的错误或异常。问题是可用性缺陷：warm_start 参数没有在 IsolationForest 的构造函数中公开，导致其功能对用户不透明，难以发现和使用。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 中提到：'It took me a while to notice that it actually works, and I had to inspect the source code of both `IsolationForest` and `BaseBagging`.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "IsolationForest 的 __init__ 方法应该公开 warm_start 参数（默认 False），允许用户像使用 RandomForestClassifier 一样方便地启用增量训练。",
+      "evidence": [
+        "Issue 中建议：'expose `warm_start` in `IsolationForest.__init__()`, default `False`;'",
+        "源码片段 4 (RandomForestClassifier) 显示其 __init__ 包含了 warm_start 参数。",
+        "源码片段 2 (BaseBagging) 显示其 __init__ 已经定义了 warm_start 参数。",
+        "Issue 提到：'document it in the same way as it is documented for `RandomForestClassifier`'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sklearn.ensemble.IsolationForest",
+        "kind": "class",
+        "source_path": "sklearn/ensemble/iforest.py",
+        "reason": "这是 Issue 报告的核心类，其 __init__ 方法缺少 warm_start 参数。"
+      },
+      {
+        "name": "sklearn.ensemble.IsolationForest.__init__",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/iforest.py",
+        "reason": "需要检查其参数列表，并确认是否应添加 warm_start。"
+      },
+      {
+        "name": "sklearn.ensemble.BaseBagging",
+        "kind": "class",
+        "source_path": "sklearn/ensemble/bagging.py",
+        "reason": "IsolationForest 继承自 BaseBagging，而 warm_start 参数定义在 BaseBagging.__init__ 中。"
+      },
+      {
+        "name": "sklearn.ensemble.IsolationForest.fit",
+        "kind": "method",
+        "source_path": "sklearn/ensemble/iforest.py",
+        "reason": "warm start 功能在调用 fit 方法时体现。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/ensemble/iforest.py",
+        "object": "IsolationForest.__init__",
+        "lines": "167-193",
+        "reason": "IsolationForest 的 __init__ 方法在调用 super().__init__ 时，没有传递 warm_start 参数给 BaseBagging 的构造函数。根据源码片段 5，super().__init__ 调用中缺少 warm_start 参数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_warm_start",
+        "test_file": "sklearn/ensemble/tests/test_bagging.py",
+        "why_relevant": "该测试验证了 BaggingClassifier（同样继承自 BaseBagging）的 warm_start 功能，包括增量增加 n_estimators 和结果一致性。",
+        "reusable_parts": [
+          "测试结构：创建分类器 -> 设置 warm_start=True -> 循环增加 n_estimators 并调用 fit -> 断言结果。",
+          "使用的数据集生成（make_hastie_10_2）。",
+          "断言风格（assert_equal, assert_array_almost_equal）。"
+        ],
+        "possible_gap": "该测试针对 BaggingClassifier，而非 IsolationForest。IsolationForest 是无监督异常检测模型，其 fit 方法签名（y=None）和内部逻辑可能不同。"
+      },
+      {
+        "test_name": "test_warm_start_equivalence",
+        "test_file": "sklearn/ensemble/tests/test_bagging.py",
+        "why_relevant": "该测试验证了 warm start 模式下的训练结果与一次性训练等价，这是 warm_start 功能的核心语义。",
+        "reusable_parts": [
+          "测试逻辑：比较 warm_start 分步训练与一次性训练的结果。",
+          "使用 train_test_split 划分数据集。",
+          "断言预测结果相等。"
+        ],
+        "possible_gap": "同样针对 BaggingClassifier，且测试的是分类预测结果。IsolationForest 的输出是异常分数或预测标签，需要调整断言目标。"
+      },
+      {
+        "test_name": "test_max_samples_attribute",
+        "test_file": "sklearn/ensemble/tests/test_iforest.py",
+        "why_relevant": "这是 IsolationForest 的现有测试，展示了如何构造 IsolationForest 对象、调用 fit 方法以及进行断言。",
+        "reusable_parts": [
+          "IsolationForest 的导入和实例化。",
+          "使用 iris 数据集。",
+          "调用 fit 方法。",
+          "pytest 的标记（filterwarnings）。"
+        ],
+        "possible_gap": "该测试完全不涉及 warm_start 功能。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试（如 test_warm_start）中，BaggingClassifier 在 __init__ 中直接指定 warm_start=True。",
+        "target_pattern": "对于 IsolationForest，由于 __init__ 未暴露 warm_start，需要先创建对象，然后通过 object.warm_start = True 来设置属性。",
+        "reason": "Issue 明确指出当前需要通过修改实例属性来启用 warm_start。这是触发“功能可用但接口隐蔽”这一问题的关键操作。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，在循环内通过 set_params(n_estimators=new_value) 来增加树的数量。",
+        "target_pattern": "根据 Issue 描述，需要手动递增 n_estimators 属性（例如 clf.n_estimators += 5）或使用 set_params。",
+        "reason": "这是使用 warm_start 功能的必要步骤：在每次调用 fit 前增加估计器数量。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相似测试使用有监督分类数据集（make_hastie_10_2）和分类器。",
+        "target_pattern": "测试需要使用无监督的异常检测数据集（或通用数据集，忽略 y）和 IsolationForest 模型。",
+        "reason": "IsolationForest 是无监督模型，其 fit 方法对 y 的处理（y=None）和预测输出与分类器不同。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "len(clf.estimators_) 或 clf.n_estimators",
+        "reason": "在 warm_start 模式下，多次调用 fit 后，estimators_ 列表的长度应该逐步增加，而不是被重置。这是 warm_start 功能是否生效的核心观测点。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "clf.score_samples(X) 或 clf.predict(X) 的结果",
+        "reason": "比较 warm_start 分步训练后的模型输出与一次性训练（warm_start=False）的模型输出是否一致或足够接近，以验证功能正确性。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "clf.warm_start 属性的值",
+        "reason": "确认在通过实例属性设置后，warm_start 标志是否被正确设置为 True。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 warm_start=True 且递增 n_estimators 后调用 fit，模型会增加新的估计器，而不是从头开始训练整个森林。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的异常分数数值（可能因随机性变化）。",
+        "reason": "warm_start 的核心语义是重用已有估计器并添加新的，断言估计器数量的变化能稳定地验证这一行为。"
+      },
+      {
+        "assertion_goal": "通过 warm_start 分步训练得到的模型，其预测/评分能力应与一次性训练（warm_start=False）的模型在统计上等价。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言模型内部所有属性完全一致（如每个树的随机状态），因为增量训练可能引入随机性差异。",
+        "reason": "功能等价性是用户关心的最终结果，断言预测输出（如异常标签）的一致性更稳定且与用户期望对齐。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sklearn.ensemble.IsolationForest 和用于生成或加载数据集的功能（如 sklearn.datasets.make_blobs 或 load_iris）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 pytest 的 filterwarnings 来忽略关于 contamination 或 behaviour 参数的弃用警告。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应构造一个无监督场景，即只使用 X，不关心 y（或 y=None）。",
+        "source": "inference",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "IsolationForest 的 fit 方法内部在 warm_start=True 时，是否完全遵循 BaseBagging 的逻辑，是否存在特定于 IsolationForest 的障碍？",
+      "在 warm_start 模式下，IsolationForest 的某些属性（如 offset_, max_samples_）的更新逻辑是否正确？",
+      "当前代码中，IsolationForest.__init__ 调用 super().__init__ 时未传递 warm_start，这是疏忽还是有意为之？如果传递默认值 False，是否会有副作用？"
+    ]
+  }
+}

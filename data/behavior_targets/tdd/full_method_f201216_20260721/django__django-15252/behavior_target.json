@@ -1,0 +1,396 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15252",
+  "issue_summary": "MigrationRecorder 在创建 django_migrations 表时未遵循数据库路由器的 allow_migrate 规则。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个多数据库的 Django 测试设置（例如 'default' 和 'other'）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 @override_settings(DATABASE_ROUTERS=[...]) 来应用自定义路由器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 类，并确保测试数据库正确创建/销毁。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要确保在测试开始时，非默认数据库上没有 django_migrations 表。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RecorderTests.test_apply",
+        "test_file": "tests/migrations/test_loader.py",
+        "why_relevant": "它直接测试 MigrationRecorder 在不同数据库连接上的行为，并检查一个数据库的记录是否影响另一个。",
+        "reusable_parts": [
+          "MigrationRecorder(connection) 的构造",
+          "使用 connections['other'] 获取另一个连接",
+          "对 applied_migrations() 返回值的断言风格"
+        ],
+        "possible_gap": "该测试没有设置 DATABASE_ROUTERS，也没有验证 ensure_schema 是否被不当调用或表是否被不当创建。"
+      },
+      {
+        "test_name": "test_makemigrations_consistency_checks_respect_routers",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它测试了 makemigrations 命令如何尊重 DATABASE_ROUTERS，并模拟了 MigrationRecorder.has_table 的行为，展示了路由器如何影响对数据库的检查。",
+        "reusable_parts": [
+          "使用 @override_settings(DATABASE_ROUTERS=...)",
+          "使用 mock.patch 模拟 MigrationRecorder 的方法",
+          "检查方法调用次数以验证路由器的影响"
+        ],
+        "possible_gap": "它关注的是 makemigrations 命令的检查逻辑，而不是 MigrationRecorder 在迁移应用过程中创建表的行为。"
+      },
+      {
+        "test_name": "CreateDefaultSiteTests.test_multi_db_with_router",
+        "test_file": "tests/sites_tests/tests.py",
+        "why_relevant": "它测试了另一个 Django 内部操作（create_default_site）如何尊重数据库路由，展示了多数据库和路由器设置的模式。",
+        "reusable_parts": [
+          "多数据库设置（using='default', using='other'）",
+          "使用 @override_settings(DATABASE_ROUTERS=...)",
+          "断言数据库特定查询集的结果"
+        ],
+        "possible_gap": "它测试的是 Site 模型的创建，而非 MigrationRecorder 或 django_migrations 表。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在多数据库设置中，当存在一个路由器（例如仅允许 'default' 数据库迁移）时，对非默认数据库（如 'other'）执行迁移操作（例如运行测试时自动创建测试数据库并调用 migrate）。",
+      "evidence": [
+        "Issue 描述：'We have a multi-db setup... We have a simple router...'",
+        "Issue 描述：'We run our functional tests and the migrate command is called against each connection...'",
+        "源码片段 2 和 3：record_applied 调用 ensure_schema，ensure_schema 在表不存在时会尝试创建表。",
+        "相关测试 2：测试了路由器如何影响 makemigrations 的检查。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "MigrationRecorder 在非默认数据库（如 'other'）上创建了 django_migrations 表，尽管路由器规则禁止在该数据库上迁移。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'If using the router above, my expectation would be that the table is not created on any connection other than the 'default' connection.'",
+        "Issue 描述：'ensure_schema checks to see if the Migration model is in the tables in the connection. If it does not find the table then it tries to create the table. I believe that this is incorrect behaviour when a db_router has been provided.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "MigrationRecorder",
+        "kind": "class",
+        "source_path": "django/db/migrations/recorder.py",
+        "reason": "Issue 的核心对象，其方法（ensure_schema, record_applied, applied_migrations, record_unapplied）被怀疑存在缺陷。"
+      },
+      {
+        "name": "MigrationRecorder.ensure_schema",
+        "kind": "method",
+        "source_path": "django/db/migrations/recorder.py",
+        "reason": "该方法在表不存在时直接创建表，未检查路由器规则。"
+      },
+      {
+        "name": "MigrationRecorder.record_applied",
+        "kind": "method",
+        "source_path": "django/db/migrations/recorder.py",
+        "reason": "调用 ensure_schema，是触发表创建的路径之一。"
+      },
+      {
+        "name": "ConnectionRouter.allow_migrate",
+        "kind": "method",
+        "source_path": "django/db/utils.py",
+        "reason": "这是决定是否允许在特定数据库上迁移的标准接口，MigrationRecorder 应使用它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/recorder.py",
+        "object": "MigrationRecorder.ensure_schema",
+        "lines": "59-70",
+        "reason": "该方法在创建 django_migrations 表之前，没有检查数据库路由器的 allow_migrate 规则。"
+      },
+      {
+        "path": "django/db/migrations/recorder.py",
+        "object": "MigrationRecorder.record_applied",
+        "lines": "84-87",
+        "reason": "它调用 ensure_schema，是触发缺陷的入口点之一。"
+      },
+      {
+        "path": "django/db/migrations/recorder.py",
+        "object": "MigrationRecorder.record_unapplied",
+        "lines": "89-92",
+        "reason": "同样调用 ensure_schema，Issue 提到可能存在类似问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能没有设置 DATABASE_ROUTERS，或者路由器允许所有迁移。",
+        "target_pattern": "设置一个 DATABASE_ROUTERS，其中包含一个路由器，其 allow_migrate 方法对非默认数据库（如 'other'）返回 False。",
+        "reason": "Issue 表明，只有当存在一个限制性路由器时，MigrationRecorder 才会表现出错误行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能直接调用 recorder.applied_migrations() 或 recorder.record_applied(...)。",
+        "target_pattern": "在设置了限制性路由器后，针对非默认数据库连接调用 MigrationRecorder 的方法（如 record_applied），触发 ensure_schema。",
+        "reason": "Issue 指出，在迁移执行过程中，record_applied 会被调用，进而调用 ensure_schema。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试可能假设 django_migrations 表已存在或不存在。",
+        "target_pattern": "确保在非默认数据库上，django_migrations 表最初不存在（has_table 返回 False）。",
+        "reason": "ensure_schema 仅在表不存在时尝试创建表，这是缺陷触发的关键条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "MigrationRecorder 在尝试创建 django_migrations 表之前，应咨询数据库路由器（通过 allow_migrate 方法），并且仅在路由器允许迁移的数据库上创建该表。",
+      "evidence": [
+        "Issue 描述：'If using the router above, my expectation would be that the table is not created on any connection other than the 'default' connection.'",
+        "源码片段 6：ConnectionRouter.allow_migrate 方法展示了路由器如何决定是否允许迁移。",
+        "相关测试 2 和 3：展示了其他组件（如 makemigrations、create_default_site）如何尊重 DATABASE_ROUTERS 设置。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 ensure_schema 方法内部，观察 self.connection.schema_editor().create_model(self.Migration) 是否在非默认数据库连接上被执行。",
+        "reason": "缺陷的核心表现是在不应创建表的数据库上执行了 CREATE TABLE 语句。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在调用 record_applied 前后，检查非默认数据库的系统表（例如通过查询 information_schema.tables）中是否存在 django_migrations 表。",
+        "reason": "可以验证表是否被不当创建。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "观察 MigrationRecorder 实例的 self.connection 别名以及当前生效的 DATABASE_ROUTERS 设置。",
+        "reason": "确保测试环境正确模拟了 Issue 描述的多数据库和路由器配置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在路由器禁止迁移的数据库上，MigrationRecorder.ensure_schema 不应创建 django_migrations 表。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 SQL 查询字符串或精确的异常消息，因为这些可能因数据库后端而异。",
+        "reason": "断言表创建行为（或 lack thereof）是缺陷的核心，且不依赖于具体的 SQL 方言。"
+      },
+      {
+        "assertion_goal": "在路由器禁止迁移的数据库上调用 MigrationRecorder.record_applied 不应导致表被创建，但可能应静默失败或引发适当异常（取决于修复方案）。",
+        "preferred_assertion_style": "state_not_updated",
+        "avoid": "断言未捕获的 DatabaseError 或特定异常类型，除非 Issue 明确指定。",
+        "reason": "Issue 主要关注表不应被创建，对错误处理方式未明确说明。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后，当路由器禁止迁移时，MigrationRecorder.record_applied 等方法是应该静默跳过、记录日志，还是引发特定异常？",
+    "MigrationRecorder.applied_migrations 方法在表不存在时返回空字典，这种行为在路由器禁止迁移的数据库上是否仍然合适？",
+    "缺陷是否也影响其他调用 ensure_schema 的场景，例如 flush 命令？"
+  ],
+  "raw": {
+    "issue_summary": "MigrationRecorder 在创建 django_migrations 表时未遵循数据库路由器的 allow_migrate 规则。",
+    "trigger_condition": {
+      "text": "在多数据库设置中，当存在一个路由器（例如仅允许 'default' 数据库迁移）时，对非默认数据库（如 'other'）执行迁移操作（例如运行测试时自动创建测试数据库并调用 migrate）。",
+      "evidence": [
+        "Issue 描述：'We have a multi-db setup... We have a simple router...'",
+        "Issue 描述：'We run our functional tests and the migrate command is called against each connection...'",
+        "源码片段 2 和 3：record_applied 调用 ensure_schema，ensure_schema 在表不存在时会尝试创建表。",
+        "相关测试 2：测试了路由器如何影响 makemigrations 的检查。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "MigrationRecorder 在非默认数据库（如 'other'）上创建了 django_migrations 表，尽管路由器规则禁止在该数据库上迁移。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'If using the router above, my expectation would be that the table is not created on any connection other than the 'default' connection.'",
+        "Issue 描述：'ensure_schema checks to see if the Migration model is in the tables in the connection. If it does not find the table then it tries to create the table. I believe that this is incorrect behaviour when a db_router has been provided.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "MigrationRecorder 在尝试创建 django_migrations 表之前，应咨询数据库路由器（通过 allow_migrate 方法），并且仅在路由器允许迁移的数据库上创建该表。",
+      "evidence": [
+        "Issue 描述：'If using the router above, my expectation would be that the table is not created on any connection other than the 'default' connection.'",
+        "源码片段 6：ConnectionRouter.allow_migrate 方法展示了路由器如何决定是否允许迁移。",
+        "相关测试 2 和 3：展示了其他组件（如 makemigrations、create_default_site）如何尊重 DATABASE_ROUTERS 设置。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "MigrationRecorder",
+        "kind": "class",
+        "source_path": "django/db/migrations/recorder.py",
+        "reason": "Issue 的核心对象，其方法（ensure_schema, record_applied, applied_migrations, record_unapplied）被怀疑存在缺陷。"
+      },
+      {
+        "name": "MigrationRecorder.ensure_schema",
+        "kind": "method",
+        "source_path": "django/db/migrations/recorder.py",
+        "reason": "该方法在表不存在时直接创建表，未检查路由器规则。"
+      },
+      {
+        "name": "MigrationRecorder.record_applied",
+        "kind": "method",
+        "source_path": "django/db/migrations/recorder.py",
+        "reason": "调用 ensure_schema，是触发表创建的路径之一。"
+      },
+      {
+        "name": "ConnectionRouter.allow_migrate",
+        "kind": "method",
+        "source_path": "django/db/utils.py",
+        "reason": "这是决定是否允许在特定数据库上迁移的标准接口，MigrationRecorder 应使用它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/recorder.py",
+        "object": "MigrationRecorder.ensure_schema",
+        "lines": "59-70",
+        "reason": "该方法在创建 django_migrations 表之前，没有检查数据库路由器的 allow_migrate 规则。"
+      },
+      {
+        "path": "django/db/migrations/recorder.py",
+        "object": "MigrationRecorder.record_applied",
+        "lines": "84-87",
+        "reason": "它调用 ensure_schema，是触发缺陷的入口点之一。"
+      },
+      {
+        "path": "django/db/migrations/recorder.py",
+        "object": "MigrationRecorder.record_unapplied",
+        "lines": "89-92",
+        "reason": "同样调用 ensure_schema，Issue 提到可能存在类似问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RecorderTests.test_apply",
+        "test_file": "tests/migrations/test_loader.py",
+        "why_relevant": "它直接测试 MigrationRecorder 在不同数据库连接上的行为，并检查一个数据库的记录是否影响另一个。",
+        "reusable_parts": [
+          "MigrationRecorder(connection) 的构造",
+          "使用 connections['other'] 获取另一个连接",
+          "对 applied_migrations() 返回值的断言风格"
+        ],
+        "possible_gap": "该测试没有设置 DATABASE_ROUTERS，也没有验证 ensure_schema 是否被不当调用或表是否被不当创建。"
+      },
+      {
+        "test_name": "test_makemigrations_consistency_checks_respect_routers",
+        "test_file": "tests/migrations/test_commands.py",
+        "why_relevant": "它测试了 makemigrations 命令如何尊重 DATABASE_ROUTERS，并模拟了 MigrationRecorder.has_table 的行为，展示了路由器如何影响对数据库的检查。",
+        "reusable_parts": [
+          "使用 @override_settings(DATABASE_ROUTERS=...)",
+          "使用 mock.patch 模拟 MigrationRecorder 的方法",
+          "检查方法调用次数以验证路由器的影响"
+        ],
+        "possible_gap": "它关注的是 makemigrations 命令的检查逻辑，而不是 MigrationRecorder 在迁移应用过程中创建表的行为。"
+      },
+      {
+        "test_name": "CreateDefaultSiteTests.test_multi_db_with_router",
+        "test_file": "tests/sites_tests/tests.py",
+        "why_relevant": "它测试了另一个 Django 内部操作（create_default_site）如何尊重数据库路由，展示了多数据库和路由器设置的模式。",
+        "reusable_parts": [
+          "多数据库设置（using='default', using='other'）",
+          "使用 @override_settings(DATABASE_ROUTERS=...)",
+          "断言数据库特定查询集的结果"
+        ],
+        "possible_gap": "它测试的是 Site 模型的创建，而非 MigrationRecorder 或 django_migrations 表。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能没有设置 DATABASE_ROUTERS，或者路由器允许所有迁移。",
+        "target_pattern": "设置一个 DATABASE_ROUTERS，其中包含一个路由器，其 allow_migrate 方法对非默认数据库（如 'other'）返回 False。",
+        "reason": "Issue 表明，只有当存在一个限制性路由器时，MigrationRecorder 才会表现出错误行为。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能直接调用 recorder.applied_migrations() 或 recorder.record_applied(...)。",
+        "target_pattern": "在设置了限制性路由器后，针对非默认数据库连接调用 MigrationRecorder 的方法（如 record_applied），触发 ensure_schema。",
+        "reason": "Issue 指出，在迁移执行过程中，record_applied 会被调用，进而调用 ensure_schema。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试可能假设 django_migrations 表已存在或不存在。",
+        "target_pattern": "确保在非默认数据库上，django_migrations 表最初不存在（has_table 返回 False）。",
+        "reason": "ensure_schema 仅在表不存在时尝试创建表，这是缺陷触发的关键条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "在 ensure_schema 方法内部，观察 self.connection.schema_editor().create_model(self.Migration) 是否在非默认数据库连接上被执行。",
+        "reason": "缺陷的核心表现是在不应创建表的数据库上执行了 CREATE TABLE 语句。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在调用 record_applied 前后，检查非默认数据库的系统表（例如通过查询 information_schema.tables）中是否存在 django_migrations 表。",
+        "reason": "可以验证表是否被不当创建。"
+      },
+      {
+        "kind": "config",
+        "expression_hint": "观察 MigrationRecorder 实例的 self.connection 别名以及当前生效的 DATABASE_ROUTERS 设置。",
+        "reason": "确保测试环境正确模拟了 Issue 描述的多数据库和路由器配置。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在路由器禁止迁移的数据库上，MigrationRecorder.ensure_schema 不应创建 django_migrations 表。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言完整的 SQL 查询字符串或精确的异常消息，因为这些可能因数据库后端而异。",
+        "reason": "断言表创建行为（或 lack thereof）是缺陷的核心，且不依赖于具体的 SQL 方言。"
+      },
+      {
+        "assertion_goal": "在路由器禁止迁移的数据库上调用 MigrationRecorder.record_applied 不应导致表被创建，但可能应静默失败或引发适当异常（取决于修复方案）。",
+        "preferred_assertion_style": "state_not_updated",
+        "avoid": "断言未捕获的 DatabaseError 或特定异常类型，除非 Issue 明确指定。",
+        "reason": "Issue 主要关注表不应被创建，对错误处理方式未明确说明。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个多数据库的 Django 测试设置（例如 'default' 和 'other'）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 @override_settings(DATABASE_ROUTERS=[...]) 来应用自定义路由器。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 TestCase 类，并确保测试数据库正确创建/销毁。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要确保在测试开始时，非默认数据库上没有 django_migrations 表。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "修复后，当路由器禁止迁移时，MigrationRecorder.record_applied 等方法是应该静默跳过、记录日志，还是引发特定异常？",
+      "MigrationRecorder.applied_migrations 方法在表不存在时返回空字典，这种行为在路由器禁止迁移的数据库上是否仍然合适？",
+      "缺陷是否也影响其他调用 ensure_schema 的场景，例如 flush 命令？"
+    ]
+  }
+}

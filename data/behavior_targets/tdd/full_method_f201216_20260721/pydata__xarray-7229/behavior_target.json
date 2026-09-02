@@ -1,0 +1,372 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-7229",
+  "issue_summary": "使用 xr.where(..., keep_attrs=True) 时，坐标属性被变量属性错误覆盖。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 xr.tutorial.load_dataset 获取一个具有坐标属性的标准数据集作为测试起点。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 xarray as xr 和 assert_identical 等测试工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个类（如 TestDataArray）中，或者是一个独立的函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_where_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "直接测试 xr.where 的 keep_attrs 参数对 DataArray 属性的影响。",
+        "reusable_parts": [
+          "imports (xr, assert_identical)",
+          "DataArray 构造模式",
+          "xr.where 调用模式",
+          "keep_attrs=True 参数",
+          "使用 assert_identical 进行断言"
+        ],
+        "possible_gap": "该测试只检查了数据变量（DataArray）本身的属性，没有涉及坐标（coordinate）的属性。Issue 是关于坐标属性被覆盖。"
+      },
+      {
+        "test_name": "test_keep_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "测试了 apply_ufunc 的 keep_attrs 对 DataArray 及其坐标属性的影响，验证了坐标属性应被保留。",
+        "reusable_parts": [
+          "DataArray 和坐标属性的设置模式",
+          "assert_identical 用于比较坐标属性",
+          "keep_attrs 参数的使用"
+        ],
+        "possible_gap": "测试的是自定义的 add 函数和 apply_ufunc，不是直接测试 xr.where。"
+      },
+      {
+        "test_name": "test_coarsen_keep_attrs",
+        "test_file": "xarray/tests/test_coarsen.py",
+        "why_relevant": "测试了 Dataset 操作（coarsen）中 keep_attrs 对全局属性、数据变量属性和坐标属性的影响，模式相似。",
+        "reusable_parts": [
+          "创建具有坐标属性的 Dataset 的模式",
+          "同时检查 result.coord.attrs",
+          "keep_attrs=True/False 的参数化测试结构"
+        ],
+        "possible_gap": "测试的是 coarsen 操作，不是 where 操作。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 xr.where(cond, x, y, keep_attrs=True)，其中 x 和 y 是包含坐标的 DataArray 或 Dataset（例如来自教程数据集），并且坐标本身具有属性。",
+      "evidence": [
+        "Issue 中的 MVCE：xr.where(True, ds.air, ds.air, keep_attrs=True).time.attrs",
+        "Issue 描述：'xr.where(..., keep_attrs=True) overwrites coordinate attributes'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "坐标（如 'time'）的属性被错误地替换为数据变量的属性，而不是被保留。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的日志输出：time 的属性从 {'standard_name': 'time', 'long_name': 'Time'} 变成了数据变量 air 的属性，如 'long_name': '4xDaily Air temperature...'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.where",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接关于此函数的 keep_attrs 参数行为。"
+      },
+      {
+        "name": "xr.tutorial.load_dataset",
+        "kind": "function",
+        "source_path": "xarray/tutorial.py",
+        "reason": "Issue 的 MVCE 使用了此函数来获取包含坐标属性的数据集。"
+      },
+      {
+        "name": "Variable.where",
+        "kind": "method",
+        "source_path": "xarray/core/variable.py",
+        "reason": "源码片段显示 Variable 类有 where 方法，可能是计算链的一部分。"
+      },
+      {
+        "name": "Variable.attrs",
+        "kind": "method",
+        "source_path": "xarray/core/variable.py",
+        "reason": "Issue 核心是关于属性访问和修改。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/variable.py",
+        "object": "where",
+        "lines": "1871-1872",
+        "reason": "源码片段显示 Variable.where 方法，它调用了 ops.where_method，可能与属性合并逻辑有关。"
+      },
+      {
+        "path": "",
+        "object": "ops.where_method 或相关的属性合并/处理逻辑",
+        "lines": "",
+        "reason": "Issue 提到 #6461 的 lambda 更改可能影响了属性处理，缺陷可能发生在 where 操作的内部实现中，特别是处理坐标与变量属性合并时。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试使用简单的 DataArray，其坐标可能没有属性或属性简单。",
+        "target_pattern": "使用包含具有明确属性的坐标的 Dataset 或 DataArray（如教程数据集 air_temperature）。",
+        "reason": "Issue 的触发需要坐标本身具有属性，并且这些属性在 where 操作后被错误覆盖。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接对 DataArray 调用 xr.where。",
+        "target_pattern": "对从 Dataset 中提取的 DataArray（如 ds.air）调用 xr.where，该 DataArray 关联着具有属性的坐标。",
+        "reason": "Issue 的 MVCE 表明缺陷出现在处理从 Dataset 中提取的、带有坐标的 DataArray 时。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中 cond, x, y 通常是不同的 DataArray。",
+        "target_pattern": "使 cond 为简单的 True 标量，x 和 y 为相同的 DataArray（如 Issue 中的 ds.air）。",
+        "reason": "Issue 的 MVCE 使用 x 和 y 相同，这简化了问题，但依然触发了坐标属性覆盖。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 keep_attrs=True 时，坐标的属性应被保留，不应被数据变量的属性覆盖。",
+      "evidence": [
+        "Issue 中的期望：'Coordinate attributes should be preserved.'",
+        "相关测试 test_keep_attrs 验证了坐标属性在 keep_attrs=True 时应被保留：assert_identical(actual['x'].attrs, a['x'].attrs)"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "result[coordinate_name].attrs (例如 result.time.attrs)",
+        "reason": "Issue 的核心错误是坐标属性被改变，直接观察操作后坐标的属性值。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "result.attrs (数据变量的属性)",
+        "reason": "需要确认数据变量的属性是否正确（可能被保留），以区分是属性错误交换还是全部丢失。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "original_dataset[coordinate_name].attrs (操作前坐标的原始属性)",
+        "reason": "作为基准，用于与操作后的坐标属性进行比较。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "操作后，坐标的属性应与操作前该坐标的属性相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、可能包含数据变量详细信息的属性字典相等，因为 Issue 只显示了属性被替换，但未指定所有细节。应关注坐标特有的属性键值对。",
+        "reason": "直接对应 Issue 的期望：坐标属性应被保留。"
+      },
+      {
+        "assertion_goal": "操作后，坐标的属性不应包含数据变量的属性内容（如 'long_name': '4xDaily Air temperature...'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "硬编码数据变量的完整属性列表。",
+        "reason": "Issue 显示坐标属性被数据变量属性污染，这是一个明确的错误信号。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷的确切位置是在 Variable.where、ops.where_method 还是更底层的合并函数中。",
+    "除了教程数据集，是否还有其他更简单的数据构造方式能稳定复现此问题。",
+    "keep_attrs 的默认行为或 keep_attrs=False 时是否也存在问题。",
+    "该缺陷是否影响所有坐标，还是只影响特定类型的坐标。"
+  ],
+  "raw": {
+    "issue_summary": "使用 xr.where(..., keep_attrs=True) 时，坐标属性被变量属性错误覆盖。",
+    "trigger_condition": {
+      "text": "调用 xr.where(cond, x, y, keep_attrs=True)，其中 x 和 y 是包含坐标的 DataArray 或 Dataset（例如来自教程数据集），并且坐标本身具有属性。",
+      "evidence": [
+        "Issue 中的 MVCE：xr.where(True, ds.air, ds.air, keep_attrs=True).time.attrs",
+        "Issue 描述：'xr.where(..., keep_attrs=True) overwrites coordinate attributes'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "坐标（如 'time'）的属性被错误地替换为数据变量的属性，而不是被保留。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中的日志输出：time 的属性从 {'standard_name': 'time', 'long_name': 'Time'} 变成了数据变量 air 的属性，如 'long_name': '4xDaily Air temperature...'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 keep_attrs=True 时，坐标的属性应被保留，不应被数据变量的属性覆盖。",
+      "evidence": [
+        "Issue 中的期望：'Coordinate attributes should be preserved.'",
+        "相关测试 test_keep_attrs 验证了坐标属性在 keep_attrs=True 时应被保留：assert_identical(actual['x'].attrs, a['x'].attrs)"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.where",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接关于此函数的 keep_attrs 参数行为。"
+      },
+      {
+        "name": "xr.tutorial.load_dataset",
+        "kind": "function",
+        "source_path": "xarray/tutorial.py",
+        "reason": "Issue 的 MVCE 使用了此函数来获取包含坐标属性的数据集。"
+      },
+      {
+        "name": "Variable.where",
+        "kind": "method",
+        "source_path": "xarray/core/variable.py",
+        "reason": "源码片段显示 Variable 类有 where 方法，可能是计算链的一部分。"
+      },
+      {
+        "name": "Variable.attrs",
+        "kind": "method",
+        "source_path": "xarray/core/variable.py",
+        "reason": "Issue 核心是关于属性访问和修改。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/variable.py",
+        "object": "where",
+        "lines": "1871-1872",
+        "reason": "源码片段显示 Variable.where 方法，它调用了 ops.where_method，可能与属性合并逻辑有关。"
+      },
+      {
+        "path": "",
+        "object": "ops.where_method 或相关的属性合并/处理逻辑",
+        "lines": "",
+        "reason": "Issue 提到 #6461 的 lambda 更改可能影响了属性处理，缺陷可能发生在 where 操作的内部实现中，特别是处理坐标与变量属性合并时。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_where_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "直接测试 xr.where 的 keep_attrs 参数对 DataArray 属性的影响。",
+        "reusable_parts": [
+          "imports (xr, assert_identical)",
+          "DataArray 构造模式",
+          "xr.where 调用模式",
+          "keep_attrs=True 参数",
+          "使用 assert_identical 进行断言"
+        ],
+        "possible_gap": "该测试只检查了数据变量（DataArray）本身的属性，没有涉及坐标（coordinate）的属性。Issue 是关于坐标属性被覆盖。"
+      },
+      {
+        "test_name": "test_keep_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "测试了 apply_ufunc 的 keep_attrs 对 DataArray 及其坐标属性的影响，验证了坐标属性应被保留。",
+        "reusable_parts": [
+          "DataArray 和坐标属性的设置模式",
+          "assert_identical 用于比较坐标属性",
+          "keep_attrs 参数的使用"
+        ],
+        "possible_gap": "测试的是自定义的 add 函数和 apply_ufunc，不是直接测试 xr.where。"
+      },
+      {
+        "test_name": "test_coarsen_keep_attrs",
+        "test_file": "xarray/tests/test_coarsen.py",
+        "why_relevant": "测试了 Dataset 操作（coarsen）中 keep_attrs 对全局属性、数据变量属性和坐标属性的影响，模式相似。",
+        "reusable_parts": [
+          "创建具有坐标属性的 Dataset 的模式",
+          "同时检查 result.coord.attrs",
+          "keep_attrs=True/False 的参数化测试结构"
+        ],
+        "possible_gap": "测试的是 coarsen 操作，不是 where 操作。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试使用简单的 DataArray，其坐标可能没有属性或属性简单。",
+        "target_pattern": "使用包含具有明确属性的坐标的 Dataset 或 DataArray（如教程数据集 air_temperature）。",
+        "reason": "Issue 的触发需要坐标本身具有属性，并且这些属性在 where 操作后被错误覆盖。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接对 DataArray 调用 xr.where。",
+        "target_pattern": "对从 Dataset 中提取的 DataArray（如 ds.air）调用 xr.where，该 DataArray 关联着具有属性的坐标。",
+        "reason": "Issue 的 MVCE 表明缺陷出现在处理从 Dataset 中提取的、带有坐标的 DataArray 时。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中 cond, x, y 通常是不同的 DataArray。",
+        "target_pattern": "使 cond 为简单的 True 标量，x 和 y 为相同的 DataArray（如 Issue 中的 ds.air）。",
+        "reason": "Issue 的 MVCE 使用 x 和 y 相同，这简化了问题，但依然触发了坐标属性覆盖。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "result[coordinate_name].attrs (例如 result.time.attrs)",
+        "reason": "Issue 的核心错误是坐标属性被改变，直接观察操作后坐标的属性值。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "result.attrs (数据变量的属性)",
+        "reason": "需要确认数据变量的属性是否正确（可能被保留），以区分是属性错误交换还是全部丢失。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "original_dataset[coordinate_name].attrs (操作前坐标的原始属性)",
+        "reason": "作为基准，用于与操作后的坐标属性进行比较。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "操作后，坐标的属性应与操作前该坐标的属性相同。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、可能包含数据变量详细信息的属性字典相等，因为 Issue 只显示了属性被替换，但未指定所有细节。应关注坐标特有的属性键值对。",
+        "reason": "直接对应 Issue 的期望：坐标属性应被保留。"
+      },
+      {
+        "assertion_goal": "操作后，坐标的属性不应包含数据变量的属性内容（如 'long_name': '4xDaily Air temperature...'）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "硬编码数据变量的完整属性列表。",
+        "reason": "Issue 显示坐标属性被数据变量属性污染，这是一个明确的错误信号。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 xr.tutorial.load_dataset 获取一个具有坐标属性的标准数据集作为测试起点。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要导入 xarray as xr 和 assert_identical 等测试工具。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能在一个类（如 TestDataArray）中，或者是一个独立的函数。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷的确切位置是在 Variable.where、ops.where_method 还是更底层的合并函数中。",
+      "除了教程数据集，是否还有其他更简单的数据构造方式能稳定复现此问题。",
+      "keep_attrs 的默认行为或 keep_attrs=False 时是否也存在问题。",
+      "该缺陷是否影响所有坐标，还是只影响特定类型的坐标。"
+    ]
+  }
+}

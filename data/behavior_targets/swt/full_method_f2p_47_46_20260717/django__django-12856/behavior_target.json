@@ -1,0 +1,310 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12856",
+  "issue_summary": "当模型添加 UniqueConstraint 时，makemigrations 没有检查其中命名的字段是否实际存在。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离应用模型定义。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要继承自 TestCase 并可能设置 databases 属性。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库连接以支持约束检查。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_unique_constraint_with_condition",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了 UniqueConstraint 在特定条件下的行为，并使用了 Model.check 来获取错误列表，这与 Issue 中检查字段有效性的模式相似。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "在类 Meta.constraints 中定义 UniqueConstraint 的模式",
+          "使用 Model.check(databases=self.databases) 获取错误",
+          "使用 self.assertEqual 比较错误列表"
+        ],
+        "possible_gap": "该测试使用了一个有效的字段 'age'，没有测试字段不存在的情况。"
+      },
+      {
+        "test_name": "test_deferrable_unique_constraint",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了 UniqueConstraint 的另一个属性（deferrable），并检查了数据库特性支持，展示了如何根据条件验证约束并生成警告。",
+        "reusable_parts": [
+          "测试类结构",
+          "Model.check 调用模式",
+          "根据 connection.features 进行条件断言"
+        ],
+        "possible_gap": "它没有测试字段存在性，而是测试数据库特性支持。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在模型的 Meta.constraints 中定义一个 UniqueConstraint，但其 fields 参数包含模型中不存在的字段名，然后运行 makemigrations。",
+      "evidence": [
+        "Issue 描述：'When a model gains a UniqueConstraint, makemigrations doesn't check that the fields named therein actually exist.'",
+        "Issue 提到 unique_together 语法会引发 models.E012 错误作为对比。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "makemigrations 没有对不存在的字段引发错误或警告，而是静默通过。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 描述：'makemigrations doesn't check that the fields named therein actually exist.'",
+        "Issue 提到 unique_together 会引发 models.E012，暗示 UniqueConstraint 应该有类似检查但缺失。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "UniqueConstraint",
+        "kind": "class",
+        "source_path": "django/db/models/constraints.py",
+        "reason": "Issue 直接关于 UniqueConstraint 的字段检查。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "module",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 提到 makemigrations 命令没有执行检查。"
+      },
+      {
+        "name": "Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试使用 Model.check 来验证约束，这可能是执行字段检查的入口点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/constraints.py",
+        "object": "UniqueConstraint",
+        "lines": "79-153",
+        "reason": "UniqueConstraint 类定义在此，可能缺少字段验证逻辑。"
+      },
+      {
+        "path": "django/core/management/commands/makemigrations.py",
+        "object": "makemigrations",
+        "lines": "",
+        "reason": "Issue 明确指出 makemigrations 命令没有执行检查，验证逻辑可能缺失于此。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "fields=['age'] (一个有效的字段名)",
+        "target_pattern": "fields=['non_existent_field'] 或 fields=['age', 'non_existent_field']",
+        "reason": "Issue 指出当字段不存在时，检查缺失。将 fields 参数变异为包含不存在的字段名应触发缺失的验证。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试通常使用有效的模型定义。",
+        "target_pattern": "在模型的 Meta.constraints 中定义一个引用不存在字段的 UniqueConstraint。",
+        "reason": "这是 Issue 描述的核心触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 UniqueConstraint 的 fields 包含不存在的字段时，应该引发一个错误（例如 models.E012）或警告，以阻止无效的迁移生成。",
+      "evidence": [
+        "Issue 提到 unique_together 语法会引发 models.E012 错误，暗示 UniqueConstraint 应具有类似行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "Model.check(databases=self.databases) 返回的错误列表",
+        "reason": "Issue 暗示应该产生一个错误（如 models.E012）。观察错误列表是否包含关于不存在字段的条目。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "运行 makemigrations 命令时的输出或引发的异常",
+        "reason": "Issue 直接关于 makemigrations 命令的行为。观察命令是否静默通过或引发错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 UniqueConstraint 引用不存在的字段时，Model.check 应返回一个非空错误列表（包含特定错误）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误消息字符串，因为具体措辞可能变化。避免断言错误列表为空。",
+        "reason": "Issue 表明当前行为是静默通过（空错误列表）。修复后应产生错误。断言错误列表非空更稳定。"
+      },
+      {
+        "assertion_goal": "错误列表中应包含与字段不存在相关的错误（例如，错误 id 可能为 'models.E012' 或类似）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言错误对象的完整 repr 或精确消息文本。",
+        "reason": "unique_together 会引发 models.E012，UniqueConstraint 可能使用相同或类似的错误标识。检查错误 id 或消息片段更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误的具体标识符（如 'models.E012'）是否也适用于 UniqueConstraint，还是会有新的错误码。",
+    "检查是在 UniqueConstraint 初始化时、Model.check 时，还是在 makemigrations 命令的某个特定阶段触发。",
+    "修复后，错误是作为 Error 还是 Warning 返回。"
+  ],
+  "raw": {
+    "issue_summary": "当模型添加 UniqueConstraint 时，makemigrations 没有检查其中命名的字段是否实际存在。",
+    "trigger_condition": {
+      "text": "在模型的 Meta.constraints 中定义一个 UniqueConstraint，但其 fields 参数包含模型中不存在的字段名，然后运行 makemigrations。",
+      "evidence": [
+        "Issue 描述：'When a model gains a UniqueConstraint, makemigrations doesn't check that the fields named therein actually exist.'",
+        "Issue 提到 unique_together 语法会引发 models.E012 错误作为对比。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "makemigrations 没有对不存在的字段引发错误或警告，而是静默通过。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 描述：'makemigrations doesn't check that the fields named therein actually exist.'",
+        "Issue 提到 unique_together 会引发 models.E012，暗示 UniqueConstraint 应该有类似检查但缺失。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 UniqueConstraint 的 fields 包含不存在的字段时，应该引发一个错误（例如 models.E012）或警告，以阻止无效的迁移生成。",
+      "evidence": [
+        "Issue 提到 unique_together 语法会引发 models.E012 错误，暗示 UniqueConstraint 应具有类似行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "UniqueConstraint",
+        "kind": "class",
+        "source_path": "django/db/models/constraints.py",
+        "reason": "Issue 直接关于 UniqueConstraint 的字段检查。"
+      },
+      {
+        "name": "makemigrations",
+        "kind": "module",
+        "source_path": "django/core/management/commands/makemigrations.py",
+        "reason": "Issue 提到 makemigrations 命令没有执行检查。"
+      },
+      {
+        "name": "Model.check",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试使用 Model.check 来验证约束，这可能是执行字段检查的入口点。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/constraints.py",
+        "object": "UniqueConstraint",
+        "lines": "79-153",
+        "reason": "UniqueConstraint 类定义在此，可能缺少字段验证逻辑。"
+      },
+      {
+        "path": "django/core/management/commands/makemigrations.py",
+        "object": "makemigrations",
+        "lines": "",
+        "reason": "Issue 明确指出 makemigrations 命令没有执行检查，验证逻辑可能缺失于此。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_unique_constraint_with_condition",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了 UniqueConstraint 在特定条件下的行为，并使用了 Model.check 来获取错误列表，这与 Issue 中检查字段有效性的模式相似。",
+        "reusable_parts": [
+          "@isolate_apps 装饰器",
+          "在类 Meta.constraints 中定义 UniqueConstraint 的模式",
+          "使用 Model.check(databases=self.databases) 获取错误",
+          "使用 self.assertEqual 比较错误列表"
+        ],
+        "possible_gap": "该测试使用了一个有效的字段 'age'，没有测试字段不存在的情况。"
+      },
+      {
+        "test_name": "test_deferrable_unique_constraint",
+        "test_file": "tests/invalid_models_tests/test_models.py",
+        "why_relevant": "它测试了 UniqueConstraint 的另一个属性（deferrable），并检查了数据库特性支持，展示了如何根据条件验证约束并生成警告。",
+        "reusable_parts": [
+          "测试类结构",
+          "Model.check 调用模式",
+          "根据 connection.features 进行条件断言"
+        ],
+        "possible_gap": "它没有测试字段存在性，而是测试数据库特性支持。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "fields=['age'] (一个有效的字段名)",
+        "target_pattern": "fields=['non_existent_field'] 或 fields=['age', 'non_existent_field']",
+        "reason": "Issue 指出当字段不存在时，检查缺失。将 fields 参数变异为包含不存在的字段名应触发缺失的验证。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试通常使用有效的模型定义。",
+        "target_pattern": "在模型的 Meta.constraints 中定义一个引用不存在字段的 UniqueConstraint。",
+        "reason": "这是 Issue 描述的核心触发条件。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "warning",
+        "expression_hint": "Model.check(databases=self.databases) 返回的错误列表",
+        "reason": "Issue 暗示应该产生一个错误（如 models.E012）。观察错误列表是否包含关于不存在字段的条目。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "运行 makemigrations 命令时的输出或引发的异常",
+        "reason": "Issue 直接关于 makemigrations 命令的行为。观察命令是否静默通过或引发错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 UniqueConstraint 引用不存在的字段时，Model.check 应返回一个非空错误列表（包含特定错误）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的错误消息字符串，因为具体措辞可能变化。避免断言错误列表为空。",
+        "reason": "Issue 表明当前行为是静默通过（空错误列表）。修复后应产生错误。断言错误列表非空更稳定。"
+      },
+      {
+        "assertion_goal": "错误列表中应包含与字段不存在相关的错误（例如，错误 id 可能为 'models.E012' 或类似）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言错误对象的完整 repr 或精确消息文本。",
+        "reason": "unique_together 会引发 models.E012，UniqueConstraint 可能使用相同或类似的错误标识。检查错误 id 或消息片段更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 @isolate_apps 装饰器来隔离应用模型定义。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要继承自 TestCase 并可能设置 databases 属性。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置数据库连接以支持约束检查。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "错误的具体标识符（如 'models.E012'）是否也适用于 UniqueConstraint，还是会有新的错误码。",
+      "检查是在 UniqueConstraint 初始化时、Model.check 时，还是在 makemigrations 命令的某个特定阶段触发。",
+      "修复后，错误是作为 Error 还是 Warning 返回。"
+    ]
+  }
+}

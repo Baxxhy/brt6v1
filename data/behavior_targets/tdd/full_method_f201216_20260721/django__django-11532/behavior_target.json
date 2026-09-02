@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11532",
+  "issue_summary": "当主机名包含非 ASCII 字符且邮件编码设置为非 Unicode（如 iso-8859-1）时，生成邮件消息 ID 头会因编码转换失败而崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 unittest.mock.patch 临时修改 django.core.mail.utils.DNS_NAME 或相关模块的 DNS_NAME 为包含非 ASCII 字符的字符串。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase 或类似的 Django 测试基类，以支持 mock 等功能。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MailTests.test_encoding",
+        "test_file": "tests/mail/tests.py",
+        "why_relevant": "此测试专门测试了当 email.encoding 设置为 'iso-8859-1' 时的邮件编码行为，包括消息头的处理。",
+        "reusable_parts": [
+          "导入 EmailMessage",
+          "设置 email.encoding = 'iso-8859-1'",
+          "调用 email.message()",
+          "使用 assertMessageHasHeaders 和 assertEqual 进行断言"
+        ],
+        "possible_gap": "此测试使用 ASCII 主机名和 ASCII 邮件头，没有涉及非 ASCII 主机名，因此不会触发 Message-ID 头的编码错误。"
+      },
+      {
+        "test_name": "MailTests.test_unicode_headers",
+        "test_file": "tests/mail/tests.py",
+        "why_relevant": "此测试处理了包含非 ASCII 字符的邮件头（如 Subject、Sender），展示了 Django 通常如何用 UTF-8 编码对非 ASCII 头进行编码。",
+        "reusable_parts": [
+          "导入 EmailMessage",
+          "构造包含非 ASCII 内容的邮件",
+          "调用 email.message()",
+          "检查编码后的头值"
+        ],
+        "possible_gap": "此测试使用默认编码（可能是 UTF-8），且不涉及非 ASCII 主机名或 iso-8859-1 编码，因此不会触发特定编码不兼容的崩溃。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "主机名（DNS_NAME）包含非 ASCII 字符（如 '正宗' 或 '漢字'），且 EmailMessage 的 encoding 属性设置为 'iso-8859-1'，然后调用 email.message() 方法。",
+      "evidence": [
+        "Issue 描述：'When the computer hostname is set in unicode (in my case \"正宗\")'，'encoding is set to iso-8859-1'",
+        "Issue 重现步骤：'Set hostname to non iso-8859-1 value (i.e. hostname 正宗)'，'email.encoding = 'iso-8859-1''，'message = email.message()'",
+        "Issue 中测试代码：'with patch(\"django.core.mailmessage.DNS_NAME\", \"漢字\"):'，'email.encoding = 'iso-8859-1''，'message = email.message()'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 email.message() 时抛出 UnicodeEncodeError，具体为 'latin-1' codec can't encode characters in position 39-40: ordinal not in range(256)。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中 Traceback 显示：'UnicodeEncodeError: 'latin-1' codec can't encode characters in position 39-40: ordinal not in range(256)'，发生在 email/header.py 的 append 方法中。",
+        "Issue 中较早的 Traceback 显示：'UnicodeEncodeError: 'ascii' codec can't encode characters in position 39-40: ordinal not in range(128)'，发生在 forbid_multi_line_headers 函数中。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "EmailMessage",
+        "kind": "class",
+        "source_path": "django/core/mail/message.py",
+        "reason": "Issue 中崩溃发生在创建 EmailMessage 实例并调用其 message() 方法时。"
+      },
+      {
+        "name": "EmailMessage.message",
+        "kind": "method",
+        "source_path": "django/core/mail/message.py",
+        "reason": "调用此方法会触发消息构建和头编码过程，是崩溃的直接入口点。"
+      },
+      {
+        "name": "forbid_multi_line_headers",
+        "kind": "function",
+        "source_path": "django/core/mail/message.py",
+        "reason": "源码显示此函数负责处理头编码，当 val 非 ASCII 时会尝试用 Header(val, encoding).encode() 编码，这是崩溃链的一部分。"
+      },
+      {
+        "name": "DNS_NAME",
+        "kind": "global_var",
+        "source_path": "django/core/mail/utils.py",
+        "reason": "Issue 指出主机名（DNS_NAME）包含非 ASCII 字符是触发条件，且测试中通过 patch 修改了它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/mail/message.py",
+        "object": "EmailMessage.message",
+        "lines": "",
+        "reason": "Issue 中 Traceback 指向此行：'msg['Message-ID'] = make_msgid(domain=DNS_NAME)'，其中 DNS_NAME 可能包含非 ASCII 字符。"
+      },
+      {
+        "path": "django/core/mail/message.py",
+        "object": "forbid_multi_line_headers",
+        "lines": "55-71",
+        "reason": "源码显示当 val 非 ASCII 且 name 不在 ADDRESS_HEADERS 时，会执行 'val = Header(val, encoding).encode()'。如果 val（如包含非 ASCII 域名的 Message-ID）和 encoding（如 iso-8859-1）不兼容，就会抛出 UnicodeEncodeError。"
+      },
+      {
+        "path": "django/core/mail/utils.py",
+        "object": "DNS_NAME",
+        "lines": "20-20",
+        "reason": "DNS_NAME 是主机名的来源，如果它包含非 ASCII 字符且未在用于生成 Message-ID 前进行适当编码（如 Punycode），就会导致后续编码问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "mock",
+        "current_pattern": "相关测试中未模拟 DNS_NAME，使用系统默认（可能为 ASCII）主机名。",
+        "target_pattern": "使用 patch 将 django.core.mail.utils.DNS_NAME 或相关模块的 DNS_NAME 设置为包含非 ASCII 字符的字符串（如 '漢字'）。",
+        "reason": "Issue 明确指出主机名包含非 ASCII 字符是触发条件，且提供了使用 patch 的示例。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 email.encoding 可能为默认值或设置为 'iso-8859-1' 但用于 ASCII 内容。",
+        "target_pattern": "在创建 EmailMessage 后，显式设置 email.encoding = 'iso-8859-1'。",
+        "reason": "Issue 表明当 encoding 为 'iso-8859-1'（非 Unicode 编码）时，尝试编码非 ASCII 主机名会失败。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使主机名包含非 ASCII 字符且邮件编码为 iso-8859-1，EmailMessage 也应能正确处理消息头的编码，例如将域名转换为 Punycode 以避免编码错误，并成功生成邮件消息。",
+      "evidence": [
+        "Issue 描述：'Django should be handling the encoding of the message properly'",
+        "Issue 中建议的修复：'have django.core.mail.utils or django.core.mail.message convert domain name to punycode before using'",
+        "Issue 中测试断言：'self.assertIn('xn--p8s937b', message['Message-ID'])'，表明期望 Message-ID 头中包含 Punycode 编码的域名。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 email.message() 时是否抛出 UnicodeEncodeError 及其详细信息。",
+        "reason": "Issue 的核心错误现象是 UnicodeEncodeError，观测此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "email.message() 返回的 message 对象的 'Message-ID' 头值。",
+        "reason": "修复后，Message-ID 头应包含 Punycode 编码的域名（如 'xn--p8s937b'），观测此值可验证行为是否正确。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当主机名包含非 ASCII 字符且编码为 iso-8859-1 时，email.message() 能成功执行而不抛出 UnicodeEncodeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的 Message-ID 字符串，因为其时间戳部分可能变化。",
+        "reason": "当前缺陷导致异常，修复后应不再抛出异常。使用 raises 断言（预期不抛出）或检查无异常通过是直接验证。"
+      },
+      {
+        "assertion_goal": "验证生成的 Message-ID 头中包含 Punycode 编码的域名片段（如 'xn--p8s937b'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、包含动态时间戳的 Message-ID 字符串相等。",
+        "reason": "Issue 中建议的修复是将域名转换为 Punycode，且测试示例检查了此片段。这是一个稳定的、与修复目标对齐的断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "确切的崩溃路径和代码中哪些头会被视为非 ADDRESS_HEADERS 从而进入 else 分支执行 Header(val, encoding).encode()。",
+    "除了 Message-ID 头，是否还有其他邮件头（如 From, To 等）在类似条件下也会触发相同错误。",
+    "在修复版本中，Punycode 转换是在哪个具体函数/位置执行的（django.core.mail.utils 还是 django.core.mail.message）。"
+  ],
+  "raw": {
+    "issue_summary": "当主机名包含非 ASCII 字符且邮件编码设置为非 Unicode（如 iso-8859-1）时，生成邮件消息 ID 头会因编码转换失败而崩溃。",
+    "trigger_condition": {
+      "text": "主机名（DNS_NAME）包含非 ASCII 字符（如 '正宗' 或 '漢字'），且 EmailMessage 的 encoding 属性设置为 'iso-8859-1'，然后调用 email.message() 方法。",
+      "evidence": [
+        "Issue 描述：'When the computer hostname is set in unicode (in my case \"正宗\")'，'encoding is set to iso-8859-1'",
+        "Issue 重现步骤：'Set hostname to non iso-8859-1 value (i.e. hostname 正宗)'，'email.encoding = 'iso-8859-1''，'message = email.message()'",
+        "Issue 中测试代码：'with patch(\"django.core.mailmessage.DNS_NAME\", \"漢字\"):'，'email.encoding = 'iso-8859-1''，'message = email.message()'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 email.message() 时抛出 UnicodeEncodeError，具体为 'latin-1' codec can't encode characters in position 39-40: ordinal not in range(256)。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中 Traceback 显示：'UnicodeEncodeError: 'latin-1' codec can't encode characters in position 39-40: ordinal not in range(256)'，发生在 email/header.py 的 append 方法中。",
+        "Issue 中较早的 Traceback 显示：'UnicodeEncodeError: 'ascii' codec can't encode characters in position 39-40: ordinal not in range(128)'，发生在 forbid_multi_line_headers 函数中。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使主机名包含非 ASCII 字符且邮件编码为 iso-8859-1，EmailMessage 也应能正确处理消息头的编码，例如将域名转换为 Punycode 以避免编码错误，并成功生成邮件消息。",
+      "evidence": [
+        "Issue 描述：'Django should be handling the encoding of the message properly'",
+        "Issue 中建议的修复：'have django.core.mail.utils or django.core.mail.message convert domain name to punycode before using'",
+        "Issue 中测试断言：'self.assertIn('xn--p8s937b', message['Message-ID'])'，表明期望 Message-ID 头中包含 Punycode 编码的域名。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "EmailMessage",
+        "kind": "class",
+        "source_path": "django/core/mail/message.py",
+        "reason": "Issue 中崩溃发生在创建 EmailMessage 实例并调用其 message() 方法时。"
+      },
+      {
+        "name": "EmailMessage.message",
+        "kind": "method",
+        "source_path": "django/core/mail/message.py",
+        "reason": "调用此方法会触发消息构建和头编码过程，是崩溃的直接入口点。"
+      },
+      {
+        "name": "forbid_multi_line_headers",
+        "kind": "function",
+        "source_path": "django/core/mail/message.py",
+        "reason": "源码显示此函数负责处理头编码，当 val 非 ASCII 时会尝试用 Header(val, encoding).encode() 编码，这是崩溃链的一部分。"
+      },
+      {
+        "name": "DNS_NAME",
+        "kind": "global_var",
+        "source_path": "django/core/mail/utils.py",
+        "reason": "Issue 指出主机名（DNS_NAME）包含非 ASCII 字符是触发条件，且测试中通过 patch 修改了它。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/mail/message.py",
+        "object": "EmailMessage.message",
+        "lines": "",
+        "reason": "Issue 中 Traceback 指向此行：'msg['Message-ID'] = make_msgid(domain=DNS_NAME)'，其中 DNS_NAME 可能包含非 ASCII 字符。"
+      },
+      {
+        "path": "django/core/mail/message.py",
+        "object": "forbid_multi_line_headers",
+        "lines": "55-71",
+        "reason": "源码显示当 val 非 ASCII 且 name 不在 ADDRESS_HEADERS 时，会执行 'val = Header(val, encoding).encode()'。如果 val（如包含非 ASCII 域名的 Message-ID）和 encoding（如 iso-8859-1）不兼容，就会抛出 UnicodeEncodeError。"
+      },
+      {
+        "path": "django/core/mail/utils.py",
+        "object": "DNS_NAME",
+        "lines": "20-20",
+        "reason": "DNS_NAME 是主机名的来源，如果它包含非 ASCII 字符且未在用于生成 Message-ID 前进行适当编码（如 Punycode），就会导致后续编码问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "MailTests.test_encoding",
+        "test_file": "tests/mail/tests.py",
+        "why_relevant": "此测试专门测试了当 email.encoding 设置为 'iso-8859-1' 时的邮件编码行为，包括消息头的处理。",
+        "reusable_parts": [
+          "导入 EmailMessage",
+          "设置 email.encoding = 'iso-8859-1'",
+          "调用 email.message()",
+          "使用 assertMessageHasHeaders 和 assertEqual 进行断言"
+        ],
+        "possible_gap": "此测试使用 ASCII 主机名和 ASCII 邮件头，没有涉及非 ASCII 主机名，因此不会触发 Message-ID 头的编码错误。"
+      },
+      {
+        "test_name": "MailTests.test_unicode_headers",
+        "test_file": "tests/mail/tests.py",
+        "why_relevant": "此测试处理了包含非 ASCII 字符的邮件头（如 Subject、Sender），展示了 Django 通常如何用 UTF-8 编码对非 ASCII 头进行编码。",
+        "reusable_parts": [
+          "导入 EmailMessage",
+          "构造包含非 ASCII 内容的邮件",
+          "调用 email.message()",
+          "检查编码后的头值"
+        ],
+        "possible_gap": "此测试使用默认编码（可能是 UTF-8），且不涉及非 ASCII 主机名或 iso-8859-1 编码，因此不会触发特定编码不兼容的崩溃。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "mock",
+        "current_pattern": "相关测试中未模拟 DNS_NAME，使用系统默认（可能为 ASCII）主机名。",
+        "target_pattern": "使用 patch 将 django.core.mail.utils.DNS_NAME 或相关模块的 DNS_NAME 设置为包含非 ASCII 字符的字符串（如 '漢字'）。",
+        "reason": "Issue 明确指出主机名包含非 ASCII 字符是触发条件，且提供了使用 patch 的示例。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中 email.encoding 可能为默认值或设置为 'iso-8859-1' 但用于 ASCII 内容。",
+        "target_pattern": "在创建 EmailMessage 后，显式设置 email.encoding = 'iso-8859-1'。",
+        "reason": "Issue 表明当 encoding 为 'iso-8859-1'（非 Unicode 编码）时，尝试编码非 ASCII 主机名会失败。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 email.message() 时是否抛出 UnicodeEncodeError 及其详细信息。",
+        "reason": "Issue 的核心错误现象是 UnicodeEncodeError，观测此异常可直接判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "email.message() 返回的 message 对象的 'Message-ID' 头值。",
+        "reason": "修复后，Message-ID 头应包含 Punycode 编码的域名（如 'xn--p8s937b'），观测此值可验证行为是否正确。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当主机名包含非 ASCII 字符且编码为 iso-8859-1 时，email.message() 能成功执行而不抛出 UnicodeEncodeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "避免断言完整的 Message-ID 字符串，因为其时间戳部分可能变化。",
+        "reason": "当前缺陷导致异常，修复后应不再抛出异常。使用 raises 断言（预期不抛出）或检查无异常通过是直接验证。"
+      },
+      {
+        "assertion_goal": "验证生成的 Message-ID 头中包含 Punycode 编码的域名片段（如 'xn--p8s937b'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、包含动态时间戳的 Message-ID 字符串相等。",
+        "reason": "Issue 中建议的修复是将域名转换为 Punycode，且测试示例检查了此片段。这是一个稳定的、与修复目标对齐的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 unittest.mock.patch 临时修改 django.core.mail.utils.DNS_NAME 或相关模块的 DNS_NAME 为包含非 ASCII 字符的字符串。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 SimpleTestCase 或类似的 Django 测试基类，以支持 mock 等功能。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "确切的崩溃路径和代码中哪些头会被视为非 ADDRESS_HEADERS 从而进入 else 分支执行 Header(val, encoding).encode()。",
+      "除了 Message-ID 头，是否还有其他邮件头（如 From, To 等）在类似条件下也会触发相同错误。",
+      "在修复版本中，Punycode 转换是在哪个具体函数/位置执行的（django.core.mail.utils 还是 django.core.mail.message）。"
+    ]
+  }
+}

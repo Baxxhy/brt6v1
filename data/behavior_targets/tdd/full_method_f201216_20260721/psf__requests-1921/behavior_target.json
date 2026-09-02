@@ -1,0 +1,354 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "psf__requests-1921",
+  "issue_summary": "将 Session 默认头设置为 None 会导致 'None' 字符串被作为头值发送，而不是移除该头。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个可以接收请求并返回头部的测试服务器端点，如 httpbin('/get') 或 httpbin('/headers')。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 unittest.TestCase 作为测试类，或使用 pytest。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 requests 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RequestsTestCase.test_header_remove_is_case_insensitive",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试直接涉及通过将头值设置为 None 来移除请求头（尽管是在请求级 headers 参数中）。",
+        "reusable_parts": [
+          "Session 对象的创建",
+          "使用 `s.get` 发送请求",
+          "断言检查请求头中不包含某个键"
+        ],
+        "possible_gap": "该测试在请求级参数 `headers={'FOO': None}` 中设置 None，而 Issue 是在会话级默认头 `session.headers['Accept-Encoding'] = None` 中设置。处理逻辑可能不同。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_fixes_1329",
+        "test_file": "test_requests.py",
+        "why_relevant": "测试会话头部的更新行为，涉及 headers 字典的操作。",
+        "reusable_parts": [
+          "Session 对象的创建",
+          "使用 `s.headers.update`",
+          "发送请求并检查请求头"
+        ],
+        "possible_gap": "该测试更新头为具体的字符串值，而不是 None。不涉及移除头的逻辑。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_prepared_from_session",
+        "test_file": "test_requests.py",
+        "why_relevant": "测试从会话准备请求，并验证自定义头部被正确添加。",
+        "reusable_parts": [
+          "Session 对象的创建和配置",
+          "使用 `s.prepare_request` 和 `s.send`",
+          "断言检查响应头中的值"
+        ],
+        "possible_gap": "该测试关注添加头部，而不是移除或处理 None 值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 requests.Session 对象，并将其 headers 字典中的某个键（例如 'Accept-Encoding'）的值设置为 None。",
+      "evidence": [
+        "Issue 中提供的代码示例：`session.headers['Accept-Encoding'] = None`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HTTP 请求头中包含了值为字符串 'None' 的键，例如 'Accept-Encoding: None'。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述：\"What happens is that 'None' gets sent as the value of header.\"",
+        "Issue 中显示的输出：`Accept-Encoding: None`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.Session",
+        "kind": "class",
+        "source_path": "requests/sessions.py",
+        "reason": "Issue 的核心是关于 Session 对象的默认头处理。"
+      },
+      {
+        "name": "requests.Session.headers",
+        "kind": "attribute",
+        "source_path": "requests/sessions.py",
+        "reason": "Issue 直接操作 session.headers 字典来设置头。"
+      },
+      {
+        "name": "requests.Session.request",
+        "kind": "method",
+        "source_path": "requests/sessions.py",
+        "reason": "发送请求并准备头部的核心方法，可能涉及头部的合并与过滤。"
+      },
+      {
+        "name": "requests.Session.prepare_request",
+        "kind": "method",
+        "source_path": "requests/sessions.py",
+        "reason": "负责准备请求对象，包括处理头部。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/sessions.py",
+        "object": "Session.prepare_request",
+        "lines": "",
+        "reason": "该方法负责合并会话级和请求级的头部，可能是将 None 值转换为字符串 'None' 的地方。"
+      },
+      {
+        "path": "requests/sessions.py",
+        "object": "Session.request",
+        "lines": "",
+        "reason": "调用 prepare_request 并发送请求，是触发头部处理的入口点。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，在请求调用时通过 `headers={'FOO': None}` 参数尝试移除头。",
+        "target_pattern": "在创建 Session 后，直接修改其默认头字典：`session.headers['Accept-Encoding'] = None`。",
+        "reason": "Issue 明确指出问题发生在会话的默认头字典被设置为 None 时，而不是请求级参数。这个变异将测试目标从请求级参数转移到会话级状态。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 2 中，头部键是自定义的（如 'foo', 'ACCEPT'）。",
+        "target_pattern": "使用 Issue 中提到的标准 HTTP 头键，如 'Accept-Encoding'。",
+        "reason": "使用标准头可能更符合真实场景，并且 Issue 示例使用了 'Accept-Encoding'。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "将 Session 默认头的值设置为 None 应该导致该头不被发送，或者从请求头中移除。",
+      "evidence": [
+        "Issue 引用文档和 IRC 讨论，表明用户期望此行为有效：\"You would expect ... that this would work for session's default headers, too\"",
+        "Issue 指出替代方案 `del session.headers['Accept-Encoding']` 有效，暗示了期望的移除行为。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "发送请求后，检查 `r.request.headers` 字典中特定键（如 'Accept-Encoding'）的值。",
+        "reason": "Issue 的错误现象是头值变成了字符串 'None'。直接观察最终发出的请求头是最直接的验证方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在调用 `session.headers['Accept-Encoding'] = None` 后，检查 `session.headers` 字典的状态。",
+        "reason": "需要确认 None 值是否被正确存储在会话的默认头字典中，还是被转换了。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 `prepare_request` 方法内部或之后，观察合并后的请求头字典。",
+        "reason": "bug 可能发生在会话头与请求头合并的过程中，观察中间状态有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在设置 `session.headers['Accept-Encoding'] = None` 后，发出的请求头中不包含 'Accept-Encoding' 头。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言请求头的完整字符串表示等于某个特定值，因为其他头可能存在。",
+        "reason": "Issue 的期望行为是该头不被发送。断言键不在字典中直接对应此语义，且稳定。"
+      },
+      {
+        "assertion_goal": "验证发出的请求头中 'Accept-Encoding' 头的值不是字符串 'None'。",
+        "preferred_assertion_style": "not_equals",
+        "avoid": "断言请求头的完整 repr 或 str 表示。",
+        "reason": "这是 Issue 观察到的直接错误现象。如果头存在，其值不应为 'None'。这可以作为次要或更严格的断言。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "将头值设置为 None 时，期望的行为是完全移除该头，还是发送一个空值的头？Issue 暗示是移除（与 `del` 类比）。",
+    "bug 的确切位置是在 headers 字典的赋值逻辑、prepare_request 的合并逻辑，还是更低层的适配器中？",
+    "除了 'Accept-Encoding'，其他头是否也有相同问题？",
+    "请求级 `headers={'Key': None}` 参数的处理逻辑与会话级默认头 `session.headers['Key'] = None` 的处理逻辑是否共享同一段代码？相关测试 1 表明请求级参数可能已正确处理。"
+  ],
+  "raw": {
+    "issue_summary": "将 Session 默认头设置为 None 会导致 'None' 字符串被作为头值发送，而不是移除该头。",
+    "trigger_condition": {
+      "text": "创建一个 requests.Session 对象，并将其 headers 字典中的某个键（例如 'Accept-Encoding'）的值设置为 None。",
+      "evidence": [
+        "Issue 中提供的代码示例：`session.headers['Accept-Encoding'] = None`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "HTTP 请求头中包含了值为字符串 'None' 的键，例如 'Accept-Encoding: None'。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中描述：\"What happens is that 'None' gets sent as the value of header.\"",
+        "Issue 中显示的输出：`Accept-Encoding: None`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "将 Session 默认头的值设置为 None 应该导致该头不被发送，或者从请求头中移除。",
+      "evidence": [
+        "Issue 引用文档和 IRC 讨论，表明用户期望此行为有效：\"You would expect ... that this would work for session's default headers, too\"",
+        "Issue 指出替代方案 `del session.headers['Accept-Encoding']` 有效，暗示了期望的移除行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "requests.Session",
+        "kind": "class",
+        "source_path": "requests/sessions.py",
+        "reason": "Issue 的核心是关于 Session 对象的默认头处理。"
+      },
+      {
+        "name": "requests.Session.headers",
+        "kind": "attribute",
+        "source_path": "requests/sessions.py",
+        "reason": "Issue 直接操作 session.headers 字典来设置头。"
+      },
+      {
+        "name": "requests.Session.request",
+        "kind": "method",
+        "source_path": "requests/sessions.py",
+        "reason": "发送请求并准备头部的核心方法，可能涉及头部的合并与过滤。"
+      },
+      {
+        "name": "requests.Session.prepare_request",
+        "kind": "method",
+        "source_path": "requests/sessions.py",
+        "reason": "负责准备请求对象，包括处理头部。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "requests/sessions.py",
+        "object": "Session.prepare_request",
+        "lines": "",
+        "reason": "该方法负责合并会话级和请求级的头部，可能是将 None 值转换为字符串 'None' 的地方。"
+      },
+      {
+        "path": "requests/sessions.py",
+        "object": "Session.request",
+        "lines": "",
+        "reason": "调用 prepare_request 并发送请求，是触发头部处理的入口点。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RequestsTestCase.test_header_remove_is_case_insensitive",
+        "test_file": "test_requests.py",
+        "why_relevant": "该测试直接涉及通过将头值设置为 None 来移除请求头（尽管是在请求级 headers 参数中）。",
+        "reusable_parts": [
+          "Session 对象的创建",
+          "使用 `s.get` 发送请求",
+          "断言检查请求头中不包含某个键"
+        ],
+        "possible_gap": "该测试在请求级参数 `headers={'FOO': None}` 中设置 None，而 Issue 是在会话级默认头 `session.headers['Accept-Encoding'] = None` 中设置。处理逻辑可能不同。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_fixes_1329",
+        "test_file": "test_requests.py",
+        "why_relevant": "测试会话头部的更新行为，涉及 headers 字典的操作。",
+        "reusable_parts": [
+          "Session 对象的创建",
+          "使用 `s.headers.update`",
+          "发送请求并检查请求头"
+        ],
+        "possible_gap": "该测试更新头为具体的字符串值，而不是 None。不涉及移除头的逻辑。"
+      },
+      {
+        "test_name": "RequestsTestCase.test_prepared_from_session",
+        "test_file": "test_requests.py",
+        "why_relevant": "测试从会话准备请求，并验证自定义头部被正确添加。",
+        "reusable_parts": [
+          "Session 对象的创建和配置",
+          "使用 `s.prepare_request` 和 `s.send`",
+          "断言检查响应头中的值"
+        ],
+        "possible_gap": "该测试关注添加头部，而不是移除或处理 None 值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试 1 中，在请求调用时通过 `headers={'FOO': None}` 参数尝试移除头。",
+        "target_pattern": "在创建 Session 后，直接修改其默认头字典：`session.headers['Accept-Encoding'] = None`。",
+        "reason": "Issue 明确指出问题发生在会话的默认头字典被设置为 None 时，而不是请求级参数。这个变异将测试目标从请求级参数转移到会话级状态。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 和 2 中，头部键是自定义的（如 'foo', 'ACCEPT'）。",
+        "target_pattern": "使用 Issue 中提到的标准 HTTP 头键，如 'Accept-Encoding'。",
+        "reason": "使用标准头可能更符合真实场景，并且 Issue 示例使用了 'Accept-Encoding'。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "发送请求后，检查 `r.request.headers` 字典中特定键（如 'Accept-Encoding'）的值。",
+        "reason": "Issue 的错误现象是头值变成了字符串 'None'。直接观察最终发出的请求头是最直接的验证方式。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在调用 `session.headers['Accept-Encoding'] = None` 后，检查 `session.headers` 字典的状态。",
+        "reason": "需要确认 None 值是否被正确存储在会话的默认头字典中，还是被转换了。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 `prepare_request` 方法内部或之后，观察合并后的请求头字典。",
+        "reason": "bug 可能发生在会话头与请求头合并的过程中，观察中间状态有助于定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在设置 `session.headers['Accept-Encoding'] = None` 后，发出的请求头中不包含 'Accept-Encoding' 头。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言请求头的完整字符串表示等于某个特定值，因为其他头可能存在。",
+        "reason": "Issue 的期望行为是该头不被发送。断言键不在字典中直接对应此语义，且稳定。"
+      },
+      {
+        "assertion_goal": "验证发出的请求头中 'Accept-Encoding' 头的值不是字符串 'None'。",
+        "preferred_assertion_style": "not_equals",
+        "avoid": "断言请求头的完整 repr 或 str 表示。",
+        "reason": "这是 Issue 观察到的直接错误现象。如果头存在，其值不应为 'None'。这可以作为次要或更严格的断言。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个可以接收请求并返回头部的测试服务器端点，如 httpbin('/get') 或 httpbin('/headers')。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 unittest.TestCase 作为测试类，或使用 pytest。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 requests 模块。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "将头值设置为 None 时，期望的行为是完全移除该头，还是发送一个空值的头？Issue 暗示是移除（与 `del` 类比）。",
+      "bug 的确切位置是在 headers 字典的赋值逻辑、prepare_request 的合并逻辑，还是更低层的适配器中？",
+      "除了 'Accept-Encoding'，其他头是否也有相同问题？",
+      "请求级 `headers={'Key': None}` 参数的处理逻辑与会话级默认头 `session.headers['Key'] = None` 的处理逻辑是否共享同一段代码？相关测试 1 表明请求级参数可能已正确处理。"
+    ]
+  }
+}

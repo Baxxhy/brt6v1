@@ -1,0 +1,262 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-16612",
+  "issue_summary": "AdminSite.catch_all_view() 在 APPEND_SLASH=True 时进行重定向会丢失查询字符串。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要设置 APPEND_SLASH=True，并创建一个具有管理员权限的用户登录。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 ROOT_URLCONF 以包含管理员 URL。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminSiteFinalCatchAllPatternTests.test_missing_slash_append_slash_true",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "此测试验证了在 APPEND_SLASH=True 时，访问缺少斜杠的管理员 URL 会触发重定向，与 Issue 触发条件相似。",
+        "reusable_parts": [
+          "@override_settings(APPEND_SLASH=True)",
+          "self.client.force_login(superuser)",
+          "self.client.get(known_url[:-1])",
+          "self.assertRedirects(...)"
+        ],
+        "possible_gap": "此测试访问的已知 URL (reverse('admin:admin_views_article_changelist')) 不包含查询字符串，因此无法复现查询字符串丢失的问题。"
+      },
+      {
+        "test_name": "ClientTest.test_redirect_with_query",
+        "test_file": "tests/test_client/tests.py",
+        "why_relevant": "此测试验证了重定向应保留查询参数，与 Issue 的预期行为一致。",
+        "reusable_parts": [
+          "self.client.get('/redirect_view/', {'var': 'value'})",
+          "self.assertRedirects(response, '/get_view/?var=value')"
+        ],
+        "possible_gap": "此测试不涉及 AdminSite.catch_all_view 或 APPEND_SLASH 设置，上下文不同。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "当 settings.APPEND_SLASH=True 且访问一个缺少尾部斜杠的管理员 URL 并带有查询字符串时，会触发重定向。",
+      "evidence": [
+        "Issue 描述：'AdminSite.catch_all_view() drops query string in redirects' 和 'settings.APPEND_SLASH = True when there are query strings'",
+        "源码片段 2 显示 catch_all_view 在 APPEND_SLASH 且 url 不以 '/' 结尾时尝试重定向。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "重定向后的 URL 丢失了原始请求中的查询字符串（例如 ?id=123）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'Provided URL: http://127.0.0.1:8000/admin/auth/foo?id=123'，'Actual redirect: http://127.0.0.1:8000/admin/auth/foo/'",
+        "源码片段 2 显示重定向返回 'HttpResponsePermanentRedirect(\"%s/\" % request.path)'，其中 request.path 不包含查询字符串。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AdminSite.catch_all_view",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 直接指出此方法在重定向时丢失查询字符串。"
+      },
+      {
+        "name": "HttpResponsePermanentRedirect",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "catch_all_view 中用于返回重定向响应的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.catch_all_view",
+        "lines": "447-457",
+        "reason": "Issue 链接指向此行号范围，且重定向代码 'return HttpResponsePermanentRedirect(\"%s/\" % request.path)' 未包含查询字符串。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中访问的 URL 是已知的管理员变更列表 URL 且不带查询字符串 (known_url[:-1])。",
+        "target_pattern": "访问一个缺少尾部斜杠的管理员 URL 并附加查询字符串（例如 '/admin/auth/foo?id=123'）。",
+        "reason": "Issue 明确指出带有查询字符串的 URL 在重定向时查询字符串被丢弃。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 已设置 APPEND_SLASH=True。",
+        "target_pattern": "保持 APPEND_SLASH=True，这是触发 catch_all_view 中重定向逻辑的必要条件。",
+        "reason": "源码片段 2 显示重定向逻辑仅在 settings.APPEND_SLASH 为 True 时执行。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "重定向后的 URL 应保留原始请求中的查询字符串。",
+      "evidence": [
+        "Issue 描述：'Expected redirect: http://127.0.0.1:8000/admin/auth/foo/?id=123'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.url 或 response['Location'] 头，用于观察重定向目标 URL。",
+        "reason": "Issue 的核心是重定向 URL 错误，观察重定向目标是否包含查询字符串是关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "request.GET 或 request.META['QUERY_STRING'] 在重定向前的状态。",
+        "reason": "Issue 提到查询字符串可能通过 request.META['QUERY_STRING'] 获取，观察原始请求的查询参数有助于理解丢失原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "重定向后的 URL 应包含原始请求中的所有查询参数。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 URL 字符串相等，因为路径前缀（如 SCRIPT_NAME）可能变化。",
+        "reason": "Issue 关注查询字符串的保留，而非 URL 的绝对路径。断言查询参数存在更稳定。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "查询字符串在重定向中丢失的确切机制：是 request.path 未包含查询字符串，还是 HttpResponsePermanentRedirect 构造时未处理？",
+    "修复后，重定向 URL 中查询字符串的顺序是否重要？",
+    "是否所有通过 catch_all_view 的重定向都受此影响，还是仅特定路径？"
+  ],
+  "raw": {
+    "issue_summary": "AdminSite.catch_all_view() 在 APPEND_SLASH=True 时进行重定向会丢失查询字符串。",
+    "trigger_condition": {
+      "text": "当 settings.APPEND_SLASH=True 且访问一个缺少尾部斜杠的管理员 URL 并带有查询字符串时，会触发重定向。",
+      "evidence": [
+        "Issue 描述：'AdminSite.catch_all_view() drops query string in redirects' 和 'settings.APPEND_SLASH = True when there are query strings'",
+        "源码片段 2 显示 catch_all_view 在 APPEND_SLASH 且 url 不以 '/' 结尾时尝试重定向。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "重定向后的 URL 丢失了原始请求中的查询字符串（例如 ?id=123）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述：'Provided URL: http://127.0.0.1:8000/admin/auth/foo?id=123'，'Actual redirect: http://127.0.0.1:8000/admin/auth/foo/'",
+        "源码片段 2 显示重定向返回 'HttpResponsePermanentRedirect(\"%s/\" % request.path)'，其中 request.path 不包含查询字符串。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "重定向后的 URL 应保留原始请求中的查询字符串。",
+      "evidence": [
+        "Issue 描述：'Expected redirect: http://127.0.0.1:8000/admin/auth/foo/?id=123'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AdminSite.catch_all_view",
+        "kind": "method",
+        "source_path": "django/contrib/admin/sites.py",
+        "reason": "Issue 直接指出此方法在重定向时丢失查询字符串。"
+      },
+      {
+        "name": "HttpResponsePermanentRedirect",
+        "kind": "class",
+        "source_path": "django/http/response.py",
+        "reason": "catch_all_view 中用于返回重定向响应的类。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/sites.py",
+        "object": "AdminSite.catch_all_view",
+        "lines": "447-457",
+        "reason": "Issue 链接指向此行号范围，且重定向代码 'return HttpResponsePermanentRedirect(\"%s/\" % request.path)' 未包含查询字符串。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AdminSiteFinalCatchAllPatternTests.test_missing_slash_append_slash_true",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "此测试验证了在 APPEND_SLASH=True 时，访问缺少斜杠的管理员 URL 会触发重定向，与 Issue 触发条件相似。",
+        "reusable_parts": [
+          "@override_settings(APPEND_SLASH=True)",
+          "self.client.force_login(superuser)",
+          "self.client.get(known_url[:-1])",
+          "self.assertRedirects(...)"
+        ],
+        "possible_gap": "此测试访问的已知 URL (reverse('admin:admin_views_article_changelist')) 不包含查询字符串，因此无法复现查询字符串丢失的问题。"
+      },
+      {
+        "test_name": "ClientTest.test_redirect_with_query",
+        "test_file": "tests/test_client/tests.py",
+        "why_relevant": "此测试验证了重定向应保留查询参数，与 Issue 的预期行为一致。",
+        "reusable_parts": [
+          "self.client.get('/redirect_view/', {'var': 'value'})",
+          "self.assertRedirects(response, '/get_view/?var=value')"
+        ],
+        "possible_gap": "此测试不涉及 AdminSite.catch_all_view 或 APPEND_SLASH 设置，上下文不同。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中访问的 URL 是已知的管理员变更列表 URL 且不带查询字符串 (known_url[:-1])。",
+        "target_pattern": "访问一个缺少尾部斜杠的管理员 URL 并附加查询字符串（例如 '/admin/auth/foo?id=123'）。",
+        "reason": "Issue 明确指出带有查询字符串的 URL 在重定向时查询字符串被丢弃。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 已设置 APPEND_SLASH=True。",
+        "target_pattern": "保持 APPEND_SLASH=True，这是触发 catch_all_view 中重定向逻辑的必要条件。",
+        "reason": "源码片段 2 显示重定向逻辑仅在 settings.APPEND_SLASH 为 True 时执行。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "response.url 或 response['Location'] 头，用于观察重定向目标 URL。",
+        "reason": "Issue 的核心是重定向 URL 错误，观察重定向目标是否包含查询字符串是关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "request.GET 或 request.META['QUERY_STRING'] 在重定向前的状态。",
+        "reason": "Issue 提到查询字符串可能通过 request.META['QUERY_STRING'] 获取，观察原始请求的查询参数有助于理解丢失原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "重定向后的 URL 应包含原始请求中的所有查询参数。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 URL 字符串相等，因为路径前缀（如 SCRIPT_NAME）可能变化。",
+        "reason": "Issue 关注查询字符串的保留，而非 URL 的绝对路径。断言查询参数存在更稳定。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要设置 APPEND_SLASH=True，并创建一个具有管理员权限的用户登录。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 ROOT_URLCONF 以包含管理员 URL。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "查询字符串在重定向中丢失的确切机制：是 request.path 未包含查询字符串，还是 HttpResponsePermanentRedirect 构造时未处理？",
+      "修复后，重定向 URL 中查询字符串的顺序是否重要？",
+      "是否所有通过 catch_all_view 的重定向都受此影响，还是仅特定路径？"
+    ]
+  }
+}

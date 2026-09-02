@@ -1,0 +1,376 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13212",
+  "issue_summary": "内置验证器在抛出 ValidationError 时没有包含提供的值，导致自定义错误消息无法使用 %(value)s 占位符。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.core.exceptions.ValidationError 和相关的验证器（如 from django.core import validators）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能不需要数据库或复杂设置，因为验证器逻辑通常不依赖数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestValidators.test_max_length_validator_message",
+        "test_file": "tests/validators/tests.py",
+        "why_relevant": "它直接测试了一个内置验证器（MaxLengthValidator）使用包含 %(value)s 占位符的自定义错误消息的行为。",
+        "reusable_parts": [
+          "MaxLengthValidator 的构造和调用方式",
+          "使用 assertRaisesMessage 捕获 ValidationError",
+          "错误消息字符串的断言模式"
+        ],
+        "possible_gap": "该测试当前可能断言了一个已经正确工作的场景（或者是一个期望的行为），而 Issue 描述的是其他内置验证器或场景下 value 未被包含的问题。"
+      },
+      {
+        "test_name": "FormsErrorMessagesTestCase.test_charfield",
+        "test_file": "tests/forms_tests/tests/test_error_messages.py",
+        "why_relevant": "它测试了表单字段（CharField）的错误消息，其中使用了 %(show_value)s 占位符，这与 %(value)s 的概念相似。",
+        "reusable_parts": [
+          "CharField 的配置（error_messages）",
+          "使用 assertFormErrors 进行断言",
+          "错误消息模板的格式"
+        ],
+        "possible_gap": "它测试的是表单层面的错误消息，而非直接测试底层验证器创建 ValidationError 时是否传递了 value。"
+      },
+      {
+        "test_name": "TestValidation.test_with_validators",
+        "test_file": "tests/postgres_tests/test_array.py",
+        "why_relevant": "它展示了 ValidationError 的 params 字典中确实包含了 'value' 键，这可能是修复后应该达到的状态。",
+        "reusable_parts": [
+          "验证器与字段的集成",
+          "捕获 ValidationError 并检查其 error_list 和 params"
+        ],
+        "possible_gap": "它测试的是 ArrayField 与 MinValueValidator 的集成，可能是一个已经正确处理了 value 的特殊情况，而非普遍问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用内置验证器（如 MaxLengthValidator、MinValueValidator 等）验证一个无效值，并期望在 ValidationError 的错误消息中使用 %(value)s 占位符来引用该值。",
+      "evidence": [
+        "Issue 描述中提到“include the provide value in a custom error message”和“use a %(value)s placeholder”。",
+        "相关测试 1 展示了 MaxLengthValidator 使用包含 %(value)s 占位符的自定义消息。",
+        "相关测试 3 显示 ValidationError 的 params 字典中包含了 'value' 键。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当使用包含 %(value)s 占位符的自定义错误消息时，该占位符可能无法被正确替换为触发验证失败的实际输入值，导致错误消息不完整或不正确。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述暗示当前行为无法在自定义错误消息中包含提供的值。",
+        "相关测试 1 和 2 展示了期望错误消息中包含具体值（如 'djangoproject.com', '4', '11'）的模式。",
+        "相关测试 3 显示 ValidationError 的 params 字典中包含了 'value' 键，表明值信息是可用的。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ValidationError",
+        "kind": "class",
+        "source_path": "django/core/exceptions.py",
+        "reason": "Issue 的核心是关于 ValidationError 异常，特别是其构造时是否包含 value 参数。"
+      },
+      {
+        "name": "MaxLengthValidator",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 使用了它，并且它是内置验证器，是 Issue 中提到的“built-in validators”的例子。"
+      },
+      {
+        "name": "MinValueValidator",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 3 使用了它，并且它是内置验证器，是 Issue 中提到的“built-in validators”的例子。"
+      },
+      {
+        "name": "CharField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 2 使用了它，它内部会使用验证器，并且展示了错误消息模板中使用 %(show_value)s 占位符。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/exceptions.py",
+        "object": "ValidationError",
+        "lines": "99-183",
+        "reason": "Issue 直接关于 ValidationError 类，其 __init__ 方法接收的 params 参数可能没有被所有内置验证器正确填充 value 值。"
+      },
+      {
+        "path": "",
+        "object": "内置验证器（如 MaxLengthValidator、MinLengthValidator、MinValueValidator 等）的 __call__ 或验证方法",
+        "lines": "",
+        "reason": "这些验证器负责在验证失败时创建 ValidationError 实例。Issue 表明它们可能没有将触发失败的值传递给 ValidationError 的 params。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用了一个特定的无效值 'djangoproject.com'。",
+        "target_pattern": "尝试使用不同的内置验证器（如 MinLengthValidator, EmailValidator, RegexValidator 等）和不同的无效输入值。",
+        "reason": "Issue 可能只影响部分内置验证器，或者在不同输入类型下表现不同。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 2 中直接在验证器或字段构造时提供了自定义的 message 参数。",
+        "target_pattern": "使用默认的错误消息，或者使用包含 %(value)s 占位符但格式略有不同的自定义消息。",
+        "reason": "测试默认消息中是否包含值，或者测试占位符替换的健壮性。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 直接调用验证器对象。",
+        "target_pattern": "通过表单字段（如 EmailField）或模型字段触发验证，模拟更真实的用例。",
+        "reason": "Issue 描述中提到“custom error message”，这可能更常在表单或模型层面配置。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "内置验证器在构造 ValidationError 时，应将触发验证失败的值（value）作为参数（params）的一部分提供，使得自定义错误消息中的 %(value)s 占位符能够被正确替换为该值。",
+      "evidence": [
+        "Issue 描述明确期望“include the provide value in a custom error message”和“use a %(value)s placeholder”。",
+        "相关测试 1 的断言期望错误消息中包含具体值 'djangoproject.com'。",
+        "相关测试 2 的断言期望错误消息中包含具体值 '4' 和 '11'。",
+        "相关测试 3 显示 ValidationError 的 params 字典中包含了 'value' 键，这可能是期望的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获的 ValidationError 实例的 params 属性。",
+        "reason": "Issue 的核心是 value 是否被包含在 ValidationError 的参数中。params 应该是一个包含 'value' 键的字典。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "ValidationError 实例的字符串表示（str(exception)）或 exception.messages。",
+        "reason": "最终呈现给用户的错误消息，检查 %(value)s 是否被实际输入值正确替换。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "验证器调用后（在未触发异常的正常情况下）的返回值，但主要关注异常路径。",
+        "reason": "需要确保观测点设置在验证失败、异常被抛出的路径上。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 ValidationError 的 params 字典中包含键为 'value' 的条目，且其值为触发验证失败的实际输入值。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的错误消息字符串完全相等，因为消息模板可能变化。",
+        "reason": "直接检查 params 字典是验证 value 是否被传递的最稳定方式，不依赖于最终消息的格式化。"
+      },
+      {
+        "assertion_goal": "验证最终的错误消息字符串（str(exception)）中包含触发验证失败的实际输入值。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言错误消息与一个固定的、包含具体值的字符串完全相等。",
+        "reason": "用户最终看到的是错误消息，确保值出现在消息中符合 Issue 要求。使用 contains 比 equals 更稳定，允许消息其他部分变化。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "哪些具体的内置验证器当前没有将 value 包含在 ValidationError.params 中？Issue 描述是“sometimes”，可能不是所有。",
+    "value 在 params 字典中应该使用的确切键名是 'value' 还是 'show_value'？相关测试 2 使用了 show_value，测试 3 使用了 value。",
+    "修复是只需要修改内置验证器的代码，还是也需要修改 ValidationError 的初始化或消息格式化逻辑？",
+    "默认的错误消息模板（不提供自定义 message 时）是否也应该支持 %(value)s 占位符？"
+  ],
+  "raw": {
+    "issue_summary": "内置验证器在抛出 ValidationError 时没有包含提供的值，导致自定义错误消息无法使用 %(value)s 占位符。",
+    "trigger_condition": {
+      "text": "使用内置验证器（如 MaxLengthValidator、MinValueValidator 等）验证一个无效值，并期望在 ValidationError 的错误消息中使用 %(value)s 占位符来引用该值。",
+      "evidence": [
+        "Issue 描述中提到“include the provide value in a custom error message”和“use a %(value)s placeholder”。",
+        "相关测试 1 展示了 MaxLengthValidator 使用包含 %(value)s 占位符的自定义消息。",
+        "相关测试 3 显示 ValidationError 的 params 字典中包含了 'value' 键。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当使用包含 %(value)s 占位符的自定义错误消息时，该占位符可能无法被正确替换为触发验证失败的实际输入值，导致错误消息不完整或不正确。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述暗示当前行为无法在自定义错误消息中包含提供的值。",
+        "相关测试 1 和 2 展示了期望错误消息中包含具体值（如 'djangoproject.com', '4', '11'）的模式。",
+        "相关测试 3 显示 ValidationError 的 params 字典中包含了 'value' 键，表明值信息是可用的。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "内置验证器在构造 ValidationError 时，应将触发验证失败的值（value）作为参数（params）的一部分提供，使得自定义错误消息中的 %(value)s 占位符能够被正确替换为该值。",
+      "evidence": [
+        "Issue 描述明确期望“include the provide value in a custom error message”和“use a %(value)s placeholder”。",
+        "相关测试 1 的断言期望错误消息中包含具体值 'djangoproject.com'。",
+        "相关测试 2 的断言期望错误消息中包含具体值 '4' 和 '11'。",
+        "相关测试 3 显示 ValidationError 的 params 字典中包含了 'value' 键，这可能是期望的行为模式。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ValidationError",
+        "kind": "class",
+        "source_path": "django/core/exceptions.py",
+        "reason": "Issue 的核心是关于 ValidationError 异常，特别是其构造时是否包含 value 参数。"
+      },
+      {
+        "name": "MaxLengthValidator",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 1 使用了它，并且它是内置验证器，是 Issue 中提到的“built-in validators”的例子。"
+      },
+      {
+        "name": "MinValueValidator",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 3 使用了它，并且它是内置验证器，是 Issue 中提到的“built-in validators”的例子。"
+      },
+      {
+        "name": "CharField",
+        "kind": "class",
+        "source_path": "",
+        "reason": "相关测试 2 使用了它，它内部会使用验证器，并且展示了错误消息模板中使用 %(show_value)s 占位符。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/exceptions.py",
+        "object": "ValidationError",
+        "lines": "99-183",
+        "reason": "Issue 直接关于 ValidationError 类，其 __init__ 方法接收的 params 参数可能没有被所有内置验证器正确填充 value 值。"
+      },
+      {
+        "path": "",
+        "object": "内置验证器（如 MaxLengthValidator、MinLengthValidator、MinValueValidator 等）的 __call__ 或验证方法",
+        "lines": "",
+        "reason": "这些验证器负责在验证失败时创建 ValidationError 实例。Issue 表明它们可能没有将触发失败的值传递给 ValidationError 的 params。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestValidators.test_max_length_validator_message",
+        "test_file": "tests/validators/tests.py",
+        "why_relevant": "它直接测试了一个内置验证器（MaxLengthValidator）使用包含 %(value)s 占位符的自定义错误消息的行为。",
+        "reusable_parts": [
+          "MaxLengthValidator 的构造和调用方式",
+          "使用 assertRaisesMessage 捕获 ValidationError",
+          "错误消息字符串的断言模式"
+        ],
+        "possible_gap": "该测试当前可能断言了一个已经正确工作的场景（或者是一个期望的行为），而 Issue 描述的是其他内置验证器或场景下 value 未被包含的问题。"
+      },
+      {
+        "test_name": "FormsErrorMessagesTestCase.test_charfield",
+        "test_file": "tests/forms_tests/tests/test_error_messages.py",
+        "why_relevant": "它测试了表单字段（CharField）的错误消息，其中使用了 %(show_value)s 占位符，这与 %(value)s 的概念相似。",
+        "reusable_parts": [
+          "CharField 的配置（error_messages）",
+          "使用 assertFormErrors 进行断言",
+          "错误消息模板的格式"
+        ],
+        "possible_gap": "它测试的是表单层面的错误消息，而非直接测试底层验证器创建 ValidationError 时是否传递了 value。"
+      },
+      {
+        "test_name": "TestValidation.test_with_validators",
+        "test_file": "tests/postgres_tests/test_array.py",
+        "why_relevant": "它展示了 ValidationError 的 params 字典中确实包含了 'value' 键，这可能是修复后应该达到的状态。",
+        "reusable_parts": [
+          "验证器与字段的集成",
+          "捕获 ValidationError 并检查其 error_list 和 params"
+        ],
+        "possible_gap": "它测试的是 ArrayField 与 MinValueValidator 的集成，可能是一个已经正确处理了 value 的特殊情况，而非普遍问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 1 中使用了一个特定的无效值 'djangoproject.com'。",
+        "target_pattern": "尝试使用不同的内置验证器（如 MinLengthValidator, EmailValidator, RegexValidator 等）和不同的无效输入值。",
+        "reason": "Issue 可能只影响部分内置验证器，或者在不同输入类型下表现不同。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 和 2 中直接在验证器或字段构造时提供了自定义的 message 参数。",
+        "target_pattern": "使用默认的错误消息，或者使用包含 %(value)s 占位符但格式略有不同的自定义消息。",
+        "reason": "测试默认消息中是否包含值，或者测试占位符替换的健壮性。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试 1 直接调用验证器对象。",
+        "target_pattern": "通过表单字段（如 EmailField）或模型字段触发验证，模拟更真实的用例。",
+        "reason": "Issue 描述中提到“custom error message”，这可能更常在表单或模型层面配置。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "捕获的 ValidationError 实例的 params 属性。",
+        "reason": "Issue 的核心是 value 是否被包含在 ValidationError 的参数中。params 应该是一个包含 'value' 键的字典。"
+      },
+      {
+        "kind": "str",
+        "expression_hint": "ValidationError 实例的字符串表示（str(exception)）或 exception.messages。",
+        "reason": "最终呈现给用户的错误消息，检查 %(value)s 是否被实际输入值正确替换。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "验证器调用后（在未触发异常的正常情况下）的返回值，但主要关注异常路径。",
+        "reason": "需要确保观测点设置在验证失败、异常被抛出的路径上。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 ValidationError 的 params 字典中包含键为 'value' 的条目，且其值为触发验证失败的实际输入值。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的错误消息字符串完全相等，因为消息模板可能变化。",
+        "reason": "直接检查 params 字典是验证 value 是否被传递的最稳定方式，不依赖于最终消息的格式化。"
+      },
+      {
+        "assertion_goal": "验证最终的错误消息字符串（str(exception)）中包含触发验证失败的实际输入值。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言错误消息与一个固定的、包含具体值的字符串完全相等。",
+        "reason": "用户最终看到的是错误消息，确保值出现在消息中符合 Issue 要求。使用 contains 比 equals 更稳定，允许消息其他部分变化。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 SimpleTestCase 或类似的测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要导入 django.core.exceptions.ValidationError 和相关的验证器（如 from django.core import validators）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能不需要数据库或复杂设置，因为验证器逻辑通常不依赖数据库。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "哪些具体的内置验证器当前没有将 value 包含在 ValidationError.params 中？Issue 描述是“sometimes”，可能不是所有。",
+      "value 在 params 字典中应该使用的确切键名是 'value' 还是 'show_value'？相关测试 2 使用了 show_value，测试 3 使用了 value。",
+      "修复是只需要修改内置验证器的代码，还是也需要修改 ValidationError 的初始化或消息格式化逻辑？",
+      "默认的错误消息模板（不提供自定义 message 时）是否也应该支持 %(value)s 占位符？"
+    ]
+  }
+}

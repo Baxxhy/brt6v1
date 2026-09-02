@@ -1,0 +1,364 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11583",
+  "issue_summary": "使用 StatReloader 进行自动重载时，间歇性地抛出 'ValueError: embedded null byte' 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 unittest.mock 来模拟 StatReloader.watched_files 方法的返回值，以控制其返回的路径列表。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自现有的测试类，如 StatReloaderTests，以复用其 fixture（如 self.reloader, self.existing_file）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建特殊的临时文件或符号链接来模拟包含空字节的路径，但这在普通文件系统中可能难以实现。",
+        "source": "inference",
+        "confidence": "low"
+      },
+      {
+        "hint": "测试可能需要在 macOS 或特定文件系统环境下运行，因为 Issue 提到 OSX 和 HFS+，且相关测试都跳过了 HFS+。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "StatReloaderTests.test_snapshot_files_updates",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它直接测试 StatReloader.snapshot_files 方法的行为，这是触发缺陷的关键方法。",
+        "reusable_parts": [
+          "测试类 StatReloaderTests",
+          "使用 mock.patch.object 模拟 watched_files 返回值",
+          "调用 self.reloader.snapshot_files()",
+          "使用 self.existing_file fixture"
+        ],
+        "possible_gap": "当前测试模拟 watched_files 返回一个简单的、不包含特殊路径（如 /Users）的文件列表，没有触发 pathlib 对复杂文件系统路径（如可能包含空字节的符号链接）的解析。"
+      },
+      {
+        "test_name": "StatReloaderTests.test_snapshot_files_ignores_missing_files",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了 snapshot_files 对异常文件路径的处理（缺失文件），与 Issue 中处理异常路径（包含空字节）的场景有相似性。",
+        "reusable_parts": [
+          "测试类 StatReloaderTests",
+          "使用 mock.patch.object 模拟 watched_files 返回值",
+          "调用 self.reloader.snapshot_files()",
+          "断言返回空字典"
+        ],
+        "possible_gap": "它处理的是文件不存在的场景，而 Issue 是文件存在但路径解析异常（ValueError），错误类型和触发点不同。"
+      },
+      {
+        "test_name": "StatReloaderTests.test_tick_does_not_trigger_twice",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了 StatReloader.tick 方法的循环行为，而 tick 方法会调用 snapshot_files，是缺陷可能被触发的运行上下文。",
+        "reusable_parts": [
+          "测试类 StatReloaderTests",
+          "使用 mock.patch 模拟 notify_file_changed",
+          "创建 ticker = self.reloader.tick()",
+          "调用 next(ticker)"
+        ],
+        "possible_gap": "它关注的是文件修改通知的逻辑，没有模拟会导致 pathlib 解析出错的特殊路径输入。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django 开发服务器中使用 StatReloader 进行自动重载，遍历文件系统路径（特别是 /Users 目录）时。",
+      "evidence": [
+        "Issue 描述：'Auto-reloading with StatReloader very intermittently throws \"ValueError: embedded null byte\"'",
+        "Issue 堆栈跟踪显示异常发生在 pathlib 的 readlink 调用中，该调用由 StatReloader 的 snapshot_files -> watched_files -> iter_all_python_module_files -> iter_modules_and_files -> path.resolve().absolute() 触发。",
+        "Issue 打印的路径显示遍历到了 /Users 目录。",
+        "源码片段 1 和 6 显示 StatReloader 的 tick 方法会调用 snapshot_files 来获取文件快照。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: embedded null byte 异常，导致自动重载进程中断。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 标题和描述明确指出该异常。",
+        "Issue 堆栈跟踪的最后一行为：'ValueError: embedded null byte'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "StatReloader.snapshot_files",
+        "kind": "method",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "Issue 堆栈跟踪显示异常链起源于此方法调用。"
+      },
+      {
+        "name": "StatReloader.tick",
+        "kind": "method",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "源码片段 6 显示 tick 方法会调用 snapshot_files，是 StatReloader 运行循环的核心。"
+      },
+      {
+        "name": "iter_modules_and_files",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "Issue 堆栈跟踪显示它是 watched_files -> iter_all_python_module_files 调用的函数，最终调用了 path.resolve().absolute()。"
+      },
+      {
+        "name": "run_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "源码片段 2 和 3 显示这是启动自动重载的入口函数，会创建和运行 StatReloader。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "iter_modules_and_files",
+        "lines": "132",
+        "reason": "Issue 堆栈跟踪显示在此行调用了 `path.resolve().absolute()`，这是导致 pathlib 抛出异常的源头。"
+      },
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "StatReloader.snapshot_files",
+        "lines": "",
+        "reason": "该方法调用 watched_files，进而触发 iter_modules_and_files，是异常发生的直接调用者。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 watched_files 返回的是简单的、良构的文件路径字符串（如 self.existing_file）。",
+        "target_pattern": "watched_files 返回的路径列表中包含一个在调用 path.resolve().absolute() 时会引发 ValueError 的路径（例如，一个指向包含空字节的符号链接的路径，或者 /Users 目录下的某个特殊条目）。",
+        "reason": "Issue 表明异常是在遍历文件系统路径（特别是 /Users）并调用 resolve() 时发生的。改变 watched_files 的返回值以包含一个会触发 pathlib 解析错误的路径，可能复现该缺陷。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在受控的临时文件系统环境中运行。",
+        "target_pattern": "测试环境需要模拟一个包含特殊文件系统对象（如损坏的符号链接、网络挂载点）的目录结构，类似于 Issue 作者猜测的 Samba 共享场景。",
+        "reason": "Issue 作者猜测问题可能与 /Users 目录下的 Samba 共享挂载点有关。改变测试的配置或环境以包含类似的边缘情况可能触发缺陷。",
+        "confidence": "low"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "StatReloader 在遍历文件系统路径以监控文件变化时，应能正确处理所有路径（包括可能包含特殊字符或链接的路径），而不会抛出 ValueError 异常。",
+      "evidence": [
+        "Issue 描述暗示这是一个意外错误，期望自动重载功能正常工作。",
+        "相关测试 1-4 展示了 StatReloader 在正常情况下的预期行为（如更新快照、处理重复项、忽略缺失文件）。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 StatReloader.snapshot_files() 或 iter_modules_and_files 时捕获的异常。",
+        "reason": "Issue 的核心症状是抛出 ValueError。观测是否在遍历特定路径时抛出此异常，是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "StatReloader.snapshot_files() 的返回值，特别是当 watched_files 返回包含可疑路径的列表时。",
+        "reason": "观察 snapshot_files 是否成功返回文件快照，还是因为异常而提前终止，可以帮助定位问题发生的时机和条件。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 iter_modules_and_files 函数中，即将调用 path.resolve().absolute() 之前的 path 对象的值（str(path)）。",
+        "reason": "Issue 作者通过打印 path 来调试。观测具体的路径字符串，有助于识别是哪个路径触发了空字节错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 watched_files 返回包含特定问题路径的列表时，调用 snapshot_files 或相关函数不应抛出 ValueError: embedded null byte 异常（修复后）。或者，在缺陷存在时，断言会抛出该异常（用于复现）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串完全相等，因为路径信息可能变化。避免断言与文件修改时间（mtime）相关的无关细节。",
+        "reason": "Issue 的核心是特定的 ValueError 异常。使用 raises 断言来验证该异常是否被触发（复现缺陷）或不被触发（验证修复），是直接且稳定的方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致 pathlib 抛出 'embedded null byte' 错误的具体路径特征是什么？是符号链接、挂载点，还是文件/目录名本身包含空字节？",
+    "该缺陷是否只在特定操作系统（如 macOS）、特定文件系统（如 HFS+）或特定 Python 版本下发生？",
+    "如何稳定地在测试环境中构造一个会触发此异常的路径，而不依赖于特定的、不可移植的系统配置？",
+    "缺陷的根本原因是在 Django 的代码中（如对 pathlib 的使用方式），还是在 Python 标准库的 pathlib 实现中，亦或是在操作系统/文件系统层面？"
+  ],
+  "raw": {
+    "issue_summary": "使用 StatReloader 进行自动重载时，间歇性地抛出 'ValueError: embedded null byte' 异常。",
+    "trigger_condition": {
+      "text": "在 Django 开发服务器中使用 StatReloader 进行自动重载，遍历文件系统路径（特别是 /Users 目录）时。",
+      "evidence": [
+        "Issue 描述：'Auto-reloading with StatReloader very intermittently throws \"ValueError: embedded null byte\"'",
+        "Issue 堆栈跟踪显示异常发生在 pathlib 的 readlink 调用中，该调用由 StatReloader 的 snapshot_files -> watched_files -> iter_all_python_module_files -> iter_modules_and_files -> path.resolve().absolute() 触发。",
+        "Issue 打印的路径显示遍历到了 /Users 目录。",
+        "源码片段 1 和 6 显示 StatReloader 的 tick 方法会调用 snapshot_files 来获取文件快照。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: embedded null byte 异常，导致自动重载进程中断。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 标题和描述明确指出该异常。",
+        "Issue 堆栈跟踪的最后一行为：'ValueError: embedded null byte'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "StatReloader 在遍历文件系统路径以监控文件变化时，应能正确处理所有路径（包括可能包含特殊字符或链接的路径），而不会抛出 ValueError 异常。",
+      "evidence": [
+        "Issue 描述暗示这是一个意外错误，期望自动重载功能正常工作。",
+        "相关测试 1-4 展示了 StatReloader 在正常情况下的预期行为（如更新快照、处理重复项、忽略缺失文件）。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "StatReloader.snapshot_files",
+        "kind": "method",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "Issue 堆栈跟踪显示异常链起源于此方法调用。"
+      },
+      {
+        "name": "StatReloader.tick",
+        "kind": "method",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "源码片段 6 显示 tick 方法会调用 snapshot_files，是 StatReloader 运行循环的核心。"
+      },
+      {
+        "name": "iter_modules_and_files",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "Issue 堆栈跟踪显示它是 watched_files -> iter_all_python_module_files 调用的函数，最终调用了 path.resolve().absolute()。"
+      },
+      {
+        "name": "run_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "源码片段 2 和 3 显示这是启动自动重载的入口函数，会创建和运行 StatReloader。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "iter_modules_and_files",
+        "lines": "132",
+        "reason": "Issue 堆栈跟踪显示在此行调用了 `path.resolve().absolute()`，这是导致 pathlib 抛出异常的源头。"
+      },
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "StatReloader.snapshot_files",
+        "lines": "",
+        "reason": "该方法调用 watched_files，进而触发 iter_modules_and_files，是异常发生的直接调用者。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "StatReloaderTests.test_snapshot_files_updates",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它直接测试 StatReloader.snapshot_files 方法的行为，这是触发缺陷的关键方法。",
+        "reusable_parts": [
+          "测试类 StatReloaderTests",
+          "使用 mock.patch.object 模拟 watched_files 返回值",
+          "调用 self.reloader.snapshot_files()",
+          "使用 self.existing_file fixture"
+        ],
+        "possible_gap": "当前测试模拟 watched_files 返回一个简单的、不包含特殊路径（如 /Users）的文件列表，没有触发 pathlib 对复杂文件系统路径（如可能包含空字节的符号链接）的解析。"
+      },
+      {
+        "test_name": "StatReloaderTests.test_snapshot_files_ignores_missing_files",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了 snapshot_files 对异常文件路径的处理（缺失文件），与 Issue 中处理异常路径（包含空字节）的场景有相似性。",
+        "reusable_parts": [
+          "测试类 StatReloaderTests",
+          "使用 mock.patch.object 模拟 watched_files 返回值",
+          "调用 self.reloader.snapshot_files()",
+          "断言返回空字典"
+        ],
+        "possible_gap": "它处理的是文件不存在的场景，而 Issue 是文件存在但路径解析异常（ValueError），错误类型和触发点不同。"
+      },
+      {
+        "test_name": "StatReloaderTests.test_tick_does_not_trigger_twice",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "它测试了 StatReloader.tick 方法的循环行为，而 tick 方法会调用 snapshot_files，是缺陷可能被触发的运行上下文。",
+        "reusable_parts": [
+          "测试类 StatReloaderTests",
+          "使用 mock.patch 模拟 notify_file_changed",
+          "创建 ticker = self.reloader.tick()",
+          "调用 next(ticker)"
+        ],
+        "possible_gap": "它关注的是文件修改通知的逻辑，没有模拟会导致 pathlib 解析出错的特殊路径输入。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 watched_files 返回的是简单的、良构的文件路径字符串（如 self.existing_file）。",
+        "target_pattern": "watched_files 返回的路径列表中包含一个在调用 path.resolve().absolute() 时会引发 ValueError 的路径（例如，一个指向包含空字节的符号链接的路径，或者 /Users 目录下的某个特殊条目）。",
+        "reason": "Issue 表明异常是在遍历文件系统路径（特别是 /Users）并调用 resolve() 时发生的。改变 watched_files 的返回值以包含一个会触发 pathlib 解析错误的路径，可能复现该缺陷。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "测试在受控的临时文件系统环境中运行。",
+        "target_pattern": "测试环境需要模拟一个包含特殊文件系统对象（如损坏的符号链接、网络挂载点）的目录结构，类似于 Issue 作者猜测的 Samba 共享场景。",
+        "reason": "Issue 作者猜测问题可能与 /Users 目录下的 Samba 共享挂载点有关。改变测试的配置或环境以包含类似的边缘情况可能触发缺陷。",
+        "confidence": "low"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 StatReloader.snapshot_files() 或 iter_modules_and_files 时捕获的异常。",
+        "reason": "Issue 的核心症状是抛出 ValueError。观测是否在遍历特定路径时抛出此异常，是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "StatReloader.snapshot_files() 的返回值，特别是当 watched_files 返回包含可疑路径的列表时。",
+        "reason": "观察 snapshot_files 是否成功返回文件快照，还是因为异常而提前终止，可以帮助定位问题发生的时机和条件。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在 iter_modules_and_files 函数中，即将调用 path.resolve().absolute() 之前的 path 对象的值（str(path)）。",
+        "reason": "Issue 作者通过打印 path 来调试。观测具体的路径字符串，有助于识别是哪个路径触发了空字节错误。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 watched_files 返回包含特定问题路径的列表时，调用 snapshot_files 或相关函数不应抛出 ValueError: embedded null byte 异常（修复后）。或者，在缺陷存在时，断言会抛出该异常（用于复现）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串完全相等，因为路径信息可能变化。避免断言与文件修改时间（mtime）相关的无关细节。",
+        "reason": "Issue 的核心是特定的 ValueError 异常。使用 raises 断言来验证该异常是否被触发（复现缺陷）或不被触发（验证修复），是直接且稳定的方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 unittest.mock 来模拟 StatReloader.watched_files 方法的返回值，以控制其返回的路径列表。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自现有的测试类，如 StatReloaderTests，以复用其 fixture（如 self.reloader, self.existing_file）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建特殊的临时文件或符号链接来模拟包含空字节的路径，但这在普通文件系统中可能难以实现。",
+        "source": "inference",
+        "confidence": "low"
+      },
+      {
+        "hint": "测试可能需要在 macOS 或特定文件系统环境下运行，因为 Issue 提到 OSX 和 HFS+，且相关测试都跳过了 HFS+。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "导致 pathlib 抛出 'embedded null byte' 错误的具体路径特征是什么？是符号链接、挂载点，还是文件/目录名本身包含空字节？",
+      "该缺陷是否只在特定操作系统（如 macOS）、特定文件系统（如 HFS+）或特定 Python 版本下发生？",
+      "如何稳定地在测试环境中构造一个会触发此异常的路径，而不依赖于特定的、不可移植的系统配置？",
+      "缺陷的根本原因是在 Django 的代码中（如对 pathlib 的使用方式），还是在 Python 标准库的 pathlib 实现中，亦或是在操作系统/文件系统层面？"
+    ]
+  }
+}

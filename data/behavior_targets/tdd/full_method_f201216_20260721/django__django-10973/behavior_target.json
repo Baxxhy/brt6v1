@@ -1,0 +1,262 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-10973",
+  "issue_summary": "建议在 PostgreSQL 后端客户端中使用 subprocess.run 和 PGPASSWORD 环境变量来简化代码并提高可靠性。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要配置 PostgreSQL 数据库连接（包括密码），并模拟调用后端客户端功能（如数据库操作命令）。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用类似 PostgreSQLSimpleTestCase 的测试基类，或设置数据库相关配置。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PostgresIntegrationTests.test_check",
+        "test_file": "tests/postgres_tests/test_integration.py",
+        "why_relevant": "该测试使用 subprocess.run 调用 Django 命令，与 Issue 讨论的使用 subprocess 的场景相关。",
+        "reusable_parts": [
+          "subprocess.run 的调用模式",
+          "cwd 和 stderr 的处理",
+          "使用 sys.executable"
+        ],
+        "possible_gap": "该测试是集成测试，检查 Django 命令，而非直接测试 PostgreSQL 后端客户端的子进程调用和密码传递。"
+      },
+      {
+        "test_name": "AdminScriptTestCase.run_test",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "该测试方法构造了自定义环境变量（env）并用于 subprocess.Popen，展示了如何为子进程设置环境。",
+        "reusable_parts": [
+          "构造 test_environ 字典",
+          "使用 env 参数传递环境变量",
+          "PYTHONPATH 等环境变量的设置"
+        ],
+        "possible_gap": "它使用 subprocess.Popen 而非 subprocess.run，且场景是管理脚本测试，非 PostgreSQL 后端。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 PostgreSQL 后端客户端相关功能，可能涉及使用 subprocess 执行外部命令（如 pg_dump, pg_restore）或数据库检查。",
+      "evidence": [
+        "Issue 提到在 django.db.backends.postgres.client 中使用 subprocess.run 和 PGPASSWORD。",
+        "相关测试 2 展示了使用 subprocess.run 调用 Django 命令的场景。"
+      ],
+      "confidence": "medium"
+    },
+    "error_symptom": {
+      "text": "Issue 未明确描述错误现象，而是提出改进建议。可能当前代码在设置密码或执行子进程时不够可靠或简洁。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述为改进建议，未报告具体错误。"
+      ],
+      "confidence": "low"
+    },
+    "target_apis": [
+      {
+        "name": "subprocess.run",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 核心建议是使用 subprocess.run 来改进 PostgreSQL 后端客户端。"
+      },
+      {
+        "name": "django.db.backends.postgres.client",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 明确指出改进目标模块。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/postgres/client.py",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 明确指向此模块，但 iCoRe 未检索到其源码。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中设置环境变量如 DJANGO_SETTINGS_MODULE、PYTHONPATH。",
+        "target_pattern": "在子进程环境中设置 PGPASSWORD 环境变量。",
+        "reason": "Issue 建议使用 PGPASSWORD 环境变量来传递密码，这需要修改子进程的环境配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试直接调用 subprocess.run 或 subprocess.Popen 执行外部命令。",
+        "target_pattern": "调用 django.db.backends.postgres.client 模块中可能使用子进程的函数（如用于数据库转储/恢复）。",
+        "reason": "Issue 的目标是改进该客户端模块中的子进程调用代码。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 django.db.backends.postgres.client 中使用 subprocess.run 并传递包含 PGPASSWORD 的自定义环境变量，使子进程执行更可靠、代码更简洁。",
+      "evidence": [
+        "Issue 明确说明使用 subprocess.run 和 PGPASSWORD 可以简化代码并使其更可靠。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "config",
+        "expression_hint": "传递给 subprocess.run 的 env 字典的内容，特别是是否包含 PGPASSWORD。",
+        "reason": "Issue 的核心是使用环境变量传递密码，观察 env 配置可判断是否按建议实现。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "subprocess.run 的返回值（如 returncode, stderr）。",
+        "reason": "观察子进程执行是否成功，以及是否有与密码认证相关的错误输出。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用包含 PGPASSWORD 的环境变量调用子进程后，子进程应成功执行（或按预期处理认证）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 stderr 输出字符串或具体的进程输出内容。",
+        "reason": "Issue 关注的是代码改进（使用 subprocess.run 和 PGPASSWORD），断言子进程成功执行（如 returncode 为 0）或环境变量正确设置，能稳定验证改进的有效性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "django.db.backends.postgres.client 模块中具体哪个函数或方法需要被测试和改进。",
+    "当前代码具体如何调用子进程以及传递密码（是否已使用 Popen 或其他方式）。",
+    "除了 PGPASSWORD，是否还有其他环境变量或参数需要关注。",
+    "改进的具体代码变更细节（如函数签名、调用方式）未知。"
+  ],
+  "raw": {
+    "issue_summary": "建议在 PostgreSQL 后端客户端中使用 subprocess.run 和 PGPASSWORD 环境变量来简化代码并提高可靠性。",
+    "trigger_condition": {
+      "text": "调用 PostgreSQL 后端客户端相关功能，可能涉及使用 subprocess 执行外部命令（如 pg_dump, pg_restore）或数据库检查。",
+      "evidence": [
+        "Issue 提到在 django.db.backends.postgres.client 中使用 subprocess.run 和 PGPASSWORD。",
+        "相关测试 2 展示了使用 subprocess.run 调用 Django 命令的场景。"
+      ],
+      "confidence": "medium"
+    },
+    "error_symptom": {
+      "text": "Issue 未明确描述错误现象，而是提出改进建议。可能当前代码在设置密码或执行子进程时不够可靠或简洁。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述为改进建议，未报告具体错误。"
+      ],
+      "confidence": "low"
+    },
+    "expected_behavior": {
+      "text": "在 django.db.backends.postgres.client 中使用 subprocess.run 并传递包含 PGPASSWORD 的自定义环境变量，使子进程执行更可靠、代码更简洁。",
+      "evidence": [
+        "Issue 明确说明使用 subprocess.run 和 PGPASSWORD 可以简化代码并使其更可靠。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "subprocess.run",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 核心建议是使用 subprocess.run 来改进 PostgreSQL 后端客户端。"
+      },
+      {
+        "name": "django.db.backends.postgres.client",
+        "kind": "module",
+        "source_path": "",
+        "reason": "Issue 明确指出改进目标模块。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/postgres/client.py",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 明确指向此模块，但 iCoRe 未检索到其源码。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "PostgresIntegrationTests.test_check",
+        "test_file": "tests/postgres_tests/test_integration.py",
+        "why_relevant": "该测试使用 subprocess.run 调用 Django 命令，与 Issue 讨论的使用 subprocess 的场景相关。",
+        "reusable_parts": [
+          "subprocess.run 的调用模式",
+          "cwd 和 stderr 的处理",
+          "使用 sys.executable"
+        ],
+        "possible_gap": "该测试是集成测试，检查 Django 命令，而非直接测试 PostgreSQL 后端客户端的子进程调用和密码传递。"
+      },
+      {
+        "test_name": "AdminScriptTestCase.run_test",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "该测试方法构造了自定义环境变量（env）并用于 subprocess.Popen，展示了如何为子进程设置环境。",
+        "reusable_parts": [
+          "构造 test_environ 字典",
+          "使用 env 参数传递环境变量",
+          "PYTHONPATH 等环境变量的设置"
+        ],
+        "possible_gap": "它使用 subprocess.Popen 而非 subprocess.run，且场景是管理脚本测试，非 PostgreSQL 后端。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中设置环境变量如 DJANGO_SETTINGS_MODULE、PYTHONPATH。",
+        "target_pattern": "在子进程环境中设置 PGPASSWORD 环境变量。",
+        "reason": "Issue 建议使用 PGPASSWORD 环境变量来传递密码，这需要修改子进程的环境配置。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试直接调用 subprocess.run 或 subprocess.Popen 执行外部命令。",
+        "target_pattern": "调用 django.db.backends.postgres.client 模块中可能使用子进程的函数（如用于数据库转储/恢复）。",
+        "reason": "Issue 的目标是改进该客户端模块中的子进程调用代码。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "config",
+        "expression_hint": "传递给 subprocess.run 的 env 字典的内容，特别是是否包含 PGPASSWORD。",
+        "reason": "Issue 的核心是使用环境变量传递密码，观察 env 配置可判断是否按建议实现。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "subprocess.run 的返回值（如 returncode, stderr）。",
+        "reason": "观察子进程执行是否成功，以及是否有与密码认证相关的错误输出。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用包含 PGPASSWORD 的环境变量调用子进程后，子进程应成功执行（或按预期处理认证）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 stderr 输出字符串或具体的进程输出内容。",
+        "reason": "Issue 关注的是代码改进（使用 subprocess.run 和 PGPASSWORD），断言子进程成功执行（如 returncode 为 0）或环境变量正确设置，能稳定验证改进的有效性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要配置 PostgreSQL 数据库连接（包括密码），并模拟调用后端客户端功能（如数据库操作命令）。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "使用类似 PostgreSQLSimpleTestCase 的测试基类，或设置数据库相关配置。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "django.db.backends.postgres.client 模块中具体哪个函数或方法需要被测试和改进。",
+      "当前代码具体如何调用子进程以及传递密码（是否已使用 Popen 或其他方式）。",
+      "除了 PGPASSWORD，是否还有其他环境变量或参数需要关注。",
+      "改进的具体代码变更细节（如函数签名、调用方式）未知。"
+    ]
+  }
+}

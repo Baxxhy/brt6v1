@@ -1,0 +1,252 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15498",
+  "issue_summary": "If-Modified-Since 头部传入空字符串时，原本会被忽略，但现在会引发异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 StaticTests 测试类及其 client，并配置 DEBUG=True 和正确的 ROOT_URLCONF 以访问静态文件视图。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个静态文件（如 file.txt）用于测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "StaticTests.test_invalid_if_modified_since",
+        "test_file": "tests/view_tests/tests/test_static.py",
+        "why_relevant": "它专门测试对无效 If-Modified-Since 值的优雅处理，与当前 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试类 StaticTests",
+          "装饰器 @override_settings",
+          "使用 client.get 并设置 HTTP_IF_MODIFIED_SINCE 头部的模式",
+          "断言文件内容被正确返回的 assert 风格"
+        ],
+        "possible_gap": "它测试的是格式错误的日期字符串（如'Mon, 28 May 999999999999 28:25:26 GMT'），而非空字符串。"
+      },
+      {
+        "test_name": "StaticTests.test_invalid_if_modified_since2",
+        "test_file": "tests/view_tests/tests/test_static.py",
+        "why_relevant": "同样测试对无效 If-Modified-Since 值的优雅处理，提供了另一个无效值的例子。",
+        "reusable_parts": [
+          "测试类 StaticTests",
+          "装饰器 @override_settings",
+          "使用 client.get 并设置 HTTP_IF_MODIFIED_SINCE 头部的模式",
+          "断言文件内容被正确返回的 assert 风格"
+        ],
+        "possible_gap": "它测试的是另一个格式错误的日期字符串，而非空字符串。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "向静态文件视图发送 GET 请求，并在 HTTP 头部设置 If-Modified-Since 为空字符串。",
+      "evidence": [
+        "Issue 描述：'Empty string used to be ignored for If-Modified-Since header, but now raises exception'",
+        "相关测试 1-4 展示了通过 HTTP_IF_MODIFIED_SINCE 参数设置该头部进行测试的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "处理请求时引发异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'now raises exception'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "was_modified_since",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 5 直接测试此函数，它很可能负责解析 If-Modified-Since 头部并判断文件是否被修改。"
+      },
+      {
+        "name": "StaticTests.client.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "所有相关测试都通过此方法发起请求并设置 HTTP_IF_MODIFIED_SINCE 头部，这是触发缺陷的入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "处理 If-Modified-Since 头部解析的逻辑",
+        "lines": "",
+        "reason": "Issue 提到异常是在特定提交 d6aff369ad3 后引入的，表明解析逻辑发生了变化，无法处理空字符串。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "invalid_date = \"Mon, 28 May 999999999999 28:25:26 GMT\"",
+        "target_pattern": "invalid_date = \"\"",
+        "reason": "根据 Issue，空字符串是新的触发缺陷的输入，而现有测试只覆盖了非空但格式错误的字符串。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "If-Modified-Since 头部传入空字符串时，应像处理无效日期一样被优雅地忽略，并正常返回文件内容。",
+      "evidence": [
+        "Issue 描述：'Empty string used to be ignored for If-Modified-Since header'",
+        "相关测试 1 和 2 的文档字符串：'Handle bogus If-Modified-Since values gracefully'，表明无效值应被优雅处理。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 client.get 时是否引发异常",
+        "reason": "Issue 明确指出当前行为会引发异常，这是判断缺陷是否被触发的直接标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "response 的类型和状态码",
+        "reason": "在预期行为下，应返回一个包含文件内容的正常 HttpResponse，而非异常或 HttpResponseNotModified。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "请求应成功完成，不引发异常，并返回文件内容。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的异常消息或堆栈跟踪，因为具体异常类型可能未知或变化。",
+        "reason": "Issue 的核心是行为从“忽略”变为“异常”，因此稳定的断言是验证没有异常发生，且响应正常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "引发异常的具体类型是什么？",
+    "缺陷的确切位置在哪个源文件、哪个函数或哪几行代码？",
+    "除了空字符串，是否还有其他之前被忽略但现在会引发异常的值？"
+  ],
+  "raw": {
+    "issue_summary": "If-Modified-Since 头部传入空字符串时，原本会被忽略，但现在会引发异常。",
+    "trigger_condition": {
+      "text": "向静态文件视图发送 GET 请求，并在 HTTP 头部设置 If-Modified-Since 为空字符串。",
+      "evidence": [
+        "Issue 描述：'Empty string used to be ignored for If-Modified-Since header, but now raises exception'",
+        "相关测试 1-4 展示了通过 HTTP_IF_MODIFIED_SINCE 参数设置该头部进行测试的模式。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "处理请求时引发异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'now raises exception'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "If-Modified-Since 头部传入空字符串时，应像处理无效日期一样被优雅地忽略，并正常返回文件内容。",
+      "evidence": [
+        "Issue 描述：'Empty string used to be ignored for If-Modified-Since header'",
+        "相关测试 1 和 2 的文档字符串：'Handle bogus If-Modified-Since values gracefully'，表明无效值应被优雅处理。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "was_modified_since",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 5 直接测试此函数，它很可能负责解析 If-Modified-Since 头部并判断文件是否被修改。"
+      },
+      {
+        "name": "StaticTests.client.get",
+        "kind": "method",
+        "source_path": "",
+        "reason": "所有相关测试都通过此方法发起请求并设置 HTTP_IF_MODIFIED_SINCE 头部，这是触发缺陷的入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "处理 If-Modified-Since 头部解析的逻辑",
+        "lines": "",
+        "reason": "Issue 提到异常是在特定提交 d6aff369ad3 后引入的，表明解析逻辑发生了变化，无法处理空字符串。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "StaticTests.test_invalid_if_modified_since",
+        "test_file": "tests/view_tests/tests/test_static.py",
+        "why_relevant": "它专门测试对无效 If-Modified-Since 值的优雅处理，与当前 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试类 StaticTests",
+          "装饰器 @override_settings",
+          "使用 client.get 并设置 HTTP_IF_MODIFIED_SINCE 头部的模式",
+          "断言文件内容被正确返回的 assert 风格"
+        ],
+        "possible_gap": "它测试的是格式错误的日期字符串（如'Mon, 28 May 999999999999 28:25:26 GMT'），而非空字符串。"
+      },
+      {
+        "test_name": "StaticTests.test_invalid_if_modified_since2",
+        "test_file": "tests/view_tests/tests/test_static.py",
+        "why_relevant": "同样测试对无效 If-Modified-Since 值的优雅处理，提供了另一个无效值的例子。",
+        "reusable_parts": [
+          "测试类 StaticTests",
+          "装饰器 @override_settings",
+          "使用 client.get 并设置 HTTP_IF_MODIFIED_SINCE 头部的模式",
+          "断言文件内容被正确返回的 assert 风格"
+        ],
+        "possible_gap": "它测试的是另一个格式错误的日期字符串，而非空字符串。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "invalid_date = \"Mon, 28 May 999999999999 28:25:26 GMT\"",
+        "target_pattern": "invalid_date = \"\"",
+        "reason": "根据 Issue，空字符串是新的触发缺陷的输入，而现有测试只覆盖了非空但格式错误的字符串。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 client.get 时是否引发异常",
+        "reason": "Issue 明确指出当前行为会引发异常，这是判断缺陷是否被触发的直接标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "response 的类型和状态码",
+        "reason": "在预期行为下，应返回一个包含文件内容的正常 HttpResponse，而非异常或 HttpResponseNotModified。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "请求应成功完成，不引发异常，并返回文件内容。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的异常消息或堆栈跟踪，因为具体异常类型可能未知或变化。",
+        "reason": "Issue 的核心是行为从“忽略”变为“异常”，因此稳定的断言是验证没有异常发生，且响应正常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 StaticTests 测试类及其 client，并配置 DEBUG=True 和正确的 ROOT_URLCONF 以访问静态文件视图。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要一个静态文件（如 file.txt）用于测试。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "引发异常的具体类型是什么？",
+      "缺陷的确切位置在哪个源文件、哪个函数或哪几行代码？",
+      "除了空字符串，是否还有其他之前被忽略但现在会引发异常的值？"
+    ]
+  }
+}

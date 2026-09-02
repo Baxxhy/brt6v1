@@ -1,0 +1,266 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-26020",
+  "issue_summary": "使用非默认轴类（如 cartopy GeoAxes）创建 AxesGrid 时，在 _tick_only 函数中因 axis 属性行为不同而引发 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要安装 cartopy 库或模拟 GeoAxes 类。在测试环境中可能需要跳过或标记为需要外部依赖。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 matplotlib 的 pyplot 接口创建图形 (plt.figure)。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_axes_class_tuple",
+        "test_file": "lib/mpl_toolkits/axes_grid1/tests/test_axes_grid1.py",
+        "why_relevant": "它直接测试了使用 axes_class 参数（以元组形式）创建 AxesGrid，与 Issue 触发条件高度相似。",
+        "reusable_parts": [
+          "imports (plt, AxesGrid)",
+          "fig = plt.figure()",
+          "axes_class = (..., {}) 的构造模式",
+          "gr = AxesGrid(fig, 111, nrows_ncols=(1, 1), axes_class=axes_class) 的调用方式。"
+        ],
+        "possible_gap": "它使用的是 mpl_toolkits.axes_grid1.mpl_axes.Axes（标准轴类），其 axis 属性行为正常，因此不会触发 GeoAxes 特有的错误。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 AxesGrid 构造函数，并传入一个自定义的 axes_class 参数，该参数是一个元组，其中第一个元素是轴类（如 cartopy.mpl.geoaxes.GeoAxes），第二个元素是参数字典。",
+      "evidence": [
+        "Issue 中提供的代码片段：axes_class = (GeoAxes, dict(map_projection=PlateCarree())) 和 gr = AxesGrid(fig, 111, nrows_ncols=(1,1), axes_class=axes_class)。",
+        "相关测试 1 展示了使用 mpl_toolkits.axes_grid1.mpl_axes.Axes 作为 axes_class 的正常情况。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: 'method' object is not subscriptable，发生在 _tick_only 函数中尝试访问 ax.axis[\"bottom\"] 时。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示：File \".../axes_grid.py\", line 27, in _tick_only ax.axis[\"bottom\"].toggle(...) TypeError: 'method' object is not subscriptable。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AxesGrid.__init__",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "reason": "Issue 中触发错误的构造函数，负责初始化 AxesGrid。"
+      },
+      {
+        "name": "AxesGrid.set_label_mode",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "reason": "错误堆栈显示 __init__ 调用了 set_label_mode，进而调用 _tick_only。"
+      },
+      {
+        "name": "_tick_only",
+        "kind": "function",
+        "source_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "reason": "直接引发 TypeError 的函数，尝试访问 ax.axis[\"bottom\"]。"
+      },
+      {
+        "name": "cartopy.mpl.geoaxes.GeoAxes",
+        "kind": "class",
+        "source_path": "lib/matplotlib/projections/geo.py",
+        "reason": "Issue 中使用的自定义轴类，其 axis 属性行为与标准轴类不同。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "object": "_tick_only",
+        "lines": "13-17",
+        "reason": "该函数直接访问 ax.axis[\"bottom\"] 和 ax.axis[\"left\"]，假设 ax.axis 是一个可下标访问的对象（如字典），但 GeoAxes 的 axis 可能是一个方法。"
+      },
+      {
+        "path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "object": "AxesGrid.set_label_mode",
+        "lines": "247-297",
+        "reason": "该方法调用了 _tick_only，并可能假设所有传入的轴对象都具有兼容的 axis 属性。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "axes_class = (mpl_toolkits.axes_grid1.mpl_axes.Axes, {})",
+        "target_pattern": "axes_class = (cartopy.mpl.geoaxes.GeoAxes, dict(map_projection=PlateCarree()))",
+        "reason": "将 axes_class 从标准轴类替换为 Issue 中使用的 GeoAxes，这是触发错误的关键变异。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "AxesGrid 应能接受自定义轴类（如 GeoAxes）作为 axes_class 参数，并成功创建图形，不引发 TypeError。",
+      "evidence": [
+        "Issue 标题和摘要暗示了期望功能：使用非默认轴类创建 AxesGrid。",
+        "相关测试 1 表明 AxesGrid 设计上支持通过 axes_class 参数传入自定义轴类。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 AxesGrid(...) 时是否引发 TypeError，特别是关于 'method' object is not subscriptable 的消息。",
+        "reason": "Issue 的核心错误现象就是这个异常。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(ax.axis) 在 _tick_only 函数被调用时的值（对于 GeoAxes 和标准 Axes）。",
+        "reason": "Issue 指出 axis 属性在 GeoAxes 中是 callable（方法），而在标准 Axes 中是可下标访问的对象，这是错误的根源。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 GeoAxes 作为 axes_class 创建 AxesGrid 时，不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体措辞可能随版本变化。",
+        "reason": "Issue 明确报告了 TypeError，修复后该异常应消失。因此，在修复版本中，断言不应引发异常（或引发其他特定异常）。注意：根据规则9，修复后应正常，所以最终断言不应是 raises TypeError。这里 preferred_assertion_style 应反映修复后的期望（例如无异常），但当前为标记修复前的错误，我们使用 raises 来捕获错误。在生成最终测试时，需要根据修复状态调整极性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "GeoAxes 的 axis 属性的确切类型和结构是什么？它是否完全缺失可下标访问的接口，还是部分支持？",
+    "除了 GeoAxes，还有哪些自定义轴类可能表现出相同的问题？",
+    "AxesGrid 内部是否还有其他地方对 axis 属性做了类似的假设？",
+    "修复方案是修改 _tick_only 以适应不同的 axis 属性，还是修改 GeoAxes 以提供兼容接口？"
+  ],
+  "raw": {
+    "issue_summary": "使用非默认轴类（如 cartopy GeoAxes）创建 AxesGrid 时，在 _tick_only 函数中因 axis 属性行为不同而引发 TypeError。",
+    "trigger_condition": {
+      "text": "使用 AxesGrid 构造函数，并传入一个自定义的 axes_class 参数，该参数是一个元组，其中第一个元素是轴类（如 cartopy.mpl.geoaxes.GeoAxes），第二个元素是参数字典。",
+      "evidence": [
+        "Issue 中提供的代码片段：axes_class = (GeoAxes, dict(map_projection=PlateCarree())) 和 gr = AxesGrid(fig, 111, nrows_ncols=(1,1), axes_class=axes_class)。",
+        "相关测试 1 展示了使用 mpl_toolkits.axes_grid1.mpl_axes.Axes 作为 axes_class 的正常情况。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: 'method' object is not subscriptable，发生在 _tick_only 函数中尝试访问 ax.axis[\"bottom\"] 时。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈跟踪显示：File \".../axes_grid.py\", line 27, in _tick_only ax.axis[\"bottom\"].toggle(...) TypeError: 'method' object is not subscriptable。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "AxesGrid 应能接受自定义轴类（如 GeoAxes）作为 axes_class 参数，并成功创建图形，不引发 TypeError。",
+      "evidence": [
+        "Issue 标题和摘要暗示了期望功能：使用非默认轴类创建 AxesGrid。",
+        "相关测试 1 表明 AxesGrid 设计上支持通过 axes_class 参数传入自定义轴类。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "AxesGrid.__init__",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "reason": "Issue 中触发错误的构造函数，负责初始化 AxesGrid。"
+      },
+      {
+        "name": "AxesGrid.set_label_mode",
+        "kind": "method",
+        "source_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "reason": "错误堆栈显示 __init__ 调用了 set_label_mode，进而调用 _tick_only。"
+      },
+      {
+        "name": "_tick_only",
+        "kind": "function",
+        "source_path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "reason": "直接引发 TypeError 的函数，尝试访问 ax.axis[\"bottom\"]。"
+      },
+      {
+        "name": "cartopy.mpl.geoaxes.GeoAxes",
+        "kind": "class",
+        "source_path": "lib/matplotlib/projections/geo.py",
+        "reason": "Issue 中使用的自定义轴类，其 axis 属性行为与标准轴类不同。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "object": "_tick_only",
+        "lines": "13-17",
+        "reason": "该函数直接访问 ax.axis[\"bottom\"] 和 ax.axis[\"left\"]，假设 ax.axis 是一个可下标访问的对象（如字典），但 GeoAxes 的 axis 可能是一个方法。"
+      },
+      {
+        "path": "lib/mpl_toolkits/axes_grid1/axes_grid.py",
+        "object": "AxesGrid.set_label_mode",
+        "lines": "247-297",
+        "reason": "该方法调用了 _tick_only，并可能假设所有传入的轴对象都具有兼容的 axis 属性。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_axes_class_tuple",
+        "test_file": "lib/mpl_toolkits/axes_grid1/tests/test_axes_grid1.py",
+        "why_relevant": "它直接测试了使用 axes_class 参数（以元组形式）创建 AxesGrid，与 Issue 触发条件高度相似。",
+        "reusable_parts": [
+          "imports (plt, AxesGrid)",
+          "fig = plt.figure()",
+          "axes_class = (..., {}) 的构造模式",
+          "gr = AxesGrid(fig, 111, nrows_ncols=(1, 1), axes_class=axes_class) 的调用方式。"
+        ],
+        "possible_gap": "它使用的是 mpl_toolkits.axes_grid1.mpl_axes.Axes（标准轴类），其 axis 属性行为正常，因此不会触发 GeoAxes 特有的错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "axes_class = (mpl_toolkits.axes_grid1.mpl_axes.Axes, {})",
+        "target_pattern": "axes_class = (cartopy.mpl.geoaxes.GeoAxes, dict(map_projection=PlateCarree()))",
+        "reason": "将 axes_class 从标准轴类替换为 Issue 中使用的 GeoAxes，这是触发错误的关键变异。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 AxesGrid(...) 时是否引发 TypeError，特别是关于 'method' object is not subscriptable 的消息。",
+        "reason": "Issue 的核心错误现象就是这个异常。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(ax.axis) 在 _tick_only 函数被调用时的值（对于 GeoAxes 和标准 Axes）。",
+        "reason": "Issue 指出 axis 属性在 GeoAxes 中是 callable（方法），而在标准 Axes 中是可下标访问的对象，这是错误的根源。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 GeoAxes 作为 axes_class 创建 AxesGrid 时，不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为具体措辞可能随版本变化。",
+        "reason": "Issue 明确报告了 TypeError，修复后该异常应消失。因此，在修复版本中，断言不应引发异常（或引发其他特定异常）。注意：根据规则9，修复后应正常，所以最终断言不应是 raises TypeError。这里 preferred_assertion_style 应反映修复后的期望（例如无异常），但当前为标记修复前的错误，我们使用 raises 来捕获错误。在生成最终测试时，需要根据修复状态调整极性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要安装 cartopy 库或模拟 GeoAxes 类。在测试环境中可能需要跳过或标记为需要外部依赖。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 matplotlib 的 pyplot 接口创建图形 (plt.figure)。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "GeoAxes 的 axis 属性的确切类型和结构是什么？它是否完全缺失可下标访问的接口，还是部分支持？",
+      "除了 GeoAxes，还有哪些自定义轴类可能表现出相同的问题？",
+      "AxesGrid 内部是否还有其他地方对 axis 属性做了类似的假设？",
+      "修复方案是修改 _tick_only 以适应不同的 axis 属性，还是修改 GeoAxes 以提供兼容接口？"
+    ]
+  }
+}

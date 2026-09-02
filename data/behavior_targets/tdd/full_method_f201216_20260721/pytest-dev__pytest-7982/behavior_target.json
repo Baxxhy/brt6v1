@@ -1,0 +1,280 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-7982",
+  "issue_summary": "pytest 6.1.0 版本后，测试目录中的符号链接目录在收集测试时被跳过，而未被正常跟随和收集。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture 创建临时目录和文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 symlink_or_skip 辅助函数创建符号链接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_collect_symlink_file_arg",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "测试了直接符号链接文件的收集，与符号链接相关。",
+        "reusable_parts": [
+          "symlink_or_skip 使用",
+          "testdir.runpytest 调用",
+          "assert result.ret == 0"
+        ],
+        "possible_gap": "测试的是文件符号链接，而非目录符号链接。"
+      },
+      {
+        "test_name": "test_collect_sub_with_symlinks",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "测试了包含符号链接文件的子目录收集，涉及符号链接。",
+        "reusable_parts": [
+          "symlink_or_skip 使用",
+          "testdir.runpytest 调用",
+          "fnmatch_lines 断言"
+        ],
+        "possible_gap": "测试的是文件符号链接和损坏符号链接，而非目录符号链接。"
+      },
+      {
+        "test_name": "test_conftest_symlink_files",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "测试了符号链接的 conftest.py 文件，涉及符号链接和测试收集。",
+        "reusable_parts": [
+          "symlink_or_skip 使用",
+          "testdir.runpytest 调用",
+          "assert result.ret == ExitCode.OK"
+        ],
+        "possible_gap": "测试的是文件符号链接，且主要关注 conftest 加载，而非目录符号链接的测试收集。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在测试目录中存在指向目录的符号链接，并运行 pytest 进行测试收集。",
+      "evidence": [
+        "Issue 描述：'When there is a symlink to a directory in a test directory, is is just skipped over'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "符号链接目录被跳过，其中的测试未被收集。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'it is just skipped over'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "symlink_or_skip",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中用于创建符号链接的辅助函数，与触发条件相关。"
+      },
+      {
+        "name": "testdir.runpytest",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于运行 pytest 的方法，是触发测试收集的入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 提到在提交 b473e515bc57ff1133fe650f1e7e6d7e22e5d841 中添加了 `follow_symlinks=False`，这可能是导致问题的位置。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中创建的是指向文件的符号链接。",
+        "target_pattern": "创建指向目录的符号链接。",
+        "reason": "Issue 明确指出问题是符号链接目录被跳过，而非文件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能未显式设置 follow_symlinks 参数。",
+        "target_pattern": "可能需要模拟导致 follow_symlinks=False 的配置或代码路径。",
+        "reason": "Issue 提到回归是由于添加了 `follow_symlinks=False`。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "符号链接目录应被跟随，其中的测试应像普通目录一样被正常收集。",
+      "evidence": [
+        "Issue 描述：'but it should be followed and collected as usual'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 收集后输出的测试节点列表（例如通过 -v 输出）。",
+        "reason": "可以观察符号链接目录中的测试是否出现在收集列表中。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "testdir.runpytest 返回的 result 对象中的 ret 属性（退出码）和 stdout 内容。",
+        "reason": "可以判断测试是否通过，以及收集过程是否有错误或遗漏。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "符号链接目录中的测试被成功收集并执行。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的节点 ID 字符串，因为路径可能变化。",
+        "reason": "应验证预期测试出现在输出中，而不依赖精确的完整路径字符串。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致 `follow_symlinks=False` 被添加的具体代码位置和上下文。",
+    "符号链接目录的具体结构（例如是否包含子目录、__init__.py 文件等）是否影响问题触发。",
+    "除了目录符号链接被跳过外，是否还有其他副作用。"
+  ],
+  "raw": {
+    "issue_summary": "pytest 6.1.0 版本后，测试目录中的符号链接目录在收集测试时被跳过，而未被正常跟随和收集。",
+    "trigger_condition": {
+      "text": "在测试目录中存在指向目录的符号链接，并运行 pytest 进行测试收集。",
+      "evidence": [
+        "Issue 描述：'When there is a symlink to a directory in a test directory, is is just skipped over'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "符号链接目录被跳过，其中的测试未被收集。",
+      "symptom_type": "unknown",
+      "evidence": [
+        "Issue 描述：'it is just skipped over'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "符号链接目录应被跟随，其中的测试应像普通目录一样被正常收集。",
+      "evidence": [
+        "Issue 描述：'but it should be followed and collected as usual'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "symlink_or_skip",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试中用于创建符号链接的辅助函数，与触发条件相关。"
+      },
+      {
+        "name": "testdir.runpytest",
+        "kind": "method",
+        "source_path": "",
+        "reason": "相关测试中用于运行 pytest 的方法，是触发测试收集的入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "Issue 提到在提交 b473e515bc57ff1133fe650f1e7e6d7e22e5d841 中添加了 `follow_symlinks=False`，这可能是导致问题的位置。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_collect_symlink_file_arg",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "测试了直接符号链接文件的收集，与符号链接相关。",
+        "reusable_parts": [
+          "symlink_or_skip 使用",
+          "testdir.runpytest 调用",
+          "assert result.ret == 0"
+        ],
+        "possible_gap": "测试的是文件符号链接，而非目录符号链接。"
+      },
+      {
+        "test_name": "test_collect_sub_with_symlinks",
+        "test_file": "testing/test_collection.py",
+        "why_relevant": "测试了包含符号链接文件的子目录收集，涉及符号链接。",
+        "reusable_parts": [
+          "symlink_or_skip 使用",
+          "testdir.runpytest 调用",
+          "fnmatch_lines 断言"
+        ],
+        "possible_gap": "测试的是文件符号链接和损坏符号链接，而非目录符号链接。"
+      },
+      {
+        "test_name": "test_conftest_symlink_files",
+        "test_file": "testing/test_conftest.py",
+        "why_relevant": "测试了符号链接的 conftest.py 文件，涉及符号链接和测试收集。",
+        "reusable_parts": [
+          "symlink_or_skip 使用",
+          "testdir.runpytest 调用",
+          "assert result.ret == ExitCode.OK"
+        ],
+        "possible_gap": "测试的是文件符号链接，且主要关注 conftest 加载，而非目录符号链接的测试收集。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中创建的是指向文件的符号链接。",
+        "target_pattern": "创建指向目录的符号链接。",
+        "reason": "Issue 明确指出问题是符号链接目录被跳过，而非文件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能未显式设置 follow_symlinks 参数。",
+        "target_pattern": "可能需要模拟导致 follow_symlinks=False 的配置或代码路径。",
+        "reason": "Issue 提到回归是由于添加了 `follow_symlinks=False`。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "pytest 收集后输出的测试节点列表（例如通过 -v 输出）。",
+        "reason": "可以观察符号链接目录中的测试是否出现在收集列表中。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "testdir.runpytest 返回的 result 对象中的 ret 属性（退出码）和 stdout 内容。",
+        "reason": "可以判断测试是否通过，以及收集过程是否有错误或遗漏。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "符号链接目录中的测试被成功收集并执行。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、硬编码的节点 ID 字符串，因为路径可能变化。",
+        "reason": "应验证预期测试出现在输出中，而不依赖精确的完整路径字符串。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 testdir fixture 创建临时目录和文件。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 symlink_or_skip 辅助函数创建符号链接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致 `follow_symlinks=False` 被添加的具体代码位置和上下文。",
+      "符号链接目录的具体结构（例如是否包含子目录、__init__.py 文件等）是否影响问题触发。",
+      "除了目录符号链接被跳过外，是否还有其他副作用。"
+    ]
+  }
+}

@@ -1,0 +1,366 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13033",
+  "issue_summary": "当对自引用外键的 '_id' 字段进行 order_by 时，会生成错误的 SQL 查询，包含不必要的 JOIN 和错误的排序方向。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义 Issue 中描述的 OneModel 和 TwoModel，并设置 OneModel 的 Meta.ordering。可能需要一个测试数据库来创建这些模型和插入测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 类，因为它会处理数据库事务。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "OrderingTests.test_order_by_fk_attname",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试直接验证了通过外键的属性名（如 'author_id'）进行 order_by 可以防止查询继承相关模型的排序选项。这与 Issue 的核心问题（order_by(\"record__root_id\") 错误地继承了 OneModel 的 ordering）高度相关。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "模型创建和保存模式",
+          "assertQuerysetEqual 断言风格",
+          "使用 attrgetter 提取对象属性进行断言"
+        ],
+        "possible_gap": "该测试使用的是一个普通的外键（Author），而不是自引用外键。它没有测试 filter 与 order_by 组合，也没有检查生成的 SQL 字符串。"
+      },
+      {
+        "test_name": "JoinReuseTest.test_fk_reuse_order_by",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试检查在特定查询中 JOIN 的数量，这与 Issue 中观察到的“不必要的额外 JOIN”直接相关。",
+        "reusable_parts": [
+          "通过 str(qs.query).count('JOIN') 来断言 JOIN 数量的模式",
+          "测试类结构"
+        ],
+        "possible_gap": "该测试的模型关系不是自引用的，且没有涉及 '_id' 属性名的排序。"
+      },
+      {
+        "test_name": "SelfReferentialFKTests.test_ticket_24748",
+        "test_file": "tests/aggregation_regress/tests.py",
+        "why_relevant": "该测试使用了自引用外键模型（SelfRefFK），与 Issue 中的 OneModel 结构相似。",
+        "reusable_parts": [
+          "自引用外键模型的创建方式",
+          "TestCase 框架"
+        ],
+        "possible_gap": "该测试关注的是聚合（annotate/Count），而不是 order_by 和 JOIN 生成问题。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "构建一个查询集，该查询集通过外键关联到一个具有自引用外键（root）的模型（OneModel），并使用 filter 筛选该模型的某个字段（oneval），然后使用 order_by(\"record__root_id\") 或 order_by(\"record__root\") 进行排序。",
+      "evidence": [
+        "Issue 中描述了模型定义：OneModel.root 是自引用外键。",
+        "Issue 中给出了触发查询：TwoModel.objects.filter(record__oneval__in=[1,2,3]).order_by(\"record__root_id\")。",
+        "相关测试 1 (test_order_by_fk_attname) 表明 order_by 使用外键属性名（如 'author_id'）是常见操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询包含一个不必要的 LEFT OUTER JOIN，并且 ORDER BY 子句使用了错误的排序方向（DESC），而不是预期的 ASC。当使用 order_by(\"-record__root_id\") 时，排序方向又变成了 ASC。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中打印的 SQL 显示：'LEFT OUTER JOIN \"orion_onemodel\" T3' 和 'ORDER BY T3.\"id\" DESC'。",
+        "Issue 指出：'The query has an unexpected DESCENDING sort.' 和 'the query has two JOINS, which is unnecessary.'",
+        "相关测试 4 (test_fk_reuse_order_by) 和 5 (test_order_by_join_unref) 表明 JOIN 的数量和类型是测试关注点。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于构建查询集的起始方法。"
+      },
+      {
+        "name": "QuerySet.order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是 order_by 方法在特定条件下产生错误行为。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中提到使用 annotate 可以绕过该问题，是理解正确行为的关键。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "在 annotate 变通方法中使用了 F 表达式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.order_by",
+        "lines": "1129-1136",
+        "reason": "order_by 方法负责处理排序逻辑，特别是当排序字段涉及自引用外键的 '_id' 属性时，可能错误地继承了相关模型的 Meta.ordering 或生成了错误的 JOIN。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "实际的 SQL 生成（包括 JOIN 和 ORDER BY 子句）发生在 Query 类中。Issue 中错误的 JOIN 和排序方向暗示了 SQL 编译逻辑存在问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 order_by 的参数可能是普通字段（如 'id'）或非自引用外键的属性名（如 'author_id'）。",
+        "target_pattern": "将 order_by 的参数改为指向自引用外键模型的 '_id' 属性名，例如 'record__root_id'。",
+        "reason": "Issue 表明问题仅在排序字段是自引用外键的 '_id' 属性时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中的模型可能没有设置 Meta.ordering，或者 ordering 不涉及自引用关系。",
+        "target_pattern": "确保被查询的模型（如 OneModel）设置了 Meta.ordering，且排序字段可能与自引用路径相关（如 ordering = (\"-id\",)）。",
+        "reason": "Issue 暗示错误的 DESC 排序可能来自 OneModel 的默认排序，但 order_by 应覆盖它。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能只使用 order_by，或 filter 条件简单。",
+        "target_pattern": "在 order_by 之前添加一个 filter，该 filter 通过外键链深入到具有自引用外键的模型（如 filter(record__oneval__in=[...])）。",
+        "reason": "Issue 中的错误 SQL 是在 filter 和 order_by 组合时出现的。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "order_by(\"record__root_id\") 应生成一个只包含必要 INNER JOIN 的 SQL 查询，并按 \"orion_onemodel\".\"root_id\" 字段进行 ASC 排序，且不应受到 OneModel 的 Meta.ordering 设置的影响。",
+      "evidence": [
+        "Issue 中描述了正确的 SQL 应如使用 order_by(\"record__root__id\") 或使用 annotate 变通方法时所示：单 INNER JOIN 和 ORDER BY \"orion_onemodel\".\"root_id\" ASC。",
+        "相关测试 1 (test_order_by_fk_attname) 的文档字符串指出：'ordering by a foreign key by its attribute name prevents the query from inheriting its related model ordering option'。",
+        "相关测试 3 (test_order_by_override) 表明后续的 order_by 应覆盖之前的排序。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "str(qs.query)",
+        "reason": "Issue 的核心错误体现在生成的 SQL 字符串中：JOIN 的数量和 ORDER BY 子句的字段及方向。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "list(qs.values_list('id', flat=True)) 或 queryset 的结果顺序",
+        "reason": "错误的 SQL 可能导致错误的查询结果顺序，这是功能的最终体现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 查询不应包含不必要的 LEFT OUTER JOIN（针对自引用表）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为表名和别名可能变化。",
+        "reason": "Issue 明确指出查询包含一个不必要的额外 JOIN。修复后，对于 order_by(\"record__root_id\")，应该只有一个 INNER JOIN（用于 filter 条件）。"
+      },
+      {
+        "assertion_goal": "ORDER BY 子句应引用正确的表字段（如 \"orion_onemodel\".\"root_id\"），而不是通过额外 JOIN 引入的别名表字段（如 T3.\"id\"）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 ORDER BY 字符串。",
+        "reason": "Issue 显示错误的 ORDER BY 使用了 T3.\"id\"，而正确的应使用 root_id 字段。"
+      },
+      {
+        "assertion_goal": "当使用 order_by(\"record__root_id\") 时，排序方向应为 ASC，而不是 DESC。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "依赖数据库默认排序的断言。",
+        "reason": "Issue 显示错误的 SQL 包含了 DESC，这似乎错误地继承了模型 Meta.ordering 的 \"-id\"。显式 order_by 应指定方向或默认为 ASC。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "导致额外 JOIN 和错误排序方向的确切代码路径是什么？是 order_by 方法、SQL 编译器还是其他地方？",
+    "问题是否只出现在自引用外键的 '_id' 属性上？使用 order_by(\"record__root\") 也会产生相同错误 SQL，这是否是同一根本原因？",
+    "OneModel 的 Meta.ordering 设置是否是触发问题的必要条件？如果移除 ordering，错误是否还会发生？",
+    "除了检查 SQL 字符串，是否还有其他更稳定的方式来断言 JOIN 和排序行为？"
+  ],
+  "raw": {
+    "issue_summary": "当对自引用外键的 '_id' 字段进行 order_by 时，会生成错误的 SQL 查询，包含不必要的 JOIN 和错误的排序方向。",
+    "trigger_condition": {
+      "text": "构建一个查询集，该查询集通过外键关联到一个具有自引用外键（root）的模型（OneModel），并使用 filter 筛选该模型的某个字段（oneval），然后使用 order_by(\"record__root_id\") 或 order_by(\"record__root\") 进行排序。",
+      "evidence": [
+        "Issue 中描述了模型定义：OneModel.root 是自引用外键。",
+        "Issue 中给出了触发查询：TwoModel.objects.filter(record__oneval__in=[1,2,3]).order_by(\"record__root_id\")。",
+        "相关测试 1 (test_order_by_fk_attname) 表明 order_by 使用外键属性名（如 'author_id'）是常见操作。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询包含一个不必要的 LEFT OUTER JOIN，并且 ORDER BY 子句使用了错误的排序方向（DESC），而不是预期的 ASC。当使用 order_by(\"-record__root_id\") 时，排序方向又变成了 ASC。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中打印的 SQL 显示：'LEFT OUTER JOIN \"orion_onemodel\" T3' 和 'ORDER BY T3.\"id\" DESC'。",
+        "Issue 指出：'The query has an unexpected DESCENDING sort.' 和 'the query has two JOINS, which is unnecessary.'",
+        "相关测试 4 (test_fk_reuse_order_by) 和 5 (test_order_by_join_unref) 表明 JOIN 的数量和类型是测试关注点。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "order_by(\"record__root_id\") 应生成一个只包含必要 INNER JOIN 的 SQL 查询，并按 \"orion_onemodel\".\"root_id\" 字段进行 ASC 排序，且不应受到 OneModel 的 Meta.ordering 设置的影响。",
+      "evidence": [
+        "Issue 中描述了正确的 SQL 应如使用 order_by(\"record__root__id\") 或使用 annotate 变通方法时所示：单 INNER JOIN 和 ORDER BY \"orion_onemodel\".\"root_id\" ASC。",
+        "相关测试 1 (test_order_by_fk_attname) 的文档字符串指出：'ordering by a foreign key by its attribute name prevents the query from inheriting its related model ordering option'。",
+        "相关测试 3 (test_order_by_override) 表明后续的 order_by 应覆盖之前的排序。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.filter",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中用于构建查询集的起始方法。"
+      },
+      {
+        "name": "QuerySet.order_by",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 的核心是 order_by 方法在特定条件下产生错误行为。"
+      },
+      {
+        "name": "QuerySet.annotate",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中提到使用 annotate 可以绕过该问题，是理解正确行为的关键。"
+      },
+      {
+        "name": "F",
+        "kind": "class",
+        "source_path": "django/db/models/expressions.py",
+        "reason": "在 annotate 变通方法中使用了 F 表达式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet.order_by",
+        "lines": "1129-1136",
+        "reason": "order_by 方法负责处理排序逻辑，特别是当排序字段涉及自引用外键的 '_id' 属性时，可能错误地继承了相关模型的 Meta.ordering 或生成了错误的 JOIN。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "实际的 SQL 生成（包括 JOIN 和 ORDER BY 子句）发生在 Query 类中。Issue 中错误的 JOIN 和排序方向暗示了 SQL 编译逻辑存在问题。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "OrderingTests.test_order_by_fk_attname",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试直接验证了通过外键的属性名（如 'author_id'）进行 order_by 可以防止查询继承相关模型的排序选项。这与 Issue 的核心问题（order_by(\"record__root_id\") 错误地继承了 OneModel 的 ordering）高度相关。",
+        "reusable_parts": [
+          "TestCase 框架",
+          "模型创建和保存模式",
+          "assertQuerysetEqual 断言风格",
+          "使用 attrgetter 提取对象属性进行断言"
+        ],
+        "possible_gap": "该测试使用的是一个普通的外键（Author），而不是自引用外键。它没有测试 filter 与 order_by 组合，也没有检查生成的 SQL 字符串。"
+      },
+      {
+        "test_name": "JoinReuseTest.test_fk_reuse_order_by",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "该测试检查在特定查询中 JOIN 的数量，这与 Issue 中观察到的“不必要的额外 JOIN”直接相关。",
+        "reusable_parts": [
+          "通过 str(qs.query).count('JOIN') 来断言 JOIN 数量的模式",
+          "测试类结构"
+        ],
+        "possible_gap": "该测试的模型关系不是自引用的，且没有涉及 '_id' 属性名的排序。"
+      },
+      {
+        "test_name": "SelfReferentialFKTests.test_ticket_24748",
+        "test_file": "tests/aggregation_regress/tests.py",
+        "why_relevant": "该测试使用了自引用外键模型（SelfRefFK），与 Issue 中的 OneModel 结构相似。",
+        "reusable_parts": [
+          "自引用外键模型的创建方式",
+          "TestCase 框架"
+        ],
+        "possible_gap": "该测试关注的是聚合（annotate/Count），而不是 order_by 和 JOIN 生成问题。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中 order_by 的参数可能是普通字段（如 'id'）或非自引用外键的属性名（如 'author_id'）。",
+        "target_pattern": "将 order_by 的参数改为指向自引用外键模型的 '_id' 属性名，例如 'record__root_id'。",
+        "reason": "Issue 表明问题仅在排序字段是自引用外键的 '_id' 属性时触发。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中的模型可能没有设置 Meta.ordering，或者 ordering 不涉及自引用关系。",
+        "target_pattern": "确保被查询的模型（如 OneModel）设置了 Meta.ordering，且排序字段可能与自引用路径相关（如 ordering = (\"-id\",)）。",
+        "reason": "Issue 暗示错误的 DESC 排序可能来自 OneModel 的默认排序，但 order_by 应覆盖它。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能只使用 order_by，或 filter 条件简单。",
+        "target_pattern": "在 order_by 之前添加一个 filter，该 filter 通过外键链深入到具有自引用外键的模型（如 filter(record__oneval__in=[...])）。",
+        "reason": "Issue 中的错误 SQL 是在 filter 和 order_by 组合时出现的。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "str(qs.query)",
+        "reason": "Issue 的核心错误体现在生成的 SQL 字符串中：JOIN 的数量和 ORDER BY 子句的字段及方向。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "list(qs.values_list('id', flat=True)) 或 queryset 的结果顺序",
+        "reason": "错误的 SQL 可能导致错误的查询结果顺序，这是功能的最终体现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 查询不应包含不必要的 LEFT OUTER JOIN（针对自引用表）。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为表名和别名可能变化。",
+        "reason": "Issue 明确指出查询包含一个不必要的额外 JOIN。修复后，对于 order_by(\"record__root_id\")，应该只有一个 INNER JOIN（用于 filter 条件）。"
+      },
+      {
+        "assertion_goal": "ORDER BY 子句应引用正确的表字段（如 \"orion_onemodel\".\"root_id\"），而不是通过额外 JOIN 引入的别名表字段（如 T3.\"id\"）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的 ORDER BY 字符串。",
+        "reason": "Issue 显示错误的 ORDER BY 使用了 T3.\"id\"，而正确的应使用 root_id 字段。"
+      },
+      {
+        "assertion_goal": "当使用 order_by(\"record__root_id\") 时，排序方向应为 ASC，而不是 DESC。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "依赖数据库默认排序的断言。",
+        "reason": "Issue 显示错误的 SQL 包含了 DESC，这似乎错误地继承了模型 Meta.ordering 的 \"-id\"。显式 order_by 应指定方向或默认为 ASC。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义 Issue 中描述的 OneModel 和 TwoModel，并设置 OneModel 的 Meta.ordering。可能需要一个测试数据库来创建这些模型和插入测试数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 类，因为它会处理数据库事务。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "导致额外 JOIN 和错误排序方向的确切代码路径是什么？是 order_by 方法、SQL 编译器还是其他地方？",
+      "问题是否只出现在自引用外键的 '_id' 属性上？使用 order_by(\"record__root\") 也会产生相同错误 SQL，这是否是同一根本原因？",
+      "OneModel 的 Meta.ordering 设置是否是触发问题的必要条件？如果移除 ordering，错误是否还会发生？",
+      "除了检查 SQL 字符串，是否还有其他更稳定的方式来断言 JOIN 和排序行为？"
+    ]
+  }
+}

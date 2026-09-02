@@ -1,0 +1,322 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15347",
+  "issue_summary": "Messages 框架在序列化/反序列化 extra_tags 为空字符串时错误地将其转换为 None。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要使用 SimpleTestCase 或 TestCase，并导入相关模块：Message, MessageEncoder, MessageDecoder, constants。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 Django settings 以允许导入相关模块，如 Issue 中所示。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_json_encoder_decoder",
+        "test_file": "tests/messages_tests/test_cookie.py",
+        "why_relevant": "它直接测试了 MessageEncoder 和 MessageDecoder 对包含 Message 对象的数据结构的编码/解码，并断言相等。",
+        "reusable_parts": [
+          "imports (Message, MessageEncoder, MessageDecoder, constants)",
+          "使用 MessageEncoder().encode() 和 json.loads(..., cls=MessageDecoder)",
+          "使用 self.assertEqual 比较原始和反序列化后的对象。"
+        ],
+        "possible_gap": "该测试使用的 Message 对象没有显式设置 extra_tags（可能使用默认值 None），因此可能无法复现 extra_tags='' 的 bug。"
+      },
+      {
+        "test_name": "test_safedata",
+        "test_file": "tests/messages_tests/test_cookie.py",
+        "why_relevant": "它测试了通过 storage._encode 和 _decode 对 Message 进行序列化/反序列化，并检查消息属性的保持情况。",
+        "reusable_parts": [
+          "Message 构造",
+          "storage._encode 和 _decode 调用",
+          "使用 assertIsInstance 检查属性类型。"
+        ],
+        "possible_gap": "它关注的是 message 属性的 SafeData 类型，而不是 extra_tags 的值。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用内置存储后端（如 cookie）对 extra_tags 为空字符串的 Message 对象进行序列化，然后反序列化。",
+      "evidence": [
+        "Issue 中提供了复现步骤：创建 extra_tags='' 的 Message，用 MessageEncoder 编码，再用 MessageDecoder 解码。",
+        "Issue 指出所有标准 API（如 messages.debug）的 extra_tags 默认值为空字符串。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "反序列化后，原本为 empty string 的 extra_tags 变成了 None，导致模板中类似 `{% if x not in message.extra_tags %}` 的检查出错。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中：`original_message.extra_tags == \"\"` 为 True，而 `decoded_message.extra_tags is None` 为 True。",
+        "Issue 描述了在重定向场景下，序列化/反序列化后 extra_tags 为 None 导致模板错误。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Message",
+        "kind": "class",
+        "source_path": "django/contrib/messages/storage/base.py",
+        "reason": "Issue 中创建了 Message 对象，其 extra_tags 参数是问题的核心。"
+      },
+      {
+        "name": "MessageEncoder",
+        "kind": "class",
+        "source_path": "django/contrib/messages/storage/cookie.py",
+        "reason": "Issue 中用于序列化 Message 对象，其 default 方法可能错误处理了 extra_tags。"
+      },
+      {
+        "name": "MessageDecoder",
+        "kind": "class",
+        "source_path": "django/contrib/messages/storage/cookie.py",
+        "reason": "Issue 中用于反序列化，其 process_messages 或 decode 方法可能未正确恢复 extra_tags。"
+      },
+      {
+        "name": "debug",
+        "kind": "function",
+        "source_path": "django/contrib/messages/api.py",
+        "reason": "Issue 提到所有标准 API（如 debug）的 extra_tags 默认值为空字符串，是触发 bug 的常见入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/messages/storage/cookie.py",
+        "object": "MessageEncoder.default",
+        "lines": "",
+        "reason": "Issue 明确指出 'MessageEncoder checks for the truthyness of extra_tags rather than checking it is not None'，这很可能在 default 方法中。"
+      },
+      {
+        "path": "django/contrib/messages/storage/cookie.py",
+        "object": "MessageDecoder.process_messages",
+        "lines": "",
+        "reason": "解码过程需要从 JSON 数据重建 Message 对象，可能未正确处理 extra_tags 为 empty string 的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中构造 Message 时可能未指定 extra_tags 或使用默认值 None。",
+        "target_pattern": "构造 Message 时显式设置 extra_tags=''。",
+        "reason": "Issue 的核心触发条件是 extra_tags 为空字符串，而非 None 或其他值。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能直接比较整个数据结构（如列表）。",
+        "target_pattern": "在编码/解码后，单独比较 Message 对象的 extra_tags 属性。",
+        "reason": "需要精确观测 extra_tags 属性的变化，而不是依赖整体相等（整体相等可能因其他属性而通过）。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Message 对象在序列化和反序列化后，extra_tags 应保持其原始值，特别是当其为空字符串时，不应变为 None。",
+      "evidence": [
+        "Issue 中 `original_message.extra_tags == \"\"` 为 True，表明原始意图是空字符串。",
+        "相关测试 1 (test_json_encoder_decoder) 使用 `self.assertEqual(messages, decoded_messages)`，暗示编码/解码应保持相等。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "decoded_message.extra_tags",
+        "reason": "直接观察反序列化后 extra_tags 的值，判断其是否为 None 而非空字符串。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(original_message.extra_tags) 与 type(decoded_message.extra_tags)",
+        "reason": "检查序列化/反序列化前后 extra_tags 的类型是否一致（应为 str）。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "encoded_message (JSON 字符串) 中关于 extra_tags 的部分",
+        "reason": "观察序列化后的中间表示，看空字符串是否被正确编码或丢失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "反序列化后的 Message 对象的 extra_tags 属性应等于原始的空字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言 decoded_message.extra_tags is None 或使用可能因其他属性差异而失败的完整对象相等断言。",
+        "reason": "直接验证 Issue 中描述的核心错误点，断言稳定且目标明确。"
+      },
+      {
+        "assertion_goal": "序列化/反序列化前后，Message 对象的 extra_tags 属性应保持相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 或复杂的嵌套结构相等，除非必要。",
+        "reason": "更通用的断言，符合编码/解码应保持数据不变的原则。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "MessageEncoder.default 方法内部检查 extra_tags 的具体逻辑（是 `if not extra_tags` 还是 `if extra_tags is None`）。",
+    "MessageDecoder.process_messages 方法内部重建 Message 对象时，如何处理从 JSON 中读取的 extra_tags 值。",
+    "除了 cookie 存储，其他内置存储后端（如 session）是否受相同问题影响。"
+  ],
+  "raw": {
+    "issue_summary": "Messages 框架在序列化/反序列化 extra_tags 为空字符串时错误地将其转换为 None。",
+    "trigger_condition": {
+      "text": "使用内置存储后端（如 cookie）对 extra_tags 为空字符串的 Message 对象进行序列化，然后反序列化。",
+      "evidence": [
+        "Issue 中提供了复现步骤：创建 extra_tags='' 的 Message，用 MessageEncoder 编码，再用 MessageDecoder 解码。",
+        "Issue 指出所有标准 API（如 messages.debug）的 extra_tags 默认值为空字符串。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "反序列化后，原本为 empty string 的 extra_tags 变成了 None，导致模板中类似 `{% if x not in message.extra_tags %}` 的检查出错。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 中：`original_message.extra_tags == \"\"` 为 True，而 `decoded_message.extra_tags is None` 为 True。",
+        "Issue 描述了在重定向场景下，序列化/反序列化后 extra_tags 为 None 导致模板错误。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Message 对象在序列化和反序列化后，extra_tags 应保持其原始值，特别是当其为空字符串时，不应变为 None。",
+      "evidence": [
+        "Issue 中 `original_message.extra_tags == \"\"` 为 True，表明原始意图是空字符串。",
+        "相关测试 1 (test_json_encoder_decoder) 使用 `self.assertEqual(messages, decoded_messages)`，暗示编码/解码应保持相等。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Message",
+        "kind": "class",
+        "source_path": "django/contrib/messages/storage/base.py",
+        "reason": "Issue 中创建了 Message 对象，其 extra_tags 参数是问题的核心。"
+      },
+      {
+        "name": "MessageEncoder",
+        "kind": "class",
+        "source_path": "django/contrib/messages/storage/cookie.py",
+        "reason": "Issue 中用于序列化 Message 对象，其 default 方法可能错误处理了 extra_tags。"
+      },
+      {
+        "name": "MessageDecoder",
+        "kind": "class",
+        "source_path": "django/contrib/messages/storage/cookie.py",
+        "reason": "Issue 中用于反序列化，其 process_messages 或 decode 方法可能未正确恢复 extra_tags。"
+      },
+      {
+        "name": "debug",
+        "kind": "function",
+        "source_path": "django/contrib/messages/api.py",
+        "reason": "Issue 提到所有标准 API（如 debug）的 extra_tags 默认值为空字符串，是触发 bug 的常见入口。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/messages/storage/cookie.py",
+        "object": "MessageEncoder.default",
+        "lines": "",
+        "reason": "Issue 明确指出 'MessageEncoder checks for the truthyness of extra_tags rather than checking it is not None'，这很可能在 default 方法中。"
+      },
+      {
+        "path": "django/contrib/messages/storage/cookie.py",
+        "object": "MessageDecoder.process_messages",
+        "lines": "",
+        "reason": "解码过程需要从 JSON 数据重建 Message 对象，可能未正确处理 extra_tags 为 empty string 的情况。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_json_encoder_decoder",
+        "test_file": "tests/messages_tests/test_cookie.py",
+        "why_relevant": "它直接测试了 MessageEncoder 和 MessageDecoder 对包含 Message 对象的数据结构的编码/解码，并断言相等。",
+        "reusable_parts": [
+          "imports (Message, MessageEncoder, MessageDecoder, constants)",
+          "使用 MessageEncoder().encode() 和 json.loads(..., cls=MessageDecoder)",
+          "使用 self.assertEqual 比较原始和反序列化后的对象。"
+        ],
+        "possible_gap": "该测试使用的 Message 对象没有显式设置 extra_tags（可能使用默认值 None），因此可能无法复现 extra_tags='' 的 bug。"
+      },
+      {
+        "test_name": "test_safedata",
+        "test_file": "tests/messages_tests/test_cookie.py",
+        "why_relevant": "它测试了通过 storage._encode 和 _decode 对 Message 进行序列化/反序列化，并检查消息属性的保持情况。",
+        "reusable_parts": [
+          "Message 构造",
+          "storage._encode 和 _decode 调用",
+          "使用 assertIsInstance 检查属性类型。"
+        ],
+        "possible_gap": "它关注的是 message 属性的 SafeData 类型，而不是 extra_tags 的值。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中构造 Message 时可能未指定 extra_tags 或使用默认值 None。",
+        "target_pattern": "构造 Message 时显式设置 extra_tags=''。",
+        "reason": "Issue 的核心触发条件是 extra_tags 为空字符串，而非 None 或其他值。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试可能直接比较整个数据结构（如列表）。",
+        "target_pattern": "在编码/解码后，单独比较 Message 对象的 extra_tags 属性。",
+        "reason": "需要精确观测 extra_tags 属性的变化，而不是依赖整体相等（整体相等可能因其他属性而通过）。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "decoded_message.extra_tags",
+        "reason": "直接观察反序列化后 extra_tags 的值，判断其是否为 None 而非空字符串。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "type(original_message.extra_tags) 与 type(decoded_message.extra_tags)",
+        "reason": "检查序列化/反序列化前后 extra_tags 的类型是否一致（应为 str）。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "encoded_message (JSON 字符串) 中关于 extra_tags 的部分",
+        "reason": "观察序列化后的中间表示，看空字符串是否被正确编码或丢失。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "反序列化后的 Message 对象的 extra_tags 属性应等于原始的空字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言 decoded_message.extra_tags is None 或使用可能因其他属性差异而失败的完整对象相等断言。",
+        "reason": "直接验证 Issue 中描述的核心错误点，断言稳定且目标明确。"
+      },
+      {
+        "assertion_goal": "序列化/反序列化前后，Message 对象的 extra_tags 属性应保持相等。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 或复杂的嵌套结构相等，除非必要。",
+        "reason": "更通用的断言，符合编码/解码应保持数据不变的原则。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要使用 SimpleTestCase 或 TestCase，并导入相关模块：Message, MessageEncoder, MessageDecoder, constants。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要配置 Django settings 以允许导入相关模块，如 Issue 中所示。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "MessageEncoder.default 方法内部检查 extra_tags 的具体逻辑（是 `if not extra_tags` 还是 `if extra_tags is None`）。",
+      "MessageDecoder.process_messages 方法内部重建 Message 对象时，如何处理从 JSON 中读取的 extra_tags 值。",
+      "除了 cookie 存储，其他内置存储后端（如 session）是否受相同问题影响。"
+    ]
+  }
+}

@@ -1,0 +1,300 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pydata__xarray-6461",
+  "issue_summary": "xr.where 函数在第二个参数为标量且 keep_attrs=True 时抛出 IndexError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 并构造一个简单的 DataArray 作为条件参数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能不需要复杂的 fixture，因为 Issue 的 MCVE 非常简单。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_where_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "它直接测试了 xr.where 在 keep_attrs=True 时的行为，并且涉及属性处理。",
+        "reusable_parts": [
+          "import xr",
+          "DataArray 构造",
+          "keep_attrs=True 参数",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "该测试中所有三个参数（cond, x, y）都是 DataArray 对象，而 Issue 中第二个参数是标量，因此不会触发标量参数路径的缺陷。"
+      },
+      {
+        "test_name": "test_keep_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "它测试了 apply_ufunc 的 keep_attrs 参数在不同输入类型（DataArray, Variable, Dataset）下的行为。",
+        "reusable_parts": [
+          "apply_ufunc 调用模式",
+          "keep_attrs 参数处理",
+          "属性比较断言"
+        ],
+        "possible_gap": "它测试的是自定义的 add 函数，而不是 xr.where 函数，并且没有涉及标量参数。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 xr.where 函数，其中第一个参数是 DataArray 与标量的比较结果（如 DataArray > 0），第二个参数是标量（如 1），第三个参数是标量（如 0），并且 keep_attrs 参数为 True（默认值）。",
+      "evidence": [
+        "Issue 中的代码示例：xr.where(xr.DataArray([1, 2, 3]) > 0, 1, 0)",
+        "Issue 中的错误堆栈指向 keep_attrs 处理逻辑"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 IndexError: list index out of range 异常，错误发生在 keep_attrs = lambda attrs, context: attrs[1] 这一行。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示 IndexError 和行号"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "xr.where",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了此函数的缺陷。"
+      },
+      {
+        "name": "apply_ufunc",
+        "kind": "function",
+        "source_path": "",
+        "reason": "错误堆栈显示 xr.where 内部调用了 apply_ufunc，且 keep_attrs 参数被传递给它。"
+      },
+      {
+        "name": "DataArray.where",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "源码片段 1 显示 Variable.where 方法，DataArray 可能继承或使用类似逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/computation.py",
+        "object": "where",
+        "lines": "1809-1824",
+        "reason": "Issue 的错误堆栈指向了处理 keep_attrs 参数的 lambda 函数，该函数试图访问 attrs[1]，但当第二个参数是标量时可能没有 attrs 列表或列表长度不足。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 test_where_attrs 中，xr.where 的第二个和第三个参数都是 DataArray 对象。",
+        "target_pattern": "将第二个参数（也可能是第三个）从 DataArray 变异为标量（如整数 1）。",
+        "reason": "Issue 表明当第二个参数是标量时，keep_attrs 处理逻辑会失败，因为 lambda 函数假设 attrs 列表有索引 1 的元素。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中 keep_attrs 参数被显式设置为 True。",
+        "target_pattern": "保持 keep_attrs=True（或使用默认值，因为默认是 True）。",
+        "reason": "Issue 显示缺陷在 keep_attrs=True 时触发，而 workaround 是设为 False。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "xr.where 函数在第二个参数为标量且 keep_attrs=True 时应正常执行，返回一个 DataArray，并且可能根据设计保留适当的属性（例如第一个参数或条件参数的属性）。",
+      "evidence": [
+        "Issue 中提到 workaround 是传递 keep_attrs=False，暗示 keep_attrs=True 应该能工作",
+        "相关测试 test_where_attrs 展示了当所有参数都是 DataArray 时 keep_attrs=True 的正常行为"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 xr.where(cond, scalar, scalar, keep_attrs=True) 时是否抛出 IndexError。",
+        "reason": "Issue 的核心错误现象就是 IndexError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 xr.where(cond, scalar, scalar, keep_attrs=False) 的返回结果类型和值。",
+        "reason": "与 workaround 行为对比，确认 keep_attrs=False 时功能正常，有助于理解预期行为。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "xr.where 调用中第二个参数的类型（是 DataArray 还是标量）。",
+        "reason": "缺陷触发条件与参数类型密切相关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当第二个参数是标量且 keep_attrs=True 时，xr.where 调用不应抛出 IndexError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为行号或细节可能变化。",
+        "reason": "Issue 明确报告了 IndexError 异常，修复后该异常应消失。"
+      },
+      {
+        "assertion_goal": "xr.where 在 keep_attrs=False 时应能正常处理标量参数并返回正确的 DataArray。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回 DataArray 的完整属性字典，因为属性可能未定义或为空。",
+        "reason": "验证 workaround 的有效性，并作为正确功能的基础参照。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "keep_attrs 参数的默认值在 xr.where 中是否是 True？Issue 没有明确说明，但错误发生在默认路径。",
+    "当第二个参数是标量时，keep_attrs=True 的预期行为具体是什么？应该保留哪个输入对象的属性？Issue 没有说明期望保留哪个属性。",
+    "错误堆栈中提到的 `attrs[1]` 具体上下文是什么？`attrs` 列表是如何构建的？",
+    "除了第二个参数，第三个参数为标量是否也会导致同样问题？"
+  ],
+  "raw": {
+    "issue_summary": "xr.where 函数在第二个参数为标量且 keep_attrs=True 时抛出 IndexError 异常。",
+    "trigger_condition": {
+      "text": "调用 xr.where 函数，其中第一个参数是 DataArray 与标量的比较结果（如 DataArray > 0），第二个参数是标量（如 1），第三个参数是标量（如 0），并且 keep_attrs 参数为 True（默认值）。",
+      "evidence": [
+        "Issue 中的代码示例：xr.where(xr.DataArray([1, 2, 3]) > 0, 1, 0)",
+        "Issue 中的错误堆栈指向 keep_attrs 处理逻辑"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 IndexError: list index out of range 异常，错误发生在 keep_attrs = lambda attrs, context: attrs[1] 这一行。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示 IndexError 和行号"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "xr.where 函数在第二个参数为标量且 keep_attrs=True 时应正常执行，返回一个 DataArray，并且可能根据设计保留适当的属性（例如第一个参数或条件参数的属性）。",
+      "evidence": [
+        "Issue 中提到 workaround 是传递 keep_attrs=False，暗示 keep_attrs=True 应该能工作",
+        "相关测试 test_where_attrs 展示了当所有参数都是 DataArray 时 keep_attrs=True 的正常行为"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "xr.where",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 直接报告了此函数的缺陷。"
+      },
+      {
+        "name": "apply_ufunc",
+        "kind": "function",
+        "source_path": "",
+        "reason": "错误堆栈显示 xr.where 内部调用了 apply_ufunc，且 keep_attrs 参数被传递给它。"
+      },
+      {
+        "name": "DataArray.where",
+        "kind": "method",
+        "source_path": "xarray/core/dataarray.py",
+        "reason": "源码片段 1 显示 Variable.where 方法，DataArray 可能继承或使用类似逻辑。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "xarray/core/computation.py",
+        "object": "where",
+        "lines": "1809-1824",
+        "reason": "Issue 的错误堆栈指向了处理 keep_attrs 参数的 lambda 函数，该函数试图访问 attrs[1]，但当第二个参数是标量时可能没有 attrs 列表或列表长度不足。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_where_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "它直接测试了 xr.where 在 keep_attrs=True 时的行为，并且涉及属性处理。",
+        "reusable_parts": [
+          "import xr",
+          "DataArray 构造",
+          "keep_attrs=True 参数",
+          "assert_identical 断言风格"
+        ],
+        "possible_gap": "该测试中所有三个参数（cond, x, y）都是 DataArray 对象，而 Issue 中第二个参数是标量，因此不会触发标量参数路径的缺陷。"
+      },
+      {
+        "test_name": "test_keep_attrs",
+        "test_file": "xarray/tests/test_computation.py",
+        "why_relevant": "它测试了 apply_ufunc 的 keep_attrs 参数在不同输入类型（DataArray, Variable, Dataset）下的行为。",
+        "reusable_parts": [
+          "apply_ufunc 调用模式",
+          "keep_attrs 参数处理",
+          "属性比较断言"
+        ],
+        "possible_gap": "它测试的是自定义的 add 函数，而不是 xr.where 函数，并且没有涉及标量参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试 test_where_attrs 中，xr.where 的第二个和第三个参数都是 DataArray 对象。",
+        "target_pattern": "将第二个参数（也可能是第三个）从 DataArray 变异为标量（如整数 1）。",
+        "reason": "Issue 表明当第二个参数是标量时，keep_attrs 处理逻辑会失败，因为 lambda 函数假设 attrs 列表有索引 1 的元素。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "相关测试中 keep_attrs 参数被显式设置为 True。",
+        "target_pattern": "保持 keep_attrs=True（或使用默认值，因为默认是 True）。",
+        "reason": "Issue 显示缺陷在 keep_attrs=True 时触发，而 workaround 是设为 False。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 xr.where(cond, scalar, scalar, keep_attrs=True) 时是否抛出 IndexError。",
+        "reason": "Issue 的核心错误现象就是 IndexError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "调用 xr.where(cond, scalar, scalar, keep_attrs=False) 的返回结果类型和值。",
+        "reason": "与 workaround 行为对比，确认 keep_attrs=False 时功能正常，有助于理解预期行为。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "xr.where 调用中第二个参数的类型（是 DataArray 还是标量）。",
+        "reason": "缺陷触发条件与参数类型密切相关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当第二个参数是标量且 keep_attrs=True 时，xr.where 调用不应抛出 IndexError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为行号或细节可能变化。",
+        "reason": "Issue 明确报告了 IndexError 异常，修复后该异常应消失。"
+      },
+      {
+        "assertion_goal": "xr.where 在 keep_attrs=False 时应能正常处理标量参数并返回正确的 DataArray。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言返回 DataArray 的完整属性字典，因为属性可能未定义或为空。",
+        "reason": "验证 workaround 的有效性，并作为正确功能的基础参照。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 xarray 并构造一个简单的 DataArray 作为条件参数。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能不需要复杂的 fixture，因为 Issue 的 MCVE 非常简单。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "keep_attrs 参数的默认值在 xr.where 中是否是 True？Issue 没有明确说明，但错误发生在默认路径。",
+      "当第二个参数是标量时，keep_attrs=True 的预期行为具体是什么？应该保留哪个输入对象的属性？Issue 没有说明期望保留哪个属性。",
+      "错误堆栈中提到的 `attrs[1]` 具体上下文是什么？`attrs` 列表是如何构建的？",
+      "除了第二个参数，第三个参数为标量是否也会导致同样问题？"
+    ]
+  }
+}

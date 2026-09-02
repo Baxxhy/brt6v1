@@ -1,0 +1,280 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "scikit-learn__scikit-learn-13124",
+  "issue_summary": "StratifiedKFold 的 shuffle 参数行为与文档描述不符，它只打乱了批次的顺序，而没有打乱每个层内的样本顺序。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 sklearn.model_selection.StratifiedKFold。测试可以使用简单的 fixture 创建 Issue 中描述的 X 和 y 数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以继承自 unittest.TestCase 或直接使用 pytest。相关测试文件 test_split.py 提供了参考的测试结构。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_shuffle_stratifiedkfold",
+        "test_file": "sklearn/model_selection/tests/test_split.py",
+        "why_relevant": "该测试专门检查 StratifiedKFold 在 shuffle=True 时的行为，包括打乱是否发生以及样本覆盖率。",
+        "reusable_parts": [
+          "StratifiedKFold 的导入和构造（设置 shuffle=True, random_state）",
+          "调用 split 方法的模式",
+          "使用 assert_not_equal 比较不同 random_state 下测试集索引的集合"
+        ],
+        "possible_gap": "该测试只检查了不同 random_state 产生的测试集是否不同（集合比较），但没有检查 Issue 中提到的核心问题：不同 random_state 下，批次的内容（训练/测试索引对）是否相同（仅顺序不同）。它可能通过了，因为批次顺序不同导致测试集集合确实不同，但未能检测到批次内容未变的问题。"
+      },
+      {
+        "test_name": "test_shuffle_kfold_stratifiedkfold_reproducibility",
+        "test_file": "sklearn/model_selection/tests/test_split.py",
+        "why_relevant": "该测试检查 shuffle=True 时，相同 random_state 是否产生可重复的拆分，以及 RandomState 实例是否产生不同的拆分。它涉及 StratifiedKFold 和 shuffle。",
+        "reusable_parts": [
+          "StratifiedKFold 的构造（设置 shuffle=True, random_state）",
+          "多次调用 split 并比较结果的模式",
+          "使用 np.testing.assert_equal 和 np.testing.assert_array_equal"
+        ],
+        "possible_gap": "该测试主要关注可重复性和随机性，但没有深入验证 shuffle 的具体语义（即是否打乱层内样本）。它可能通过了，因为批次顺序的变化足以使不同 RandomState 实例的拆分看起来“不同”。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 StratifiedKFold，设置 shuffle=True 和不同的 random_state 值，调用 split 方法。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分展示了使用 shuffle=True 和不同 random_state 调用 split 的代码。",
+        "源码片段 1 中 StratifiedKFold 类的文档描述了 shuffle 参数。",
+        "相关测试 2 (test_shuffle_stratifiedkfold) 和 4 (test_shuffle_kfold_stratifiedkfold_reproducibility) 都涉及 shuffle=True 的配置。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 shuffle=True 时，不同 random_state 产生的批次（fold）内容（即每个 fold 中的训练/测试索引组合）是相同的，只是这些批次的出现顺序发生了变化。这导致交叉验证结果不受 shuffle 影响，与文档描述的“打乱每个层内的数据”不符。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 的 Description 部分明确指出：“When shuffle=True, the batches are always the same for any random_state, but appear in a different order.”",
+        "Issue 的 Actual Results 部分展示了 random_state=1 和 random_state=2 时，shuffle=True 产生的批次内容相同但顺序不同。",
+        "Issue 的 Expected Results 部分表明用户期望不同 random_state 能产生不同的批次。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "StratifiedKFold",
+        "kind": "class",
+        "source_path": "sklearn/model_selection/_split.py",
+        "reason": "Issue 直接报告了该类 shuffle 参数的行为问题。"
+      },
+      {
+        "name": "StratifiedKFold.split",
+        "kind": "method",
+        "source_path": "sklearn/model_selection/_split.py",
+        "reason": "Issue 通过调用 split 方法来观察和报告问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/model_selection/_split.py",
+        "object": "StratifiedKFold._make_test_folds",
+        "lines": "",
+        "reason": "Issue 描述的问题核心在于如何生成测试折叠（folds）。_make_test_folds 方法（在源码片段1中提及但未展示代码）很可能负责创建分层折叠，其内部实现可能只对折叠索引进行了打乱，而没有对层内样本进行打乱。"
+      },
+      {
+        "path": "sklearn/model_selection/_split.py",
+        "object": "StratifiedKFold._iter_test_masks",
+        "lines": "",
+        "reason": "该方法（在源码片段1中提及但未展示代码）负责迭代生成测试掩码，可能与 shuffle 逻辑的实现有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的 y 标签分布通常比较简单（如 [0]*20 + [1]*20）。",
+        "target_pattern": "使用 Issue 中提供的特定输入模式：两个类别样本数相等（samples_per_class=10），且样本在数组中是连续排列的（前半部分全是1，后半部分全是0）。这种模式更容易暴露“仅打乱批次顺序”的问题，因为每个批次会固定配对来自两个类别的相同位置的样本（如索引0和10）。",
+        "reason": "Issue 的复现代码使用了这种特定的数据排列，使得当 shuffle 行为不正确时，批次内容（样本配对）在不同 random_state 下保持不变的现象非常明显。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能使用 n_splits=3 或 5。",
+        "target_pattern": "设置 n_splits 等于每个类别的样本数（如 Issue 中的 samples_per_class=10）。这样每个 fold 只包含两个样本（每个类别一个），使得“批次内容固定配对”的现象更加清晰。",
+        "reason": "Issue 中设置 n_splits=10（等于 samples_per_class），使得每个 fold 的测试集恰好包含两个索引（如 [0,10], [1,11]），便于观察配对是否随 random_state 改变。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 shuffle=True 时，每个层（stratum）内的样本顺序应该被打乱，从而使得不同 random_state 值能够产生不同的批次内容（即训练/测试索引组合），而不仅仅是批次的顺序不同。",
+      "evidence": [
+        "Issue 的 Description 部分引用了文档：“Whether to shuffle each stratification of the data before splitting into batches”。",
+        "Issue 的 Expected Results 部分表明用户期望“batches to be different when Shuffle is turned on for different random_state seeds”。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "list(kf.split(X, y)) 返回的列表，包含所有 (train_idx, test_idx) 元组。需要观察这些元组的内容，而不仅仅是顺序。",
+        "reason": "Issue 的核心是不同 random_state 下，split 返回的各个 (train_idx, test_idx) 对的内容是否相同。直接观察返回值可以判断 shuffle 是否影响了层内样本的分配。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "将不同 random_state 下 split 返回的 (train_idx, test_idx) 对进行排序后比较。",
+        "reason": "如果排序后（例如按 test_idx 的第一个元素排序）的批次列表在不同 random_state 下是相同的，则说明 shuffle 只改变了批次的输出顺序，而没有改变批次内部的样本组成，这与预期行为不符。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 shuffle=True 且不同的 random_state 值，StratifiedKFold.split 返回的批次内容（即训练/测试索引组合）应该不同，而不仅仅是顺序不同。",
+        "preferred_assertion_style": "not_equals",
+        "avoid": "仅断言 split 返回的原始列表（顺序敏感）不相等，因为这可能仅由顺序变化导致。避免断言完整的、顺序敏感的列表相等。",
+        "reason": "Issue 期望的是批次内容的变化。更稳定的断言是比较排序后的批次列表或批次内容的集合，以确保内容本身因 shuffle 而改变。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "StratifiedKFold._make_test_folds 和 _iter_test_masks 方法的具体实现逻辑，以及 shuffle 参数是如何在这些方法中被解释和使用的。",
+    "文档中“shuffle each stratification of the data”的确切预期实现细节（例如，是在全局打乱后分层，还是在每个层内独立打乱）。",
+    "除了 Issue 中展示的特定数据模式（两个平衡类别，连续排列）外，该缺陷是否在其他数据分布下也会显现。"
+  ],
+  "raw": {
+    "issue_summary": "StratifiedKFold 的 shuffle 参数行为与文档描述不符，它只打乱了批次的顺序，而没有打乱每个层内的样本顺序。",
+    "trigger_condition": {
+      "text": "使用 StratifiedKFold，设置 shuffle=True 和不同的 random_state 值，调用 split 方法。",
+      "evidence": [
+        "Issue 的 Steps/Code to Reproduce 部分展示了使用 shuffle=True 和不同 random_state 调用 split 的代码。",
+        "源码片段 1 中 StratifiedKFold 类的文档描述了 shuffle 参数。",
+        "相关测试 2 (test_shuffle_stratifiedkfold) 和 4 (test_shuffle_kfold_stratifiedkfold_reproducibility) 都涉及 shuffle=True 的配置。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当 shuffle=True 时，不同 random_state 产生的批次（fold）内容（即每个 fold 中的训练/测试索引组合）是相同的，只是这些批次的出现顺序发生了变化。这导致交叉验证结果不受 shuffle 影响，与文档描述的“打乱每个层内的数据”不符。",
+      "symptom_type": "wrong_order",
+      "evidence": [
+        "Issue 的 Description 部分明确指出：“When shuffle=True, the batches are always the same for any random_state, but appear in a different order.”",
+        "Issue 的 Actual Results 部分展示了 random_state=1 和 random_state=2 时，shuffle=True 产生的批次内容相同但顺序不同。",
+        "Issue 的 Expected Results 部分表明用户期望不同 random_state 能产生不同的批次。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 shuffle=True 时，每个层（stratum）内的样本顺序应该被打乱，从而使得不同 random_state 值能够产生不同的批次内容（即训练/测试索引组合），而不仅仅是批次的顺序不同。",
+      "evidence": [
+        "Issue 的 Description 部分引用了文档：“Whether to shuffle each stratification of the data before splitting into batches”。",
+        "Issue 的 Expected Results 部分表明用户期望“batches to be different when Shuffle is turned on for different random_state seeds”。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "StratifiedKFold",
+        "kind": "class",
+        "source_path": "sklearn/model_selection/_split.py",
+        "reason": "Issue 直接报告了该类 shuffle 参数的行为问题。"
+      },
+      {
+        "name": "StratifiedKFold.split",
+        "kind": "method",
+        "source_path": "sklearn/model_selection/_split.py",
+        "reason": "Issue 通过调用 split 方法来观察和报告问题。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sklearn/model_selection/_split.py",
+        "object": "StratifiedKFold._make_test_folds",
+        "lines": "",
+        "reason": "Issue 描述的问题核心在于如何生成测试折叠（folds）。_make_test_folds 方法（在源码片段1中提及但未展示代码）很可能负责创建分层折叠，其内部实现可能只对折叠索引进行了打乱，而没有对层内样本进行打乱。"
+      },
+      {
+        "path": "sklearn/model_selection/_split.py",
+        "object": "StratifiedKFold._iter_test_masks",
+        "lines": "",
+        "reason": "该方法（在源码片段1中提及但未展示代码）负责迭代生成测试掩码，可能与 shuffle 逻辑的实现有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_shuffle_stratifiedkfold",
+        "test_file": "sklearn/model_selection/tests/test_split.py",
+        "why_relevant": "该测试专门检查 StratifiedKFold 在 shuffle=True 时的行为，包括打乱是否发生以及样本覆盖率。",
+        "reusable_parts": [
+          "StratifiedKFold 的导入和构造（设置 shuffle=True, random_state）",
+          "调用 split 方法的模式",
+          "使用 assert_not_equal 比较不同 random_state 下测试集索引的集合"
+        ],
+        "possible_gap": "该测试只检查了不同 random_state 产生的测试集是否不同（集合比较），但没有检查 Issue 中提到的核心问题：不同 random_state 下，批次的内容（训练/测试索引对）是否相同（仅顺序不同）。它可能通过了，因为批次顺序不同导致测试集集合确实不同，但未能检测到批次内容未变的问题。"
+      },
+      {
+        "test_name": "test_shuffle_kfold_stratifiedkfold_reproducibility",
+        "test_file": "sklearn/model_selection/tests/test_split.py",
+        "why_relevant": "该测试检查 shuffle=True 时，相同 random_state 是否产生可重复的拆分，以及 RandomState 实例是否产生不同的拆分。它涉及 StratifiedKFold 和 shuffle。",
+        "reusable_parts": [
+          "StratifiedKFold 的构造（设置 shuffle=True, random_state）",
+          "多次调用 split 并比较结果的模式",
+          "使用 np.testing.assert_equal 和 np.testing.assert_array_equal"
+        ],
+        "possible_gap": "该测试主要关注可重复性和随机性，但没有深入验证 shuffle 的具体语义（即是否打乱层内样本）。它可能通过了，因为批次顺序的变化足以使不同 RandomState 实例的拆分看起来“不同”。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中使用的 y 标签分布通常比较简单（如 [0]*20 + [1]*20）。",
+        "target_pattern": "使用 Issue 中提供的特定输入模式：两个类别样本数相等（samples_per_class=10），且样本在数组中是连续排列的（前半部分全是1，后半部分全是0）。这种模式更容易暴露“仅打乱批次顺序”的问题，因为每个批次会固定配对来自两个类别的相同位置的样本（如索引0和10）。",
+        "reason": "Issue 的复现代码使用了这种特定的数据排列，使得当 shuffle 行为不正确时，批次内容（样本配对）在不同 random_state 下保持不变的现象非常明显。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中可能使用 n_splits=3 或 5。",
+        "target_pattern": "设置 n_splits 等于每个类别的样本数（如 Issue 中的 samples_per_class=10）。这样每个 fold 只包含两个样本（每个类别一个），使得“批次内容固定配对”的现象更加清晰。",
+        "reason": "Issue 中设置 n_splits=10（等于 samples_per_class），使得每个 fold 的测试集恰好包含两个索引（如 [0,10], [1,11]），便于观察配对是否随 random_state 改变。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "list(kf.split(X, y)) 返回的列表，包含所有 (train_idx, test_idx) 元组。需要观察这些元组的内容，而不仅仅是顺序。",
+        "reason": "Issue 的核心是不同 random_state 下，split 返回的各个 (train_idx, test_idx) 对的内容是否相同。直接观察返回值可以判断 shuffle 是否影响了层内样本的分配。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "将不同 random_state 下 split 返回的 (train_idx, test_idx) 对进行排序后比较。",
+        "reason": "如果排序后（例如按 test_idx 的第一个元素排序）的批次列表在不同 random_state 下是相同的，则说明 shuffle 只改变了批次的输出顺序，而没有改变批次内部的样本组成，这与预期行为不符。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 shuffle=True 且不同的 random_state 值，StratifiedKFold.split 返回的批次内容（即训练/测试索引组合）应该不同，而不仅仅是顺序不同。",
+        "preferred_assertion_style": "not_equals",
+        "avoid": "仅断言 split 返回的原始列表（顺序敏感）不相等，因为这可能仅由顺序变化导致。避免断言完整的、顺序敏感的列表相等。",
+        "reason": "Issue 期望的是批次内容的变化。更稳定的断言是比较排序后的批次列表或批次内容的集合，以确保内容本身因 shuffle 而改变。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 numpy 和 sklearn.model_selection.StratifiedKFold。测试可以使用简单的 fixture 创建 Issue 中描述的 X 和 y 数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可以继承自 unittest.TestCase 或直接使用 pytest。相关测试文件 test_split.py 提供了参考的测试结构。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "StratifiedKFold._make_test_folds 和 _iter_test_masks 方法的具体实现逻辑，以及 shuffle 参数是如何在这些方法中被解释和使用的。",
+      "文档中“shuffle each stratification of the data”的确切预期实现细节（例如，是在全局打乱后分层，还是在每个层内独立打乱）。",
+      "除了 Issue 中展示的特定数据模式（两个平衡类别，连续排列）外，该缺陷是否在其他数据分布下也会显现。"
+    ]
+  }
+}

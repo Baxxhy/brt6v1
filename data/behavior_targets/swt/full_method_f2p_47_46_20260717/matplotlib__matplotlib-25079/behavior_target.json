@@ -1,0 +1,356 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-25079",
+  "issue_summary": "在 matplotlib 3.6.3 中，为已创建 colorbar 的绘图对象设置 LogNorm 会引发 ValueError: Invalid vmin or vmax 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 matplotlib 的 non-interactive 后端（如 'Agg'）进行测试，以避免交互式窗口弹出。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要导入 matplotlib.pyplot、numpy、LogNorm。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "遵循相似测试的 fixture 模式：创建 fig, ax，然后创建 plot 和 colorbar。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_colorbar_renorm",
+        "test_file": "lib/matplotlib/tests/test_colorbar.py",
+        "why_relevant": "该测试展示了在创建 colorbar 后为 imshow 对象设置 LogNorm 的过程，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "imports (plt, np)",
+          "fig, ax = plt.subplots() 创建",
+          "fig.colorbar 创建",
+          "im.set_norm(norm) 调用",
+          "assert np.isclose(cbar.vmin, ...) 断言风格"
+        ],
+        "possible_gap": "该测试使用 imshow 而非 pcolormesh，且数据范围（z.min(), z.max()）与 Issue 中显式设置的 vmin/vmax 可能不同。测试未触发异常，表明在特定条件下（如 Issue 中的交互式环境或特定数据范围）才会失败。"
+      },
+      {
+        "test_name": "test_colorbar_scale_reset",
+        "test_file": "lib/matplotlib/tests/test_colorbar.py",
+        "why_relevant": "该测试展示了为 pcolormesh 对象设置 LogNorm 和 Normalize，并检查 colorbar 的 scale 是否正确更新。",
+        "reusable_parts": [
+          "imports (plt, np, LogNorm, Normalize)",
+          "fig, ax = plt.subplots()",
+          "ax.pcolormesh 创建",
+          "fig.colorbar 创建",
+          "pcm.set_norm 调用",
+          "assert cbar.ax.yaxis.get_scale() 断言风格"
+        ],
+        "possible_gap": "该测试也未触发异常，且其设置 norm 时直接传递 vmin/vmax 参数（`LogNorm(vmin=1, vmax=100)`），而 Issue 中是在创建对象后设置属性。测试可能使用了不同的数据或调用顺序。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在创建了 colorbar 之后，为绘图对象（如 pcolormesh）设置 LogNorm 规范。",
+      "evidence": [
+        "Issue 中的复现代码：先创建 plot 和 cbar，然后执行 `plot.norm = LogNorm(vmin, vmax)`。",
+        "Issue 描述：'Setting the norm to a `LogNorm` after the colorbar has been created (e.g. in interactive code) fails'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: Invalid vmin or vmax 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示：`ValueError: Invalid vmin or vmax` 来自 `matplotlib/colors.py` 第 1694 行。",
+        "Issue 描述：'fails with an `Invalid vmin` value'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LogNorm",
+        "kind": "class",
+        "source_path": "lib/matplotlib/colors.py",
+        "reason": "Issue 中用于设置新 norm 的类，是触发异常的直接原因。"
+      },
+      {
+        "name": "pcolormesh",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 中创建绘图对象的方法。"
+      },
+      {
+        "name": "colorbar",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 中在设置 norm 前创建 colorbar 的方法。"
+      },
+      {
+        "name": "ScalarMappable.norm",
+        "kind": "property",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "Issue 中设置 norm 的属性（`plot.norm = ...`）。"
+      },
+      {
+        "name": "autoscale",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中在设置 norm 后调用的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/colors.py",
+        "object": "LogNorm.__call__",
+        "lines": "1694",
+        "reason": "错误堆栈指向此处抛出 ValueError。"
+      },
+      {
+        "path": "lib/matplotlib/collections.py",
+        "object": "update_scalarmappable",
+        "lines": "",
+        "reason": "错误堆栈显示异常在 `self.update_scalarmappable()` 调用链中发生，可能与 colorbar 更新逻辑有关。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，在创建 colorbar 后立即设置 norm，且数据范围可能来自数据本身（如 z.min(), z.max()）。",
+        "target_pattern": "在创建 colorbar 后，通过属性赋值（`plot.norm = LogNorm(vmin, vmax)`）设置 norm，其中 vmin/vmax 是显式指定的值（如 1 和 5）。",
+        "reason": "Issue 表明通过属性赋值的方式在特定版本（3.6.3）下会失败，而相似测试可能使用了 set_norm 方法或不同的数据范围。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，设置 norm 后可能没有立即触发重绘或 autoscale 调用。",
+        "target_pattern": "在设置 norm 后调用 `plot.autoscale()`，并可能处于交互模式（`plt.ion()`）下，这会触发重绘并暴露问题。",
+        "reason": "Issue 的复现代码包含了 autoscale 调用和交互模式设置，这可能影响了内部状态更新顺序，从而触发异常。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "设置 norm 后，colorbar 和 mappable 应成功更新为新规范，不引发异常。",
+      "evidence": [
+        "Issue 的 Expected outcome: 'Works, colorbar and mappable are updated with new norm.'",
+        "相关测试 test_colorbar_renorm 和 test_colorbar_scale_reset 展示了在创建 colorbar 后成功设置 norm 的场景。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在 `plot.norm = LogNorm(vmin, vmax)` 和 `plot.autoscale()` 调用后，观察是否抛出 ValueError。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "设置 norm 前后，观察 `plot.norm.vmin`、`plot.norm.vmax` 以及 `cbar.vmin`、`cbar.vmax` 的值。",
+        "reason": "Issue 期望 norm 和 colorbar 成功更新，检查这些状态可以验证更新是否正常完成。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察 colorbar 的 scale 属性（`cbar.ax.yaxis.get_scale()`）在设置 LogNorm 后是否变为 'log'。",
+        "reason": "相关测试 test_colorbar_scale_reset 验证了这一点，这是 norm 成功应用的一个表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在设置 LogNorm 后，不会抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本或环境下微调。",
+        "reason": "Issue 的核心是异常被引发，修复后应不再引发。使用 `pytest.raises` 或 `assert not raises` 来捕获异常。"
+      },
+      {
+        "assertion_goal": "验证设置 norm 后，colorbar 的 vmin/vmax 与设置的 norm 的 vmin/vmax 一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言与数据本身（如 img.min()）的比较，因为 Issue 中显式设置了 vmin/vmax。",
+        "reason": "Issue 期望 colorbar 成功更新，验证 vmin/vmax 是检查更新是否正确的稳定方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "异常是否仅在特定数据范围（vmin=1, vmax=5）下触发，还是更普遍。",
+    "异常是否与交互模式（plt.ion()）或 autoscale() 调用强相关，还是单独设置 norm 就会触发。",
+    "bug 的确切根源是在 LogNorm 的 __call__ 方法中，还是在 colorbar 与 mappable 的同步逻辑中。",
+    "为什么相似测试（test_colorbar_renorm, test_colorbar_scale_reset）没有触发此异常，它们与 Issue 场景的具体差异是什么。"
+  ],
+  "raw": {
+    "issue_summary": "在 matplotlib 3.6.3 中，为已创建 colorbar 的绘图对象设置 LogNorm 会引发 ValueError: Invalid vmin or vmax 异常。",
+    "trigger_condition": {
+      "text": "在创建了 colorbar 之后，为绘图对象（如 pcolormesh）设置 LogNorm 规范。",
+      "evidence": [
+        "Issue 中的复现代码：先创建 plot 和 cbar，然后执行 `plot.norm = LogNorm(vmin, vmax)`。",
+        "Issue 描述：'Setting the norm to a `LogNorm` after the colorbar has been created (e.g. in interactive code) fails'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 ValueError: Invalid vmin or vmax 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误堆栈显示：`ValueError: Invalid vmin or vmax` 来自 `matplotlib/colors.py` 第 1694 行。",
+        "Issue 描述：'fails with an `Invalid vmin` value'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "设置 norm 后，colorbar 和 mappable 应成功更新为新规范，不引发异常。",
+      "evidence": [
+        "Issue 的 Expected outcome: 'Works, colorbar and mappable are updated with new norm.'",
+        "相关测试 test_colorbar_renorm 和 test_colorbar_scale_reset 展示了在创建 colorbar 后成功设置 norm 的场景。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "LogNorm",
+        "kind": "class",
+        "source_path": "lib/matplotlib/colors.py",
+        "reason": "Issue 中用于设置新 norm 的类，是触发异常的直接原因。"
+      },
+      {
+        "name": "pcolormesh",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 中创建绘图对象的方法。"
+      },
+      {
+        "name": "colorbar",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 中在设置 norm 前创建 colorbar 的方法。"
+      },
+      {
+        "name": "ScalarMappable.norm",
+        "kind": "property",
+        "source_path": "lib/matplotlib/cm.py",
+        "reason": "Issue 中设置 norm 的属性（`plot.norm = ...`）。"
+      },
+      {
+        "name": "autoscale",
+        "kind": "function",
+        "source_path": "lib/matplotlib/pyplot.py",
+        "reason": "Issue 复现代码中在设置 norm 后调用的方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/colors.py",
+        "object": "LogNorm.__call__",
+        "lines": "1694",
+        "reason": "错误堆栈指向此处抛出 ValueError。"
+      },
+      {
+        "path": "lib/matplotlib/collections.py",
+        "object": "update_scalarmappable",
+        "lines": "",
+        "reason": "错误堆栈显示异常在 `self.update_scalarmappable()` 调用链中发生，可能与 colorbar 更新逻辑有关。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_colorbar_renorm",
+        "test_file": "lib/matplotlib/tests/test_colorbar.py",
+        "why_relevant": "该测试展示了在创建 colorbar 后为 imshow 对象设置 LogNorm 的过程，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "imports (plt, np)",
+          "fig, ax = plt.subplots() 创建",
+          "fig.colorbar 创建",
+          "im.set_norm(norm) 调用",
+          "assert np.isclose(cbar.vmin, ...) 断言风格"
+        ],
+        "possible_gap": "该测试使用 imshow 而非 pcolormesh，且数据范围（z.min(), z.max()）与 Issue 中显式设置的 vmin/vmax 可能不同。测试未触发异常，表明在特定条件下（如 Issue 中的交互式环境或特定数据范围）才会失败。"
+      },
+      {
+        "test_name": "test_colorbar_scale_reset",
+        "test_file": "lib/matplotlib/tests/test_colorbar.py",
+        "why_relevant": "该测试展示了为 pcolormesh 对象设置 LogNorm 和 Normalize，并检查 colorbar 的 scale 是否正确更新。",
+        "reusable_parts": [
+          "imports (plt, np, LogNorm, Normalize)",
+          "fig, ax = plt.subplots()",
+          "ax.pcolormesh 创建",
+          "fig.colorbar 创建",
+          "pcm.set_norm 调用",
+          "assert cbar.ax.yaxis.get_scale() 断言风格"
+        ],
+        "possible_gap": "该测试也未触发异常，且其设置 norm 时直接传递 vmin/vmax 参数（`LogNorm(vmin=1, vmax=100)`），而 Issue 中是在创建对象后设置属性。测试可能使用了不同的数据或调用顺序。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，在创建 colorbar 后立即设置 norm，且数据范围可能来自数据本身（如 z.min(), z.max()）。",
+        "target_pattern": "在创建 colorbar 后，通过属性赋值（`plot.norm = LogNorm(vmin, vmax)`）设置 norm，其中 vmin/vmax 是显式指定的值（如 1 和 5）。",
+        "reason": "Issue 表明通过属性赋值的方式在特定版本（3.6.3）下会失败，而相似测试可能使用了 set_norm 方法或不同的数据范围。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中，设置 norm 后可能没有立即触发重绘或 autoscale 调用。",
+        "target_pattern": "在设置 norm 后调用 `plot.autoscale()`，并可能处于交互模式（`plt.ion()`）下，这会触发重绘并暴露问题。",
+        "reason": "Issue 的复现代码包含了 autoscale 调用和交互模式设置，这可能影响了内部状态更新顺序，从而触发异常。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在 `plot.norm = LogNorm(vmin, vmax)` 和 `plot.autoscale()` 调用后，观察是否抛出 ValueError。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "设置 norm 前后，观察 `plot.norm.vmin`、`plot.norm.vmax` 以及 `cbar.vmin`、`cbar.vmax` 的值。",
+        "reason": "Issue 期望 norm 和 colorbar 成功更新，检查这些状态可以验证更新是否正常完成。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "观察 colorbar 的 scale 属性（`cbar.ax.yaxis.get_scale()`）在设置 LogNorm 后是否变为 'log'。",
+        "reason": "相关测试 test_colorbar_scale_reset 验证了这一点，这是 norm 成功应用的一个表现。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证在设置 LogNorm 后，不会抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能在不同版本或环境下微调。",
+        "reason": "Issue 的核心是异常被引发，修复后应不再引发。使用 `pytest.raises` 或 `assert not raises` 来捕获异常。"
+      },
+      {
+        "assertion_goal": "验证设置 norm 后，colorbar 的 vmin/vmax 与设置的 norm 的 vmin/vmax 一致。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言与数据本身（如 img.min()）的比较，因为 Issue 中显式设置了 vmin/vmax。",
+        "reason": "Issue 期望 colorbar 成功更新，验证 vmin/vmax 是检查更新是否正确的稳定方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 matplotlib 的 non-interactive 后端（如 'Agg'）进行测试，以避免交互式窗口弹出。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要导入 matplotlib.pyplot、numpy、LogNorm。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "遵循相似测试的 fixture 模式：创建 fig, ax，然后创建 plot 和 colorbar。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "异常是否仅在特定数据范围（vmin=1, vmax=5）下触发，还是更普遍。",
+      "异常是否与交互模式（plt.ion()）或 autoscale() 调用强相关，还是单独设置 norm 就会触发。",
+      "bug 的确切根源是在 LogNorm 的 __call__ 方法中，还是在 colorbar 与 mappable 的同步逻辑中。",
+      "为什么相似测试（test_colorbar_renorm, test_colorbar_scale_reset）没有触发此异常，它们与 Issue 场景的具体差异是什么。"
+    ]
+  }
+}

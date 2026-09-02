@@ -1,0 +1,246 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12286",
+  "issue_summary": "当存在基础语言时，Django 不应在子语言上引发 translation.E004 错误。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 和 self.settings 来临时覆盖 Django 的 LANGUAGE_CODE 和 LANGUAGES 设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TranslationCheckTests.test_inconsistent_language_settings",
+        "test_file": "tests/check_framework/test_translation.py",
+        "why_relevant": "它直接测试了 LANGUAGE_CODE 不在 LANGUAGES 中时触发 E004 错误的场景，与当前 Issue 的核心检查逻辑相同。",
+        "reusable_parts": [
+          "测试类 TranslationCheckTests",
+          "使用 self.settings 临时设置 LANGUAGE_CODE 和 LANGUAGES",
+          "调用 check_language_settings_consistent",
+          "断言返回 Error 对象列表的格式"
+        ],
+        "possible_gap": "当前测试只检查了完全不在列表中的情况（'fr' vs ['en']），没有测试子语言（'de-at'）而其基础语言（'de'）在列表中的情况。"
+      },
+      {
+        "test_name": "TranslationCheckTests.test_valid_language_code",
+        "test_file": "tests/check_framework/test_translation.py",
+        "why_relevant": "它测试了有效的 LANGUAGE_CODE 标签，可能包含语言标签验证的逻辑，与子语言解析相关。",
+        "reusable_parts": [
+          "使用 self.settings 临时设置 LANGUAGE_CODE",
+          "调用 check_setting_language_code",
+          "断言返回空列表表示通过"
+        ],
+        "possible_gap": "它可能只验证了标签格式，没有涉及与 LANGUAGES 列表的关联检查。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 settings.py 中将 LANGUAGE_CODE 设置为一个不在 LANGUAGES 列表中的子语言（例如 'de-at'），但该子语言的基础语言（例如 'de'）存在于 LANGUAGES 列表中。",
+      "evidence": [
+        "Issue 描述：'LANGUAGE_CODE = \"de-at\"' 导致错误，而 'es-ar' 正常工作。",
+        "源码片段 2：LANGUAGES 列表包含 'de' 但不包含 'de-at'，包含 'es-ar'。",
+        "相关测试 1：测试了 LANGUAGE_CODE 不在 LANGUAGES 中的情况。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "系统检查抛出 SystemCheckError，错误 ID 为 translation.E004，提示 LANGUAGE_CODE 的值不在 LANGUAGES 设置中。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'SystemCheckError: System check identified some issues: ERRORS: ?: (translation.E004) ...'",
+        "源码片段 3：定义了 E004 错误信息。",
+        "相关测试 1：断言会生成 Error(msg, id='translation.E004')。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "check_language_settings_consistent",
+        "kind": "function",
+        "source_path": "django/core/checks/translation.py",
+        "reason": "相关测试 1 中调用了此函数来检查 LANGUAGE_CODE 和 LANGUAGES 的一致性，并可能产生 E004 错误。"
+      },
+      {
+        "name": "check_setting_language_code",
+        "kind": "function",
+        "source_path": "django/core/checks/translation.py",
+        "reason": "相关测试 2 和 3 中调用了此函数来检查 LANGUAGE_CODE 的有效性，可能涉及语言标签的解析。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/checks/translation.py",
+        "object": "check_language_settings_consistent",
+        "lines": "",
+        "reason": "此函数负责检查 LANGUAGE_CODE 是否在 LANGUAGES 中，并生成 E004 错误。它可能没有正确处理子语言回退到基础语言的逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "LANGUAGE_CODE='fr', LANGUAGES=[('en', 'English')] （完全不在列表中）",
+        "target_pattern": "LANGUAGE_CODE='de-at', LANGUAGES=[('de', 'German'), ...] （子语言不在，但基础语言在）",
+        "reason": "将触发条件从完全缺失改为子语言缺失但基础语言存在，以测试文档描述的回退行为是否被正确实现。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当 LANGUAGE_CODE 设置为一个子语言（如 'de-at'）而其基础语言（如 'de'）在 LANGUAGES 中时，系统检查应通过，不引发 translation.E004 错误。",
+      "evidence": [
+        "Issue 描述引用的 Django 文档：'If a base language is available but the sublanguage specified is not, Django uses the base language.'",
+        "Issue 描述：'es-ar' 可以正常工作。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "check_language_settings_consistent(None) 的返回值",
+        "reason": "该函数的返回值应包含 E004 错误列表。观察其是否在子语言场景下错误地返回了错误。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "check_setting_language_code(None) 的返回值",
+        "reason": "该函数检查 LANGUAGE_CODE 的有效性。观察其对 'de-at' 这类子语言标签的验证结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 LANGUAGE_CODE 设置为 'de-at' 且 LANGUAGES 包含 'de' 时，系统检查应通过，不产生 E004 错误。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的错误信息字符串，因为信息可能微调；避免断言不相关的错误。",
+        "reason": "断言 check_language_settings_consistent 返回空列表，直接验证了 E004 错误未被触发，与期望行为一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "语言标签（如 'de-at'）的解析和基础语言匹配的确切逻辑位于代码库的哪个具体位置。",
+    "除了 check_language_settings_consistent，是否还有其他检查函数（如 check_setting_language_code）会影响到最终的系统检查结果。",
+    "LANGUAGES 设置是否必须显式包含基础语言，还是可以从其他默认设置中推断。"
+  ],
+  "raw": {
+    "issue_summary": "当存在基础语言时，Django 不应在子语言上引发 translation.E004 错误。",
+    "trigger_condition": {
+      "text": "在 settings.py 中将 LANGUAGE_CODE 设置为一个不在 LANGUAGES 列表中的子语言（例如 'de-at'），但该子语言的基础语言（例如 'de'）存在于 LANGUAGES 列表中。",
+      "evidence": [
+        "Issue 描述：'LANGUAGE_CODE = \"de-at\"' 导致错误，而 'es-ar' 正常工作。",
+        "源码片段 2：LANGUAGES 列表包含 'de' 但不包含 'de-at'，包含 'es-ar'。",
+        "相关测试 1：测试了 LANGUAGE_CODE 不在 LANGUAGES 中的情况。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "系统检查抛出 SystemCheckError，错误 ID 为 translation.E004，提示 LANGUAGE_CODE 的值不在 LANGUAGES 设置中。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'SystemCheckError: System check identified some issues: ERRORS: ?: (translation.E004) ...'",
+        "源码片段 3：定义了 E004 错误信息。",
+        "相关测试 1：断言会生成 Error(msg, id='translation.E004')。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当 LANGUAGE_CODE 设置为一个子语言（如 'de-at'）而其基础语言（如 'de'）在 LANGUAGES 中时，系统检查应通过，不引发 translation.E004 错误。",
+      "evidence": [
+        "Issue 描述引用的 Django 文档：'If a base language is available but the sublanguage specified is not, Django uses the base language.'",
+        "Issue 描述：'es-ar' 可以正常工作。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "check_language_settings_consistent",
+        "kind": "function",
+        "source_path": "django/core/checks/translation.py",
+        "reason": "相关测试 1 中调用了此函数来检查 LANGUAGE_CODE 和 LANGUAGES 的一致性，并可能产生 E004 错误。"
+      },
+      {
+        "name": "check_setting_language_code",
+        "kind": "function",
+        "source_path": "django/core/checks/translation.py",
+        "reason": "相关测试 2 和 3 中调用了此函数来检查 LANGUAGE_CODE 的有效性，可能涉及语言标签的解析。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/checks/translation.py",
+        "object": "check_language_settings_consistent",
+        "lines": "",
+        "reason": "此函数负责检查 LANGUAGE_CODE 是否在 LANGUAGES 中，并生成 E004 错误。它可能没有正确处理子语言回退到基础语言的逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TranslationCheckTests.test_inconsistent_language_settings",
+        "test_file": "tests/check_framework/test_translation.py",
+        "why_relevant": "它直接测试了 LANGUAGE_CODE 不在 LANGUAGES 中时触发 E004 错误的场景，与当前 Issue 的核心检查逻辑相同。",
+        "reusable_parts": [
+          "测试类 TranslationCheckTests",
+          "使用 self.settings 临时设置 LANGUAGE_CODE 和 LANGUAGES",
+          "调用 check_language_settings_consistent",
+          "断言返回 Error 对象列表的格式"
+        ],
+        "possible_gap": "当前测试只检查了完全不在列表中的情况（'fr' vs ['en']），没有测试子语言（'de-at'）而其基础语言（'de'）在列表中的情况。"
+      },
+      {
+        "test_name": "TranslationCheckTests.test_valid_language_code",
+        "test_file": "tests/check_framework/test_translation.py",
+        "why_relevant": "它测试了有效的 LANGUAGE_CODE 标签，可能包含语言标签验证的逻辑，与子语言解析相关。",
+        "reusable_parts": [
+          "使用 self.settings 临时设置 LANGUAGE_CODE",
+          "调用 check_setting_language_code",
+          "断言返回空列表表示通过"
+        ],
+        "possible_gap": "它可能只验证了标签格式，没有涉及与 LANGUAGES 列表的关联检查。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "LANGUAGE_CODE='fr', LANGUAGES=[('en', 'English')] （完全不在列表中）",
+        "target_pattern": "LANGUAGE_CODE='de-at', LANGUAGES=[('de', 'German'), ...] （子语言不在，但基础语言在）",
+        "reason": "将触发条件从完全缺失改为子语言缺失但基础语言存在，以测试文档描述的回退行为是否被正确实现。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "check_language_settings_consistent(None) 的返回值",
+        "reason": "该函数的返回值应包含 E004 错误列表。观察其是否在子语言场景下错误地返回了错误。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "check_setting_language_code(None) 的返回值",
+        "reason": "该函数检查 LANGUAGE_CODE 的有效性。观察其对 'de-at' 这类子语言标签的验证结果。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 LANGUAGE_CODE 设置为 'de-at' 且 LANGUAGES 包含 'de' 时，系统检查应通过，不产生 E004 错误。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的错误信息字符串，因为信息可能微调；避免断言不相关的错误。",
+        "reason": "断言 check_language_settings_consistent 返回空列表，直接验证了 E004 错误未被触发，与期望行为一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 SimpleTestCase 和 self.settings 来临时覆盖 Django 的 LANGUAGE_CODE 和 LANGUAGES 设置。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "语言标签（如 'de-at'）的解析和基础语言匹配的确切逻辑位于代码库的哪个具体位置。",
+      "除了 check_language_settings_consistent，是否还有其他检查函数（如 check_setting_language_code）会影响到最终的系统检查结果。",
+      "LANGUAGES 设置是否必须显式包含基础语言，还是可以从其他默认设置中推断。"
+    ]
+  }
+}

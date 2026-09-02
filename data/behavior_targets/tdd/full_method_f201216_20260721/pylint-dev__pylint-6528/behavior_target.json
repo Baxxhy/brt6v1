@@ -1,0 +1,284 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pylint-dev__pylint-6528",
+  "issue_summary": "Pylint 在递归模式下不尊重忽略设置（--ignore、--ignore-paths、--ignore-patterns）。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要在临时目录中创建测试文件结构，包含应忽略和不应忽略的 Python 文件。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `pytest` 的 `tmp_path` fixture 来管理临时目录。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要改变当前工作目录（`os.chdir`）或调整 `sys.path`，如相关测试 3 和 4 所示。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_expand_modules_with_ignore",
+        "test_file": "tests/lint/unittest_expand_modules.py",
+        "why_relevant": "该测试直接测试了 `expand_modules` 函数在配置了 `ignore_paths` 时的行为，与 Issue 的核心问题（忽略设置）高度相关。",
+        "reusable_parts": [
+          "使用 `@set_config(ignore_paths=\"...\")` 装饰器设置配置。",
+          "调用 `expand_modules` 函数并检查其返回的模块列表。",
+          "使用 `assert` 验证模块列表和错误。"
+        ],
+        "possible_gap": "该测试是单元测试，针对特定函数，而 Issue 描述的是通过命令行调用 pylint 的端到端行为。它可能没有覆盖递归模式下的文件遍历逻辑。"
+      },
+      {
+        "test_name": "test_recursive",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试直接使用了 `--recursive=y` 参数，与 Issue 的触发条件一致。",
+        "reusable_parts": [
+          "使用 `self._runtest` 方法运行 pylint。",
+          "构造包含 `--recursive=y` 的命令行参数。",
+          "在 `regrtest_data` 目录结构下操作。"
+        ],
+        "possible_gap": "该测试没有设置任何忽略参数，因此无法复现忽略设置失效的问题。它主要验证递归模式本身是否工作。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 `--recursive=y` 模式运行 pylint，并指定 `--ignore`、`--ignore-paths` 或 `--ignore-patterns` 参数来忽略某些文件或目录。",
+      "evidence": [
+        "Issue 中描述了命令：`pylint --recursive=y --ignore=.a .` 等。",
+        "Issue 指出所有命令都给出了相同的输出，表明忽略设置未生效。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "被指定忽略的文件（如 `.a/foo.py`）仍然被 pylint 检查并报告了警告/错误。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 的输出显示 `.a/foo.py` 文件被报告了 `disallowed-name`、`missing-module-docstring` 和 `unused-import` 警告。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "expand_modules",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 使用了 `expand_modules` 函数，并且该测试与 `ignore_paths` 配置相关，这与 Issue 中关于忽略路径的问题直接相关。"
+      },
+      {
+        "name": "pylint.lint.Run",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及通过命令行调用 pylint，这最终会使用 `Run` 类。相关测试 2-5 也属于集成测试，涉及运行 pylint。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "没有检索到相关源代码片段，无法推断具体位置。但问题可能出现在处理递归文件发现和忽略列表过滤的模块中。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中通过 `@set_config(ignore_paths=\"...\")` 设置了一个忽略模式。",
+        "target_pattern": "在运行 pylint 的命令行参数中添加 `--ignore`、`--ignore-paths` 或 `--ignore-patterns` 选项，并指向一个应该被忽略的目录（如 `.a`）。",
+        "reason": "Issue 表明当这些配置与 `--recursive=y` 结合时，忽略逻辑可能被绕过。变异配置可以触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 的输入是目录路径和 `--recursive=y`。",
+        "target_pattern": "输入应包含一个被忽略模式匹配的子目录（如包含 `.a` 目录的当前目录 `.`）。",
+        "reason": "需要创建包含应忽略文件和不应忽略文件的目录结构，以观察忽略逻辑是否在递归遍历中正确应用。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在递归模式下，被 `--ignore`、`--ignore-paths` 或 `--ignore-patterns` 设置匹配的文件或目录应该被跳过，不被 pylint 检查。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分明确指出：'`foo.py` should be ignored by all of the above commands'。",
+        "Issue 引用了 `pylint --help` 中关于忽略设置的文档，描述了它们应该跳过文件或目录。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "pylint 运行后的标准输出（stdout/stderr），特别是其中报告警告/错误的模块名称。",
+        "reason": "Issue 的核心现象是输出了本应被忽略的文件（`.a/foo.py`）的警告。观察输出中是否包含该文件名可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`expand_modules` 函数返回的 `modules` 列表。",
+        "reason": "该函数负责扩展模块列表，可能包含忽略逻辑。观察其返回的模块是否包含了被忽略路径下的模块，可以帮助定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pylint 的输出中不包含来自被忽略目录（如 `.a/`）下文件的任何警告或错误信息。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、可能因 pylint 版本或配置而变化的输出字符串。",
+        "reason": "Issue 的期望行为是被忽略的文件不被报告。因此，断言输出中不包含被忽略文件的路径或模块名是稳定且直接相关的。"
+      },
+      {
+        "assertion_goal": "验证 `expand_modules` 返回的模块列表不包含被忽略路径匹配的模块。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免对模块列表的顺序或完整内容进行过于严格的断言。",
+        "reason": "这可以更底层地验证忽略逻辑在模块扩展阶段是否正常工作。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "忽略设置（--ignore, --ignore-paths, --ignore-patterns）在代码中具体是如何解析和应用的，尤其是在递归遍历文件的上下文中。",
+    "默认的 `ignore-patterns` 值 `\"^\\.\"` 是否在递归模式下被正确应用（Issue 中提到即使第一个没有忽略设置的命令也应该跳过 `.a`）。",
+    "缺陷的确切代码位置，因为没有检索到相关的源代码片段。"
+  ],
+  "raw": {
+    "issue_summary": "Pylint 在递归模式下不尊重忽略设置（--ignore、--ignore-paths、--ignore-patterns）。",
+    "trigger_condition": {
+      "text": "使用 `--recursive=y` 模式运行 pylint，并指定 `--ignore`、`--ignore-paths` 或 `--ignore-patterns` 参数来忽略某些文件或目录。",
+      "evidence": [
+        "Issue 中描述了命令：`pylint --recursive=y --ignore=.a .` 等。",
+        "Issue 指出所有命令都给出了相同的输出，表明忽略设置未生效。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "被指定忽略的文件（如 `.a/foo.py`）仍然被 pylint 检查并报告了警告/错误。",
+      "symptom_type": "warning",
+      "evidence": [
+        "Issue 的输出显示 `.a/foo.py` 文件被报告了 `disallowed-name`、`missing-module-docstring` 和 `unused-import` 警告。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在递归模式下，被 `--ignore`、`--ignore-paths` 或 `--ignore-patterns` 设置匹配的文件或目录应该被跳过，不被 pylint 检查。",
+      "evidence": [
+        "Issue 的 'Expected behavior' 部分明确指出：'`foo.py` should be ignored by all of the above commands'。",
+        "Issue 引用了 `pylint --help` 中关于忽略设置的文档，描述了它们应该跳过文件或目录。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "expand_modules",
+        "kind": "function",
+        "source_path": "",
+        "reason": "相关测试 1 使用了 `expand_modules` 函数，并且该测试与 `ignore_paths` 配置相关，这与 Issue 中关于忽略路径的问题直接相关。"
+      },
+      {
+        "name": "pylint.lint.Run",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 涉及通过命令行调用 pylint，这最终会使用 `Run` 类。相关测试 2-5 也属于集成测试，涉及运行 pylint。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "",
+        "object": "",
+        "lines": "",
+        "reason": "没有检索到相关源代码片段，无法推断具体位置。但问题可能出现在处理递归文件发现和忽略列表过滤的模块中。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_expand_modules_with_ignore",
+        "test_file": "tests/lint/unittest_expand_modules.py",
+        "why_relevant": "该测试直接测试了 `expand_modules` 函数在配置了 `ignore_paths` 时的行为，与 Issue 的核心问题（忽略设置）高度相关。",
+        "reusable_parts": [
+          "使用 `@set_config(ignore_paths=\"...\")` 装饰器设置配置。",
+          "调用 `expand_modules` 函数并检查其返回的模块列表。",
+          "使用 `assert` 验证模块列表和错误。"
+        ],
+        "possible_gap": "该测试是单元测试，针对特定函数，而 Issue 描述的是通过命令行调用 pylint 的端到端行为。它可能没有覆盖递归模式下的文件遍历逻辑。"
+      },
+      {
+        "test_name": "test_recursive",
+        "test_file": "tests/test_self.py",
+        "why_relevant": "该测试直接使用了 `--recursive=y` 参数，与 Issue 的触发条件一致。",
+        "reusable_parts": [
+          "使用 `self._runtest` 方法运行 pylint。",
+          "构造包含 `--recursive=y` 的命令行参数。",
+          "在 `regrtest_data` 目录结构下操作。"
+        ],
+        "possible_gap": "该测试没有设置任何忽略参数，因此无法复现忽略设置失效的问题。它主要验证递归模式本身是否工作。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 1 中通过 `@set_config(ignore_paths=\"...\")` 设置了一个忽略模式。",
+        "target_pattern": "在运行 pylint 的命令行参数中添加 `--ignore`、`--ignore-paths` 或 `--ignore-patterns` 选项，并指向一个应该被忽略的目录（如 `.a`）。",
+        "reason": "Issue 表明当这些配置与 `--recursive=y` 结合时，忽略逻辑可能被绕过。变异配置可以触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 2 的输入是目录路径和 `--recursive=y`。",
+        "target_pattern": "输入应包含一个被忽略模式匹配的子目录（如包含 `.a` 目录的当前目录 `.`）。",
+        "reason": "需要创建包含应忽略文件和不应忽略文件的目录结构，以观察忽略逻辑是否在递归遍历中正确应用。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "file_output",
+        "expression_hint": "pylint 运行后的标准输出（stdout/stderr），特别是其中报告警告/错误的模块名称。",
+        "reason": "Issue 的核心现象是输出了本应被忽略的文件（`.a/foo.py`）的警告。观察输出中是否包含该文件名可以判断缺陷是否触发。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "`expand_modules` 函数返回的 `modules` 列表。",
+        "reason": "该函数负责扩展模块列表，可能包含忽略逻辑。观察其返回的模块是否包含了被忽略路径下的模块，可以帮助定位问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pylint 的输出中不包含来自被忽略目录（如 `.a/`）下文件的任何警告或错误信息。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免断言完整的、可能因 pylint 版本或配置而变化的输出字符串。",
+        "reason": "Issue 的期望行为是被忽略的文件不被报告。因此，断言输出中不包含被忽略文件的路径或模块名是稳定且直接相关的。"
+      },
+      {
+        "assertion_goal": "验证 `expand_modules` 返回的模块列表不包含被忽略路径匹配的模块。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "避免对模块列表的顺序或完整内容进行过于严格的断言。",
+        "reason": "这可以更底层地验证忽略逻辑在模块扩展阶段是否正常工作。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要在临时目录中创建测试文件结构，包含应忽略和不应忽略的 Python 文件。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `pytest` 的 `tmp_path` fixture 来管理临时目录。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要改变当前工作目录（`os.chdir`）或调整 `sys.path`，如相关测试 3 和 4 所示。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "忽略设置（--ignore, --ignore-paths, --ignore-patterns）在代码中具体是如何解析和应用的，尤其是在递归遍历文件的上下文中。",
+      "默认的 `ignore-patterns` 值 `\"^\\.\"` 是否在递归模式下被正确应用（Issue 中提到即使第一个没有忽略设置的命令也应该跳过 `.a`）。",
+      "缺陷的确切代码位置，因为没有检索到相关的源代码片段。"
+    ]
+  }
+}

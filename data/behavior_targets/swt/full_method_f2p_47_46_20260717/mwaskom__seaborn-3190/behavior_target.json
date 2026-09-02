@@ -1,0 +1,332 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "mwaskom__seaborn-3190",
+  "issue_summary": "使用布尔值作为颜色映射数据时，在连续尺度计算中因不支持布尔减法操作而引发 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要导入 seaborn.objects 作为 so，以及 matplotlib 相关模块。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用类似 test_identity_mapping_color_tuples 中的 MockMark 来捕获尺度函数，避免实际绘图。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_identity_mapping_color_tuples",
+        "test_file": "tests/_core/test_plot.py",
+        "why_relevant": "测试了 Plot 的 color 参数映射，使用了 scale(color=None) 和 MockMark，结构与 Issue 类似。",
+        "reusable_parts": [
+          "Plot 构造、.add(mark)、.plot() 调用模式",
+          "MockMark 用于捕获尺度函数",
+          "assert_array_equal 断言风格"
+        ],
+        "possible_gap": "该测试使用 RGB 元组列表作为颜色输入，而非布尔值，且使用了 scale(color=None) 可能绕过了尺度设置逻辑。"
+      },
+      {
+        "test_name": "test_get_boolean_legend_data",
+        "test_file": "tests/test_axisgrid.py",
+        "why_relevant": "测试了布尔数据（b_bool）在图例中的使用，表明库的某些部分支持布尔数据。",
+        "reusable_parts": [
+          "将布尔列添加到 DataFrame",
+          "使用布尔列作为 hue 参数",
+          "对图例元素进行断言"
+        ],
+        "possible_gap": "测试的是 FacetGrid 而非 seaborn.objects.Plot，且不涉及颜色尺度的连续计算。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用布尔列表作为 color 参数调用 Plot，并添加 Bar mark。",
+      "evidence": [
+        "Issue 中的示例代码: so.Plot([\"a\", \"b\"], [1, 2], color=[True, False]).add(so.Bar())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 seaborn/_core/scales.py 第 351 行，执行 forward(vmax) - forward(vmin) 时抛出 TypeError，提示不支持 numpy 布尔值的减法操作。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示 TypeError: numpy boolean subtract, the `-` operator, is not supported, use the bitwise_xor, the `^` operator, or the logical_xor function instead."
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "seaborn.objects.Plot",
+        "kind": "class",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "Issue 中触发错误的入口点。"
+      },
+      {
+        "name": "seaborn.objects.Bar",
+        "kind": "class",
+        "source_path": "seaborn/_marks/bar.py",
+        "reason": "Issue 中使用的 mark。"
+      },
+      {
+        "name": "Plot._plot",
+        "kind": "method",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "绘图流程的入口，调用了 _setup_scales。"
+      },
+      {
+        "name": "Plotter._setup_scales",
+        "kind": "method",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "负责设置尺度，最终调用 scale._setup。"
+      },
+      {
+        "name": "ContinuousBase._setup",
+        "kind": "method",
+        "source_path": "seaborn/_core/scales.py",
+        "reason": "发生错误的直接位置，执行了导致 TypeError 的减法操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "seaborn/_core/scales.py",
+        "object": "ContinuousBase._setup",
+        "lines": "322-392",
+        "reason": "错误 traceback 指向第 351 行，该行对 forward(vmin) 和 forward(vmax) 执行减法，当数据为布尔值时 forward 可能返回布尔值。"
+      },
+      {
+        "path": "seaborn/_core/plot.py",
+        "object": "Plotter._setup_scales",
+        "lines": "1171-1293",
+        "reason": "该方法调用 scale._setup，并可能影响为布尔数据选择的尺度类型。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_identity_mapping_color_tuples 中使用颜色元组列表作为 color 参数。",
+        "target_pattern": "将 color 参数替换为布尔值列表，如 [True, False]。",
+        "reason": "Issue 表明布尔值输入会触发尺度计算中的错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "test_identity_mapping_color_tuples 中使用了 .scale(color=None) 可能禁用尺度转换。",
+        "target_pattern": "移除 .scale(color=None) 或使用默认尺度设置。",
+        "reason": "让库自动推断尺度，可能将布尔数据视为连续数据并进入有问题的代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "布尔值数据应能正确映射到颜色，或至少以更优雅的方式处理（例如转换为数值），而不引发 TypeError。",
+      "evidence": [
+        "Issue 标题 \"Color mapping fails with boolean data\" 暗示布尔数据应能进行颜色映射。",
+        "相关测试 test_get_boolean_legend_data 表明库的其他部分支持布尔数据用于图例。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 Plot(...).add(Bar()).plot() 时是否抛出 TypeError，并检查异常消息是否包含 \"numpy boolean subtract\"。",
+        "reason": "Issue 的核心错误现象是特定的 TypeError。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 ContinuousBase._setup 中，检查 forward(vmin) 和 forward(vmax) 返回值的类型。",
+        "reason": "错误源于对布尔值执行减法，了解 forward 函数对布尔输入的处理是关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Plotter._setup_scales 中为 color 变量选择的 scale 类型（例如 Continuous 还是 Nominal）。",
+        "reason": "布尔数据可能被错误地分配了连续尺度，而连续尺度的计算不支持布尔运算。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用布尔列表作为 color 参数不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能改变。",
+        "reason": "Issue 报告的是异常，修复后应不再抛出。断言不引发特定异常是稳定的。"
+      },
+      {
+        "assertion_goal": "布尔数据应能成功完成绘图流程或得到合理的颜色映射结果。",
+        "preferred_assertion_style": "unknown",
+        "avoid": "断言具体的颜色值，因为映射策略可能改变。",
+        "reason": "修复的目标是功能正常，而非特定的输出值。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "布尔数据在修复后应被视为分类数据（Nominal）还是连续数据（Continuous）？",
+    "forward 函数在布尔输入下的确切行为是什么？",
+    "除了 Bar mark，其他 mark 是否也会触发此错误？",
+    "修复是应该在尺度选择阶段（将布尔视为分类），还是在连续尺度计算阶段（处理布尔减法）？"
+  ],
+  "raw": {
+    "issue_summary": "使用布尔值作为颜色映射数据时，在连续尺度计算中因不支持布尔减法操作而引发 TypeError。",
+    "trigger_condition": {
+      "text": "使用布尔列表作为 color 参数调用 Plot，并添加 Bar mark。",
+      "evidence": [
+        "Issue 中的示例代码: so.Plot([\"a\", \"b\"], [1, 2], color=[True, False]).add(so.Bar())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 seaborn/_core/scales.py 第 351 行，执行 forward(vmax) - forward(vmin) 时抛出 TypeError，提示不支持 numpy 布尔值的减法操作。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示 TypeError: numpy boolean subtract, the `-` operator, is not supported, use the bitwise_xor, the `^` operator, or the logical_xor function instead."
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "布尔值数据应能正确映射到颜色，或至少以更优雅的方式处理（例如转换为数值），而不引发 TypeError。",
+      "evidence": [
+        "Issue 标题 \"Color mapping fails with boolean data\" 暗示布尔数据应能进行颜色映射。",
+        "相关测试 test_get_boolean_legend_data 表明库的其他部分支持布尔数据用于图例。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "seaborn.objects.Plot",
+        "kind": "class",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "Issue 中触发错误的入口点。"
+      },
+      {
+        "name": "seaborn.objects.Bar",
+        "kind": "class",
+        "source_path": "seaborn/_marks/bar.py",
+        "reason": "Issue 中使用的 mark。"
+      },
+      {
+        "name": "Plot._plot",
+        "kind": "method",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "绘图流程的入口，调用了 _setup_scales。"
+      },
+      {
+        "name": "Plotter._setup_scales",
+        "kind": "method",
+        "source_path": "seaborn/_core/plot.py",
+        "reason": "负责设置尺度，最终调用 scale._setup。"
+      },
+      {
+        "name": "ContinuousBase._setup",
+        "kind": "method",
+        "source_path": "seaborn/_core/scales.py",
+        "reason": "发生错误的直接位置，执行了导致 TypeError 的减法操作。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "seaborn/_core/scales.py",
+        "object": "ContinuousBase._setup",
+        "lines": "322-392",
+        "reason": "错误 traceback 指向第 351 行，该行对 forward(vmin) 和 forward(vmax) 执行减法，当数据为布尔值时 forward 可能返回布尔值。"
+      },
+      {
+        "path": "seaborn/_core/plot.py",
+        "object": "Plotter._setup_scales",
+        "lines": "1171-1293",
+        "reason": "该方法调用 scale._setup，并可能影响为布尔数据选择的尺度类型。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_identity_mapping_color_tuples",
+        "test_file": "tests/_core/test_plot.py",
+        "why_relevant": "测试了 Plot 的 color 参数映射，使用了 scale(color=None) 和 MockMark，结构与 Issue 类似。",
+        "reusable_parts": [
+          "Plot 构造、.add(mark)、.plot() 调用模式",
+          "MockMark 用于捕获尺度函数",
+          "assert_array_equal 断言风格"
+        ],
+        "possible_gap": "该测试使用 RGB 元组列表作为颜色输入，而非布尔值，且使用了 scale(color=None) 可能绕过了尺度设置逻辑。"
+      },
+      {
+        "test_name": "test_get_boolean_legend_data",
+        "test_file": "tests/test_axisgrid.py",
+        "why_relevant": "测试了布尔数据（b_bool）在图例中的使用，表明库的某些部分支持布尔数据。",
+        "reusable_parts": [
+          "将布尔列添加到 DataFrame",
+          "使用布尔列作为 hue 参数",
+          "对图例元素进行断言"
+        ],
+        "possible_gap": "测试的是 FacetGrid 而非 seaborn.objects.Plot，且不涉及颜色尺度的连续计算。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_identity_mapping_color_tuples 中使用颜色元组列表作为 color 参数。",
+        "target_pattern": "将 color 参数替换为布尔值列表，如 [True, False]。",
+        "reason": "Issue 表明布尔值输入会触发尺度计算中的错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "test_identity_mapping_color_tuples 中使用了 .scale(color=None) 可能禁用尺度转换。",
+        "target_pattern": "移除 .scale(color=None) 或使用默认尺度设置。",
+        "reason": "让库自动推断尺度，可能将布尔数据视为连续数据并进入有问题的代码路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 Plot(...).add(Bar()).plot() 时是否抛出 TypeError，并检查异常消息是否包含 \"numpy boolean subtract\"。",
+        "reason": "Issue 的核心错误现象是特定的 TypeError。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "在 ContinuousBase._setup 中，检查 forward(vmin) 和 forward(vmax) 返回值的类型。",
+        "reason": "错误源于对布尔值执行减法，了解 forward 函数对布尔输入的处理是关键。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "Plotter._setup_scales 中为 color 变量选择的 scale 类型（例如 Continuous 还是 Nominal）。",
+        "reason": "布尔数据可能被错误地分配了连续尺度，而连续尺度的计算不支持布尔运算。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用布尔列表作为 color 参数不应引发 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为修复后消息可能改变。",
+        "reason": "Issue 报告的是异常，修复后应不再抛出。断言不引发特定异常是稳定的。"
+      },
+      {
+        "assertion_goal": "布尔数据应能成功完成绘图流程或得到合理的颜色映射结果。",
+        "preferred_assertion_style": "unknown",
+        "avoid": "断言具体的颜色值，因为映射策略可能改变。",
+        "reason": "修复的目标是功能正常，而非特定的输出值。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要导入 seaborn.objects 作为 so，以及 matplotlib 相关模块。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可以使用类似 test_identity_mapping_color_tuples 中的 MockMark 来捕获尺度函数，避免实际绘图。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "布尔数据在修复后应被视为分类数据（Nominal）还是连续数据（Continuous）？",
+      "forward 函数在布尔输入下的确切行为是什么？",
+      "除了 Bar mark，其他 mark 是否也会触发此错误？",
+      "修复是应该在尺度选择阶段（将布尔视为分类），还是在连续尺度计算阶段（处理布尔减法）？"
+    ]
+  }
+}

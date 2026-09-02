@@ -1,0 +1,246 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-22005",
+  "issue_summary": "solve_poly_system 在处理某些无限解系统时未能正确抛出 NotImplementedError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 solve_poly_system, Poly, symbols (如 x, y)。测试框架（如 pytest）需支持 raises 断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_solve_poly_system",
+        "test_file": "sympy/solvers/tests/test_polysys.py",
+        "why_relevant": "这是测试 solve_poly_system 的主要函数，包含了多种正常和异常情况的测试，包括对 NotImplementedError 的测试。",
+        "reusable_parts": [
+          "导入的符号（如 x, y, z）",
+          "使用 raises 上下文管理器测试异常",
+          "调用 solve_poly_system 的基本模式",
+          "使用 Poly 对象作为输入的断言风格"
+        ],
+        "possible_gap": "现有测试可能没有覆盖到 Issue 中描述的特定触发条件：一个只涉及一个变量（但符号列表中有多个变量）的多项式系统。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 solve_poly_system，传入一个多项式和一个符号列表，其中多项式只包含一个变量，但符号列表包含多个变量（例如，传入 Poly(y - 1, x, y) 和 (x, y)）。",
+      "evidence": [
+        "Issue 中展示了 solve_poly_system((y - 1,), x, y) 返回了 [(1,)]，而 solve_poly_system((x - 1,), x, y) 抛出了 NotImplementedError。",
+        "Issue 中的 diff 显示在 _solve_reduced_system 中增加了对 len(gens) == 1 的检查。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于某些无限解系统（非零维系统），函数返回了一个解列表（例如 [(1,)]），而不是抛出 NotImplementedError 异常。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中显示 solve_poly_system((y - 1,), x, y) 返回了 [(1,)]，而预期行为应与 solve_poly_system((x - 1,), x, y) 一致，抛出 NotImplementedError。",
+        "相关测试 1 中已有对类似情况抛出 NotImplementedError 的测试。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "solve_poly_system",
+        "kind": "function",
+        "source_path": "sympy/solvers/polysys.py",
+        "reason": "这是 Issue 报告的直接目标函数，用于求解多项式系统。"
+      },
+      {
+        "name": "Poly",
+        "kind": "class",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 中的示例和 diff 中的测试使用了 Poly 对象作为输入。"
+      },
+      {
+        "name": "_solve_reduced_system",
+        "kind": "function",
+        "source_path": "sympy/solvers/polysys.py",
+        "reason": "Issue 中的 diff 修改了这个函数，它是 solve_poly_system 内部调用的关键函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/solvers/polysys.py",
+        "object": "_solve_reduced_system",
+        "lines": "240-250",
+        "reason": "Issue 中的 diff 修改了该函数的第 240 行，在检查 univariate 多项式数量时，增加了对 gens 长度的检查，这表明原逻辑在处理单变量多项式但多符号时存在缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中调用 solve_poly_system([x**3 - y**3], x, y) 来触发 NotImplementedError。",
+        "target_pattern": "调用 solve_poly_system(Poly(y - 1, x, y), (x, y)) 或 solve_poly_system([y - 1], x, y)。",
+        "reason": "Issue 表明，当多项式只包含一个变量（如 y），但符号列表包含多个变量（x, y）时，原逻辑错误地返回了结果，而没有抛出异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中通常将方程列表和符号作为分开的参数传递（例如 solve_poly_system([x - 1], x)）。",
+        "target_pattern": "使用 Poly 对象作为第一个参数，并显式传递符号元组作为第二个参数（如 Issue diff 中的测试所示）。",
+        "reason": "Issue 的 diff 在测试中添加了使用 Poly 对象的用例，这可能更直接地触发了内部路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对于非零维系统（即无限解系统），solve_poly_system 应一致地抛出 NotImplementedError 异常，并提示“only zero-dimensional systems supported (finite number of solutions)”。",
+      "evidence": [
+        "Issue 中 diff 的修改意图是让两种情况的处理一致。",
+        "相关测试 1 中已有对无限解系统抛出 NotImplementedError 的测试用例（例如 raises(NotImplementedError, lambda: solve_poly_system([x**3 - y**3], x, y))）。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 solve_poly_system 时是否抛出 NotImplementedError 异常及其消息。",
+        "reason": "Issue 的核心是函数在某些情况下应该抛出异常但没有抛出。观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "solve_poly_system 的返回值（当没有异常时）。",
+        "reason": "在缺陷版本中，对于特定输入，函数会返回一个解列表（如 [(1,)]），这是错误的。观测返回值可以确认错误行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于给定的触发输入，solve_poly_system 应抛出 NotImplementedError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能微调。避免断言返回值的具体内容。",
+        "reason": "Issue 的核心是缺失异常。使用 raises 上下文管理器是测试异常的标准且稳定的方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "除了 Issue 中给出的两个具体例子（(x-1) 和 (y-1)）外，是否还有其他类似的输入模式会触发此缺陷？",
+    "内部函数 _solve_reduced_system 的确切调用路径和条件，以及为何原逻辑在处理 y-1 时通过了检查。",
+    "修复后，除了抛出异常，是否还有其他预期的副作用或状态变化需要验证？"
+  ],
+  "raw": {
+    "issue_summary": "solve_poly_system 在处理某些无限解系统时未能正确抛出 NotImplementedError。",
+    "trigger_condition": {
+      "text": "调用 solve_poly_system，传入一个多项式和一个符号列表，其中多项式只包含一个变量，但符号列表包含多个变量（例如，传入 Poly(y - 1, x, y) 和 (x, y)）。",
+      "evidence": [
+        "Issue 中展示了 solve_poly_system((y - 1,), x, y) 返回了 [(1,)]，而 solve_poly_system((x - 1,), x, y) 抛出了 NotImplementedError。",
+        "Issue 中的 diff 显示在 _solve_reduced_system 中增加了对 len(gens) == 1 的检查。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "对于某些无限解系统（非零维系统），函数返回了一个解列表（例如 [(1,)]），而不是抛出 NotImplementedError 异常。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中显示 solve_poly_system((y - 1,), x, y) 返回了 [(1,)]，而预期行为应与 solve_poly_system((x - 1,), x, y) 一致，抛出 NotImplementedError。",
+        "相关测试 1 中已有对类似情况抛出 NotImplementedError 的测试。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对于非零维系统（即无限解系统），solve_poly_system 应一致地抛出 NotImplementedError 异常，并提示“only zero-dimensional systems supported (finite number of solutions)”。",
+      "evidence": [
+        "Issue 中 diff 的修改意图是让两种情况的处理一致。",
+        "相关测试 1 中已有对无限解系统抛出 NotImplementedError 的测试用例（例如 raises(NotImplementedError, lambda: solve_poly_system([x**3 - y**3], x, y))）。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "solve_poly_system",
+        "kind": "function",
+        "source_path": "sympy/solvers/polysys.py",
+        "reason": "这是 Issue 报告的直接目标函数，用于求解多项式系统。"
+      },
+      {
+        "name": "Poly",
+        "kind": "class",
+        "source_path": "sympy/polys/polytools.py",
+        "reason": "Issue 中的示例和 diff 中的测试使用了 Poly 对象作为输入。"
+      },
+      {
+        "name": "_solve_reduced_system",
+        "kind": "function",
+        "source_path": "sympy/solvers/polysys.py",
+        "reason": "Issue 中的 diff 修改了这个函数，它是 solve_poly_system 内部调用的关键函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/solvers/polysys.py",
+        "object": "_solve_reduced_system",
+        "lines": "240-250",
+        "reason": "Issue 中的 diff 修改了该函数的第 240 行，在检查 univariate 多项式数量时，增加了对 gens 长度的检查，这表明原逻辑在处理单变量多项式但多符号时存在缺陷。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_solve_poly_system",
+        "test_file": "sympy/solvers/tests/test_polysys.py",
+        "why_relevant": "这是测试 solve_poly_system 的主要函数，包含了多种正常和异常情况的测试，包括对 NotImplementedError 的测试。",
+        "reusable_parts": [
+          "导入的符号（如 x, y, z）",
+          "使用 raises 上下文管理器测试异常",
+          "调用 solve_poly_system 的基本模式",
+          "使用 Poly 对象作为输入的断言风格"
+        ],
+        "possible_gap": "现有测试可能没有覆盖到 Issue 中描述的特定触发条件：一个只涉及一个变量（但符号列表中有多个变量）的多项式系统。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中调用 solve_poly_system([x**3 - y**3], x, y) 来触发 NotImplementedError。",
+        "target_pattern": "调用 solve_poly_system(Poly(y - 1, x, y), (x, y)) 或 solve_poly_system([y - 1], x, y)。",
+        "reason": "Issue 表明，当多项式只包含一个变量（如 y），但符号列表包含多个变量（x, y）时，原逻辑错误地返回了结果，而没有抛出异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中通常将方程列表和符号作为分开的参数传递（例如 solve_poly_system([x - 1], x)）。",
+        "target_pattern": "使用 Poly 对象作为第一个参数，并显式传递符号元组作为第二个参数（如 Issue diff 中的测试所示）。",
+        "reason": "Issue 的 diff 在测试中添加了使用 Poly 对象的用例，这可能更直接地触发了内部路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 solve_poly_system 时是否抛出 NotImplementedError 异常及其消息。",
+        "reason": "Issue 的核心是函数在某些情况下应该抛出异常但没有抛出。观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "solve_poly_system 的返回值（当没有异常时）。",
+        "reason": "在缺陷版本中，对于特定输入，函数会返回一个解列表（如 [(1,)]），这是错误的。观测返回值可以确认错误行为。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于给定的触发输入，solve_poly_system 应抛出 NotImplementedError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能微调。避免断言返回值的具体内容。",
+        "reason": "Issue 的核心是缺失异常。使用 raises 上下文管理器是测试异常的标准且稳定的方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要从 sympy 导入 solve_poly_system, Poly, symbols (如 x, y)。测试框架（如 pytest）需支持 raises 断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 Issue 中给出的两个具体例子（(x-1) 和 (y-1)）外，是否还有其他类似的输入模式会触发此缺陷？",
+      "内部函数 _solve_reduced_system 的确切调用路径和条件，以及为何原逻辑在处理 y-1 时通过了检查。",
+      "修复后，除了抛出异常，是否还有其他预期的副作用或状态变化需要验证？"
+    ]
+  }
+}

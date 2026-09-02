@@ -1,0 +1,326 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14122",
+  "issue_summary": "当使用 Meta.ordering 时，Django 的聚合查询错误地将排序字段包含在 GROUP BY 子句中，导致错误的聚合结果。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个定义了 Meta.ordering 的 Django 模型，并为其创建测试数据。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 和数据库 fixture（例如 Book 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AggregateTestCase.test_non_grouped_annotation_not_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了注解和聚合查询中 GROUP BY 子句的生成逻辑，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试类 AggregateTestCase",
+          "使用 Book 模型和注解/聚合的查询构造模式",
+          "使用 assertEqual 验证结果"
+        ],
+        "possible_gap": "该测试没有涉及模型的 Meta.ordering 属性，这是触发当前 Issue 的关键条件。"
+      },
+      {
+        "test_name": "AggregateTestCase.test_grouped_annotation_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了当注解被包含在 values() 中时，GROUP BY 子句的正确包含行为。",
+        "reusable_parts": [
+          "测试类 AggregateTestCase",
+          "使用 values() 和 annotate() 的链式调用模式",
+          "对查询结果列表的断言风格"
+        ],
+        "possible_gap": "它没有测试 Meta.ordering 字段被错误包含的情况。"
+      },
+      {
+        "test_name": "test_order_by_resetting",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 order_by() 的行为，与排序字段的管理相关。",
+        "reusable_parts": [
+          "使用 Author 模型",
+          "检查生成的 SQL 中是否包含 'ORDER BY' 的断言方法"
+        ],
+        "possible_gap": "它不涉及聚合查询或 GROUP BY 子句。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个带有 Meta.ordering 定义的模型执行聚合查询（例如使用 annotate 和 values）。",
+      "evidence": [
+        "Issue 描述提到 'Meta.ordering fields must not be included in GROUP BY clause' 和 'it still does populates GROUP BY with Meta.ordering fields thus leads to wrong aggregation'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "聚合查询返回错误的聚合结果（例如错误的计数或求和）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述提到 'leads to wrong aggregation'，并且 PR 中包含了测试用例。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "聚合查询的核心方法，用于添加注解和聚合。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.values",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于指定分组字段，与 GROUP BY 子句生成相关。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.order_by",
+        "kind": "method",
+        "source_path": "",
+        "reason": "与 Meta.ordering 和查询排序相关。"
+      },
+      {
+        "name": "django.db.models.Model.Meta.ordering",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是关于模型 Meta 类中的 ordering 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.get_group_by",
+        "lines": "",
+        "reason": "该函数负责生成 GROUP BY 子句，可能错误地包含了排序字段。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.add_ordering",
+        "lines": "",
+        "reason": "该函数处理排序字段的添加，可能与 GROUP BY 的字段选择有交互。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中没有显式设置模型的 Meta.ordering。",
+        "target_pattern": "创建一个带有 Meta.ordering 字段定义的模型，并对其执行聚合查询。",
+        "reason": "Issue 明确指出 Meta.ordering 字段是触发错误 GROUP BY 的条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常使用 values().annotate() 来测试分组聚合。",
+        "target_pattern": "在带有 Meta.ordering 的模型上，使用 annotate() 和 values() 进行聚合，可能不显式调用 order_by()。",
+        "reason": "Issue 提到即使移除了 ORDER BY，GROUP BY 仍然错误地包含了排序字段。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "Meta.ordering 字段不应被包含在 GROUP BY 子句中，聚合查询应返回正确的聚合结果。",
+      "evidence": [
+        "Issue 标题明确指出 'Meta.ordering fields must not be included in GROUP BY clause'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 GROUP BY 子句部分。",
+        "reason": "Issue 的核心是 GROUP BY 子句中错误地包含了 Meta.ordering 字段，直接检查 SQL 可以确认。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "聚合查询的结果（例如 Count 的值）。",
+        "reason": "错误的 GROUP BY 会导致错误的聚合结果，比较实际结果与预期结果可以判断问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 的 GROUP BY 子句中不包含 Meta.ordering 字段。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为不同数据库后端可能有微小差异。",
+        "reason": "直接针对 Issue 的核心问题（错误的字段包含）进行稳定断言。"
+      },
+      {
+        "assertion_goal": "验证聚合查询返回正确的聚合值（例如正确的计数）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言与排序无关的中间结果或完整的字典列表顺序。",
+        "reason": "错误的 GROUP BY 最终会导致错误的聚合结果，这是最终的用户可见症状。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Meta.ordering 是定义在模型 Meta 内部类中，还是通过其他方式（如 QuerySet.order_by）设置时也会触发此 bug？",
+    "错误是否只发生在特定的聚合函数（如 Count, Sum）或特定的查询链组合中？",
+    "修复提交 [0ddb4ebf] 具体修改了哪些代码，当前缺陷是否是其残留问题？"
+  ],
+  "raw": {
+    "issue_summary": "当使用 Meta.ordering 时，Django 的聚合查询错误地将排序字段包含在 GROUP BY 子句中，导致错误的聚合结果。",
+    "trigger_condition": {
+      "text": "对一个带有 Meta.ordering 定义的模型执行聚合查询（例如使用 annotate 和 values）。",
+      "evidence": [
+        "Issue 描述提到 'Meta.ordering fields must not be included in GROUP BY clause' 和 'it still does populates GROUP BY with Meta.ordering fields thus leads to wrong aggregation'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "聚合查询返回错误的聚合结果（例如错误的计数或求和）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 描述提到 'leads to wrong aggregation'，并且 PR 中包含了测试用例。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "Meta.ordering 字段不应被包含在 GROUP BY 子句中，聚合查询应返回正确的聚合结果。",
+      "evidence": [
+        "Issue 标题明确指出 'Meta.ordering fields must not be included in GROUP BY clause'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.db.models.query.QuerySet.annotate",
+        "kind": "method",
+        "source_path": "",
+        "reason": "聚合查询的核心方法，用于添加注解和聚合。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.values",
+        "kind": "method",
+        "source_path": "",
+        "reason": "用于指定分组字段，与 GROUP BY 子句生成相关。"
+      },
+      {
+        "name": "django.db.models.query.QuerySet.order_by",
+        "kind": "method",
+        "source_path": "",
+        "reason": "与 Meta.ordering 和查询排序相关。"
+      },
+      {
+        "name": "django.db.models.Model.Meta.ordering",
+        "kind": "class",
+        "source_path": "",
+        "reason": "Issue 的核心是关于模型 Meta 类中的 ordering 属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.get_group_by",
+        "lines": "",
+        "reason": "该函数负责生成 GROUP BY 子句，可能错误地包含了排序字段。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query.add_ordering",
+        "lines": "",
+        "reason": "该函数处理排序字段的添加，可能与 GROUP BY 的字段选择有交互。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "AggregateTestCase.test_non_grouped_annotation_not_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了注解和聚合查询中 GROUP BY 子句的生成逻辑，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "测试类 AggregateTestCase",
+          "使用 Book 模型和注解/聚合的查询构造模式",
+          "使用 assertEqual 验证结果"
+        ],
+        "possible_gap": "该测试没有涉及模型的 Meta.ordering 属性，这是触发当前 Issue 的关键条件。"
+      },
+      {
+        "test_name": "AggregateTestCase.test_grouped_annotation_in_group_by",
+        "test_file": "tests/aggregation/tests.py",
+        "why_relevant": "它测试了当注解被包含在 values() 中时，GROUP BY 子句的正确包含行为。",
+        "reusable_parts": [
+          "测试类 AggregateTestCase",
+          "使用 values() 和 annotate() 的链式调用模式",
+          "对查询结果列表的断言风格"
+        ],
+        "possible_gap": "它没有测试 Meta.ordering 字段被错误包含的情况。"
+      },
+      {
+        "test_name": "test_order_by_resetting",
+        "test_file": "tests/queries/tests.py",
+        "why_relevant": "它测试了 order_by() 的行为，与排序字段的管理相关。",
+        "reusable_parts": [
+          "使用 Author 模型",
+          "检查生成的 SQL 中是否包含 'ORDER BY' 的断言方法"
+        ],
+        "possible_gap": "它不涉及聚合查询或 GROUP BY 子句。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中没有显式设置模型的 Meta.ordering。",
+        "target_pattern": "创建一个带有 Meta.ordering 字段定义的模型，并对其执行聚合查询。",
+        "reason": "Issue 明确指出 Meta.ordering 字段是触发错误 GROUP BY 的条件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常使用 values().annotate() 来测试分组聚合。",
+        "target_pattern": "在带有 Meta.ordering 的模型上，使用 annotate() 和 values() 进行聚合，可能不显式调用 order_by()。",
+        "reason": "Issue 提到即使移除了 ORDER BY，GROUP BY 仍然错误地包含了排序字段。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "生成的 SQL 查询字符串，特别是 GROUP BY 子句部分。",
+        "reason": "Issue 的核心是 GROUP BY 子句中错误地包含了 Meta.ordering 字段，直接检查 SQL 可以确认。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "聚合查询的结果（例如 Count 的值）。",
+        "reason": "错误的 GROUP BY 会导致错误的聚合结果，比较实际结果与预期结果可以判断问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证生成的 SQL 的 GROUP BY 子句中不包含 Meta.ordering 字段。",
+        "preferred_assertion_style": "not_contains_fragment",
+        "avoid": "断言完整的 SQL 字符串相等，因为不同数据库后端可能有微小差异。",
+        "reason": "直接针对 Issue 的核心问题（错误的字段包含）进行稳定断言。"
+      },
+      {
+        "assertion_goal": "验证聚合查询返回正确的聚合值（例如正确的计数）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言与排序无关的中间结果或完整的字典列表顺序。",
+        "reason": "错误的 GROUP BY 最终会导致错误的聚合结果，这是最终的用户可见症状。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个定义了 Meta.ordering 的 Django 模型，并为其创建测试数据。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 Django 的 TestCase 和数据库 fixture（例如 Book 模型）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Meta.ordering 是定义在模型 Meta 内部类中，还是通过其他方式（如 QuerySet.order_by）设置时也会触发此 bug？",
+      "错误是否只发生在特定的聚合函数（如 Count, Sum）或特定的查询链组合中？",
+      "修复提交 [0ddb4ebf] 具体修改了哪些代码，当前缺陷是否是其残留问题？"
+    ]
+  }
+}

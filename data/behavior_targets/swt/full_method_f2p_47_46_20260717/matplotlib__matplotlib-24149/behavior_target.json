@@ -1,0 +1,312 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "matplotlib__matplotlib-24149",
+  "issue_summary": "在 matplotlib 3.6.1 中，当 ax.bar 的 x 坐标数据全部为 NaN 时会抛出 StopIteration 异常，而在 3.6.0 中会返回一个包含 NaN 坐标的 BarCollection。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要 matplotlib.pyplot 和 numpy。使用 plt.subplots() 创建图形和坐标轴。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在 matplotlib 3.6.1 的环境中运行以复现缺陷。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_bar_leading_nan",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试专门处理 x 坐标包含 NaN 的条形图，验证了第一个条形可以有 NaN 坐标且不会崩溃。",
+        "reusable_parts": [
+          "import numpy as np",
+          "import matplotlib.pyplot as plt",
+          "fig, ax = plt.subplots()",
+          "bars = ax.bar(...)",
+          "使用 np.isfinite 检查坐标属性。"
+        ],
+        "possible_gap": "该测试中 x 数组只有第一个元素是 NaN，其余是有限值，因此 _safe_first_finite 能找到有限值。而 Issue 中是所有 x 元素都是 NaN，导致找不到有限值而触发 StopIteration。"
+      },
+      {
+        "test_name": "test_nan_bar_values",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试调用了 ax.bar([0, 1], [np.nan, 4])，即 height 包含 NaN 而 x 是有限值，这与 Issue 中 'ax.bar([0], [np.nan]) works' 一致，展示了部分场景正常工作。",
+        "reusable_parts": [
+          "基本的测试设置和 API 调用模式。"
+        ],
+        "possible_gap": "该测试没有断言，且 x 坐标是有限值，不涉及 _safe_first_finite 在 x 全为 NaN 时的行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 ax.bar(x, height)，其中 x 数组的所有元素都是 NaN，或者第一个元素是 NaN 且 height 为有限值。",
+      "evidence": [
+        "Issue 中的代码示例：ax.bar([np.nan], [np.nan]) 和 ax.bar([np.nan], [0]) 会引发异常。",
+        "Issue 中进一步调试说明：'So it's about the x position specifically.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 StopIteration 异常，堆栈跟踪指向 _safe_first_finite 函数中的 next(val for val in obj if safe_isfinite(val))。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示 StopIteration 异常来自 _safe_first_finite。",
+        "源码片段 3 显示 _safe_first_finite 在 skip_nonfinite 为 True 时会尝试获取第一个有限值，如果所有值都是 NaN 则会导致 StopIteration。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Axes.bar",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_axes.py",
+        "reason": "这是触发缺陷的直接 API 调用。"
+      },
+      {
+        "name": "Axes._convert_dx",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_axes.py",
+        "reason": "堆栈跟踪显示异常发生在 _convert_dx 内部，它调用了 _safe_first_finite。"
+      },
+      {
+        "name": "_safe_first_finite",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cbook/__init__.py",
+        "reason": "这是抛出 StopIteration 异常的直接函数。"
+      },
+      {
+        "name": "Rectangle",
+        "kind": "class",
+        "source_path": "lib/matplotlib/patches.py",
+        "reason": "BarCollection 包含 Rectangle 对象，预期行为涉及 Rectangle 的属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_axes.py",
+        "object": "Axes._convert_dx",
+        "lines": "2182",
+        "reason": "堆栈跟踪显示异常发生在 _convert_dx 内部调用 x0 = cbook._safe_first_finite(x0) 的行。"
+      },
+      {
+        "path": "lib/matplotlib/cbook/__init__.py",
+        "object": "_safe_first_finite",
+        "lines": "1749",
+        "reason": "该函数在 skip_nonfinite=True 时，如果迭代器中的所有值都使 safe_isfinite 返回 False（例如全是 NaN），则 next() 会抛出 StopIteration。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_bar_leading_nan 中使用 barx = np.arange(3, dtype=float); barx[0] = np.NaN（即部分 NaN）。",
+        "target_pattern": "x = [np.nan] 或 x = [np.nan, np.nan]（即全部 NaN）。",
+        "reason": "当 x 数组所有元素都是 NaN 时，_safe_first_finite 找不到有限值，从而触发 StopIteration 异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中 height 通常包含有限值或部分 NaN。",
+        "target_pattern": "height 可以是任何值（如 [np.nan] 或 [0]），因为 Issue 表明问题与 x 坐标相关。",
+        "reason": "Issue 指出 ax.bar([np.nan], [0]) 也会引发异常，而 ax.bar([0], [np.nan]) 正常，说明触发条件与 x 是否为 NaN 强相关。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "ax.bar 应成功返回一个 BarCollection，其中包含一个 Rectangle 对象，其 x 和 height 属性可以是 NaN，而不应抛出异常。",
+      "evidence": [
+        "Issue 中说明：'On 3.6.0 this returns a `BarCollection` with one Rectangle, having `nan` for `x` and `height`.'",
+        "相关测试 test_bar_leading_nan 验证了当第一个 x 为 NaN 时，条形图仍能创建，且第一个条形具有非有限坐标。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "是否抛出 StopIteration 异常。",
+        "reason": "Issue 的核心错误现象就是 StopIteration 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ax.bar 的返回值类型和属性，例如 isinstance(result, BarContainer) 及 result.patches[0].get_x() 的值。",
+        "reason": "预期行为是返回一个 BarContainer，其中包含 Rectangle，其 x 坐标可能是 NaN。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 ax.bar([np.nan], [np.nan]) 不应抛出 StopIteration 或任何异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能变化。",
+        "reason": "修复后，该调用应正常返回，而不是崩溃。"
+      },
+      {
+        "assertion_goal": "返回的 BarContainer 应包含一个 Rectangle，且其 x 坐标是 NaN（或至少允许非有限值）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 Rectangle 的精确像素位置或完整 repr。",
+        "reason": "与 test_bar_leading_nan 的断言风格一致，验证非有限坐标的存在。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否也影响 barh（水平条形图），因为 test_bar_leading_nan 测试了 hbars，但 Issue 未提及。",
+    "_safe_first_finite 中 skip_nonfinite 参数的具体调用上下文和默认值如何影响行为。",
+    "除了 x 全为 NaN 外，是否还有其他边界情况（如 inf）会触发相同异常。"
+  ],
+  "raw": {
+    "issue_summary": "在 matplotlib 3.6.1 中，当 ax.bar 的 x 坐标数据全部为 NaN 时会抛出 StopIteration 异常，而在 3.6.0 中会返回一个包含 NaN 坐标的 BarCollection。",
+    "trigger_condition": {
+      "text": "调用 ax.bar(x, height)，其中 x 数组的所有元素都是 NaN，或者第一个元素是 NaN 且 height 为有限值。",
+      "evidence": [
+        "Issue 中的代码示例：ax.bar([np.nan], [np.nan]) 和 ax.bar([np.nan], [0]) 会引发异常。",
+        "Issue 中进一步调试说明：'So it's about the x position specifically.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 StopIteration 异常，堆栈跟踪指向 _safe_first_finite 函数中的 next(val for val in obj if safe_isfinite(val))。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的 traceback 显示 StopIteration 异常来自 _safe_first_finite。",
+        "源码片段 3 显示 _safe_first_finite 在 skip_nonfinite 为 True 时会尝试获取第一个有限值，如果所有值都是 NaN 则会导致 StopIteration。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "ax.bar 应成功返回一个 BarCollection，其中包含一个 Rectangle 对象，其 x 和 height 属性可以是 NaN，而不应抛出异常。",
+      "evidence": [
+        "Issue 中说明：'On 3.6.0 this returns a `BarCollection` with one Rectangle, having `nan` for `x` and `height`.'",
+        "相关测试 test_bar_leading_nan 验证了当第一个 x 为 NaN 时，条形图仍能创建，且第一个条形具有非有限坐标。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Axes.bar",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_axes.py",
+        "reason": "这是触发缺陷的直接 API 调用。"
+      },
+      {
+        "name": "Axes._convert_dx",
+        "kind": "method",
+        "source_path": "lib/matplotlib/axes/_axes.py",
+        "reason": "堆栈跟踪显示异常发生在 _convert_dx 内部，它调用了 _safe_first_finite。"
+      },
+      {
+        "name": "_safe_first_finite",
+        "kind": "function",
+        "source_path": "lib/matplotlib/cbook/__init__.py",
+        "reason": "这是抛出 StopIteration 异常的直接函数。"
+      },
+      {
+        "name": "Rectangle",
+        "kind": "class",
+        "source_path": "lib/matplotlib/patches.py",
+        "reason": "BarCollection 包含 Rectangle 对象，预期行为涉及 Rectangle 的属性。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "lib/matplotlib/axes/_axes.py",
+        "object": "Axes._convert_dx",
+        "lines": "2182",
+        "reason": "堆栈跟踪显示异常发生在 _convert_dx 内部调用 x0 = cbook._safe_first_finite(x0) 的行。"
+      },
+      {
+        "path": "lib/matplotlib/cbook/__init__.py",
+        "object": "_safe_first_finite",
+        "lines": "1749",
+        "reason": "该函数在 skip_nonfinite=True 时，如果迭代器中的所有值都使 safe_isfinite 返回 False（例如全是 NaN），则 next() 会抛出 StopIteration。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_bar_leading_nan",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试专门处理 x 坐标包含 NaN 的条形图，验证了第一个条形可以有 NaN 坐标且不会崩溃。",
+        "reusable_parts": [
+          "import numpy as np",
+          "import matplotlib.pyplot as plt",
+          "fig, ax = plt.subplots()",
+          "bars = ax.bar(...)",
+          "使用 np.isfinite 检查坐标属性。"
+        ],
+        "possible_gap": "该测试中 x 数组只有第一个元素是 NaN，其余是有限值，因此 _safe_first_finite 能找到有限值。而 Issue 中是所有 x 元素都是 NaN，导致找不到有限值而触发 StopIteration。"
+      },
+      {
+        "test_name": "test_nan_bar_values",
+        "test_file": "lib/matplotlib/tests/test_axes.py",
+        "why_relevant": "该测试调用了 ax.bar([0, 1], [np.nan, 4])，即 height 包含 NaN 而 x 是有限值，这与 Issue 中 'ax.bar([0], [np.nan]) works' 一致，展示了部分场景正常工作。",
+        "reusable_parts": [
+          "基本的测试设置和 API 调用模式。"
+        ],
+        "possible_gap": "该测试没有断言，且 x 坐标是有限值，不涉及 _safe_first_finite 在 x 全为 NaN 时的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_bar_leading_nan 中使用 barx = np.arange(3, dtype=float); barx[0] = np.NaN（即部分 NaN）。",
+        "target_pattern": "x = [np.nan] 或 x = [np.nan, np.nan]（即全部 NaN）。",
+        "reason": "当 x 数组所有元素都是 NaN 时，_safe_first_finite 找不到有限值，从而触发 StopIteration 异常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相关测试中 height 通常包含有限值或部分 NaN。",
+        "target_pattern": "height 可以是任何值（如 [np.nan] 或 [0]），因为 Issue 表明问题与 x 坐标相关。",
+        "reason": "Issue 指出 ax.bar([np.nan], [0]) 也会引发异常，而 ax.bar([0], [np.nan]) 正常，说明触发条件与 x 是否为 NaN 强相关。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "是否抛出 StopIteration 异常。",
+        "reason": "Issue 的核心错误现象就是 StopIteration 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "ax.bar 的返回值类型和属性，例如 isinstance(result, BarContainer) 及 result.patches[0].get_x() 的值。",
+        "reason": "预期行为是返回一个 BarContainer，其中包含 Rectangle，其 x 坐标可能是 NaN。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 ax.bar([np.nan], [np.nan]) 不应抛出 StopIteration 或任何异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能变化。",
+        "reason": "修复后，该调用应正常返回，而不是崩溃。"
+      },
+      {
+        "assertion_goal": "返回的 BarContainer 应包含一个 Rectangle，且其 x 坐标是 NaN（或至少允许非有限值）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言 Rectangle 的精确像素位置或完整 repr。",
+        "reason": "与 test_bar_leading_nan 的断言风格一致，验证非有限坐标的存在。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要 matplotlib.pyplot 和 numpy。使用 plt.subplots() 创建图形和坐标轴。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试应在 matplotlib 3.6.1 的环境中运行以复现缺陷。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否也影响 barh（水平条形图），因为 test_bar_leading_nan 测试了 hbars，但 Issue 未提及。",
+      "_safe_first_finite 中 skip_nonfinite 参数的具体调用上下文和默认值如何影响行为。",
+      "除了 x 全为 NaN 外，是否还有其他边界情况（如 inf）会触发相同异常。"
+    ]
+  }
+}

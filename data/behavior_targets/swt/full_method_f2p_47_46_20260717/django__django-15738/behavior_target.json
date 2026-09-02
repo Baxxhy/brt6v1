@@ -1,0 +1,378 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-15738",
+  "issue_summary": "在将外键字段改为多对多字段并删除 unique_together 约束时，Django 迁移系统错误地报告约束数量不匹配。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用支持迁移的数据库后端（如 PostgreSQL、MySQL、SQLite）。可能需要配置数据库连接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构建包含 ForeignKey 和 unique_together 约束的初始模型状态，然后应用组合的迁移操作。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 OperationTestBase 或类似的测试基类来管理项目状态和应用操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_alter_field_m2m_to_fk",
+        "test_file": "tests/migrations/test_state.py",
+        "why_relevant": "该测试直接涉及将 ManyToManyField 改为 ForeignKey 的字段类型转换，与 Issue 中的反向操作（ForeignKey -> ManyToManyField）高度相关，且涉及 ModelState 和 relations 的状态管理。",
+        "reusable_parts": [
+          "使用 ProjectState 和 ModelState 构建模型状态",
+          "调用 project_state.alter_field 方法",
+          "检查 relations 字典的状态变化"
+        ],
+        "possible_gap": "该测试是反向操作（M2M -> FK），且不涉及 unique_together 约束的删除。"
+      },
+      {
+        "test_name": "test_remove_unique_together_on_unique_field",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试涉及删除 unique_together 约束，并检查数据库约束的存在性，与 Issue 中删除 unique_together 的部分相关。",
+        "reusable_parts": [
+          "使用 migrations.AlterUniqueTogether 操作",
+          "使用 assertConstraintExists/NotExists 检查数据库约束",
+          "OperationTestBase 的测试框架"
+        ],
+        "possible_gap": "该测试不涉及字段类型从 ForeignKey 到 ManyToManyField 的更改。"
+      },
+      {
+        "test_name": "test_alter_field_m2m",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试涉及使用 migrations.AlterField 操作更改 ManyToManyField 的属性，展示了如何操作多对多字段。",
+        "reusable_parts": [
+          "使用 migrations.AlterField 操作",
+          "使用 apply_operations 方法",
+          "从 project_state.apps 获取模型并检查字段属性"
+        ],
+        "possible_gap": "该测试不涉及字段类型从 ForeignKey 到 ManyToManyField 的更改，也不涉及 unique_together。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对一个包含 unique_together 约束的模型字段，执行一个同时将其从 ForeignKey 改为 ManyToManyField 并删除该 unique_together 约束的迁移操作。",
+      "evidence": [
+        "Issue 描述：'when i want to change field project_data_set in Authors model from foreign key field to many to many field I must delete a unique_together, cause it can't be on many to many field.'",
+        "Issue 描述：'But when I want to do a migrations. python3 manage.py makemigrations python3 manage.py migrate I have error:'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行迁移时抛出 ValueError: Found wrong number (0) of constraints for app_authors(project_data_set, state, start_date)。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'I have error: ValueError: Found wrong number (0) of constraints for app_authors(project_data_set, state, start_date)'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AlterField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 涉及更改字段类型（ForeignKey -> ManyToManyField）。"
+      },
+      {
+        "name": "migrations.AlterUniqueTogether",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "Issue 涉及删除 unique_together 约束。"
+      },
+      {
+        "name": "ModelState.alter_field",
+        "kind": "method",
+        "source_path": "django/db/migrations/state.py",
+        "reason": "相关测试 test_alter_field_m2m_to_fk 使用了此方法，可能与字段类型转换的状态管理有关。"
+      },
+      {
+        "name": "ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中涉及的原始字段类型。"
+      },
+      {
+        "name": "ManyToManyField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中涉及的目标字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/state.py",
+        "object": "ModelState",
+        "lines": "",
+        "reason": "相关测试 test_alter_field_m2m_to_fk 涉及 ModelState.alter_field，可能与字段类型转换和约束状态同步有关。"
+      },
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AlterField",
+        "lines": "",
+        "reason": "执行字段类型更改的核心操作类，可能在处理外键到多对多转换时未正确协调 unique_together 约束的移除。"
+      },
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "AlterUniqueTogether",
+        "lines": "",
+        "reason": "处理 unique_together 约束变更的操作类，可能在与其他操作（如 AlterField）组合时出现状态不一致。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，模型初始状态要么没有 unique_together，要么字段类型更改不涉及 unique_together。",
+        "target_pattern": "模型初始状态应包含一个 ForeignKey 字段，并且该字段参与了一个 unique_together 约束。然后执行一个操作，同时将该字段改为 ManyToManyField 并删除该 unique_together 约束。",
+        "reason": "Issue 表明，当这两种变更（字段类型转换和约束删除）组合在一个迁移步骤中时，会触发错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常单独应用 AlterField 或 AlterUniqueTogether 操作。",
+        "target_pattern": "在一个迁移操作序列中，同时包含 AlterField（将 ForeignKey 改为 ManyToManyField）和 AlterUniqueTogether（删除相关约束）。或者，makemigrations 自动生成的单个操作可能隐含了这两种变更。",
+        "reason": "Issue 表明用户期望单次迁移完成这两件事，但实际需要拆分成两次独立的迁移。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "迁移系统应能正确处理将外键字段改为多对多字段并同时删除相关 unique_together 约束的操作，成功生成并应用迁移，不抛出异常。",
+      "evidence": [
+        "Issue 描述：用户期望通过一次迁移完成字段类型更改和约束删除，但实际需要分两步。",
+        "Issue 描述：'But in this way I have 2 migrations instead of one.' 暗示了期望的正确行为是单次迁移成功。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 apply_operations 或执行迁移时捕获的 ValueError 异常及其消息。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError，并包含特定约束数量的错误信息。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在迁移操作执行前后，检查 ProjectState 中模型的 fields 和 options（特别是 unique_together）的状态。",
+        "reason": "错误可能与迁移系统内部对模型状态（字段类型和约束）的同步不一致有关。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "迁移操作生成的 SQL 语句，特别是与删除约束和更改字段类型相关的部分。",
+        "reason": "错误可能与数据库后端在生成或执行特定 SQL 时的问题有关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功执行，不抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因版本或配置而异。",
+        "reason": "Issue 的核心是迁移过程因异常而失败。修复后，该异常不应被引发。"
+      },
+      {
+        "assertion_goal": "迁移后，模型的字段应成功从 ForeignKey 变为 ManyToManyField，且 unique_together 约束被移除。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的内部状态表示（如 dict 的精确结构）。",
+        "reason": "这验证了迁移的语义目标：字段类型更改和约束删除都成功应用。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误的确切触发点是在 makemigrations 阶段（生成迁移文件）还是在 migrate 阶段（执行迁移）。Issue 提到两者都执行，但未明确区分。",
+    "错误消息中提到的约束数量为 0 的具体含义，以及迁移系统在哪个步骤计算和验证约束数量。",
+    "是否所有数据库后端都会出现此问题，还是特定于某些后端。",
+    "迁移系统内部处理字段类型转换和约束删除的详细交互逻辑。"
+  ],
+  "raw": {
+    "issue_summary": "在将外键字段改为多对多字段并删除 unique_together 约束时，Django 迁移系统错误地报告约束数量不匹配。",
+    "trigger_condition": {
+      "text": "对一个包含 unique_together 约束的模型字段，执行一个同时将其从 ForeignKey 改为 ManyToManyField 并删除该 unique_together 约束的迁移操作。",
+      "evidence": [
+        "Issue 描述：'when i want to change field project_data_set in Authors model from foreign key field to many to many field I must delete a unique_together, cause it can't be on many to many field.'",
+        "Issue 描述：'But when I want to do a migrations. python3 manage.py makemigrations python3 manage.py migrate I have error:'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行迁移时抛出 ValueError: Found wrong number (0) of constraints for app_authors(project_data_set, state, start_date)。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'I have error: ValueError: Found wrong number (0) of constraints for app_authors(project_data_set, state, start_date)'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "迁移系统应能正确处理将外键字段改为多对多字段并同时删除相关 unique_together 约束的操作，成功生成并应用迁移，不抛出异常。",
+      "evidence": [
+        "Issue 描述：用户期望通过一次迁移完成字段类型更改和约束删除，但实际需要分两步。",
+        "Issue 描述：'But in this way I have 2 migrations instead of one.' 暗示了期望的正确行为是单次迁移成功。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "migrations.AlterField",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/fields.py",
+        "reason": "Issue 涉及更改字段类型（ForeignKey -> ManyToManyField）。"
+      },
+      {
+        "name": "migrations.AlterUniqueTogether",
+        "kind": "class",
+        "source_path": "django/db/migrations/operations/models.py",
+        "reason": "Issue 涉及删除 unique_together 约束。"
+      },
+      {
+        "name": "ModelState.alter_field",
+        "kind": "method",
+        "source_path": "django/db/migrations/state.py",
+        "reason": "相关测试 test_alter_field_m2m_to_fk 使用了此方法，可能与字段类型转换的状态管理有关。"
+      },
+      {
+        "name": "ForeignKey",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中涉及的原始字段类型。"
+      },
+      {
+        "name": "ManyToManyField",
+        "kind": "class",
+        "source_path": "django/db/models/fields/related.py",
+        "reason": "Issue 中涉及的目标字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/migrations/state.py",
+        "object": "ModelState",
+        "lines": "",
+        "reason": "相关测试 test_alter_field_m2m_to_fk 涉及 ModelState.alter_field，可能与字段类型转换和约束状态同步有关。"
+      },
+      {
+        "path": "django/db/migrations/operations/fields.py",
+        "object": "AlterField",
+        "lines": "",
+        "reason": "执行字段类型更改的核心操作类，可能在处理外键到多对多转换时未正确协调 unique_together 约束的移除。"
+      },
+      {
+        "path": "django/db/migrations/operations/models.py",
+        "object": "AlterUniqueTogether",
+        "lines": "",
+        "reason": "处理 unique_together 约束变更的操作类，可能在与其他操作（如 AlterField）组合时出现状态不一致。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_alter_field_m2m_to_fk",
+        "test_file": "tests/migrations/test_state.py",
+        "why_relevant": "该测试直接涉及将 ManyToManyField 改为 ForeignKey 的字段类型转换，与 Issue 中的反向操作（ForeignKey -> ManyToManyField）高度相关，且涉及 ModelState 和 relations 的状态管理。",
+        "reusable_parts": [
+          "使用 ProjectState 和 ModelState 构建模型状态",
+          "调用 project_state.alter_field 方法",
+          "检查 relations 字典的状态变化"
+        ],
+        "possible_gap": "该测试是反向操作（M2M -> FK），且不涉及 unique_together 约束的删除。"
+      },
+      {
+        "test_name": "test_remove_unique_together_on_unique_field",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试涉及删除 unique_together 约束，并检查数据库约束的存在性，与 Issue 中删除 unique_together 的部分相关。",
+        "reusable_parts": [
+          "使用 migrations.AlterUniqueTogether 操作",
+          "使用 assertConstraintExists/NotExists 检查数据库约束",
+          "OperationTestBase 的测试框架"
+        ],
+        "possible_gap": "该测试不涉及字段类型从 ForeignKey 到 ManyToManyField 的更改。"
+      },
+      {
+        "test_name": "test_alter_field_m2m",
+        "test_file": "tests/migrations/test_operations.py",
+        "why_relevant": "该测试涉及使用 migrations.AlterField 操作更改 ManyToManyField 的属性，展示了如何操作多对多字段。",
+        "reusable_parts": [
+          "使用 migrations.AlterField 操作",
+          "使用 apply_operations 方法",
+          "从 project_state.apps 获取模型并检查字段属性"
+        ],
+        "possible_gap": "该测试不涉及字段类型从 ForeignKey 到 ManyToManyField 的更改，也不涉及 unique_together。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相关测试中，模型初始状态要么没有 unique_together，要么字段类型更改不涉及 unique_together。",
+        "target_pattern": "模型初始状态应包含一个 ForeignKey 字段，并且该字段参与了一个 unique_together 约束。然后执行一个操作，同时将该字段改为 ManyToManyField 并删除该 unique_together 约束。",
+        "reason": "Issue 表明，当这两种变更（字段类型转换和约束删除）组合在一个迁移步骤中时，会触发错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常单独应用 AlterField 或 AlterUniqueTogether 操作。",
+        "target_pattern": "在一个迁移操作序列中，同时包含 AlterField（将 ForeignKey 改为 ManyToManyField）和 AlterUniqueTogether（删除相关约束）。或者，makemigrations 自动生成的单个操作可能隐含了这两种变更。",
+        "reason": "Issue 表明用户期望单次迁移完成这两件事，但实际需要拆分成两次独立的迁移。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 apply_operations 或执行迁移时捕获的 ValueError 异常及其消息。",
+        "reason": "Issue 的核心错误现象是抛出 ValueError，并包含特定约束数量的错误信息。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在迁移操作执行前后，检查 ProjectState 中模型的 fields 和 options（特别是 unique_together）的状态。",
+        "reason": "错误可能与迁移系统内部对模型状态（字段类型和约束）的同步不一致有关。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "迁移操作生成的 SQL 语句，特别是与删除约束和更改字段类型相关的部分。",
+        "reason": "错误可能与数据库后端在生成或执行特定 SQL 时的问题有关。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "迁移操作应成功执行，不抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因版本或配置而异。",
+        "reason": "Issue 的核心是迁移过程因异常而失败。修复后，该异常不应被引发。"
+      },
+      {
+        "assertion_goal": "迁移后，模型的字段应成功从 ForeignKey 变为 ManyToManyField，且 unique_together 约束被移除。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的内部状态表示（如 dict 的精确结构）。",
+        "reason": "这验证了迁移的语义目标：字段类型更改和约束删除都成功应用。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用支持迁移的数据库后端（如 PostgreSQL、MySQL、SQLite）。可能需要配置数据库连接。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构建包含 ForeignKey 和 unique_together 约束的初始模型状态，然后应用组合的迁移操作。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 OperationTestBase 或类似的测试基类来管理项目状态和应用操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "错误的确切触发点是在 makemigrations 阶段（生成迁移文件）还是在 migrate 阶段（执行迁移）。Issue 提到两者都执行，但未明确区分。",
+      "错误消息中提到的约束数量为 0 的具体含义，以及迁移系统在哪个步骤计算和验证约束数量。",
+      "是否所有数据库后端都会出现此问题，还是特定于某些后端。",
+      "迁移系统内部处理字段类型转换和约束删除的详细交互逻辑。"
+    ]
+  }
+}

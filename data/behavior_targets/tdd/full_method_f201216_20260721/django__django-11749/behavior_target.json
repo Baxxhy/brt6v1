@@ -1,0 +1,320 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11749",
+  "issue_summary": "call_command 在通过 kwargs 传递互斥必需组的参数时失败，抛出 CommandError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个自定义的 Django 管理命令，其解析器中包含一个 required=True 的互斥组，组内至少有两个参数（如 --shop-id 和 --shop）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要使用 override_settings 来确保自定义命令所在的 app 在 INSTALLED_APPS 中。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 StringIO 来捕获命令的标准输出，以便进行断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_call_command_with_required_parameters_in_options",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试直接使用 call_command 并通过 kwargs 传递 required 参数，与 Issue 触发场景相似。",
+        "reusable_parts": [
+          "使用 call_command 的语法",
+          "StringIO 捕获输出",
+          "assertIn 断言风格",
+          "测试类结构（CommandTests）"
+        ],
+        "possible_gap": "该测试传递的是独立的 required 参数，而非属于 required 互斥组的参数。"
+      },
+      {
+        "test_name": "test_call_command_option_parsing",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试关注 call_command 的选项解析行为，特别是 dest 名称的映射，与 Issue 涉及的参数传递机制相关。",
+        "reusable_parts": [
+          "call_command 与 kwargs 的交互",
+          "输出捕获和内容检查"
+        ],
+        "possible_gap": "测试的是普通可选参数，不涉及互斥组或 required 组。"
+      },
+      {
+        "test_name": "CommandTypes.test_no_color_force_color_mutually_exclusive_command_init",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "该测试涉及互斥参数（no_color 和 force_color）以及 CommandError，与 Issue 主题有部分重叠。",
+        "reusable_parts": [
+          "assertRaisesMessage 用于捕获 CommandError",
+          "call_command 的调用"
+        ],
+        "possible_gap": "该测试关注的是命令对象初始化时的互斥检查，而非 call_command 在解析 kwargs 时对 required 互斥组的处理。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 call_command 调用一个自定义命令，该命令的解析器中定义了一个 required=True 的互斥组（mutually exclusive group），组内包含两个可选参数（如 --shop-id 和 --shop）。通过关键字参数（kwargs）的方式向 call_command 传递该互斥组中任意一个参数的值（例如 shop_id=1）。",
+      "evidence": [
+        "Issue 描述：'call_command fails when argument of required mutually exclusive group is passed in kwargs.'",
+        "Issue 描述：'call_command('my_command', shop_id=1)'",
+        "Issue 描述：'the argument 'shop_id' is part of a required mutually exclusive group'",
+        "Issue 描述：'both of them individually are not required, they are actually part of a group that is required'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.core.management.base.CommandError 异常，提示 'Error: one of the arguments --shop-id --shop is required'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'This error django.core.management.base.CommandError: Error: one of the arguments --shop-id --shop is required is raised when I run call_command('my_command', shop_id=1)'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.call_command",
+        "kind": "function",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "Issue 的核心是 call_command 函数在处理特定参数时行为异常。"
+      },
+      {
+        "name": "django.core.management.base.CommandError",
+        "kind": "class",
+        "source_path": "django/core/management/base.py",
+        "reason": "Issue 中观察到的错误现象是抛出此异常。"
+      },
+      {
+        "name": "argparse.ArgumentParser.add_mutually_exclusive_group",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中缺陷与 required=True 的互斥组定义相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/__init__.py",
+        "object": "call_command",
+        "lines": "76-160",
+        "reason": "Issue 描述中引用了该函数的源码片段，并指出其逻辑仅处理 opt.required 的参数，而忽略了属于 required 互斥组的参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 call_command 的 kwargs 传递的是独立的 required 参数（如 need_me='foo'）。",
+        "target_pattern": "kwargs 应传递属于 required 互斥组的参数（如 shop_id=1）。",
+        "reason": "Issue 指出 call_command 的当前逻辑只检查 opt.required，不检查组级别的 required，因此这种变异可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用 call_command 并断言输出内容。",
+        "target_pattern": "调用 call_command 并预期其成功执行（不抛异常），或捕获并断言特定的 CommandError 消息。",
+        "reason": "根据测试目标（复现 bug 或验证修复），需要调整对 call_command 调用结果的预期。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "call_command 应能正确处理通过 kwargs 传递的、属于 required 互斥组的参数，成功调用命令而不抛出 CommandError。",
+      "evidence": [
+        "Issue 描述：'However, everything is fine when I call this command in this way: call_command('my_command, '--shop-id=1')'",
+        "Issue 描述暗示了通过位置参数（'--shop-id=1'）调用是正常的，因此通过 kwargs 调用也应正常。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 call_command 时是否抛出 django.core.management.base.CommandError 异常及其消息。",
+        "reason": "Issue 的核心错误现象就是抛出特定消息的 CommandError。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果 call_command 成功执行，观察其返回值或命令执行的副作用（如输出到 stdout 的内容）。",
+        "reason": "用于验证在修复后，通过 kwargs 传递互斥组参数时命令能正常执行。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 call_command 在通过 kwargs 传递 required 互斥组参数时，不会抛出 CommandError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因具体命令或参数名而变化。",
+        "reason": "Issue 的核心是异常是否被抛出，而非异常消息的精确措辞。使用 assertRaises 或 context manager 更稳定。"
+      },
+      {
+        "assertion_goal": "验证 call_command 在通过 kwargs 传递 required 互斥组参数时，命令能成功执行并产生预期输出。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、可能变化的输出字符串。",
+        "reason": "修复后，命令应能正常处理参数并执行。检查输出中是否包含与传入参数相关的稳定片段可以验证这一点。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "call_command 内部 parser._actions 中，属于 required 互斥组的 Action 对象是否具有特殊的属性可以识别。",
+    "除了示例中的 shop_id 和 shop，其他类型的互斥组参数（如 flag 类型、不同类型）是否也会触发此问题。",
+    "修复后的具体实现细节，以及 assert 断言中应该检查命令输出的确切内容是什么。"
+  ],
+  "raw": {
+    "issue_summary": "call_command 在通过 kwargs 传递互斥必需组的参数时失败，抛出 CommandError 异常。",
+    "trigger_condition": {
+      "text": "使用 call_command 调用一个自定义命令，该命令的解析器中定义了一个 required=True 的互斥组（mutually exclusive group），组内包含两个可选参数（如 --shop-id 和 --shop）。通过关键字参数（kwargs）的方式向 call_command 传递该互斥组中任意一个参数的值（例如 shop_id=1）。",
+      "evidence": [
+        "Issue 描述：'call_command fails when argument of required mutually exclusive group is passed in kwargs.'",
+        "Issue 描述：'call_command('my_command', shop_id=1)'",
+        "Issue 描述：'the argument 'shop_id' is part of a required mutually exclusive group'",
+        "Issue 描述：'both of them individually are not required, they are actually part of a group that is required'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 django.core.management.base.CommandError 异常，提示 'Error: one of the arguments --shop-id --shop is required'。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'This error django.core.management.base.CommandError: Error: one of the arguments --shop-id --shop is required is raised when I run call_command('my_command', shop_id=1)'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "call_command 应能正确处理通过 kwargs 传递的、属于 required 互斥组的参数，成功调用命令而不抛出 CommandError。",
+      "evidence": [
+        "Issue 描述：'However, everything is fine when I call this command in this way: call_command('my_command, '--shop-id=1')'",
+        "Issue 描述暗示了通过位置参数（'--shop-id=1'）调用是正常的，因此通过 kwargs 调用也应正常。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.core.management.call_command",
+        "kind": "function",
+        "source_path": "django/core/management/__init__.py",
+        "reason": "Issue 的核心是 call_command 函数在处理特定参数时行为异常。"
+      },
+      {
+        "name": "django.core.management.base.CommandError",
+        "kind": "class",
+        "source_path": "django/core/management/base.py",
+        "reason": "Issue 中观察到的错误现象是抛出此异常。"
+      },
+      {
+        "name": "argparse.ArgumentParser.add_mutually_exclusive_group",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中缺陷与 required=True 的互斥组定义相关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/core/management/__init__.py",
+        "object": "call_command",
+        "lines": "76-160",
+        "reason": "Issue 描述中引用了该函数的源码片段，并指出其逻辑仅处理 opt.required 的参数，而忽略了属于 required 互斥组的参数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_call_command_with_required_parameters_in_options",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试直接使用 call_command 并通过 kwargs 传递 required 参数，与 Issue 触发场景相似。",
+        "reusable_parts": [
+          "使用 call_command 的语法",
+          "StringIO 捕获输出",
+          "assertIn 断言风格",
+          "测试类结构（CommandTests）"
+        ],
+        "possible_gap": "该测试传递的是独立的 required 参数，而非属于 required 互斥组的参数。"
+      },
+      {
+        "test_name": "test_call_command_option_parsing",
+        "test_file": "tests/user_commands/tests.py",
+        "why_relevant": "该测试关注 call_command 的选项解析行为，特别是 dest 名称的映射，与 Issue 涉及的参数传递机制相关。",
+        "reusable_parts": [
+          "call_command 与 kwargs 的交互",
+          "输出捕获和内容检查"
+        ],
+        "possible_gap": "测试的是普通可选参数，不涉及互斥组或 required 组。"
+      },
+      {
+        "test_name": "CommandTypes.test_no_color_force_color_mutually_exclusive_command_init",
+        "test_file": "tests/admin_scripts/tests.py",
+        "why_relevant": "该测试涉及互斥参数（no_color 和 force_color）以及 CommandError，与 Issue 主题有部分重叠。",
+        "reusable_parts": [
+          "assertRaisesMessage 用于捕获 CommandError",
+          "call_command 的调用"
+        ],
+        "possible_gap": "该测试关注的是命令对象初始化时的互斥检查，而非 call_command 在解析 kwargs 时对 required 互斥组的处理。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "相似测试中 call_command 的 kwargs 传递的是独立的 required 参数（如 need_me='foo'）。",
+        "target_pattern": "kwargs 应传递属于 required 互斥组的参数（如 shop_id=1）。",
+        "reason": "Issue 指出 call_command 的当前逻辑只检查 opt.required，不检查组级别的 required，因此这种变异可能触发缺陷路径。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试直接调用 call_command 并断言输出内容。",
+        "target_pattern": "调用 call_command 并预期其成功执行（不抛异常），或捕获并断言特定的 CommandError 消息。",
+        "reason": "根据测试目标（复现 bug 或验证修复），需要调整对 call_command 调用结果的预期。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 call_command 时是否抛出 django.core.management.base.CommandError 异常及其消息。",
+        "reason": "Issue 的核心错误现象就是抛出特定消息的 CommandError。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果 call_command 成功执行，观察其返回值或命令执行的副作用（如输出到 stdout 的内容）。",
+        "reason": "用于验证在修复后，通过 kwargs 传递互斥组参数时命令能正常执行。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 call_command 在通过 kwargs 传递 required 互斥组参数时，不会抛出 CommandError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因具体命令或参数名而变化。",
+        "reason": "Issue 的核心是异常是否被抛出，而非异常消息的精确措辞。使用 assertRaises 或 context manager 更稳定。"
+      },
+      {
+        "assertion_goal": "验证 call_command 在通过 kwargs 传递 required 互斥组参数时，命令能成功执行并产生预期输出。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、可能变化的输出字符串。",
+        "reason": "修复后，命令应能正常处理参数并执行。检查输出中是否包含与传入参数相关的稳定片段可以验证这一点。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个自定义的 Django 管理命令，其解析器中包含一个 required=True 的互斥组，组内至少有两个参数（如 --shop-id 和 --shop）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要使用 override_settings 来确保自定义命令所在的 app 在 INSTALLED_APPS 中。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 StringIO 来捕获命令的标准输出，以便进行断言。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "call_command 内部 parser._actions 中，属于 required 互斥组的 Action 对象是否具有特殊的属性可以识别。",
+      "除了示例中的 shop_id 和 shop，其他类型的互斥组参数（如 flag 类型、不同类型）是否也会触发此问题。",
+      "修复后的具体实现细节，以及 assert 断言中应该检查命令输出的确切内容是什么。"
+    ]
+  }
+}

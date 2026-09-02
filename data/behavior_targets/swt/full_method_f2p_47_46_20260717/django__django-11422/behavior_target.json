@@ -1,0 +1,324 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11422",
+  "issue_summary": "Django 2.2.1 中，使用 StatReloader 的自动重载机制在 manage.py 文件被修改时不会触发重载。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个临时的 Django 项目结构，包含 manage.py 文件。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 mock.patch 来模拟或观测 `BaseReloader.notify_file_changed` 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `SimpleTestCase` 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要模拟时间流逝和文件修改操作（如 `increment_mtime`）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RestartWithReloaderTests.test_manage_py",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试直接涉及 manage.py 和自动重载器的重启逻辑，与 Issue 的核心场景高度相关。",
+        "reusable_parts": [
+          "测试类 RestartWithReloaderTests",
+          "使用 mock 来 patch 自动重载",
+          "调用 autoreload.restart_with_reloader()",
+          "使用 assertEqual 验证调用参数"
+        ],
+        "possible_gap": "该测试主要测试重启时参数是否正确，不涉及文件变化检测和触发重载的逻辑。"
+      },
+      {
+        "test_name": "IntegrationTests.test_file",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试模拟了文件变化（通过 increment_mtime）并验证了 notify_file_changed 被调用，这是自动重载检测文件变化的核心流程。",
+        "reusable_parts": [
+          "使用 mock.patch 装饰器",
+          "reloader.watch_file 方法",
+          "tick_twice 上下文管理器",
+          "increment_mtime 方法",
+          "assertEqual 和 assertCountEqual 验证调用"
+        ],
+        "possible_gap": "该测试针对一个通用的现有文件，没有专门针对 manage.py 这个特定的入口文件进行测试。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 `python manage.py runserver` 启动开发服务器，然后修改 manage.py 文件（例如添加一个 print 语句）。",
+      "evidence": [
+        "Issue 中描述了运行服务器和编辑 manage.py 的步骤。",
+        "Issue 提到在 Django 2.2.1 下不会触发自动重载。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "修改 manage.py 文件后，自动重载机制没有触发，服务器没有重启。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'Under 2.2.1, it won't. As far as I can tell from the django.utils.autoreload log lines, it never sees the manage.py itself.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "StatReloader",
+        "kind": "class",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "Issue 明确指出问题与 StatReloader 相关，且相关源码片段 2 展示了 StatReloader 类。"
+      },
+      {
+        "name": "BaseReloader.notify_file_changed",
+        "kind": "method",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "相关测试 3、4、5 都 mock 并调用了此方法，用于通知文件变化，是重载机制的关键部分。"
+      },
+      {
+        "name": "autoreload.restart_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "相关测试 1 调用了此函数，用于模拟重载过程。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "StatReloader",
+        "lines": "323-358",
+        "reason": "Issue 标题和描述明确指出问题与 StatReloader 相关，且相关源码片段 2 指向了 StatReloader 类。"
+      },
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "StatReloader.snapshot_files",
+        "lines": "",
+        "reason": "snapshot_files 方法负责跟踪文件变化，可能是 manage.py 未被正确纳入监控的原因。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 `IntegrationTests.test_file` 中，通过 `self.existing_file` 模拟一个通用文件的变化。",
+        "target_pattern": "将测试中的文件目标改为 manage.py 文件，并模拟其被修改。",
+        "reason": "Issue 明确指出 manage.py 的变化未被检测到，因此需要将测试的关注点聚焦于此文件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 `IntegrationTests.test_file` 中，通过 `self.reloader.watch_file(self.existing_file)` 显式监控一个文件。",
+        "target_pattern": "测试需要确保 manage.py 文件被自动重载器（特别是 StatReloader）的默认监控机制所覆盖，而不是通过显式 watch_file 调用。",
+        "reason": "Issue 暗示 manage.py 可能没有被自动纳入监控列表，需要测试默认的监控行为。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "修改 manage.py 文件后，自动重载机制应该检测到文件变化并触发服务器重启。",
+      "evidence": [
+        "Issue 提到在 Django 2.1.8 及更早版本中，此操作会触发自动重载机制。",
+        "相关测试 `RestartWithReloaderTests.test_manage_py` 表明 manage.py 是自动重载机制关注的一部分。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "`notify_file_changed` 方法是否被调用，以及其调用参数（是否包含 manage.py 的路径）。",
+        "reason": "这是自动重载机制检测到文件变化并准备重启的关键信号。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "开发服务器的日志输出，特别是 django.utils.autoreload 相关的日志行，观察是否提及 manage.py 文件。",
+        "reason": "Issue 提到从日志行看，autoreload 'never sees the manage.py itself'，日志是重要的观测点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 manage.py 文件被修改后，`notify_file_changed` 方法被调用，且参数包含 manage.py 的文件路径。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的日志字符串或与特定时间戳相关的输出。",
+        "reason": "这直接对应了自动重载机制是否感知到 manage.py 变化的核心问题。"
+      },
+      {
+        "assertion_goal": "验证服务器在 manage.py 修改后重启（或触发了重启流程）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言进程 ID 等不稳定信息。",
+        "reason": "这是自动重载功能的最终行为表现。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "StatReloader 监控文件的具体规则和默认包含哪些文件（如 manage.py）的确切逻辑尚不明确。",
+    "Django 2.1.8 到 2.2.1 之间，StatReloader 或相关文件监控逻辑发生了什么具体变化。",
+    "除了 `notify_file_changed` 被调用，是否还有其他条件（如文件扩展名、路径模式）阻止了 manage.py 触发重启。"
+  ],
+  "raw": {
+    "issue_summary": "Django 2.2.1 中，使用 StatReloader 的自动重载机制在 manage.py 文件被修改时不会触发重载。",
+    "trigger_condition": {
+      "text": "使用 `python manage.py runserver` 启动开发服务器，然后修改 manage.py 文件（例如添加一个 print 语句）。",
+      "evidence": [
+        "Issue 中描述了运行服务器和编辑 manage.py 的步骤。",
+        "Issue 提到在 Django 2.2.1 下不会触发自动重载。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "修改 manage.py 文件后，自动重载机制没有触发，服务器没有重启。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'Under 2.2.1, it won't. As far as I can tell from the django.utils.autoreload log lines, it never sees the manage.py itself.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "修改 manage.py 文件后，自动重载机制应该检测到文件变化并触发服务器重启。",
+      "evidence": [
+        "Issue 提到在 Django 2.1.8 及更早版本中，此操作会触发自动重载机制。",
+        "相关测试 `RestartWithReloaderTests.test_manage_py` 表明 manage.py 是自动重载机制关注的一部分。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "StatReloader",
+        "kind": "class",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "Issue 明确指出问题与 StatReloader 相关，且相关源码片段 2 展示了 StatReloader 类。"
+      },
+      {
+        "name": "BaseReloader.notify_file_changed",
+        "kind": "method",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "相关测试 3、4、5 都 mock 并调用了此方法，用于通知文件变化，是重载机制的关键部分。"
+      },
+      {
+        "name": "autoreload.restart_with_reloader",
+        "kind": "function",
+        "source_path": "django/utils/autoreload.py",
+        "reason": "相关测试 1 调用了此函数，用于模拟重载过程。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "StatReloader",
+        "lines": "323-358",
+        "reason": "Issue 标题和描述明确指出问题与 StatReloader 相关，且相关源码片段 2 指向了 StatReloader 类。"
+      },
+      {
+        "path": "django/utils/autoreload.py",
+        "object": "StatReloader.snapshot_files",
+        "lines": "",
+        "reason": "snapshot_files 方法负责跟踪文件变化，可能是 manage.py 未被正确纳入监控的原因。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "RestartWithReloaderTests.test_manage_py",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试直接涉及 manage.py 和自动重载器的重启逻辑，与 Issue 的核心场景高度相关。",
+        "reusable_parts": [
+          "测试类 RestartWithReloaderTests",
+          "使用 mock 来 patch 自动重载",
+          "调用 autoreload.restart_with_reloader()",
+          "使用 assertEqual 验证调用参数"
+        ],
+        "possible_gap": "该测试主要测试重启时参数是否正确，不涉及文件变化检测和触发重载的逻辑。"
+      },
+      {
+        "test_name": "IntegrationTests.test_file",
+        "test_file": "tests/utils_tests/test_autoreload.py",
+        "why_relevant": "该测试模拟了文件变化（通过 increment_mtime）并验证了 notify_file_changed 被调用，这是自动重载检测文件变化的核心流程。",
+        "reusable_parts": [
+          "使用 mock.patch 装饰器",
+          "reloader.watch_file 方法",
+          "tick_twice 上下文管理器",
+          "increment_mtime 方法",
+          "assertEqual 和 assertCountEqual 验证调用"
+        ],
+        "possible_gap": "该测试针对一个通用的现有文件，没有专门针对 manage.py 这个特定的入口文件进行测试。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相关测试 `IntegrationTests.test_file` 中，通过 `self.existing_file` 模拟一个通用文件的变化。",
+        "target_pattern": "将测试中的文件目标改为 manage.py 文件，并模拟其被修改。",
+        "reason": "Issue 明确指出 manage.py 的变化未被检测到，因此需要将测试的关注点聚焦于此文件。",
+        "confidence": "high"
+      },
+      {
+        "slot": "config",
+        "current_pattern": "相关测试 `IntegrationTests.test_file` 中，通过 `self.reloader.watch_file(self.existing_file)` 显式监控一个文件。",
+        "target_pattern": "测试需要确保 manage.py 文件被自动重载器（特别是 StatReloader）的默认监控机制所覆盖，而不是通过显式 watch_file 调用。",
+        "reason": "Issue 暗示 manage.py 可能没有被自动纳入监控列表，需要测试默认的监控行为。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "`notify_file_changed` 方法是否被调用，以及其调用参数（是否包含 manage.py 的路径）。",
+        "reason": "这是自动重载机制检测到文件变化并准备重启的关键信号。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "开发服务器的日志输出，特别是 django.utils.autoreload 相关的日志行，观察是否提及 manage.py 文件。",
+        "reason": "Issue 提到从日志行看，autoreload 'never sees the manage.py itself'，日志是重要的观测点。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当 manage.py 文件被修改后，`notify_file_changed` 方法被调用，且参数包含 manage.py 的文件路径。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的日志字符串或与特定时间戳相关的输出。",
+        "reason": "这直接对应了自动重载机制是否感知到 manage.py 变化的核心问题。"
+      },
+      {
+        "assertion_goal": "验证服务器在 manage.py 修改后重启（或触发了重启流程）。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "避免断言进程 ID 等不稳定信息。",
+        "reason": "这是自动重载功能的最终行为表现。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个临时的 Django 项目结构，包含 manage.py 文件。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 mock.patch 来模拟或观测 `BaseReloader.notify_file_changed` 方法。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 `SimpleTestCase` 或类似的 Django 测试基类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要模拟时间流逝和文件修改操作（如 `increment_mtime`）。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "StatReloader 监控文件的具体规则和默认包含哪些文件（如 manage.py）的确切逻辑尚不明确。",
+      "Django 2.1.8 到 2.2.1 之间，StatReloader 或相关文件监控逻辑发生了什么具体变化。",
+      "除了 `notify_file_changed` 被调用，是否还有其他条件（如文件扩展名、路径模式）阻止了 manage.py 触发重启。"
+    ]
+  }
+}

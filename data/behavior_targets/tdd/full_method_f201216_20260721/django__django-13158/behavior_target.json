@@ -1,0 +1,370 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-13158",
+  "issue_summary": "使用 union() 组合查询的 ModelMultipleChoiceField 在表单提交空值时错误地添加了所有匹配对象，而不是不添加任何对象。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要创建 Publication 和 Article 模型实例，并建立它们之间的 ManyToMany 关系。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以使用数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个使用 union() 查询集的 ModelMultipleChoiceField，并将其集成到一个 ModelForm 中。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_model_multiple_choice_required_false",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它直接测试了 ModelMultipleChoiceField 在 required=False 时，提交空值（[]）的行为，并验证 clean([]) 返回 EmptyQuerySet。这与 Issue 的核心场景（提交空表单）高度相关。",
+        "reusable_parts": [
+          "ModelMultipleChoiceField 的构造",
+          "required=False 的设置",
+          "使用 clean([]) 的调用模式",
+          "assertIsInstance 检查返回类型为 EmptyQuerySet"
+        ],
+        "possible_gap": "该测试使用简单的 Category.objects.all() 查询集，没有测试使用 union() 组合查询的情况。"
+      },
+      {
+        "test_name": "test_disabled_multiplemodelchoicefield",
+        "test_file": "tests/model_forms/test_modelchoicefield.py",
+        "why_relevant": "它测试了 ModelMultipleChoiceField 与 Article 模型（包含 ManyToManyField）的集成，以及表单提交数据后 cleaned_data 的验证。这涉及模型关联的更新，与 Issue 中描述的对象被错误添加的场景类似。",
+        "reusable_parts": [
+          "Article 和 Category 模型的 fixture 设置",
+          "ModelMultipleChoiceField 与 Article 模型的集成",
+          "通过 form.cleaned_data 获取并验证关联对象"
+        ],
+        "possible_gap": "该测试主要关注 disabled 字段的行为，没有测试 union() 查询集或提交空值的情况。"
+      },
+      {
+        "test_name": "test_add",
+        "test_file": "tests/many_to_many/tests.py",
+        "why_relevant": "它测试了 Article 和 Publication 模型之间的 ManyToMany 关系，以及使用 add() 方法添加关联。Issue 中使用的正是 Publication 和 Article 模型。",
+        "reusable_parts": [
+          "Publication 和 Article 模型的 fixture 设置",
+          "ManyToMany 关系 add() 操作的使用",
+          "assertQuerysetEqual 验证关联结果"
+        ],
+        "possible_gap": "这是一个模型层测试，不涉及表单（ModelMultipleChoiceField）或 union() 查询集。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 ModelMultipleChoiceField，其 queryset 使用 union() 组合查询（例如 Publication.objects.filter(id__lt=2).union(Publication.objects.filter(id__gt=5))），然后提交一个空表单（即未选择任何选项）。",
+      "evidence": [
+        "Issue 描述：'changing the ModelMultipleChoiceField queryset to use union() breaks things'",
+        "Issue 描述：'if you submit this form while empty (i.e. you didn't select any publications), ALL objects matching the queryset will be added'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当表单提交空值时，所有符合 union() 查询条件的对象都被错误地添加到关联中，而预期行为是不添加任何对象。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'ALL objects matching the queryset will be added'",
+        "Issue 描述：'Using the OR query, NO objects are added, as I'd expect'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelMultipleChoiceField",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 的核心是关于 ModelMultipleChoiceField 在使用 union() 查询集时的行为。"
+      },
+      {
+        "name": "union",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 指出使用 union() 构建查询集会导致问题，而使用 OR 操作符（|）则正常。"
+      },
+      {
+        "name": "none",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 标题提到 'QuerySet.none() on combined queries returns all results'，暗示 none() 方法在组合查询上的行为可能相关。"
+      },
+      {
+        "name": "clean",
+        "kind": "method",
+        "source_path": "django/forms/models.py",
+        "reason": "ModelMultipleChoiceField.clean() 处理表单提交的值，是错误发生的可能位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelMultipleChoiceField.clean",
+        "lines": "",
+        "reason": "该方法处理表单输入值，并可能涉及对 union() 查询集的特殊处理。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "union",
+        "lines": "999-1004",
+        "reason": "union() 方法的实现（特别是处理 EmptyQuerySet 的逻辑）可能与 Issue 描述的行为有关。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "none",
+        "lines": "919-923",
+        "reason": "Issue 标题直接提到了 QuerySet.none() 在组合查询上的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "在相关测试 2 中，ModelMultipleChoiceField 的 queryset 是简单的 Category.objects.all()。",
+        "target_pattern": "将 queryset 改为使用 union() 组合的查询，例如 Publication.objects.filter(id__lt=2).union(Publication.objects.filter(id__gt=5))。",
+        "reason": "Issue 明确指出使用 union() 会触发 bug，而使用 OR 操作符（|）则正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "在相关测试 2 中，调用 f.clean([]) 并断言返回 EmptyQuerySet。",
+        "target_pattern": "在变异后的测试中，除了调用 clean([])，还需要模拟表单提交后，验证关联对象（例如 Article.publications）是否被错误添加。",
+        "reason": "Issue 的症状是对象被错误添加，而不仅仅是 clean 方法的返回值问题。需要观测最终的状态变化。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当表单提交空值时，无论 queryset 是使用 OR 操作符（|）还是 union() 方法构建的，都不应添加任何对象到关联中。",
+      "evidence": [
+        "Issue 描述：'Using the OR query, NO objects are added, as I'd expect'",
+        "相关测试 2 显示 ModelMultipleChoiceField 在 required=False 时，clean([]) 返回 EmptyQuerySet。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "ModelMultipleChoiceField.clean([]) 的返回值类型和内容。",
+        "reason": "Issue 可能源于 clean 方法对 union() 查询集返回了错误的值（非 EmptyQuerySet），导致后续逻辑添加了所有对象。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "提交空表单后，相关 ManyToMany 关联（例如 article.publications.all()）的状态。",
+        "reason": "直接观测 Issue 描述的核心错误现象：对象是否被错误添加。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "union() 查询集在调用 none() 方法或作为 clean([]) 输入时的类型和行为。",
+        "reason": "Issue 标题提到了 QuerySet.none() on combined queries，暗示组合查询与 none() 方法的交互可能有问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 union() 查询集的 ModelMultipleChoiceField 提交空值时，关联的 ManyToMany 关系保持为空（没有对象被添加）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 查询字符串或 repr 输出。",
+        "reason": "这直接对应 Issue 的预期行为：提交空表单不应添加对象。断言关联查询集为空是稳定且语义明确的。"
+      },
+      {
+        "assertion_goal": "验证 ModelMultipleChoiceField.clean([]) 在处理 union() 查询集时，返回一个表示空的查询集（如 EmptyQuerySet）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回的查询集包含特定对象或特定数量。",
+        "reason": "相关测试 2 已经建立了 clean([]) 应返回 EmptyQuerySet 的基线行为。这对于内部逻辑正确性很重要。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "bug 的确切根源是在 ModelMultipleChoiceField.clean 方法中，还是在 union() 或 none() 的 QuerySet 实现中，亦或是它们之间的交互。",
+    "除了 union()，其他组合查询方法（如 intersection, difference）是否也存在同样的问题。",
+    "错误添加所有对象的具体触发条件是否仅限于提交空值，还是其他无效值也会触发。",
+    "是否需要特定的数据库后端或配置才能复现。"
+  ],
+  "raw": {
+    "issue_summary": "使用 union() 组合查询的 ModelMultipleChoiceField 在表单提交空值时错误地添加了所有匹配对象，而不是不添加任何对象。",
+    "trigger_condition": {
+      "text": "创建一个 ModelMultipleChoiceField，其 queryset 使用 union() 组合查询（例如 Publication.objects.filter(id__lt=2).union(Publication.objects.filter(id__gt=5))），然后提交一个空表单（即未选择任何选项）。",
+      "evidence": [
+        "Issue 描述：'changing the ModelMultipleChoiceField queryset to use union() breaks things'",
+        "Issue 描述：'if you submit this form while empty (i.e. you didn't select any publications), ALL objects matching the queryset will be added'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "当表单提交空值时，所有符合 union() 查询条件的对象都被错误地添加到关联中，而预期行为是不添加任何对象。",
+      "symptom_type": "state_not_updated",
+      "evidence": [
+        "Issue 描述：'ALL objects matching the queryset will be added'",
+        "Issue 描述：'Using the OR query, NO objects are added, as I'd expect'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当表单提交空值时，无论 queryset 是使用 OR 操作符（|）还是 union() 方法构建的，都不应添加任何对象到关联中。",
+      "evidence": [
+        "Issue 描述：'Using the OR query, NO objects are added, as I'd expect'",
+        "相关测试 2 显示 ModelMultipleChoiceField 在 required=False 时，clean([]) 返回 EmptyQuerySet。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ModelMultipleChoiceField",
+        "kind": "class",
+        "source_path": "django/forms/models.py",
+        "reason": "Issue 的核心是关于 ModelMultipleChoiceField 在使用 union() 查询集时的行为。"
+      },
+      {
+        "name": "union",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 指出使用 union() 构建查询集会导致问题，而使用 OR 操作符（|）则正常。"
+      },
+      {
+        "name": "none",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 标题提到 'QuerySet.none() on combined queries returns all results'，暗示 none() 方法在组合查询上的行为可能相关。"
+      },
+      {
+        "name": "clean",
+        "kind": "method",
+        "source_path": "django/forms/models.py",
+        "reason": "ModelMultipleChoiceField.clean() 处理表单提交的值，是错误发生的可能位置。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/forms/models.py",
+        "object": "ModelMultipleChoiceField.clean",
+        "lines": "",
+        "reason": "该方法处理表单输入值，并可能涉及对 union() 查询集的特殊处理。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "union",
+        "lines": "999-1004",
+        "reason": "union() 方法的实现（特别是处理 EmptyQuerySet 的逻辑）可能与 Issue 描述的行为有关。"
+      },
+      {
+        "path": "django/db/models/query.py",
+        "object": "none",
+        "lines": "919-923",
+        "reason": "Issue 标题直接提到了 QuerySet.none() 在组合查询上的行为。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_model_multiple_choice_required_false",
+        "test_file": "tests/model_forms/tests.py",
+        "why_relevant": "它直接测试了 ModelMultipleChoiceField 在 required=False 时，提交空值（[]）的行为，并验证 clean([]) 返回 EmptyQuerySet。这与 Issue 的核心场景（提交空表单）高度相关。",
+        "reusable_parts": [
+          "ModelMultipleChoiceField 的构造",
+          "required=False 的设置",
+          "使用 clean([]) 的调用模式",
+          "assertIsInstance 检查返回类型为 EmptyQuerySet"
+        ],
+        "possible_gap": "该测试使用简单的 Category.objects.all() 查询集，没有测试使用 union() 组合查询的情况。"
+      },
+      {
+        "test_name": "test_disabled_multiplemodelchoicefield",
+        "test_file": "tests/model_forms/test_modelchoicefield.py",
+        "why_relevant": "它测试了 ModelMultipleChoiceField 与 Article 模型（包含 ManyToManyField）的集成，以及表单提交数据后 cleaned_data 的验证。这涉及模型关联的更新，与 Issue 中描述的对象被错误添加的场景类似。",
+        "reusable_parts": [
+          "Article 和 Category 模型的 fixture 设置",
+          "ModelMultipleChoiceField 与 Article 模型的集成",
+          "通过 form.cleaned_data 获取并验证关联对象"
+        ],
+        "possible_gap": "该测试主要关注 disabled 字段的行为，没有测试 union() 查询集或提交空值的情况。"
+      },
+      {
+        "test_name": "test_add",
+        "test_file": "tests/many_to_many/tests.py",
+        "why_relevant": "它测试了 Article 和 Publication 模型之间的 ManyToMany 关系，以及使用 add() 方法添加关联。Issue 中使用的正是 Publication 和 Article 模型。",
+        "reusable_parts": [
+          "Publication 和 Article 模型的 fixture 设置",
+          "ManyToMany 关系 add() 操作的使用",
+          "assertQuerysetEqual 验证关联结果"
+        ],
+        "possible_gap": "这是一个模型层测试，不涉及表单（ModelMultipleChoiceField）或 union() 查询集。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "在相关测试 2 中，ModelMultipleChoiceField 的 queryset 是简单的 Category.objects.all()。",
+        "target_pattern": "将 queryset 改为使用 union() 组合的查询，例如 Publication.objects.filter(id__lt=2).union(Publication.objects.filter(id__gt=5))。",
+        "reason": "Issue 明确指出使用 union() 会触发 bug，而使用 OR 操作符（|）则正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "在相关测试 2 中，调用 f.clean([]) 并断言返回 EmptyQuerySet。",
+        "target_pattern": "在变异后的测试中，除了调用 clean([])，还需要模拟表单提交后，验证关联对象（例如 Article.publications）是否被错误添加。",
+        "reason": "Issue 的症状是对象被错误添加，而不仅仅是 clean 方法的返回值问题。需要观测最终的状态变化。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "ModelMultipleChoiceField.clean([]) 的返回值类型和内容。",
+        "reason": "Issue 可能源于 clean 方法对 union() 查询集返回了错误的值（非 EmptyQuerySet），导致后续逻辑添加了所有对象。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "提交空表单后，相关 ManyToMany 关联（例如 article.publications.all()）的状态。",
+        "reason": "直接观测 Issue 描述的核心错误现象：对象是否被错误添加。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "union() 查询集在调用 none() 方法或作为 clean([]) 输入时的类型和行为。",
+        "reason": "Issue 标题提到了 QuerySet.none() on combined queries，暗示组合查询与 none() 方法的交互可能有问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 union() 查询集的 ModelMultipleChoiceField 提交空值时，关联的 ManyToMany 关系保持为空（没有对象被添加）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的 SQL 查询字符串或 repr 输出。",
+        "reason": "这直接对应 Issue 的预期行为：提交空表单不应添加对象。断言关联查询集为空是稳定且语义明确的。"
+      },
+      {
+        "assertion_goal": "验证 ModelMultipleChoiceField.clean([]) 在处理 union() 查询集时，返回一个表示空的查询集（如 EmptyQuerySet）。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回的查询集包含特定对象或特定数量。",
+        "reason": "相关测试 2 已经建立了 clean([]) 应返回 EmptyQuerySet 的基线行为。这对于内部逻辑正确性很重要。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要创建 Publication 和 Article 模型实例，并建立它们之间的 ManyToMany 关系。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要继承自 django.test.TestCase 以使用数据库。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构造一个使用 union() 查询集的 ModelMultipleChoiceField，并将其集成到一个 ModelForm 中。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "bug 的确切根源是在 ModelMultipleChoiceField.clean 方法中，还是在 union() 或 none() 的 QuerySet 实现中，亦或是它们之间的交互。",
+      "除了 union()，其他组合查询方法（如 intersection, difference）是否也存在同样的问题。",
+      "错误添加所有对象的具体触发条件是否仅限于提交空值，还是其他无效值也会触发。",
+      "是否需要特定的数据库后端或配置才能复现。"
+    ]
+  }
+}

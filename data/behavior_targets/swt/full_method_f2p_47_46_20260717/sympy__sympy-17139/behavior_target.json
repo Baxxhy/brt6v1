@@ -1,0 +1,382 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-17139",
+  "issue_summary": "简化包含复数指数 I 的三角函数表达式时，由于在 fu.py 中进行了无效的复数比较而引发 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 模块中的 Symbol, cos, I, simplify。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在类似 test_fu.py 或 test_simplify.py 的测试类或模块中运行。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_TR6",
+        "test_file": "sympy/simplify/tests/test_fu.py",
+        "why_relevant": "直接测试了 TR6 函数，该函数在错误调用链中。",
+        "reusable_parts": [
+          "导入模式：from sympy.simplify.fu import TR6",
+          "符号定义：x = Symbol('x')",
+          "断言风格：assert TR6(cos(x)**2) == -sin(x)**2 + 1"
+        ],
+        "possible_gap": "现有测试只使用了实数指数（2, -2, 4），没有测试复数指数（如 I）。"
+      },
+      {
+        "test_name": "test_simplify_complex",
+        "test_file": "sympy/simplify/tests/test_simplify.py",
+        "why_relevant": "测试了 simplify 函数处理复数表达式的能力。",
+        "reusable_parts": [
+          "导入模式：from sympy import simplify, cos, sin, exp, Matrix",
+          "符号定义：x = Symbol('x')",
+          "断言风格：assert simplify(cosAsExp*tanAsExp) == sin(x)"
+        ],
+        "possible_gap": "该测试没有涉及复数指数 I 与三角函数的组合（如 cos(x)**I）。"
+      },
+      {
+        "test_name": "test_issue_6920",
+        "test_file": "sympy/simplify/tests/test_simplify.py",
+        "why_relevant": "测试了 simplify 函数处理包含虚数单位 I 的表达式。",
+        "reusable_parts": [
+          "导入模式：from sympy import simplify, cos, sin, I, exp, Function",
+          "符号定义：x = Symbol('x')",
+          "断言风格：assert [simplify(f(ei)).args[0] for ei in e] == ok"
+        ],
+        "possible_gap": "该测试的表达式是 cos(x) + I*sin(x) 等形式，不是 cos(x)**I 这种幂运算。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 simplify(cos(x)**I)，其中 I 是虚数单位，x 是符号变量。",
+      "evidence": [
+        "Issue 中的代码示例：`simplify(cos(x)**I)`",
+        "Issue 中的堆栈跟踪显示调用链：simplify -> trigsimp -> futrig -> TR6 -> _TR56 -> bottom_up -> _f"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: Invalid comparison of complex I。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的堆栈跟踪末尾：`TypeError: \"Invalid comparison of complex %s\" % me`",
+        "Issue 中的错误信息：`TypeError: Invalid comparison of complex I`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "simplify",
+        "kind": "function",
+        "source_path": "sympy/simplify/simplify.py",
+        "reason": "Issue 中触发错误的入口函数。"
+      },
+      {
+        "name": "trigsimp",
+        "kind": "function",
+        "source_path": "sympy/simplify/trigsimp.py",
+        "reason": "simplify 函数内部调用了 trigsimp，是错误调用链的一部分。"
+      },
+      {
+        "name": "futrig",
+        "kind": "function",
+        "source_path": "sympy/simplify/trigsimp.py",
+        "reason": "trigsimp 内部调用了 futrig，是错误调用链的一部分。"
+      },
+      {
+        "name": "TR6",
+        "kind": "function",
+        "source_path": "sympy/simplify/fu.py",
+        "reason": "堆栈跟踪显示错误发生在 TR6 函数内部或其调用的 _TR56 函数中。"
+      },
+      {
+        "name": "_TR56",
+        "kind": "function",
+        "source_path": "sympy/simplify/fu.py",
+        "reason": "TR6 函数调用了 _TR56，是错误调用链的一部分。"
+      },
+      {
+        "name": "bottom_up",
+        "kind": "function",
+        "source_path": "sympy/simplify/simplify.py",
+        "reason": "堆栈跟踪显示 _TR56 调用了 bottom_up，后者又调用了 _f 函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/simplify/fu.py",
+        "object": "_f",
+        "lines": "",
+        "reason": "堆栈跟踪显示错误发生在 `fu.py` 第 504 行的 `if (rv.exp < 0) == True:` 比较中，该行在 _f 函数内。该比较试图对复数指数 I 使用 `<` 运算符，这是无效的。"
+      },
+      {
+        "path": "sympy/simplify/fu.py",
+        "object": "_TR56",
+        "lines": "",
+        "reason": "_TR56 函数调用了 bottom_up 并传入了 _f 函数，是导致错误比较发生的上下文。"
+      },
+      {
+        "path": "sympy/simplify/fu.py",
+        "object": "TR6",
+        "lines": "548-566",
+        "reason": "TR6 函数直接调用了 _TR56，是触发错误路径的入口点之一。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_TR6 中使用 cos(x)**2、cos(x)**-2、cos(x)**4 作为输入。",
+        "target_pattern": "将指数从实数（2, -2, 4）改为复数 I，即 cos(x)**I。",
+        "reason": "Issue 表明当指数为复数 I 时，在 _f 函数中会触发无效的比较 (rv.exp < 0)。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "test_TR6 直接调用 TR6 函数。",
+        "target_pattern": "通过 simplify 函数调用，以触发完整的调用链：simplify -> trigsimp -> futrig -> ... -> TR6 -> _TR56 -> ... -> _f。",
+        "reason": "Issue 中的错误是通过 simplify 函数触发的，这涉及到更复杂的内部转换和调用链。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "simplify 函数应能处理包含复数指数 I 的三角函数表达式，并返回一个有效的简化结果，而不是抛出 TypeError。",
+      "evidence": [
+        "Issue 标题和描述暗示这是一个需要修复的 bug，而不是预期行为。",
+        "相关测试 test_simplify_complex 表明 simplify 函数旨在处理复数表达式。",
+        "相关测试 test_issue_6920 表明 simplify 函数可以处理包含 I 的表达式。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 simplify(cos(x)**I) 时捕获 TypeError。",
+        "reason": "Issue 的核心错误是抛出 TypeError，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果修复后，simplify(cos(x)**I) 的返回值（类型和内容）。",
+        "reason": "修复后，函数应返回一个有效的 SymPy 表达式，而不是抛出异常。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "表达式 cos(x)**I 及其子表达式（如指数 I）的类型。",
+        "reason": "了解操作数的类型有助于理解为何比较操作会失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 simplify(cos(x)**I) 不应抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回值的精确字符串或完整表达式，因为 Issue 未指定修复后的确切输出。",
+        "reason": "当前缺陷是抛出异常，修复后应不再抛出。使用 `pytest.raises` 或 `assertRaises` 来验证异常是否消失是直接且稳定的方法。"
+      },
+      {
+        "assertion_goal": "simplify(cos(x)**I) 应返回一个有效的 SymPy 表达式。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回值的精确数学等价性，因为简化结果可能不唯一。",
+        "reason": "修复后，函数应成功执行并返回一个表达式对象，而不是 None 或引发异常。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "修复后 simplify(cos(x)**I) 的确切返回值是什么？是保持不变，还是转换为其他形式（如指数形式）？",
+    "_f 函数中 `if (rv.exp < 0) == True:` 这一行的确切上下文和目的是什么？它是否只应处理实数指数？",
+    "除了复数指数 I，其他复数指数（如 2+3*I）是否也会触发同样的错误？"
+  ],
+  "raw": {
+    "issue_summary": "简化包含复数指数 I 的三角函数表达式时，由于在 fu.py 中进行了无效的复数比较而引发 TypeError。",
+    "trigger_condition": {
+      "text": "调用 simplify(cos(x)**I)，其中 I 是虚数单位，x 是符号变量。",
+      "evidence": [
+        "Issue 中的代码示例：`simplify(cos(x)**I)`",
+        "Issue 中的堆栈跟踪显示调用链：simplify -> trigsimp -> futrig -> TR6 -> _TR56 -> bottom_up -> _f"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 TypeError: Invalid comparison of complex I。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的堆栈跟踪末尾：`TypeError: \"Invalid comparison of complex %s\" % me`",
+        "Issue 中的错误信息：`TypeError: Invalid comparison of complex I`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "simplify 函数应能处理包含复数指数 I 的三角函数表达式，并返回一个有效的简化结果，而不是抛出 TypeError。",
+      "evidence": [
+        "Issue 标题和描述暗示这是一个需要修复的 bug，而不是预期行为。",
+        "相关测试 test_simplify_complex 表明 simplify 函数旨在处理复数表达式。",
+        "相关测试 test_issue_6920 表明 simplify 函数可以处理包含 I 的表达式。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "simplify",
+        "kind": "function",
+        "source_path": "sympy/simplify/simplify.py",
+        "reason": "Issue 中触发错误的入口函数。"
+      },
+      {
+        "name": "trigsimp",
+        "kind": "function",
+        "source_path": "sympy/simplify/trigsimp.py",
+        "reason": "simplify 函数内部调用了 trigsimp，是错误调用链的一部分。"
+      },
+      {
+        "name": "futrig",
+        "kind": "function",
+        "source_path": "sympy/simplify/trigsimp.py",
+        "reason": "trigsimp 内部调用了 futrig，是错误调用链的一部分。"
+      },
+      {
+        "name": "TR6",
+        "kind": "function",
+        "source_path": "sympy/simplify/fu.py",
+        "reason": "堆栈跟踪显示错误发生在 TR6 函数内部或其调用的 _TR56 函数中。"
+      },
+      {
+        "name": "_TR56",
+        "kind": "function",
+        "source_path": "sympy/simplify/fu.py",
+        "reason": "TR6 函数调用了 _TR56，是错误调用链的一部分。"
+      },
+      {
+        "name": "bottom_up",
+        "kind": "function",
+        "source_path": "sympy/simplify/simplify.py",
+        "reason": "堆栈跟踪显示 _TR56 调用了 bottom_up，后者又调用了 _f 函数。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/simplify/fu.py",
+        "object": "_f",
+        "lines": "",
+        "reason": "堆栈跟踪显示错误发生在 `fu.py` 第 504 行的 `if (rv.exp < 0) == True:` 比较中，该行在 _f 函数内。该比较试图对复数指数 I 使用 `<` 运算符，这是无效的。"
+      },
+      {
+        "path": "sympy/simplify/fu.py",
+        "object": "_TR56",
+        "lines": "",
+        "reason": "_TR56 函数调用了 bottom_up 并传入了 _f 函数，是导致错误比较发生的上下文。"
+      },
+      {
+        "path": "sympy/simplify/fu.py",
+        "object": "TR6",
+        "lines": "548-566",
+        "reason": "TR6 函数直接调用了 _TR56，是触发错误路径的入口点之一。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_TR6",
+        "test_file": "sympy/simplify/tests/test_fu.py",
+        "why_relevant": "直接测试了 TR6 函数，该函数在错误调用链中。",
+        "reusable_parts": [
+          "导入模式：from sympy.simplify.fu import TR6",
+          "符号定义：x = Symbol('x')",
+          "断言风格：assert TR6(cos(x)**2) == -sin(x)**2 + 1"
+        ],
+        "possible_gap": "现有测试只使用了实数指数（2, -2, 4），没有测试复数指数（如 I）。"
+      },
+      {
+        "test_name": "test_simplify_complex",
+        "test_file": "sympy/simplify/tests/test_simplify.py",
+        "why_relevant": "测试了 simplify 函数处理复数表达式的能力。",
+        "reusable_parts": [
+          "导入模式：from sympy import simplify, cos, sin, exp, Matrix",
+          "符号定义：x = Symbol('x')",
+          "断言风格：assert simplify(cosAsExp*tanAsExp) == sin(x)"
+        ],
+        "possible_gap": "该测试没有涉及复数指数 I 与三角函数的组合（如 cos(x)**I）。"
+      },
+      {
+        "test_name": "test_issue_6920",
+        "test_file": "sympy/simplify/tests/test_simplify.py",
+        "why_relevant": "测试了 simplify 函数处理包含虚数单位 I 的表达式。",
+        "reusable_parts": [
+          "导入模式：from sympy import simplify, cos, sin, I, exp, Function",
+          "符号定义：x = Symbol('x')",
+          "断言风格：assert [simplify(f(ei)).args[0] for ei in e] == ok"
+        ],
+        "possible_gap": "该测试的表达式是 cos(x) + I*sin(x) 等形式，不是 cos(x)**I 这种幂运算。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_TR6 中使用 cos(x)**2、cos(x)**-2、cos(x)**4 作为输入。",
+        "target_pattern": "将指数从实数（2, -2, 4）改为复数 I，即 cos(x)**I。",
+        "reason": "Issue 表明当指数为复数 I 时，在 _f 函数中会触发无效的比较 (rv.exp < 0)。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "test_TR6 直接调用 TR6 函数。",
+        "target_pattern": "通过 simplify 函数调用，以触发完整的调用链：simplify -> trigsimp -> futrig -> ... -> TR6 -> _TR56 -> ... -> _f。",
+        "reason": "Issue 中的错误是通过 simplify 函数触发的，这涉及到更复杂的内部转换和调用链。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 simplify(cos(x)**I) 时捕获 TypeError。",
+        "reason": "Issue 的核心错误是抛出 TypeError，观测异常是判断缺陷是否触发的直接方式。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "如果修复后，simplify(cos(x)**I) 的返回值（类型和内容）。",
+        "reason": "修复后，函数应返回一个有效的 SymPy 表达式，而不是抛出异常。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "表达式 cos(x)**I 及其子表达式（如指数 I）的类型。",
+        "reason": "了解操作数的类型有助于理解为何比较操作会失败。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "调用 simplify(cos(x)**I) 不应抛出 TypeError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言返回值的精确字符串或完整表达式，因为 Issue 未指定修复后的确切输出。",
+        "reason": "当前缺陷是抛出异常，修复后应不再抛出。使用 `pytest.raises` 或 `assertRaises` 来验证异常是否消失是直接且稳定的方法。"
+      },
+      {
+        "assertion_goal": "simplify(cos(x)**I) 应返回一个有效的 SymPy 表达式。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "断言返回值的精确数学等价性，因为简化结果可能不唯一。",
+        "reason": "修复后，函数应成功执行并返回一个表达式对象，而不是 None 或引发异常。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 模块中的 Symbol, cos, I, simplify。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能需要在类似 test_fu.py 或 test_simplify.py 的测试类或模块中运行。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "修复后 simplify(cos(x)**I) 的确切返回值是什么？是保持不变，还是转换为其他形式（如指数形式）？",
+      "_f 函数中 `if (rv.exp < 0) == True:` 这一行的确切上下文和目的是什么？它是否只应处理实数指数？",
+      "除了复数指数 I，其他复数指数（如 2+3*I）是否也会触发同样的错误？"
+    ]
+  }
+}

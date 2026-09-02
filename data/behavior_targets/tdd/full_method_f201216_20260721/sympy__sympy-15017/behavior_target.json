@@ -1,0 +1,276 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-15017",
+  "issue_summary": "sympy.tensor.array.NDimArray.__len__ 对 rank-0 数组（标量）错误地返回 0，而不是 1。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 或直接从 sympy.tensor.array 导入 ImmutableDenseNDimArray。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊 fixture，直接构造数组即可。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ndim_array_initiation",
+        "test_file": "sympy/tensor/array/tests/test_immutable_ndim_array.py",
+        "why_relevant": "该测试包含 rank-0 数组的构造和 len() 断言，是直接的起点。",
+        "reusable_parts": [
+          "ImmutableDenseNDimArray 的导入和构造",
+          "对 rank-0 数组的断言模式（如 assert len(...) == ...）",
+          "对 shape 和 rank 的检查"
+        ],
+        "possible_gap": "该测试当前断言 len(rank_zero_array) == 0，这反映了 buggy 行为，需要变异以触发并验证修复后的正确行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个 rank-0 的 sympy.Array（例如 sympy.Array(3) 或 ImmutableDenseNDimArray(x)），然后对其调用 len()。",
+      "evidence": [
+        "Issue 中：`a = sympy.Array(3)` 和 `len(a)`",
+        "相关测试 1 中：`rank_zero_array = ImmutableDenseNDimArray(x)` 和 `assert len(rank_zero_array) == 0`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "len(rank-0 array) 返回 0，但迭代该数组的元素数量为 1（len(list(a)) == 1）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中：`len(a)` 返回 `0`，而 `len(list(a))` 返回 `1`",
+        "相关测试 1 中：`assert len(rank_zero_array) == 0`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.Array",
+        "kind": "function",
+        "source_path": "sympy/tensor/array/__init__.py",
+        "reason": "Issue 中用于创建 rank-0 数组的入口函数。"
+      },
+      {
+        "name": "sympy.tensor.array.NDimArray.__len__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出 __len__ 方法对 rank-0 数组返回错误值。"
+      },
+      {
+        "name": "ImmutableDenseNDimArray",
+        "kind": "class",
+        "source_path": "sympy/tensor/array/__init__.py",
+        "reason": "sympy.Array 是其别名，相关测试中用于构造 rank-0 数组。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/tensor/array/__init__.py",
+        "object": "NDimArray.__len__",
+        "lines": "",
+        "reason": "Issue 直接指出 `sympy.tensor.array.NDimArray.__len__` 对 rank-0 数组返回 0。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中 rank-0 数组的构造使用符号 `x`（`ImmutableDenseNDimArray(x)`）。",
+        "target_pattern": "使用标量数值（如 `3`）构造 rank-0 数组，以更贴近 Issue 示例。",
+        "reason": "Issue 使用 `sympy.Array(3)`，数值标量是更直接的触发输入。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中对 rank-0 数组的 len() 断言是 `assert len(rank_zero_array) == 0`。",
+        "target_pattern": "将断言改为 `assert len(rank_zero_array) == 1`。",
+        "reason": "Issue 期望 len() 返回 1，变异此断言可直接暴露缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "len(rank-0 array) 应返回 1，与迭代器元素数量一致，并与 numpy 对标量数组的 .size 行为类似。",
+      "evidence": [
+        "Issue 中：\"the correct value should be one, which is the number of elements of the iterator and the observed behaviour in numpy.\"",
+        "Issue 中：`len(list(a))` 返回 `1`"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "len(array_instance)",
+        "reason": "Issue 的核心是 len() 的返回值错误，直接观测此返回值是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "len(list(array_instance))",
+        "reason": "Issue 用此作为正确元素数量的参照，观测其与 len(array_instance) 的差异。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "array_instance.shape 和 array_instance.rank()",
+        "reason": "确认数组确实是 rank-0（shape 为 ()，rank 为 0），以排除其他维度数组的干扰。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 rank-0 数组，len(array) 应等于 1。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 或与迭代无关的属性。",
+        "reason": "Issue 的核心是 len() 返回值，直接的数字相等断言最稳定且与 Issue 对齐。"
+      },
+      {
+        "assertion_goal": "len(array) 应等于 len(list(array))。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言 list(array) 的具体内容，除非与 Issue 直接相关。",
+        "reason": "Issue 指出迭代器元素数量为 1，此关系是验证 len() 正确性的稳定方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "NDimArray.__len__ 方法的具体实现位置和逻辑尚不确定。",
+    "是否所有 rank-0 数组类型（如 MutableDenseNDimArray）都存在相同问题。",
+    "修复后，对 rank-0 数组的索引行为（如 `array[()]`）是否应保持不变。"
+  ],
+  "raw": {
+    "issue_summary": "sympy.tensor.array.NDimArray.__len__ 对 rank-0 数组（标量）错误地返回 0，而不是 1。",
+    "trigger_condition": {
+      "text": "创建一个 rank-0 的 sympy.Array（例如 sympy.Array(3) 或 ImmutableDenseNDimArray(x)），然后对其调用 len()。",
+      "evidence": [
+        "Issue 中：`a = sympy.Array(3)` 和 `len(a)`",
+        "相关测试 1 中：`rank_zero_array = ImmutableDenseNDimArray(x)` 和 `assert len(rank_zero_array) == 0`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "len(rank-0 array) 返回 0，但迭代该数组的元素数量为 1（len(list(a)) == 1）。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中：`len(a)` 返回 `0`，而 `len(list(a))` 返回 `1`",
+        "相关测试 1 中：`assert len(rank_zero_array) == 0`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "len(rank-0 array) 应返回 1，与迭代器元素数量一致，并与 numpy 对标量数组的 .size 行为类似。",
+      "evidence": [
+        "Issue 中：\"the correct value should be one, which is the number of elements of the iterator and the observed behaviour in numpy.\"",
+        "Issue 中：`len(list(a))` 返回 `1`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "sympy.Array",
+        "kind": "function",
+        "source_path": "sympy/tensor/array/__init__.py",
+        "reason": "Issue 中用于创建 rank-0 数组的入口函数。"
+      },
+      {
+        "name": "sympy.tensor.array.NDimArray.__len__",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 明确指出 __len__ 方法对 rank-0 数组返回错误值。"
+      },
+      {
+        "name": "ImmutableDenseNDimArray",
+        "kind": "class",
+        "source_path": "sympy/tensor/array/__init__.py",
+        "reason": "sympy.Array 是其别名，相关测试中用于构造 rank-0 数组。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/tensor/array/__init__.py",
+        "object": "NDimArray.__len__",
+        "lines": "",
+        "reason": "Issue 直接指出 `sympy.tensor.array.NDimArray.__len__` 对 rank-0 数组返回 0。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_ndim_array_initiation",
+        "test_file": "sympy/tensor/array/tests/test_immutable_ndim_array.py",
+        "why_relevant": "该测试包含 rank-0 数组的构造和 len() 断言，是直接的起点。",
+        "reusable_parts": [
+          "ImmutableDenseNDimArray 的导入和构造",
+          "对 rank-0 数组的断言模式（如 assert len(...) == ...）",
+          "对 shape 和 rank 的检查"
+        ],
+        "possible_gap": "该测试当前断言 len(rank_zero_array) == 0，这反映了 buggy 行为，需要变异以触发并验证修复后的正确行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "测试中 rank-0 数组的构造使用符号 `x`（`ImmutableDenseNDimArray(x)`）。",
+        "target_pattern": "使用标量数值（如 `3`）构造 rank-0 数组，以更贴近 Issue 示例。",
+        "reason": "Issue 使用 `sympy.Array(3)`，数值标量是更直接的触发输入。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "测试中对 rank-0 数组的 len() 断言是 `assert len(rank_zero_array) == 0`。",
+        "target_pattern": "将断言改为 `assert len(rank_zero_array) == 1`。",
+        "reason": "Issue 期望 len() 返回 1，变异此断言可直接暴露缺陷。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "len(array_instance)",
+        "reason": "Issue 的核心是 len() 的返回值错误，直接观测此返回值是关键。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "len(list(array_instance))",
+        "reason": "Issue 用此作为正确元素数量的参照，观测其与 len(array_instance) 的差异。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "array_instance.shape 和 array_instance.rank()",
+        "reason": "确认数组确实是 rank-0（shape 为 ()，rank 为 0），以排除其他维度数组的干扰。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对于 rank-0 数组，len(array) 应等于 1。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的 repr 或与迭代无关的属性。",
+        "reason": "Issue 的核心是 len() 返回值，直接的数字相等断言最稳定且与 Issue 对齐。"
+      },
+      {
+        "assertion_goal": "len(array) 应等于 len(list(array))。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言 list(array) 的具体内容，除非与 Issue 直接相关。",
+        "reason": "Issue 指出迭代器元素数量为 1，此关系是验证 len() 正确性的稳定方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 或直接从 sympy.tensor.array 导入 ImmutableDenseNDimArray。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试可能不需要特殊 fixture，直接构造数组即可。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "NDimArray.__len__ 方法的具体实现位置和逻辑尚不确定。",
+      "是否所有 rank-0 数组类型（如 MutableDenseNDimArray）都存在相同问题。",
+      "修复后，对 rank-0 数组的索引行为（如 `array[()]`）是否应保持不变。"
+    ]
+  }
+}

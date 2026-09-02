@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-23262",
+  "issue_summary": "SymPy 1.10 中 Python 代码打印机在生成单元素元组时丢失了逗号，导致返回整数而非元组。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 inspect 和 sympy 的 lambdify。可能还需要 sympy 的 symbols 或其它基础对象来构造表达式，但 Issue 示例中使用了空参数列表和纯 Python tuple。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境应模拟 Issue 中描述的 SymPy 1.10 上下文，但无需特定配置或 fixture。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lambdify_inspect",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "此测试直接使用了 inspect.getsource 来检查 lambdify 生成的函数源代码，与 Issue 的触发和验证方式高度相似。",
+        "reusable_parts": [
+          "import inspect",
+          "使用 lambdify 创建函数",
+          "使用 inspect.getsource 获取源代码",
+          "assert 风格"
+        ],
+        "possible_gap": "此测试检查的是源代码中是否包含特定表达式片段（'x**2'），而非元组语法的正确性。"
+      },
+      {
+        "test_name": "test_python_functions",
+        "test_file": "sympy/printing/tests/test_python.py",
+        "why_relevant": "此测试验证 python 打印机的输出，而 Issue 的根本原因可能在于打印机。它展示了如何断言打印输出的模式。",
+        "reusable_parts": [
+          "使用 python() 函数（可能是打印机接口）",
+          "断言输出字符串的模式",
+          "包含多种表达式打印的示例"
+        ],
+        "possible_gap": "此测试未直接涉及 lambdify 或元组打印，且断言的是完整或部分字符串相等/包含，可能过于具体。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 lambdify 生成一个返回单元素元组的函数，并通过 inspect.getsource 检查其源代码。",
+      "evidence": [
+        "Issue 中的 MWE: inspect.getsource(lambdify([], tuple([1])))",
+        "Issue 说明对于两个或更多元素的元组，生成的代码是正确的"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的函数源代码中，单元素元组缺少逗号，导致返回整数 (1) 而非元组 (1,)。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了 SymPy 1.9 输出 'return (1,)' 和 SymPy 1.10 输出 'return (1)'",
+        "Issue 说明这导致程序假设返回类型始终为元组时出错"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 的核心是 lambdify 生成的代码存在问题，且相关源码片段指向此文件。"
+      },
+      {
+        "name": "inspect.getsource",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中使用此函数来检查生成的源代码，是触发和观察问题的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify",
+        "lines": "",
+        "reason": "Issue 直接涉及 lambdify 函数，且相关源码片段指向此文件，问题可能在于其内部使用的代码打印机。"
+      },
+      {
+        "path": "sympy/printing/python.py",
+        "object": "PythonCodePrinter",
+        "lines": "",
+        "reason": "Issue 标题和内容指出是 'Python code printer' 的问题，推断负责将表达式转换为 Python 代码的打印机是缺陷根源。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_lambdify_inspect 中使用 lambdify(x, x**2) 生成返回标量值的函数。",
+        "target_pattern": "使用 lambdify([], tuple([1])) 生成返回单元素元组的函数。",
+        "reason": "Issue 表明，当 lambdify 的表达式是单元素元组时，会触发代码打印错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_lambdify_inspect 中检查源代码是否包含 'x**2' 片段。",
+        "target_pattern": "检查源代码是否包含正确的单元素元组语法 '(1,)' 或错误的 '(1)'。",
+        "reason": "Issue 的核心错误是生成的源代码中元组语法不正确。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "生成的函数源代码中，单元素元组应包含逗号，确保返回类型为元组。",
+      "evidence": [
+        "Issue 中 SymPy 1.9 及以下版本的输出 'return (1,)' 展示了正确行为",
+        "Issue 说明对于两个或更多元素的元组，生成的代码是正确的，这暗示了期望的行为模式"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "inspect.getsource(lambdify([], tuple([1]))) 返回的字符串",
+        "reason": "Issue 通过比较此字符串在正确和错误版本中的差异来定位问题。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "lambdify([], tuple([1]))() 调用返回值的类型",
+        "reason": "错误的源代码会导致函数返回整数而非元组，类型检查可以直接验证此问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的函数源代码中，单元素元组的表示应包含逗号。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的源代码字符串完全相等，因为实现细节（如函数名、空格）可能变化。",
+        "reason": "Issue 的关键在于是否存在逗号，而不是源代码的每个字符。使用片段包含断言更稳定。"
+      },
+      {
+        "assertion_goal": "调用生成的函数应返回一个元组类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "仅断言返回值等于某个整数，因为这可能掩盖了类型错误。",
+        "reason": "Issue 明确指出返回类型错误，直接检查类型更符合问题本质。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只影响 lambdify 中通过 tuple([1]) 构造的元组，还是影响所有单元素 SymPy 元组表达式。",
+    "代码打印机的具体哪个方法或逻辑负责处理元组打印，需要进一步代码分析或插桩确认。",
+    "除了 inspect.getsource 观察源代码，是否还有其他 API 调用或操作会直接暴露出此问题。"
+  ],
+  "raw": {
+    "issue_summary": "SymPy 1.10 中 Python 代码打印机在生成单元素元组时丢失了逗号，导致返回整数而非元组。",
+    "trigger_condition": {
+      "text": "使用 lambdify 生成一个返回单元素元组的函数，并通过 inspect.getsource 检查其源代码。",
+      "evidence": [
+        "Issue 中的 MWE: inspect.getsource(lambdify([], tuple([1])))",
+        "Issue 说明对于两个或更多元素的元组，生成的代码是正确的"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的函数源代码中，单元素元组缺少逗号，导致返回整数 (1) 而非元组 (1,)。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中对比了 SymPy 1.9 输出 'return (1,)' 和 SymPy 1.10 输出 'return (1)'",
+        "Issue 说明这导致程序假设返回类型始终为元组时出错"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "生成的函数源代码中，单元素元组应包含逗号，确保返回类型为元组。",
+      "evidence": [
+        "Issue 中 SymPy 1.9 及以下版本的输出 'return (1,)' 展示了正确行为",
+        "Issue 说明对于两个或更多元素的元组，生成的代码是正确的，这暗示了期望的行为模式"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "lambdify",
+        "kind": "function",
+        "source_path": "sympy/utilities/lambdify.py",
+        "reason": "Issue 的核心是 lambdify 生成的代码存在问题，且相关源码片段指向此文件。"
+      },
+      {
+        "name": "inspect.getsource",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中使用此函数来检查生成的源代码，是触发和观察问题的关键。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/utilities/lambdify.py",
+        "object": "lambdify",
+        "lines": "",
+        "reason": "Issue 直接涉及 lambdify 函数，且相关源码片段指向此文件，问题可能在于其内部使用的代码打印机。"
+      },
+      {
+        "path": "sympy/printing/python.py",
+        "object": "PythonCodePrinter",
+        "lines": "",
+        "reason": "Issue 标题和内容指出是 'Python code printer' 的问题，推断负责将表达式转换为 Python 代码的打印机是缺陷根源。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_lambdify_inspect",
+        "test_file": "sympy/utilities/tests/test_lambdify.py",
+        "why_relevant": "此测试直接使用了 inspect.getsource 来检查 lambdify 生成的函数源代码，与 Issue 的触发和验证方式高度相似。",
+        "reusable_parts": [
+          "import inspect",
+          "使用 lambdify 创建函数",
+          "使用 inspect.getsource 获取源代码",
+          "assert 风格"
+        ],
+        "possible_gap": "此测试检查的是源代码中是否包含特定表达式片段（'x**2'），而非元组语法的正确性。"
+      },
+      {
+        "test_name": "test_python_functions",
+        "test_file": "sympy/printing/tests/test_python.py",
+        "why_relevant": "此测试验证 python 打印机的输出，而 Issue 的根本原因可能在于打印机。它展示了如何断言打印输出的模式。",
+        "reusable_parts": [
+          "使用 python() 函数（可能是打印机接口）",
+          "断言输出字符串的模式",
+          "包含多种表达式打印的示例"
+        ],
+        "possible_gap": "此测试未直接涉及 lambdify 或元组打印，且断言的是完整或部分字符串相等/包含，可能过于具体。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_lambdify_inspect 中使用 lambdify(x, x**2) 生成返回标量值的函数。",
+        "target_pattern": "使用 lambdify([], tuple([1])) 生成返回单元素元组的函数。",
+        "reason": "Issue 表明，当 lambdify 的表达式是单元素元组时，会触发代码打印错误。",
+        "confidence": "high"
+      },
+      {
+        "slot": "argument",
+        "current_pattern": "test_lambdify_inspect 中检查源代码是否包含 'x**2' 片段。",
+        "target_pattern": "检查源代码是否包含正确的单元素元组语法 '(1,)' 或错误的 '(1)'。",
+        "reason": "Issue 的核心错误是生成的源代码中元组语法不正确。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "inspect.getsource(lambdify([], tuple([1]))) 返回的字符串",
+        "reason": "Issue 通过比较此字符串在正确和错误版本中的差异来定位问题。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "lambdify([], tuple([1]))() 调用返回值的类型",
+        "reason": "错误的源代码会导致函数返回整数而非元组，类型检查可以直接验证此问题。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的函数源代码中，单元素元组的表示应包含逗号。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的源代码字符串完全相等，因为实现细节（如函数名、空格）可能变化。",
+        "reason": "Issue 的关键在于是否存在逗号，而不是源代码的每个字符。使用片段包含断言更稳定。"
+      },
+      {
+        "assertion_goal": "调用生成的函数应返回一个元组类型。",
+        "preferred_assertion_style": "isinstance",
+        "avoid": "仅断言返回值等于某个整数，因为这可能掩盖了类型错误。",
+        "reason": "Issue 明确指出返回类型错误，直接检查类型更符合问题本质。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 inspect 和 sympy 的 lambdify。可能还需要 sympy 的 symbols 或其它基础对象来构造表达式，但 Issue 示例中使用了空参数列表和纯 Python tuple。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试环境应模拟 Issue 中描述的 SymPy 1.10 上下文，但无需特定配置或 fixture。",
+        "source": "inference",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只影响 lambdify 中通过 tuple([1]) 构造的元组，还是影响所有单元素 SymPy 元组表达式。",
+      "代码打印机的具体哪个方法或逻辑负责处理元组打印，需要进一步代码分析或插桩确认。",
+      "除了 inspect.getsource 观察源代码，是否还有其他 API 调用或操作会直接暴露出此问题。"
+    ]
+  }
+}

@@ -1,0 +1,204 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-23413",
+  "issue_summary": "hermite_normal_form 函数在处理特定矩阵时错误地移除了行，导致结果矩阵维度不正确。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "测试需要导入 numpy (np)、sympy 的 Matrix 以及 hermite_normal_form 函数。可能需要处理 numpy 数组和 SymPy Matrix 之间的转换。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_hermite_normal",
+        "test_file": "sympy/matrices/tests/test_normalforms.py",
+        "why_relevant": "此测试直接测试 hermite_normal_form 函数，包含多种输入矩阵和预期输出的断言，是生成缺陷复现测试最直接的起点。",
+        "reusable_parts": [
+          "imports (from sympy import Matrix, from sympy.matrices.normalforms import hermite_normal_form)",
+          "调用 hermite_normal_form 的语法",
+          "使用 assert 进行矩阵相等的验证风格"
+        ],
+        "possible_gap": "现有测试用例可能不包含通过转置和翻转操作构造的特定矩阵，也未测试函数在错误识别矩阵秩并移除行时的行为。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "对矩阵 [[5, 8, 12], [0, 0, 1]] 进行转置和翻转操作后，调用 hermite_normal_form 函数。",
+      "evidence": [
+        "Issue 中给出的输入表达式：`np.flip (hermite_normal_form (Matrix (np.flip (np.array ([[5, 8, 12], [0, 0, 1]]))).T).T))`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回了 `[[5, 8, 0]]`，这是一个 1x3 矩阵，而预期结果是 `[[5, 8, 0], [0, 0, 1]]`，一个 2x3 矩阵。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中明确给出了实际输出 `[[5, 8, 0]]` 和预期输出 `[[5, 8, 0], [0, 0, 1]]`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "hermite_normal_form",
+        "kind": "function",
+        "source_path": "sympy/matrices/normalforms.py",
+        "reason": "Issue 直接报告了此函数的错误行为，它是计算 Hermite 标准形的核心函数。"
+      },
+      {
+        "name": "Matrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/__init__.py",
+        "reason": "Issue 中使用了 Matrix 类来构造输入。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/normalforms.py",
+        "object": "hermite_normal_form",
+        "lines": "70-127",
+        "reason": "Issue 直接指向此函数。源码片段显示它调用 `_hnf` 内部函数，问题可能在于内部实现错误地判断了矩阵的秩或处理了行移除逻辑。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用直接的整数矩阵作为输入，如 `Matrix([[2, 7, 17, 29, 41], [3, 11, 19, 31, 43], [5, 13, 23, 37, 47]])`。",
+        "target_pattern": "使用 Issue 中描述的复杂构造作为输入：先创建 numpy 数组，进行翻转和转置操作，再转换为 SymPy Matrix。",
+        "reason": "Issue 表明通过特定操作（翻转、转置）构造的矩阵可能触发了函数内部的错误逻辑（如错误的秩判断）。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "hermite_normal_form 函数应正确计算输入矩阵的 Hermite 标准形，保持正确的行数（秩），不错误地移除行。",
+      "evidence": [
+        "Issue 中用户期望得到 2x3 矩阵 `[[5, 8, 0], [0, 0, 1]]`",
+        "相关测试代码中展示了 hermite_normal_form 对多种矩阵（包括非满秩矩阵）的计算，并验证了结果的正确性"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "hermite_normal_form 返回的 Matrix 对象的形状（.shape）和具体元素。",
+        "reason": "Issue 的核心错误是返回矩阵的行数（形状）不正确，观测形状和内容可以直接判断缺陷是否被触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 hermite_normal_form 对给定输入返回的矩阵具有正确的行数（应为2）和正确的元素值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免与不相关的矩阵属性（如行列式）进行比较，或使用可能不稳定的完整 repr 字符串比较。",
+        "reason": "Issue 明确给出了预期的完整矩阵结果，直接进行矩阵相等性断言是最直接和稳定的验证方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只存在于特定参数组合（如未提供 D 参数）下？",
+    "内部函数 `_hnf` 的具体实现逻辑和错误点是什么？",
+    "是否所有经过类似翻转/转置操作的矩阵都会触发此问题，还是仅限于特定数值的矩阵？"
+  ],
+  "raw": {
+    "issue_summary": "hermite_normal_form 函数在处理特定矩阵时错误地移除了行，导致结果矩阵维度不正确。",
+    "trigger_condition": {
+      "text": "对矩阵 [[5, 8, 12], [0, 0, 1]] 进行转置和翻转操作后，调用 hermite_normal_form 函数。",
+      "evidence": [
+        "Issue 中给出的输入表达式：`np.flip (hermite_normal_form (Matrix (np.flip (np.array ([[5, 8, 12], [0, 0, 1]]))).T).T))`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "函数返回了 `[[5, 8, 0]]`，这是一个 1x3 矩阵，而预期结果是 `[[5, 8, 0], [0, 0, 1]]`，一个 2x3 矩阵。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中明确给出了实际输出 `[[5, 8, 0]]` 和预期输出 `[[5, 8, 0], [0, 0, 1]]`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "hermite_normal_form 函数应正确计算输入矩阵的 Hermite 标准形，保持正确的行数（秩），不错误地移除行。",
+      "evidence": [
+        "Issue 中用户期望得到 2x3 矩阵 `[[5, 8, 0], [0, 0, 1]]`",
+        "相关测试代码中展示了 hermite_normal_form 对多种矩阵（包括非满秩矩阵）的计算，并验证了结果的正确性"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "hermite_normal_form",
+        "kind": "function",
+        "source_path": "sympy/matrices/normalforms.py",
+        "reason": "Issue 直接报告了此函数的错误行为，它是计算 Hermite 标准形的核心函数。"
+      },
+      {
+        "name": "Matrix",
+        "kind": "class",
+        "source_path": "sympy/matrices/__init__.py",
+        "reason": "Issue 中使用了 Matrix 类来构造输入。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/matrices/normalforms.py",
+        "object": "hermite_normal_form",
+        "lines": "70-127",
+        "reason": "Issue 直接指向此函数。源码片段显示它调用 `_hnf` 内部函数，问题可能在于内部实现错误地判断了矩阵的秩或处理了行移除逻辑。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_hermite_normal",
+        "test_file": "sympy/matrices/tests/test_normalforms.py",
+        "why_relevant": "此测试直接测试 hermite_normal_form 函数，包含多种输入矩阵和预期输出的断言，是生成缺陷复现测试最直接的起点。",
+        "reusable_parts": [
+          "imports (from sympy import Matrix, from sympy.matrices.normalforms import hermite_normal_form)",
+          "调用 hermite_normal_form 的语法",
+          "使用 assert 进行矩阵相等的验证风格"
+        ],
+        "possible_gap": "现有测试用例可能不包含通过转置和翻转操作构造的特定矩阵，也未测试函数在错误识别矩阵秩并移除行时的行为。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用直接的整数矩阵作为输入，如 `Matrix([[2, 7, 17, 29, 41], [3, 11, 19, 31, 43], [5, 13, 23, 37, 47]])`。",
+        "target_pattern": "使用 Issue 中描述的复杂构造作为输入：先创建 numpy 数组，进行翻转和转置操作，再转换为 SymPy Matrix。",
+        "reason": "Issue 表明通过特定操作（翻转、转置）构造的矩阵可能触发了函数内部的错误逻辑（如错误的秩判断）。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "hermite_normal_form 返回的 Matrix 对象的形状（.shape）和具体元素。",
+        "reason": "Issue 的核心错误是返回矩阵的行数（形状）不正确，观测形状和内容可以直接判断缺陷是否被触发。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 hermite_normal_form 对给定输入返回的矩阵具有正确的行数（应为2）和正确的元素值。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免与不相关的矩阵属性（如行列式）进行比较，或使用可能不稳定的完整 repr 字符串比较。",
+        "reason": "Issue 明确给出了预期的完整矩阵结果，直接进行矩阵相等性断言是最直接和稳定的验证方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "测试需要导入 numpy (np)、sympy 的 Matrix 以及 hermite_normal_form 函数。可能需要处理 numpy 数组和 SymPy Matrix 之间的转换。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只存在于特定参数组合（如未提供 D 参数）下？",
+      "内部函数 `_hnf` 的具体实现逻辑和错误点是什么？",
+      "是否所有经过类似翻转/转置操作的矩阵都会触发此问题，还是仅限于特定数值的矩阵？"
+    ]
+  }
+}

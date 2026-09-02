@@ -1,0 +1,256 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-22914",
+  "issue_summary": "PythonCodePrinter 不支持将 sympy 的 Min 和 Max 函数转换为 Python 代码。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 symbols, Min, Max, pycode 以及 PythonCodePrinter 类。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_PythonCodePrinter",
+        "test_file": "sympy/printing/tests/test_pycode.py",
+        "why_relevant": "该测试直接测试 PythonCodePrinter 的 doprint 方法对各种 sympy 表达式的转换，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "PythonCodePrinter 对象的构造",
+          "doprint 方法的调用模式",
+          "assert 风格（字符串比较）",
+          "导入语句（如 from sympy import ...）"
+        ],
+        "possible_gap": "该测试没有包含对 Min 或 Max 表达式的测试用例，因此无法触发当前 Issue 描述的错误。"
+      },
+      {
+        "test_name": "test_issue_18770",
+        "test_file": "sympy/printing/tests/test_pycode.py",
+        "why_relevant": "该测试涉及使用 lambdify 和 numpy 处理 Min/Max 表达式，表明 Min/Max 在其他上下文中是可用的，但未测试 PythonCodePrinter 的直接代码生成。",
+        "reusable_parts": [
+          "Min/Max 表达式的构造",
+          "导入语句"
+        ],
+        "possible_gap": "测试焦点是 lambdify 与 numpy 的集成，而非 PythonCodePrinter 的 pycode 输出。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 PythonCodePrinter（通过 pycode 函数）打印包含 Min 或 Max 函数的 sympy 表达式。",
+      "evidence": [
+        "Issue 中的示例代码：`c = Min(a,b); print(pycode(c))`",
+        "相关测试 1 中测试了 PythonCodePrinter 的 doprint 方法对各种表达式的转换。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 Python 代码包含注释“# Not supported in Python: # Min”和未转换的原始函数调用“Min(a, b)”，而不是有效的 Python 代码“min(a, b)”。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中给出的错误输出示例。",
+        "相关源码 1 中 PythonCodePrinter 类没有定义 _print_Min 和 _print_Max 方法，可能继承了 CodePrinter._print_not_supported 的行为。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PythonCodePrinter",
+        "kind": "class",
+        "source_path": "sympy/printing/pycode.py",
+        "reason": "Issue 明确指出 PythonCodePrinter 缺少对 Min 和 Max 的支持，需要为其添加 _print_Min 和 _print_Max 方法。"
+      },
+      {
+        "name": "pycode",
+        "kind": "function",
+        "source_path": "sympy/printing/pycode.py",
+        "reason": "Issue 示例中直接调用了 pycode 函数，它内部使用了 PythonCodePrinter。"
+      },
+      {
+        "name": "Min",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/miscellaneous.py",
+        "reason": "Issue 中需要被打印的 sympy 函数对象。"
+      },
+      {
+        "name": "Max",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/miscellaneous.py",
+        "reason": "Issue 中需要被打印的 sympy 函数对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/pycode.py",
+        "object": "PythonCodePrinter",
+        "lines": "425-471",
+        "reason": "该类是 Python 代码打印器，但检索出的源码片段显示它没有定义 _print_Min 和 _print_Max 方法，而 Issue 指出这正是问题所在。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_PythonCodePrinter 中测试了多种表达式（如 x**y, Mod(x,2), Piecewise）。",
+        "target_pattern": "将输入表达式替换为包含 Min 或 Max 的表达式，例如 Min(x, y) 或 Max(a, b)。",
+        "reason": "Issue 表明当前缺陷仅在输入包含 Min 或 Max 时触发。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "PythonCodePrinter 应该能够将 sympy 的 Min 和 Max 函数分别转换为 Python 内置的 min 和 max 函数调用。",
+      "evidence": [
+        "Issue 中建议的修复代码：`return \"min({})\".format(...)` 和 `return \"max({})\".format(...)`。",
+        "相关测试 2 展示了其他打印器（如 MathML）成功处理 Min/Max 的预期行为。",
+        "相关源码 5 和 6 展示了 C 代码打印器对 Min/Max 的支持，表明这是合理的功能。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "PythonCodePrinter.doprint(Min(x, y)) 或 pycode(Min(x, y)) 的返回值。",
+        "reason": "Issue 的核心错误是返回值不正确（包含不支持注释和未转换的函数名）。观察返回值是否包含“min(”或“max(”可以判断修复是否成功。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pycode(Min(x, y)) 的输出是有效的 Python 代码“min(x, y)”，而不是包含“Not supported”注释或“Min”函数名的字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、包含注释的错误输出字符串，因为修复后注释会消失。",
+        "reason": "修复的目标是生成有效的 Python 代码，因此断言输出等于预期的 Python 表达式是直接且稳定的。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "PythonCodePrinter 内部处理不支持函数的确切机制（例如，是否调用 _print_not_supported）在提供的源码片段中未完全展示。",
+    "Min/Max 函数的多参数情况是否与建议的修复代码（连接所有 args）完全一致。",
+    "修复后是否需要处理特殊的导入（如 math 模块），但 Issue 建议的代码未涉及，因此可能不需要。"
+  ],
+  "raw": {
+    "issue_summary": "PythonCodePrinter 不支持将 sympy 的 Min 和 Max 函数转换为 Python 代码。",
+    "trigger_condition": {
+      "text": "使用 PythonCodePrinter（通过 pycode 函数）打印包含 Min 或 Max 函数的 sympy 表达式。",
+      "evidence": [
+        "Issue 中的示例代码：`c = Min(a,b); print(pycode(c))`",
+        "相关测试 1 中测试了 PythonCodePrinter 的 doprint 方法对各种表达式的转换。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 Python 代码包含注释“# Not supported in Python: # Min”和未转换的原始函数调用“Min(a, b)”，而不是有效的 Python 代码“min(a, b)”。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue 中给出的错误输出示例。",
+        "相关源码 1 中 PythonCodePrinter 类没有定义 _print_Min 和 _print_Max 方法，可能继承了 CodePrinter._print_not_supported 的行为。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "PythonCodePrinter 应该能够将 sympy 的 Min 和 Max 函数分别转换为 Python 内置的 min 和 max 函数调用。",
+      "evidence": [
+        "Issue 中建议的修复代码：`return \"min({})\".format(...)` 和 `return \"max({})\".format(...)`。",
+        "相关测试 2 展示了其他打印器（如 MathML）成功处理 Min/Max 的预期行为。",
+        "相关源码 5 和 6 展示了 C 代码打印器对 Min/Max 的支持，表明这是合理的功能。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "PythonCodePrinter",
+        "kind": "class",
+        "source_path": "sympy/printing/pycode.py",
+        "reason": "Issue 明确指出 PythonCodePrinter 缺少对 Min 和 Max 的支持，需要为其添加 _print_Min 和 _print_Max 方法。"
+      },
+      {
+        "name": "pycode",
+        "kind": "function",
+        "source_path": "sympy/printing/pycode.py",
+        "reason": "Issue 示例中直接调用了 pycode 函数，它内部使用了 PythonCodePrinter。"
+      },
+      {
+        "name": "Min",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/miscellaneous.py",
+        "reason": "Issue 中需要被打印的 sympy 函数对象。"
+      },
+      {
+        "name": "Max",
+        "kind": "class",
+        "source_path": "sympy/functions/elementary/miscellaneous.py",
+        "reason": "Issue 中需要被打印的 sympy 函数对象。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/printing/pycode.py",
+        "object": "PythonCodePrinter",
+        "lines": "425-471",
+        "reason": "该类是 Python 代码打印器，但检索出的源码片段显示它没有定义 _print_Min 和 _print_Max 方法，而 Issue 指出这正是问题所在。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_PythonCodePrinter",
+        "test_file": "sympy/printing/tests/test_pycode.py",
+        "why_relevant": "该测试直接测试 PythonCodePrinter 的 doprint 方法对各种 sympy 表达式的转换，与 Issue 场景高度相似。",
+        "reusable_parts": [
+          "PythonCodePrinter 对象的构造",
+          "doprint 方法的调用模式",
+          "assert 风格（字符串比较）",
+          "导入语句（如 from sympy import ...）"
+        ],
+        "possible_gap": "该测试没有包含对 Min 或 Max 表达式的测试用例，因此无法触发当前 Issue 描述的错误。"
+      },
+      {
+        "test_name": "test_issue_18770",
+        "test_file": "sympy/printing/tests/test_pycode.py",
+        "why_relevant": "该测试涉及使用 lambdify 和 numpy 处理 Min/Max 表达式，表明 Min/Max 在其他上下文中是可用的，但未测试 PythonCodePrinter 的直接代码生成。",
+        "reusable_parts": [
+          "Min/Max 表达式的构造",
+          "导入语句"
+        ],
+        "possible_gap": "测试焦点是 lambdify 与 numpy 的集成，而非 PythonCodePrinter 的 pycode 输出。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试 test_PythonCodePrinter 中测试了多种表达式（如 x**y, Mod(x,2), Piecewise）。",
+        "target_pattern": "将输入表达式替换为包含 Min 或 Max 的表达式，例如 Min(x, y) 或 Max(a, b)。",
+        "reason": "Issue 表明当前缺陷仅在输入包含 Min 或 Max 时触发。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "PythonCodePrinter.doprint(Min(x, y)) 或 pycode(Min(x, y)) 的返回值。",
+        "reason": "Issue 的核心错误是返回值不正确（包含不支持注释和未转换的函数名）。观察返回值是否包含“min(”或“max(”可以判断修复是否成功。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 pycode(Min(x, y)) 的输出是有效的 Python 代码“min(x, y)”，而不是包含“Not supported”注释或“Min”函数名的字符串。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、包含注释的错误输出字符串，因为修复后注释会消失。",
+        "reason": "修复的目标是生成有效的 Python 代码，因此断言输出等于预期的 Python 表达式是直接且稳定的。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 sympy 的 symbols, Min, Max, pycode 以及 PythonCodePrinter 类。",
+        "source": "issue|retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "PythonCodePrinter 内部处理不支持函数的确切机制（例如，是否调用 _print_not_supported）在提供的源码片段中未完全展示。",
+      "Min/Max 函数的多参数情况是否与建议的修复代码（连接所有 args）完全一致。",
+      "修复后是否需要处理特殊的导入（如 math 模块），但 Issue 建议的代码未涉及，因此可能不需要。"
+    ]
+  }
+}

@@ -1,0 +1,342 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-14493",
+  "issue_summary": "当自定义的 ManifestStaticFilesStorage 子类设置 max_post_process_passes = 0 时，运行 collectstatic 命令会引发 UnboundLocalError 异常。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 CollectionTestCase 或类似的测试基类，它提供了运行 collectstatic 和操作静态文件目录的环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 @override_settings 装饰器或 modify_settings 来临时配置 STATICFILES_STORAGE。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时的静态文件用于收集，以触发 post_process 流程。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要使用 StringIO 或类似工具来捕获命令的标准输出和错误输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestCollectionVerbosity.test_verbosity_2_with_post_process",
+        "test_file": "tests/staticfiles_tests/test_management.py",
+        "why_relevant": "它使用了 ManifestStaticFilesStorage 并运行了 collectstatic 命令，这是触发缺陷的核心操作。",
+        "reusable_parts": [
+          "@override_settings 装饰器用于设置 STATICFILES_STORAGE",
+          "self.run_collectstatic 方法调用",
+          "CollectionTestCase 基类可能提供的测试环境"
+        ],
+        "possible_gap": "它使用默认的 ManifestStaticFilesStorage，没有自定义 max_post_process_passes 属性。"
+      },
+      {
+        "test_name": "TestCollectionHashedFilesCache.test_file_change_after_collectstatic",
+        "test_file": "tests/staticfiles_tests/test_storage.py",
+        "why_relevant": "它同样使用了 ManifestStaticFilesStorage 并多次调用 collectstatic 命令，测试了静态文件收集和哈希更新的流程。",
+        "reusable_parts": [
+          "@override_settings 装饰器",
+          "call_command('collectstatic', ...) 的调用方式",
+          "文件创建和内容操作的模式",
+          "使用 StringIO 捕获错误输出"
+        ],
+        "possible_gap": "它没有涉及自定义存储类或修改 max_post_process_passes 属性。"
+      },
+      {
+        "test_name": "TestHashedFiles.test_post_processing_failure",
+        "test_file": "tests/staticfiles_tests/test_storage.py",
+        "why_relevant": "它测试了 collectstatic 命令在 post-processing 失败时的行为，包括异常处理和错误输出捕获，这与当前 Issue 的错误场景（异常）有相似之处。",
+        "reusable_parts": [
+          "使用 call_command 并捕获 stderr",
+          "assertRaises 用于预期异常",
+          "特定的 settings 配置模式"
+        ],
+        "possible_gap": "它触发的是处理特定错误文件导致的异常，而非配置导致的变量未定义异常。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个继承自 ManifestStaticFilesStorage 的自定义存储类，将其 max_post_process_passes 属性设置为 0，并在 settings.py 中将 STATICFILES_STORAGE 配置为该自定义类，然后运行 collectstatic 命令。",
+      "evidence": [
+        "Issue 描述中明确给出了复现步骤：'Derive a custom class from ManifestStaticFilesStorage and set max_post_process_passes to 0'，并指定了 settings.py 的配置和运行 collectstatic。",
+        "源码片段 2 中显示 post_process 方法使用了 self.max_post_process_passes 来控制循环次数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 collectstatic 命令时，在 django/contrib/staticfiles/storage.py 文件的 post_process 方法中，抛出了 UnboundLocalError: local variable 'substitutions' referenced before assignment 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出了完整的错误堆栈跟踪，并明确指出错误发生在第 251 行：'UnboundLocalError: local variable 'substitutions' referenced before assignment'。",
+        "Issue 链接了源码位置，指出 'substitutions is only set if the loop is entered at least once.'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "ManifestStaticFilesStorage",
+        "kind": "class",
+        "source_path": "django/contrib/staticfiles/storage.py",
+        "reason": "Issue 的核心是自定义这个存储类并设置其属性。"
+      },
+      {
+        "name": "post_process",
+        "kind": "method",
+        "source_path": "django/contrib/staticfiles/storage.py",
+        "reason": "错误发生在这个方法内部，它是 collectstatic 处理流程的关键部分。"
+      },
+      {
+        "name": "collectstatic",
+        "kind": "command",
+        "source_path": "django/contrib/staticfiles/management/commands/collectstatic.py",
+        "reason": "Issue 通过运行此命令触发错误。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/staticfiles/storage.py",
+        "object": "HashedFilesMixin.post_process",
+        "lines": "224-281",
+        "reason": "Issue 明确指出了错误发生在此方法内（第 251 行），并分析了变量 'substitutions' 的初始化依赖于循环是否执行。源码片段 2 显示了该方法中 'substitutions' 变量的定义和作用域。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 @override_settings(STATICFILES_STORAGE='...ManifestStaticFilesStorage') 来配置默认存储后端。",
+        "target_pattern": "需要创建一个自定义的存储类，继承 ManifestStaticFilesStorage 并设置 max_post_process_passes = 0，然后通过 @override_settings 或 settings 模块配置 STATICFILES_STORAGE 指向这个自定义类。",
+        "reason": "Issue 明确指出，只有当自定义类并设置该属性为 0 时，才会触发缺陷路径，导致 post_process 方法中的变量未初始化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用 call_command('collectstatic', ...) 或 self.run_collectstatic(...)。",
+        "target_pattern": "在配置了自定义存储类后，调用相同的 collectstatic 命令。",
+        "reason": "该调用是触发 post_process 方法执行的入口，从而进入有缺陷的代码路径。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使 max_post_process_passes 设置为 0，collectstatic 命令也应能正常完成，不会引发 UnboundLocalError 异常。",
+      "evidence": [
+        "Issue 中描述了设置 max_post_process_passes 为 0 的动机是为了避免产生无效的 CSS，这暗示了该配置应该是一个合法且被支持的操作。",
+        "从代码逻辑推断，当 max_post_process_passes 为 0 时，外层 for 循环不会执行，因此变量 'substitutions' 可能未被初始化，但程序应能优雅处理这种情况，而不是崩溃。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 collectstatic 命令时捕获的异常对象及其 traceback。",
+        "reason": "Issue 的核心现象是抛出 UnboundLocalError，观测是否出现此异常是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "自定义存储类实例的 max_post_process_passes 属性值。",
+        "reason": "确认测试配置是否正确应用了 max_post_process_passes = 0 的设置。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "collectstatic 命令的标准错误输出 (stderr)。",
+        "reason": "错误堆栈信息会输出到 stderr，可以用于确认错误位置和类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 max_post_process_passes 设置为 0 时，运行 collectstatic 命令不应引发 UnboundLocalError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串，因为堆栈信息可能因环境而异。",
+        "reason": "Issue 的核心是特定异常的出现，修复后该异常应消失。使用 raises 断言可以明确验证异常是否被抛出。注意：修复后，此断言应期望不抛出异常（即使用 assertNoRaises 或类似模式），但当前提示修复前的测试应断言会抛出异常。"
+      },
+      {
+        "assertion_goal": "collectstatic 命令应正常完成（可能产生输出或修改文件），而不因配置而崩溃。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言静态文件收集的具体结果（如生成的文件名），因为这可能因文件内容而异，且与当前配置缺陷无关。",
+        "reason": "更稳定的断言是验证命令执行过程本身没有因内部错误而中断，可以通过检查命令退出状态或捕获的异常为空来判断。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "除了 UnboundLocalError 外，设置 max_post_process_passes = 0 是否还会导致其他副作用或逻辑错误？",
+    "修复后，当 max_post_process_passes = 0 时，post_process 方法的预期返回值或行为具体是什么？是完全跳过处理，还是进行单次处理？",
+    "自定义存储类是否还需要其他设置才能完全模拟 Issue 中的场景？"
+  ],
+  "raw": {
+    "issue_summary": "当自定义的 ManifestStaticFilesStorage 子类设置 max_post_process_passes = 0 时，运行 collectstatic 命令会引发 UnboundLocalError 异常。",
+    "trigger_condition": {
+      "text": "创建一个继承自 ManifestStaticFilesStorage 的自定义存储类，将其 max_post_process_passes 属性设置为 0，并在 settings.py 中将 STATICFILES_STORAGE 配置为该自定义类，然后运行 collectstatic 命令。",
+      "evidence": [
+        "Issue 描述中明确给出了复现步骤：'Derive a custom class from ManifestStaticFilesStorage and set max_post_process_passes to 0'，并指定了 settings.py 的配置和运行 collectstatic。",
+        "源码片段 2 中显示 post_process 方法使用了 self.max_post_process_passes 来控制循环次数。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "运行 collectstatic 命令时，在 django/contrib/staticfiles/storage.py 文件的 post_process 方法中，抛出了 UnboundLocalError: local variable 'substitutions' referenced before assignment 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中给出了完整的错误堆栈跟踪，并明确指出错误发生在第 251 行：'UnboundLocalError: local variable 'substitutions' referenced before assignment'。",
+        "Issue 链接了源码位置，指出 'substitutions is only set if the loop is entered at least once.'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使 max_post_process_passes 设置为 0，collectstatic 命令也应能正常完成，不会引发 UnboundLocalError 异常。",
+      "evidence": [
+        "Issue 中描述了设置 max_post_process_passes 为 0 的动机是为了避免产生无效的 CSS，这暗示了该配置应该是一个合法且被支持的操作。",
+        "从代码逻辑推断，当 max_post_process_passes 为 0 时，外层 for 循环不会执行，因此变量 'substitutions' 可能未被初始化，但程序应能优雅处理这种情况，而不是崩溃。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "ManifestStaticFilesStorage",
+        "kind": "class",
+        "source_path": "django/contrib/staticfiles/storage.py",
+        "reason": "Issue 的核心是自定义这个存储类并设置其属性。"
+      },
+      {
+        "name": "post_process",
+        "kind": "method",
+        "source_path": "django/contrib/staticfiles/storage.py",
+        "reason": "错误发生在这个方法内部，它是 collectstatic 处理流程的关键部分。"
+      },
+      {
+        "name": "collectstatic",
+        "kind": "command",
+        "source_path": "django/contrib/staticfiles/management/commands/collectstatic.py",
+        "reason": "Issue 通过运行此命令触发错误。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/staticfiles/storage.py",
+        "object": "HashedFilesMixin.post_process",
+        "lines": "224-281",
+        "reason": "Issue 明确指出了错误发生在此方法内（第 251 行），并分析了变量 'substitutions' 的初始化依赖于循环是否执行。源码片段 2 显示了该方法中 'substitutions' 变量的定义和作用域。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "TestCollectionVerbosity.test_verbosity_2_with_post_process",
+        "test_file": "tests/staticfiles_tests/test_management.py",
+        "why_relevant": "它使用了 ManifestStaticFilesStorage 并运行了 collectstatic 命令，这是触发缺陷的核心操作。",
+        "reusable_parts": [
+          "@override_settings 装饰器用于设置 STATICFILES_STORAGE",
+          "self.run_collectstatic 方法调用",
+          "CollectionTestCase 基类可能提供的测试环境"
+        ],
+        "possible_gap": "它使用默认的 ManifestStaticFilesStorage，没有自定义 max_post_process_passes 属性。"
+      },
+      {
+        "test_name": "TestCollectionHashedFilesCache.test_file_change_after_collectstatic",
+        "test_file": "tests/staticfiles_tests/test_storage.py",
+        "why_relevant": "它同样使用了 ManifestStaticFilesStorage 并多次调用 collectstatic 命令，测试了静态文件收集和哈希更新的流程。",
+        "reusable_parts": [
+          "@override_settings 装饰器",
+          "call_command('collectstatic', ...) 的调用方式",
+          "文件创建和内容操作的模式",
+          "使用 StringIO 捕获错误输出"
+        ],
+        "possible_gap": "它没有涉及自定义存储类或修改 max_post_process_passes 属性。"
+      },
+      {
+        "test_name": "TestHashedFiles.test_post_processing_failure",
+        "test_file": "tests/staticfiles_tests/test_storage.py",
+        "why_relevant": "它测试了 collectstatic 命令在 post-processing 失败时的行为，包括异常处理和错误输出捕获，这与当前 Issue 的错误场景（异常）有相似之处。",
+        "reusable_parts": [
+          "使用 call_command 并捕获 stderr",
+          "assertRaises 用于预期异常",
+          "特定的 settings 配置模式"
+        ],
+        "possible_gap": "它触发的是处理特定错误文件导致的异常，而非配置导致的变量未定义异常。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中使用 @override_settings(STATICFILES_STORAGE='...ManifestStaticFilesStorage') 来配置默认存储后端。",
+        "target_pattern": "需要创建一个自定义的存储类，继承 ManifestStaticFilesStorage 并设置 max_post_process_passes = 0，然后通过 @override_settings 或 settings 模块配置 STATICFILES_STORAGE 指向这个自定义类。",
+        "reason": "Issue 明确指出，只有当自定义类并设置该属性为 0 时，才会触发缺陷路径，导致 post_process 方法中的变量未初始化。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相似测试中直接调用 call_command('collectstatic', ...) 或 self.run_collectstatic(...)。",
+        "target_pattern": "在配置了自定义存储类后，调用相同的 collectstatic 命令。",
+        "reason": "该调用是触发 post_process 方法执行的入口，从而进入有缺陷的代码路径。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 collectstatic 命令时捕获的异常对象及其 traceback。",
+        "reason": "Issue 的核心现象是抛出 UnboundLocalError，观测是否出现此异常是判断缺陷是否触发的直接依据。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "自定义存储类实例的 max_post_process_passes 属性值。",
+        "reason": "确认测试配置是否正确应用了 max_post_process_passes = 0 的设置。"
+      },
+      {
+        "kind": "file_output",
+        "expression_hint": "collectstatic 命令的标准错误输出 (stderr)。",
+        "reason": "错误堆栈信息会输出到 stderr，可以用于确认错误位置和类型。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当 max_post_process_passes 设置为 0 时，运行 collectstatic 命令不应引发 UnboundLocalError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的错误消息字符串，因为堆栈信息可能因环境而异。",
+        "reason": "Issue 的核心是特定异常的出现，修复后该异常应消失。使用 raises 断言可以明确验证异常是否被抛出。注意：修复后，此断言应期望不抛出异常（即使用 assertNoRaises 或类似模式），但当前提示修复前的测试应断言会抛出异常。"
+      },
+      {
+        "assertion_goal": "collectstatic 命令应正常完成（可能产生输出或修改文件），而不因配置而崩溃。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言静态文件收集的具体结果（如生成的文件名），因为这可能因文件内容而异，且与当前配置缺陷无关。",
+        "reason": "更稳定的断言是验证命令执行过程本身没有因内部错误而中断，可以通过检查命令退出状态或捕获的异常为空来判断。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 CollectionTestCase 或类似的测试基类，它提供了运行 collectstatic 和操作静态文件目录的环境。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 @override_settings 装饰器或 modify_settings 来临时配置 STATICFILES_STORAGE。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建临时的静态文件用于收集，以触发 post_process 流程。",
+        "source": "retrieved_test",
+        "confidence": "medium"
+      },
+      {
+        "hint": "需要使用 StringIO 或类似工具来捕获命令的标准输出和错误输出。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了 UnboundLocalError 外，设置 max_post_process_passes = 0 是否还会导致其他副作用或逻辑错误？",
+      "修复后，当 max_post_process_passes = 0 时，post_process 方法的预期返回值或行为具体是什么？是完全跳过处理，还是进行单次处理？",
+      "自定义存储类是否还需要其他设置才能完全模拟 Issue 中的场景？"
+    ]
+  }
+}

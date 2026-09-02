@@ -1,0 +1,300 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-13471",
+  "issue_summary": "在 Python 2 中序列化包含浮点数的 sympy 表达式，然后在 Python 3 中反序列化时失败。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "可能需要模拟或准备一个在 Python 2 下生成的 pickle 数据文件，供 Python 3 测试读取。或者，在测试中内联嵌入该数据的十六进制/字节表示。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试可能需要处理 Python 2 和 Python 3 的差异，例如 long 类型和字节字符串。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Float",
+        "test_file": "sympy/core/tests/test_numbers.py",
+        "why_relevant": "该测试广泛测试了 Float 类的构造、属性、比较和序列化相关行为，包括使用 long 类型和 _mpf_ 内部表示，与 Issue 中涉及的 Float 对象和内部表示（num[1]）高度相关。",
+        "reusable_parts": [
+          "Float 对象的构造方式（如 Float(1.0), Float('1.0')）",
+          "对 _mpf_ 属性的断言模式",
+          "使用 long 类型的模式"
+        ],
+        "possible_gap": "该测试没有涉及跨 Python 版本的 pickle 序列化和反序列化场景，也没有模拟从 Python 2 格式（包含 'L' 后缀）加载数据。"
+      },
+      {
+        "test_name": "test_Float_issue_2107",
+        "test_file": "sympy/core/tests/test_numbers.py",
+        "why_relevant": "测试了 Float 对象的算术运算和与零的比较，展示了 Float 对象的基本行为。",
+        "reusable_parts": [
+          "Float 对象的构造和基本运算"
+        ],
+        "possible_gap": "完全不涉及 pickle 或序列化。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Python 2 中使用 pickle protocol 2 序列化一个包含浮点数（例如 1.0）的 sympy 表达式（例如 x + 1.0），然后在 Python 3 中反序列化该 pickle 数据。",
+      "evidence": [
+        "Issue 中提供了最小复现代码：`python2 -c 'import pickle; import sympy; x = sympy.symbols(\"x\"); print pickle.dumps(x + 1.0, 2)' | python3 -c 'import pickle; import sys; print(pickle.loads(sys.stdin.buffer.read()))'`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "反序列化时抛出 ValueError: invalid literal for int() with base 16: '1L'，发生在 sympy/core/numbers.py 的 __new__ 方法中。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中显示了错误堆栈：`File \"/Users/alex/git/VU/sympy/sympy/core/numbers.py\", line 1045, in __new__\n    num[1] = long(num[1], 16)\nValueError: invalid literal for int() with base 16: '1L'`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "pickle.dumps",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于序列化包含浮点数的 sympy 表达式。"
+      },
+      {
+        "name": "pickle.loads",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于在 Python 3 中反序列化 Python 2 生成的 pickle 数据。"
+      },
+      {
+        "name": "sympy.symbols",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于创建表达式中的符号。"
+      },
+      {
+        "name": "sympy.core.numbers.Float.__new__",
+        "kind": "method",
+        "source_path": "sympy/core/numbers.py",
+        "reason": "错误堆栈指向此处，可能与 Float 对象的反序列化构造有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/numbers.py",
+        "object": "Float.__new__",
+        "lines": "1045",
+        "reason": "错误堆栈直接指向该行代码 `num[1] = long(num[1], 16)`，在处理 pickle 数据时可能未能正确处理 Python 2 和 Python 3 在整数表示（如 '1L'）上的差异。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中直接构造 Float 对象（如 Float(1.0)）或进行本地运算。",
+        "target_pattern": "构造一个包含 Float 的 sympy 表达式（如 x + 1.0），在 Python 2 环境下用 pickle protocol 2 序列化，保存数据，然后在 Python 3 测试中加载该数据。",
+        "reason": "Issue 的触发条件依赖于跨版本的 pickle 数据流，而不仅仅是本地对象构造。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中直接操作 Float 对象的 _mpf_ 等内部属性。",
+        "target_pattern": "模拟从 Python 2 pickle 数据中还原出的内部状态，其中可能包含类似 '1L' 的字符串表示。",
+        "reason": "错误表明 __new__ 方法在处理 pickle 数据时，对 num[1]（可能是一个表示整数的字符串）的解析失败。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "在 Python 3 中应该能成功加载在 Python 2 中序列化的包含浮点数的 sympy 表达式，并得到等价的表达式对象。",
+      "evidence": [
+        "Issue 标题和描述暗示了跨版本 pickle 兼容性的期望。相关测试 test_Float 展示了 Float 对象的正常构造和比较，表明 Float 对象应能正常工作。"
+      ],
+      "confidence": "medium"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "pickle.loads(data)",
+        "reason": "直接观察反序列化调用是否抛出 ValueError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "type(pickle.loads(data)) 或 repr(pickle.loads(data))",
+        "reason": "如果反序列化成功，观察返回的对象类型和表示，确认它是一个有效的 sympy 表达式。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "pickle.dumps(expr, 2) 在 Python 2 下生成的字节数据内容（特别是与 Float 相关的部分）",
+        "reason": "了解 Python 2 序列化数据的格式，有助于理解 Python 3 加载时解析失败的原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 Python 3 中，从 Python 2 序列化的数据成功加载，得到一个 sympy 表达式对象，且该表达式与原始表达式等价（例如，结构相同或数值相等）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、可能脆弱的 repr 字符串相等。避免断言内部 _mpf_ 元组的精确相等，因为跨版本表示可能变化。",
+        "reason": "修复后，跨版本 pickle 应能正常工作，核心是功能等价性而非内部表示的完全一致。"
+      },
+      {
+        "assertion_goal": "反序列化过程不抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言异常消息的完整字符串，因为消息可能微调。",
+        "reason": "当前 bug 表现为抛出 ValueError，修复后应不再抛出。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "错误行 `num[1] = long(num[1], 16)` 中 `num` 数据结构的完整形态和来源（来自 pickle）不确定。",
+    "除了 Float 类，其他 sympy 类型（如 Symbol, Add）在跨版本 pickle 中是否也有问题不确定。",
+    "修复后的具体正确行为（如内部表示是否完全一致）不确定，只能推断功能应正常。"
+  ],
+  "raw": {
+    "issue_summary": "在 Python 2 中序列化包含浮点数的 sympy 表达式，然后在 Python 3 中反序列化时失败。",
+    "trigger_condition": {
+      "text": "在 Python 2 中使用 pickle protocol 2 序列化一个包含浮点数（例如 1.0）的 sympy 表达式（例如 x + 1.0），然后在 Python 3 中反序列化该 pickle 数据。",
+      "evidence": [
+        "Issue 中提供了最小复现代码：`python2 -c 'import pickle; import sympy; x = sympy.symbols(\"x\"); print pickle.dumps(x + 1.0, 2)' | python3 -c 'import pickle; import sys; print(pickle.loads(sys.stdin.buffer.read()))'`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "反序列化时抛出 ValueError: invalid literal for int() with base 16: '1L'，发生在 sympy/core/numbers.py 的 __new__ 方法中。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中显示了错误堆栈：`File \"/Users/alex/git/VU/sympy/sympy/core/numbers.py\", line 1045, in __new__\n    num[1] = long(num[1], 16)\nValueError: invalid literal for int() with base 16: '1L'`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "在 Python 3 中应该能成功加载在 Python 2 中序列化的包含浮点数的 sympy 表达式，并得到等价的表达式对象。",
+      "evidence": [
+        "Issue 标题和描述暗示了跨版本 pickle 兼容性的期望。相关测试 test_Float 展示了 Float 对象的正常构造和比较，表明 Float 对象应能正常工作。"
+      ],
+      "confidence": "medium"
+    },
+    "target_apis": [
+      {
+        "name": "pickle.dumps",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于序列化包含浮点数的 sympy 表达式。"
+      },
+      {
+        "name": "pickle.loads",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于在 Python 3 中反序列化 Python 2 生成的 pickle 数据。"
+      },
+      {
+        "name": "sympy.symbols",
+        "kind": "function",
+        "source_path": "",
+        "reason": "用于创建表达式中的符号。"
+      },
+      {
+        "name": "sympy.core.numbers.Float.__new__",
+        "kind": "method",
+        "source_path": "sympy/core/numbers.py",
+        "reason": "错误堆栈指向此处，可能与 Float 对象的反序列化构造有关。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/core/numbers.py",
+        "object": "Float.__new__",
+        "lines": "1045",
+        "reason": "错误堆栈直接指向该行代码 `num[1] = long(num[1], 16)`，在处理 pickle 数据时可能未能正确处理 Python 2 和 Python 3 在整数表示（如 '1L'）上的差异。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_Float",
+        "test_file": "sympy/core/tests/test_numbers.py",
+        "why_relevant": "该测试广泛测试了 Float 类的构造、属性、比较和序列化相关行为，包括使用 long 类型和 _mpf_ 内部表示，与 Issue 中涉及的 Float 对象和内部表示（num[1]）高度相关。",
+        "reusable_parts": [
+          "Float 对象的构造方式（如 Float(1.0), Float('1.0')）",
+          "对 _mpf_ 属性的断言模式",
+          "使用 long 类型的模式"
+        ],
+        "possible_gap": "该测试没有涉及跨 Python 版本的 pickle 序列化和反序列化场景，也没有模拟从 Python 2 格式（包含 'L' 后缀）加载数据。"
+      },
+      {
+        "test_name": "test_Float_issue_2107",
+        "test_file": "sympy/core/tests/test_numbers.py",
+        "why_relevant": "测试了 Float 对象的算术运算和与零的比较，展示了 Float 对象的基本行为。",
+        "reusable_parts": [
+          "Float 对象的构造和基本运算"
+        ],
+        "possible_gap": "完全不涉及 pickle 或序列化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中直接构造 Float 对象（如 Float(1.0)）或进行本地运算。",
+        "target_pattern": "构造一个包含 Float 的 sympy 表达式（如 x + 1.0），在 Python 2 环境下用 pickle protocol 2 序列化，保存数据，然后在 Python 3 测试中加载该数据。",
+        "reason": "Issue 的触发条件依赖于跨版本的 pickle 数据流，而不仅仅是本地对象构造。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中直接操作 Float 对象的 _mpf_ 等内部属性。",
+        "target_pattern": "模拟从 Python 2 pickle 数据中还原出的内部状态，其中可能包含类似 '1L' 的字符串表示。",
+        "reason": "错误表明 __new__ 方法在处理 pickle 数据时，对 num[1]（可能是一个表示整数的字符串）的解析失败。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "pickle.loads(data)",
+        "reason": "直接观察反序列化调用是否抛出 ValueError 异常。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "type(pickle.loads(data)) 或 repr(pickle.loads(data))",
+        "reason": "如果反序列化成功，观察返回的对象类型和表示，确认它是一个有效的 sympy 表达式。"
+      },
+      {
+        "kind": "serialization",
+        "expression_hint": "pickle.dumps(expr, 2) 在 Python 2 下生成的字节数据内容（特别是与 Float 相关的部分）",
+        "reason": "了解 Python 2 序列化数据的格式，有助于理解 Python 3 加载时解析失败的原因。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "在 Python 3 中，从 Python 2 序列化的数据成功加载，得到一个 sympy 表达式对象，且该表达式与原始表达式等价（例如，结构相同或数值相等）。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的、可能脆弱的 repr 字符串相等。避免断言内部 _mpf_ 元组的精确相等，因为跨版本表示可能变化。",
+        "reason": "修复后，跨版本 pickle 应能正常工作，核心是功能等价性而非内部表示的完全一致。"
+      },
+      {
+        "assertion_goal": "反序列化过程不抛出 ValueError 异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言异常消息的完整字符串，因为消息可能微调。",
+        "reason": "当前 bug 表现为抛出 ValueError，修复后应不再抛出。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "可能需要模拟或准备一个在 Python 2 下生成的 pickle 数据文件，供 Python 3 测试读取。或者，在测试中内联嵌入该数据的十六进制/字节表示。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试可能需要处理 Python 2 和 Python 3 的差异，例如 long 类型和字节字符串。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "错误行 `num[1] = long(num[1], 16)` 中 `num` 数据结构的完整形态和来源（来自 pickle）不确定。",
+      "除了 Float 类，其他 sympy 类型（如 Symbol, Add）在跨版本 pickle 中是否也有问题不确定。",
+      "修复后的具体正确行为（如内部表示是否完全一致）不确定，只能推断功能应正常。"
+    ]
+  }
+}

@@ -1,0 +1,290 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pytest-dev__pytest-10081",
+  "issue_summary": "使用 pytest --pdb 运行被 unittest.skip 装饰的 unittest.TestCase 类时，会错误地执行该类的 tearDown 方法。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "使用 pytester fixture 创建临时的测试文件，其中包含被 @unittest.skip 装饰的 unittest.TestCase 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 monkeypatch fixture 设置一个全局变量或列表，用于追踪 setUp 和 tearDown 方法的调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "在测试类中定义 tearDown 方法，其中包含一个会引发错误的操作（如访问未定义变量），以放大错误信号。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pdb_teardown_skipped",
+        "test_file": "testing/test_unittest.py",
+        "why_relevant": "该测试专门验证了在 --pdb 模式下，被跳过的 unittest 测试的 setUp 和 tearDown 不应被调用，与当前 Issue 描述的问题高度相关。",
+        "reusable_parts": [
+          "使用 pytester fixture 创建测试文件",
+          "使用 monkeypatch 追踪方法调用",
+          "断言 tracked 列表为空",
+          "测试结构：创建被跳过的 unittest.TestCase 并检查其生命周期方法"
+        ],
+        "possible_gap": "该测试是针对方法级别（`@unittest.skip` 装饰方法）的跳过，而当前 Issue 是针对类级别的跳过。"
+      },
+      {
+        "test_name": "test_unittest_skip_issue148",
+        "test_file": "testing/test_unittest.py",
+        "why_relevant": "该测试涉及类级别的 unittest.skip 装饰器，并检查了测试结果（skipped=1）。",
+        "reusable_parts": [
+          "使用 @unittest.skip 装饰类",
+          "测试类结构（包含 setUpClass, test_one, tearDownClass）",
+          "使用 pytester.inline_run 运行测试并断言结果"
+        ],
+        "possible_gap": "该测试没有使用 --pdb 选项，因此无法复现与 --pdb 交互时 tearDown 被错误调用的缺陷。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 pytest 运行一个被 @unittest.skip 装饰在类级别的 unittest.TestCase 子类，并加上 --pdb 命令行选项。",
+      "evidence": [
+        "Issue 描述：'Running `pytest --pdb` will run the `tearDown()` of `unittest.TestCase` classes that are decorated with `unittest.skip` on the class level.'",
+        "Issue 中提供的测试代码示例：`@unittest.skip(\"hello\") class MyTestCase(unittest.TestCase): ...`",
+        "Issue 中展示的命令行调用：`$ pytest --pdb test_repro_skip_class.py`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "被跳过的测试类的 tearDown 方法被执行，导致其中未定义的变量引发 NameError 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误输出显示：`E NameError: name 'xxx' is not defined`，并指向 `tearDown` 方法中的 `xxx` 行。",
+        "Issue 中的跟踪信息：`> /mnt/raid/hugo/research/micado/wise/t/test_repro_skip_class.py(10)tearDown() -> xxx`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "unittest.skip",
+        "kind": "function",
+        "source_path": "src/_pytest/outcomes.py",
+        "reason": "Issue 中用于装饰测试类以跳过测试的装饰器。"
+      },
+      {
+        "name": "unittest.TestCase.tearDown",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中错误执行的方法，是缺陷的核心。"
+      },
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "",
+        "reason": "运行测试的入口点，需要 --pdb 参数来触发缺陷。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/outcomes.py",
+        "object": "skip",
+        "lines": "147-175",
+        "reason": "该函数处理 skip 逻辑，可能与 --pdb 交互时，对类级别 skip 的处理存在缺陷，导致后续的 tearDown 被错误调用。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试 test_pdb_teardown_skipped 中，skip 装饰器应用于测试方法（`def test_1`）。",
+        "target_pattern": "将 skip 装饰器应用于测试类（`class MyTestCase`），如 Issue 示例所示。",
+        "reason": "Issue 明确指出缺陷发生在类级别 skip 装饰时，而方法级别 skip 在现有测试中工作正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "正常执行流程：skip 装饰器引发 Skipped 异常，测试被标记为跳过，生命周期方法（setUp/tearDown）不被调用。",
+        "target_pattern": "在 --pdb 模式下，skip 装饰器引发 Skipped 异常后，tearDown 方法仍被调用。",
+        "reason": "Issue 表明 --pdb 选项改变了异常处理流程，导致在 skip 后仍进入了 tearDown 的执行路径。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当使用 --pdb 选项运行时，被 unittest.skip 装饰的 unittest.TestCase 类的 setUp 和 tearDown 方法都不应被执行。",
+      "evidence": [
+        "相关测试 1 (test_pdb_teardown_skipped) 的文档字符串：'With --pdb, setUp and tearDown should not be called for skipped tests.'",
+        "相关测试 1 的断言：`assert tracked == []`，表明在正常跳过时，setUp 和 tearDown 的追踪列表应为空。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "追踪列表（如 `tracked`）的内容，记录 setUp 和 tearDown 方法是否被调用及其调用顺序。",
+        "reason": "Issue 的核心是 tearDown 被错误调用。通过追踪这些方法的调用，可以直接观察到缺陷是否发生。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "测试运行过程中是否捕获到 NameError（或任何在 tearDown 中定义的错误）。",
+        "reason": "Issue 中观察到的直接错误现象是 tearDown 中的未定义变量导致 NameError。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 --pdb 运行类级别跳过的 unittest 测试时，tearDown 方法没有被调用。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的异常消息字符串或完整的跟踪信息，因为这些可能因环境而异。",
+        "reason": "断言追踪列表为空是稳定且直接的验证方式，与期望行为（tearDown 不被调用）完全一致。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否也影响 setUp 方法（Issue 只明确提到了 tearDown，但相关测试表明两者都不应被调用）。",
+    "缺陷的确切触发条件是否仅限于类级别 skip，还是其他 skip 变体（如 skipIf）也存在问题。",
+    "缺陷在 pytest 内部的具体执行路径和与 --pdb 交互的精确位置。"
+  ],
+  "raw": {
+    "issue_summary": "使用 pytest --pdb 运行被 unittest.skip 装饰的 unittest.TestCase 类时，会错误地执行该类的 tearDown 方法。",
+    "trigger_condition": {
+      "text": "使用 pytest 运行一个被 @unittest.skip 装饰在类级别的 unittest.TestCase 子类，并加上 --pdb 命令行选项。",
+      "evidence": [
+        "Issue 描述：'Running `pytest --pdb` will run the `tearDown()` of `unittest.TestCase` classes that are decorated with `unittest.skip` on the class level.'",
+        "Issue 中提供的测试代码示例：`@unittest.skip(\"hello\") class MyTestCase(unittest.TestCase): ...`",
+        "Issue 中展示的命令行调用：`$ pytest --pdb test_repro_skip_class.py`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "被跳过的测试类的 tearDown 方法被执行，导致其中未定义的变量引发 NameError 异常。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中的错误输出显示：`E NameError: name 'xxx' is not defined`，并指向 `tearDown` 方法中的 `xxx` 行。",
+        "Issue 中的跟踪信息：`> /mnt/raid/hugo/research/micado/wise/t/test_repro_skip_class.py(10)tearDown() -> xxx`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当使用 --pdb 选项运行时，被 unittest.skip 装饰的 unittest.TestCase 类的 setUp 和 tearDown 方法都不应被执行。",
+      "evidence": [
+        "相关测试 1 (test_pdb_teardown_skipped) 的文档字符串：'With --pdb, setUp and tearDown should not be called for skipped tests.'",
+        "相关测试 1 的断言：`assert tracked == []`，表明在正常跳过时，setUp 和 tearDown 的追踪列表应为空。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "unittest.skip",
+        "kind": "function",
+        "source_path": "src/_pytest/outcomes.py",
+        "reason": "Issue 中用于装饰测试类以跳过测试的装饰器。"
+      },
+      {
+        "name": "unittest.TestCase.tearDown",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue 中错误执行的方法，是缺陷的核心。"
+      },
+      {
+        "name": "pytest.main",
+        "kind": "function",
+        "source_path": "",
+        "reason": "运行测试的入口点，需要 --pdb 参数来触发缺陷。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/_pytest/outcomes.py",
+        "object": "skip",
+        "lines": "147-175",
+        "reason": "该函数处理 skip 逻辑，可能与 --pdb 交互时，对类级别 skip 的处理存在缺陷，导致后续的 tearDown 被错误调用。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_pdb_teardown_skipped",
+        "test_file": "testing/test_unittest.py",
+        "why_relevant": "该测试专门验证了在 --pdb 模式下，被跳过的 unittest 测试的 setUp 和 tearDown 不应被调用，与当前 Issue 描述的问题高度相关。",
+        "reusable_parts": [
+          "使用 pytester fixture 创建测试文件",
+          "使用 monkeypatch 追踪方法调用",
+          "断言 tracked 列表为空",
+          "测试结构：创建被跳过的 unittest.TestCase 并检查其生命周期方法"
+        ],
+        "possible_gap": "该测试是针对方法级别（`@unittest.skip` 装饰方法）的跳过，而当前 Issue 是针对类级别的跳过。"
+      },
+      {
+        "test_name": "test_unittest_skip_issue148",
+        "test_file": "testing/test_unittest.py",
+        "why_relevant": "该测试涉及类级别的 unittest.skip 装饰器，并检查了测试结果（skipped=1）。",
+        "reusable_parts": [
+          "使用 @unittest.skip 装饰类",
+          "测试类结构（包含 setUpClass, test_one, tearDownClass）",
+          "使用 pytester.inline_run 运行测试并断言结果"
+        ],
+        "possible_gap": "该测试没有使用 --pdb 选项，因此无法复现与 --pdb 交互时 tearDown 被错误调用的缺陷。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相似测试 test_pdb_teardown_skipped 中，skip 装饰器应用于测试方法（`def test_1`）。",
+        "target_pattern": "将 skip 装饰器应用于测试类（`class MyTestCase`），如 Issue 示例所示。",
+        "reason": "Issue 明确指出缺陷发生在类级别 skip 装饰时，而方法级别 skip 在现有测试中工作正常。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "正常执行流程：skip 装饰器引发 Skipped 异常，测试被标记为跳过，生命周期方法（setUp/tearDown）不被调用。",
+        "target_pattern": "在 --pdb 模式下，skip 装饰器引发 Skipped 异常后，tearDown 方法仍被调用。",
+        "reason": "Issue 表明 --pdb 选项改变了异常处理流程，导致在 skip 后仍进入了 tearDown 的执行路径。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "state",
+        "expression_hint": "追踪列表（如 `tracked`）的内容，记录 setUp 和 tearDown 方法是否被调用及其调用顺序。",
+        "reason": "Issue 的核心是 tearDown 被错误调用。通过追踪这些方法的调用，可以直接观察到缺陷是否发生。"
+      },
+      {
+        "kind": "exception",
+        "expression_hint": "测试运行过程中是否捕获到 NameError（或任何在 tearDown 中定义的错误）。",
+        "reason": "Issue 中观察到的直接错误现象是 tearDown 中的未定义变量导致 NameError。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证当使用 --pdb 运行类级别跳过的 unittest 测试时，tearDown 方法没有被调用。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言完整的异常消息字符串或完整的跟踪信息，因为这些可能因环境而异。",
+        "reason": "断言追踪列表为空是稳定且直接的验证方式，与期望行为（tearDown 不被调用）完全一致。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "使用 pytester fixture 创建临时的测试文件，其中包含被 @unittest.skip 装饰的 unittest.TestCase 类。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 monkeypatch fixture 设置一个全局变量或列表，用于追踪 setUp 和 tearDown 方法的调用。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "在测试类中定义 tearDown 方法，其中包含一个会引发错误的操作（如访问未定义变量），以放大错误信号。",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否也影响 setUp 方法（Issue 只明确提到了 tearDown，但相关测试表明两者都不应被调用）。",
+      "缺陷的确切触发条件是否仅限于类级别 skip，还是其他 skip 变体（如 skipIf）也存在问题。",
+      "缺陷在 pytest 内部的具体执行路径和与 --pdb 交互的精确位置。"
+    ]
+  }
+}

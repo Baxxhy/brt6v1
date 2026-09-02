@@ -1,0 +1,312 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-11087",
+  "issue_summary": "在Python 3环境下，使用MySQL数据库且字符集为utf8mb4时，执行QuerySet.delete()操作会因尝试解码非UTF-8编码的文本字段而引发UnicodeDecodeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用TestCase类，并可能重写数据库设置以使用MySQL后端和utf8mb4字符集。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用fixture或setup方法向数据库插入包含非UTF-8字节序列的文本数据，以模拟Python 2遗留数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构建具有外键关系的模型结构，使得.delete()操作触发级联删除并遍历到包含问题数据的表。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DeletionTests.test_large_delete",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接测试了QuerySet.delete()方法，并涉及批量删除操作，与Issue中触发bug的操作（.filter(...).delete()）相似。",
+        "reusable_parts": [
+          "DeletionTests测试类结构",
+          "使用Avatar模型进行删除操作的模式",
+          "assertNumQueries和assertFalse的断言风格"
+        ],
+        "possible_gap": "该测试没有设置复杂的模型关系（如外键级联删除），也没有模拟包含非UTF-8编码数据的数据库环境。"
+      },
+      {
+        "test_name": "DeletionTests.test_large_delete_related",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试涉及具有外键关系的模型（S, T, U）的删除，测试了级联删除行为，与Issue中涉及多个关联表（job, failure_line, job_log, text_log_error）的场景更接近。",
+        "reusable_parts": [
+          "创建具有外键关系的模型实例",
+          "使用assertNumQueries检查查询数量",
+          "级联删除后的状态断言"
+        ],
+        "possible_gap": "该测试同样没有模拟非UTF-8编码数据，且使用的数据库后端和配置是测试默认的，不是MySQL with utf8mb4。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在Python 3环境下，使用MySQL数据库（mysqlclient-python驱动），数据库字符集配置为utf8mb4，数据库中包含由Python 2插入的非UTF-8编码文本数据，对包含外键关联的模型执行QuerySet.delete()操作。",
+      "evidence": [
+        "Issue描述：'We're in the process of upgrading our Django 1.11 installation from Python 2.7 to Python 3.6... hitting an unexpected UnicodeDecodeError during a .delete()...'",
+        "Issue描述：'Querying the text_log_error table for those ids shows there to be junk values in its line field. These are from data inserted when using Python 2.7...'",
+        "Issue描述：'mysqlclient-python's behaviour differs depending on Python version - under Python 3 it defaults use_unicode to True...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行.delete()时抛出UnicodeDecodeError异常，错误信息为'utf-8' codec can't decode byte 0xed in position 78: invalid continuation byte。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中提供的完整Traceback，最终异常为：UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 78: invalid continuation byte"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue的核心是.delete()方法在特定条件下引发异常。"
+      },
+      {
+        "name": "django.db.models.deletion.Collector.collect",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Traceback显示异常发生在删除收集过程中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/deletion.py",
+        "object": "Collector.collect",
+        "lines": "",
+        "reason": "Traceback显示异常发生在collect方法调用链中，该方法负责收集要删除的对象。"
+      },
+      {
+        "path": "django/db/models/sql/compiler.py",
+        "object": "SQLCompiler.execute_sql",
+        "lines": "",
+        "reason": "Traceback显示数据库查询执行在此处，最终引发了底层驱动的解码错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试默认使用SQLite或其他内存数据库后端。",
+        "target_pattern": "配置使用MySQL数据库后端，并设置'charset': 'utf8mb4'。",
+        "reason": "Issue明确指出bug发生在使用mysqlclient-python连接MySQL且字符集为utf8mb4时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试数据由测试本身在Python 3环境下创建，编码正常。",
+        "target_pattern": "模拟数据库中已存在由Python 2插入的、包含非UTF-8编码字节序列的文本字段数据。",
+        "reason": "Issue指出错误源于读取历史遗留的非UTF-8编码数据。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接删除顶层模型（如Avatar或S）。",
+        "target_pattern": "构建一个更深的模型关系链，使得.delete()操作需要遍历多个外键关联来收集对象，并且其中一个关联表的非关键字段包含问题数据。",
+        "reason": "Issue中错误发生在删除Job时，需要级联删除failure_line、job_log、text_log_error等表，其中text_log_error.line字段有问题。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "QuerySet.delete()操作应成功执行，即使关联表中包含非UTF-8编码的文本数据，因为删除操作不需要读取这些非关键字段的内容。",
+      "evidence": [
+        "Issue描述：'the UnicodeDecodeError is occurring for a field (text_log_error.line) that is not actually needed for the .delete() (it's not a primary key etc), so Django shouldn't be fetching that field regardless when making the text_log_error SELECT query'"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行.delete()调用时捕获的异常类型和消息。",
+        "reason": "Issue的核心表现是UnicodeDecodeError，观测此异常是判断bug是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "Django数据库后端生成的SQL查询语句，特别是那些SELECT非关键字段（如text_log_error.line）的语句。",
+        "reason": "Issue认为.delete()不应该获取非关键字段，观测生成的SQL可以验证是否发生了不必要的字段获取。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证.delete()操作成功完成，没有抛出UnicodeDecodeError或其他异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为字节位置可能变化。",
+        "reason": "修复后的行为是删除操作应成功。使用assertRaises(UnicodeDecodeError)来验证bug是否被触发，但最终修复后该断言应失败（即不抛出异常）。"
+      },
+      {
+        "assertion_goal": "验证目标对象及其关联对象已被成功删除。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的查询数量，因为这可能因优化而改变。",
+        "reason": "删除操作的根本目的是移除数据，断言相关查询集为空是稳定且与Issue语义对齐的验证方式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "具体是django/db/models/deletion.py或django/db/models/sql/compiler.py中哪一行代码导致了不必要的字段选择。",
+    "在测试环境中精确模拟mysqlclient-python在Python 3下use_unicode=True的行为以及非UTF-8数据插入的难度。",
+    "除了text_log_error.line字段，是否还有其他非关键字段的获取也可能导致类似问题。",
+    "修复方案是优化.delete()的字段选择逻辑，还是调整数据库驱动的解码行为，这会影响expected_behavior的精确描述。"
+  ],
+  "raw": {
+    "issue_summary": "在Python 3环境下，使用MySQL数据库且字符集为utf8mb4时，执行QuerySet.delete()操作会因尝试解码非UTF-8编码的文本字段而引发UnicodeDecodeError。",
+    "trigger_condition": {
+      "text": "在Python 3环境下，使用MySQL数据库（mysqlclient-python驱动），数据库字符集配置为utf8mb4，数据库中包含由Python 2插入的非UTF-8编码文本数据，对包含外键关联的模型执行QuerySet.delete()操作。",
+      "evidence": [
+        "Issue描述：'We're in the process of upgrading our Django 1.11 installation from Python 2.7 to Python 3.6... hitting an unexpected UnicodeDecodeError during a .delete()...'",
+        "Issue描述：'Querying the text_log_error table for those ids shows there to be junk values in its line field. These are from data inserted when using Python 2.7...'",
+        "Issue描述：'mysqlclient-python's behaviour differs depending on Python version - under Python 3 it defaults use_unicode to True...'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "执行.delete()时抛出UnicodeDecodeError异常，错误信息为'utf-8' codec can't decode byte 0xed in position 78: invalid continuation byte。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue中提供的完整Traceback，最终异常为：UnicodeDecodeError: 'utf-8' codec can't decode byte 0xed in position 78: invalid continuation byte"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "QuerySet.delete()操作应成功执行，即使关联表中包含非UTF-8编码的文本数据，因为删除操作不需要读取这些非关键字段的内容。",
+      "evidence": [
+        "Issue描述：'the UnicodeDecodeError is occurring for a field (text_log_error.line) that is not actually needed for the .delete() (it's not a primary key etc), so Django shouldn't be fetching that field regardless when making the text_log_error SELECT query'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "QuerySet.delete",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue的核心是.delete()方法在特定条件下引发异常。"
+      },
+      {
+        "name": "django.db.models.deletion.Collector.collect",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Traceback显示异常发生在删除收集过程中。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/deletion.py",
+        "object": "Collector.collect",
+        "lines": "",
+        "reason": "Traceback显示异常发生在collect方法调用链中，该方法负责收集要删除的对象。"
+      },
+      {
+        "path": "django/db/models/sql/compiler.py",
+        "object": "SQLCompiler.execute_sql",
+        "lines": "",
+        "reason": "Traceback显示数据库查询执行在此处，最终引发了底层驱动的解码错误。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "DeletionTests.test_large_delete",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试直接测试了QuerySet.delete()方法，并涉及批量删除操作，与Issue中触发bug的操作（.filter(...).delete()）相似。",
+        "reusable_parts": [
+          "DeletionTests测试类结构",
+          "使用Avatar模型进行删除操作的模式",
+          "assertNumQueries和assertFalse的断言风格"
+        ],
+        "possible_gap": "该测试没有设置复杂的模型关系（如外键级联删除），也没有模拟包含非UTF-8编码数据的数据库环境。"
+      },
+      {
+        "test_name": "DeletionTests.test_large_delete_related",
+        "test_file": "tests/delete/tests.py",
+        "why_relevant": "该测试涉及具有外键关系的模型（S, T, U）的删除，测试了级联删除行为，与Issue中涉及多个关联表（job, failure_line, job_log, text_log_error）的场景更接近。",
+        "reusable_parts": [
+          "创建具有外键关系的模型实例",
+          "使用assertNumQueries检查查询数量",
+          "级联删除后的状态断言"
+        ],
+        "possible_gap": "该测试同样没有模拟非UTF-8编码数据，且使用的数据库后端和配置是测试默认的，不是MySQL with utf8mb4。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "测试默认使用SQLite或其他内存数据库后端。",
+        "target_pattern": "配置使用MySQL数据库后端，并设置'charset': 'utf8mb4'。",
+        "reason": "Issue明确指出bug发生在使用mysqlclient-python连接MySQL且字符集为utf8mb4时。",
+        "confidence": "high"
+      },
+      {
+        "slot": "object_state",
+        "current_pattern": "测试数据由测试本身在Python 3环境下创建，编码正常。",
+        "target_pattern": "模拟数据库中已存在由Python 2插入的、包含非UTF-8编码字节序列的文本字段数据。",
+        "reason": "Issue指出错误源于读取历史遗留的非UTF-8编码数据。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试直接删除顶层模型（如Avatar或S）。",
+        "target_pattern": "构建一个更深的模型关系链，使得.delete()操作需要遍历多个外键关联来收集对象，并且其中一个关联表的非关键字段包含问题数据。",
+        "reason": "Issue中错误发生在删除Job时，需要级联删除failure_line、job_log、text_log_error等表，其中text_log_error.line字段有问题。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在执行.delete()调用时捕获的异常类型和消息。",
+        "reason": "Issue的核心表现是UnicodeDecodeError，观测此异常是判断bug是否触发的直接方式。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "Django数据库后端生成的SQL查询语句，特别是那些SELECT非关键字段（如text_log_error.line）的语句。",
+        "reason": "Issue认为.delete()不应该获取非关键字段，观测生成的SQL可以验证是否发生了不必要的字段获取。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证.delete()操作成功完成，没有抛出UnicodeDecodeError或其他异常。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为字节位置可能变化。",
+        "reason": "修复后的行为是删除操作应成功。使用assertRaises(UnicodeDecodeError)来验证bug是否被触发，但最终修复后该断言应失败（即不抛出异常）。"
+      },
+      {
+        "assertion_goal": "验证目标对象及其关联对象已被成功删除。",
+        "preferred_assertion_style": "equals",
+        "avoid": "断言具体的查询数量，因为这可能因优化而改变。",
+        "reason": "删除操作的根本目的是移除数据，断言相关查询集为空是稳定且与Issue语义对齐的验证方式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用TestCase类，并可能重写数据库设置以使用MySQL后端和utf8mb4字符集。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用fixture或setup方法向数据库插入包含非UTF-8字节序列的文本数据，以模拟Python 2遗留数据。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要构建具有外键关系的模型结构，使得.delete()操作触发级联删除并遍历到包含问题数据的表。",
+        "source": "issue",
+        "confidence": "medium"
+      }
+    ],
+    "uncertainties": [
+      "具体是django/db/models/deletion.py或django/db/models/sql/compiler.py中哪一行代码导致了不必要的字段选择。",
+      "在测试环境中精确模拟mysqlclient-python在Python 3下use_unicode=True的行为以及非UTF-8数据插入的难度。",
+      "除了text_log_error.line字段，是否还有其他非关键字段的获取也可能导致类似问题。",
+      "修复方案是优化.delete()的字段选择逻辑，还是调整数据库驱动的解码行为，这会影响expected_behavior的精确描述。"
+    ]
+  }
+}

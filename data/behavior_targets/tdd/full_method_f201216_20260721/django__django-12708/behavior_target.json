@@ -1,0 +1,326 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12708",
+  "issue_summary": "当同一组字段同时存在于 unique_together 和 index_together 时，删除 index_together 的迁移操作会因找到两个约束而崩溃。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要使用 TransactionTestCase 或 TestCase 作为测试基类，并可能使用 skipUnlessDBFeature 来确保数据库支持多约束。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建自定义的 Django 模型，其 Meta 类中同时定义 unique_together 和 index_together，且字段列表相同。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 connection.schema_editor() 来执行数据库模式操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_index_together",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它测试了添加和删除 index_together 约束的基本流程。",
+        "reusable_parts": [
+          "使用 connection.schema_editor() 上下文管理器",
+          "调用 editor.alter_index_together",
+          "使用 self.get_constraints 检查数据库约束状态",
+          "TransactionTestCase 基类"
+        ],
+        "possible_gap": "它没有在同一个模型上同时设置 unique_together 和 index_together，因此不会触发缺陷。"
+      },
+      {
+        "test_name": "test_unique_together",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它测试了 unique_together 约束的添加和删除，展示了如何操作 unique_together。",
+        "reusable_parts": [
+          "使用 editor.alter_unique_together",
+          "通过 IntegrityError 验证唯一性约束",
+          "模型创建和对象操作模式"
+        ],
+        "possible_gap": "它没有与 index_together 交互，因此没有覆盖两者共存的情况。"
+      },
+      {
+        "test_name": "test_remove_index_together_does_not_remove_meta_indexes",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它涉及 index_together 和通过 Meta.indexes 声明的索引共存的情况，与 Issue 中提到的 'new Options.indexes feature' 相关。",
+        "reusable_parts": [
+          "同时处理 _meta.index_together 和 _meta.indexes",
+          "使用 self.get_constraints 并检查 'columns' 和 'index' 属性",
+          "skipUnlessDBFeature 装饰器"
+        ],
+        "possible_gap": "它没有涉及 unique_together，因此不会触发因 unique 和 index 约束混淆而导致的错误。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "创建一个模型，其中两个字段同时被包含在 unique_together 和 index_together 约束中，然后执行删除 index_together 的迁移操作。",
+      "evidence": [
+        "Issue 步骤描述：'Create models with 2 fields, add 2 same fields to unique_together and to index_together'， 'Delete index_together -> Fail'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 django/db/backends/base/schema.py 的 _delete_composed_index 函数中抛出 ValueError，提示找到错误数量（2）的约束。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'It will fail at django/db/backends/base/schema.py, line 378, in _delete_composed_index(), ValueError: Found wrong number (2) of constraints...'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BaseDatabaseSchemaEditor._delete_composed_index",
+        "kind": "method",
+        "source_path": "django/db/backends/base/schema.py",
+        "reason": "Issue 中明确指出了崩溃发生在此方法中。"
+      },
+      {
+        "name": "BaseDatabaseSchemaEditor.alter_index_together",
+        "kind": "method",
+        "source_path": "",
+        "reason": "删除 index_together 的迁移操作会调用此方法，相关测试也使用了它。"
+      },
+      {
+        "name": "BaseDatabaseSchemaEditor._constraint_names",
+        "kind": "method",
+        "source_path": "",
+        "reason": "_delete_composed_index 内部调用此方法来查找约束名称。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/schema.py",
+        "object": "BaseDatabaseSchemaEditor._delete_composed_index",
+        "lines": "402-416",
+        "reason": "Issue 中错误发生在此处，且源码显示当 len(constraint_names) != 1 时会抛出 ValueError。当同一字段集上同时存在 unique 和 index 约束时，此条件可能被触发。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型要么只有 index_together，要么只有 unique_together，或者 index_together 与 Meta.indexes 共存。",
+        "target_pattern": "创建一个模型，其同一组字段同时存在于 Meta.unique_together 和 Meta.index_together 中。",
+        "reason": "Issue 表明，当两种约束在同一字段集上共存时，_delete_composed_index 在查找要删除的索引约束时会错误地找到两个约束（一个唯一约束，一个索引约束）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常先创建模型，然后单独调用 alter_index_together 或 alter_unique_together。",
+        "target_pattern": "在创建同时具有 unique_together 和 index_together 的模型后，调用 alter_index_together 来删除 index_together。",
+        "reason": "Issue 的复现步骤是删除 index_together，这会导致调用 _delete_composed_index 并触发错误。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "即使同一组字段同时存在于 unique_together 和 index_together 中，也应该能够成功删除 index_together 约束，而不引发异常。",
+      "evidence": [
+        "Issue 中用户意图：'The deletion of index_together should be possible alone or made coherent (migrations side?) with unique_together'。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 editor.alter_index_together 时捕获的 ValueError 及其消息。",
+        "reason": "Issue 的核心错误是抛出 ValueError，观测此异常能直接确认缺陷是否被触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在 _delete_composed_index 中调用 self._constraint_names 返回的 constraint_names 列表的长度和内容。",
+        "reason": "缺陷的根本原因是该方法找到了两个约束（一个唯一约束，一个索引约束），观测这个列表能揭示问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在删除 index_together 操作前后，通过 self.get_constraints 获取的数据库约束状态，特别是那些具有相同字段列表的约束。",
+        "reason": "可以验证在操作后，索引约束是否被正确删除，而唯一约束是否被保留。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当模型同时具有 unique_together 和 index_together 时，删除 index_together 的操作不应引发 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为行号或格式可能变化。",
+        "reason": "Issue 表明当前行为会抛出异常，而修复后应不再抛出。因此，在修复前，测试应断言 raises ValueError；修复后，测试应断言不引发该异常。"
+      },
+      {
+        "assertion_goal": "在成功删除 index_together 后，数据库中对应该字段集的索引约束应被移除，而唯一约束应保持不变。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的约束名称，因为名称可能因数据库后端而异。",
+        "reason": "这验证了操作的正确语义：只删除索引，不影响唯一性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "确切的数据库后端行为是否会影响约束的命名和查找方式。",
+    "_delete_composed_index 中 exclude 参数的计算（meta_constraint_names | meta_index_names）是否足以在查找时排除唯一约束。",
+    "除了 ValueError 之外，是否还有其他潜在的错误状态或副作用。"
+  ],
+  "raw": {
+    "issue_summary": "当同一组字段同时存在于 unique_together 和 index_together 时，删除 index_together 的迁移操作会因找到两个约束而崩溃。",
+    "trigger_condition": {
+      "text": "创建一个模型，其中两个字段同时被包含在 unique_together 和 index_together 约束中，然后执行删除 index_together 的迁移操作。",
+      "evidence": [
+        "Issue 步骤描述：'Create models with 2 fields, add 2 same fields to unique_together and to index_together'， 'Delete index_together -> Fail'。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "在 django/db/backends/base/schema.py 的 _delete_composed_index 函数中抛出 ValueError，提示找到错误数量（2）的约束。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 描述：'It will fail at django/db/backends/base/schema.py, line 378, in _delete_composed_index(), ValueError: Found wrong number (2) of constraints...'。"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "即使同一组字段同时存在于 unique_together 和 index_together 中，也应该能够成功删除 index_together 约束，而不引发异常。",
+      "evidence": [
+        "Issue 中用户意图：'The deletion of index_together should be possible alone or made coherent (migrations side?) with unique_together'。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "BaseDatabaseSchemaEditor._delete_composed_index",
+        "kind": "method",
+        "source_path": "django/db/backends/base/schema.py",
+        "reason": "Issue 中明确指出了崩溃发生在此方法中。"
+      },
+      {
+        "name": "BaseDatabaseSchemaEditor.alter_index_together",
+        "kind": "method",
+        "source_path": "",
+        "reason": "删除 index_together 的迁移操作会调用此方法，相关测试也使用了它。"
+      },
+      {
+        "name": "BaseDatabaseSchemaEditor._constraint_names",
+        "kind": "method",
+        "source_path": "",
+        "reason": "_delete_composed_index 内部调用此方法来查找约束名称。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/backends/base/schema.py",
+        "object": "BaseDatabaseSchemaEditor._delete_composed_index",
+        "lines": "402-416",
+        "reason": "Issue 中错误发生在此处，且源码显示当 len(constraint_names) != 1 时会抛出 ValueError。当同一字段集上同时存在 unique 和 index 约束时，此条件可能被触发。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_index_together",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它测试了添加和删除 index_together 约束的基本流程。",
+        "reusable_parts": [
+          "使用 connection.schema_editor() 上下文管理器",
+          "调用 editor.alter_index_together",
+          "使用 self.get_constraints 检查数据库约束状态",
+          "TransactionTestCase 基类"
+        ],
+        "possible_gap": "它没有在同一个模型上同时设置 unique_together 和 index_together，因此不会触发缺陷。"
+      },
+      {
+        "test_name": "test_unique_together",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它测试了 unique_together 约束的添加和删除，展示了如何操作 unique_together。",
+        "reusable_parts": [
+          "使用 editor.alter_unique_together",
+          "通过 IntegrityError 验证唯一性约束",
+          "模型创建和对象操作模式"
+        ],
+        "possible_gap": "它没有与 index_together 交互，因此没有覆盖两者共存的情况。"
+      },
+      {
+        "test_name": "test_remove_index_together_does_not_remove_meta_indexes",
+        "test_file": "tests/schema/tests.py",
+        "why_relevant": "它涉及 index_together 和通过 Meta.indexes 声明的索引共存的情况，与 Issue 中提到的 'new Options.indexes feature' 相关。",
+        "reusable_parts": [
+          "同时处理 _meta.index_together 和 _meta.indexes",
+          "使用 self.get_constraints 并检查 'columns' 和 'index' 属性",
+          "skipUnlessDBFeature 装饰器"
+        ],
+        "possible_gap": "它没有涉及 unique_together，因此不会触发因 unique 和 index 约束混淆而导致的错误。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中，模型要么只有 index_together，要么只有 unique_together，或者 index_together 与 Meta.indexes 共存。",
+        "target_pattern": "创建一个模型，其同一组字段同时存在于 Meta.unique_together 和 Meta.index_together 中。",
+        "reason": "Issue 表明，当两种约束在同一字段集上共存时，_delete_composed_index 在查找要删除的索引约束时会错误地找到两个约束（一个唯一约束，一个索引约束）。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "测试通常先创建模型，然后单独调用 alter_index_together 或 alter_unique_together。",
+        "target_pattern": "在创建同时具有 unique_together 和 index_together 的模型后，调用 alter_index_together 来删除 index_together。",
+        "reason": "Issue 的复现步骤是删除 index_together，这会导致调用 _delete_composed_index 并触发错误。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "在调用 editor.alter_index_together 时捕获的 ValueError 及其消息。",
+        "reason": "Issue 的核心错误是抛出 ValueError，观测此异常能直接确认缺陷是否被触发。"
+      },
+      {
+        "kind": "sql",
+        "expression_hint": "在 _delete_composed_index 中调用 self._constraint_names 返回的 constraint_names 列表的长度和内容。",
+        "reason": "缺陷的根本原因是该方法找到了两个约束（一个唯一约束，一个索引约束），观测这个列表能揭示问题。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "在删除 index_together 操作前后，通过 self.get_constraints 获取的数据库约束状态，特别是那些具有相同字段列表的约束。",
+        "reason": "可以验证在操作后，索引约束是否被正确删除，而唯一约束是否被保留。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "当模型同时具有 unique_together 和 index_together 时，删除 index_together 的操作不应引发 ValueError。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为行号或格式可能变化。",
+        "reason": "Issue 表明当前行为会抛出异常，而修复后应不再抛出。因此，在修复前，测试应断言 raises ValueError；修复后，测试应断言不引发该异常。"
+      },
+      {
+        "assertion_goal": "在成功删除 index_together 后，数据库中对应该字段集的索引约束应被移除，而唯一约束应保持不变。",
+        "preferred_assertion_style": "before_after_relation",
+        "avoid": "断言具体的约束名称，因为名称可能因数据库后端而异。",
+        "reason": "这验证了操作的正确语义：只删除索引，不影响唯一性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要使用 TransactionTestCase 或 TestCase 作为测试基类，并可能使用 skipUnlessDBFeature 来确保数据库支持多约束。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要创建自定义的 Django 模型，其 Meta 类中同时定义 unique_together 和 index_together，且字段列表相同。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要使用 connection.schema_editor() 来执行数据库模式操作。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "确切的数据库后端行为是否会影响约束的命名和查找方式。",
+      "_delete_composed_index 中 exclude 参数的计算（meta_constraint_names | meta_index_names）是否足以在查找时排除唯一约束。",
+      "除了 ValueError 之外，是否还有其他潜在的错误状态或副作用。"
+    ]
+  }
+}

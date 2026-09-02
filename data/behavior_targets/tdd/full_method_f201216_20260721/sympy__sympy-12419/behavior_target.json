@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-12419",
+  "issue_summary": "对正交矩阵假设下推导出的单位矩阵进行元素求和时，结果错误地返回0而不是矩阵维度n。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入sympy相关模块：Symbol, symbols, MatrixSymbol, assuming, Q, refine, Sum",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置符号假设：n为正整数，M为正交矩阵",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_matrix_sum",
+        "test_file": "sympy/concrete/tests/test_sums_products.py",
+        "why_relevant": "该测试直接对矩阵进行求和，与Issue中矩阵求和场景相似。",
+        "reusable_parts": [
+          "Sum(A, (n,0,3)).doit()调用模式",
+          "Matrix构造",
+          "assert结果与Matrix比较"
+        ],
+        "possible_gap": "该测试使用具体数值矩阵，而Issue使用符号矩阵和假设推导出的单位矩阵表达式。"
+      },
+      {
+        "test_name": "test_Sum_doit",
+        "test_file": "sympy/concrete/tests/test_sums_products.py",
+        "why_relevant": "该测试验证Sum.doit()的各种行为，包括嵌套求和和KroneckerDelta，与Issue中双重求和相关。",
+        "reusable_parts": [
+          "Sum.doit()调用",
+          "嵌套求和结构",
+          "符号索引使用"
+        ],
+        "possible_gap": "测试未涉及矩阵表达式求和，特别是单位矩阵的符号求和。"
+      },
+      {
+        "test_name": "test_Identity",
+        "test_file": "sympy/matrices/expressions/tests/test_matexpr.py",
+        "why_relevant": "该测试涉及Identity矩阵，与Issue中推导出的单位矩阵相关。",
+        "reusable_parts": [
+          "MatrixSymbol和Identity使用",
+          "符号维度n"
+        ],
+        "possible_gap": "测试只验证Identity的代数性质，未测试对Identity元素的求和。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在正交矩阵假设下，对MatrixSymbol M进行M.T * M运算，得到单位矩阵表达式，然后对该表达式进行双重求和计算所有元素之和。",
+      "evidence": [
+        "Issue中代码：with assuming(Query.orthogonal(M)): e = refine((M.T * M).doit()); print(Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "单位矩阵所有元素之和的计算结果为0，而期望结果为矩阵维度n。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue中描述：'Total sum of the elements is expected to be 'n' but the answer is 0!'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Sum",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue中使用Sum进行求和计算，相关测试1和5也使用Sum。"
+      },
+      {
+        "name": "doit",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue和测试中都调用doit()来执行求和计算。"
+      },
+      {
+        "name": "refine",
+        "kind": "function",
+        "source_path": "sympy/polys/rootisolation.py",
+        "reason": "Issue中使用refine在假设下简化矩阵表达式。"
+      },
+      {
+        "name": "assuming",
+        "kind": "function",
+        "source_path": "sympy/assumptions/assume.py",
+        "reason": "Issue中使用assuming上下文管理器设置正交矩阵假设。"
+      },
+      {
+        "name": "MatrixSymbol",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/matexpr.py",
+        "reason": "Issue中创建矩阵符号M。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/concrete/summations.py",
+        "object": "Sum.doit",
+        "lines": "",
+        "reason": "Issue涉及Sum.doit()对矩阵表达式求和返回错误结果，可能是求和逻辑对单位矩阵处理不当。"
+      },
+      {
+        "path": "sympy/matrices/expressions/matexpr.py",
+        "object": "MatrixSymbol._entry",
+        "lines": "",
+        "reason": "矩阵元素访问e[i,j]可能未正确处理单位矩阵的非对角元素（应为0）和对角元素（应为1）。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_matrix_sum中使用具体数值矩阵[[0,1],[n,0]]",
+        "target_pattern": "使用正交假设下推导出的符号单位矩阵表达式",
+        "reason": "Issue表明符号单位矩阵的求和计算有误，而具体数值矩阵可能正常工作。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接对具体矩阵求和：Sum(A, (n,0,3)).doit()",
+        "target_pattern": "先通过假设和refine得到矩阵表达式，再对表达式元素双重求和",
+        "reason": "Issue触发路径涉及假设推导和refine，可能影响后续求和计算。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "对n×n单位矩阵进行所有元素求和应返回n。",
+      "evidence": [
+        "Issue中描述：'Total sum of the elements is expected to be 'n''",
+        "相关测试2中Identity类表示单位矩阵"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit()的结果",
+        "reason": "直接观察求和结果是否为0（错误）或n（正确）。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "e的类型和e[i,j]的类型",
+        "reason": "检查矩阵表达式类型是否影响求和计算。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "str(e)或repr(e)",
+        "reason": "观察refine后的矩阵表达式如何表示，是否被正确识别为单位矩阵。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对n×n单位矩阵所有元素求和应等于n",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言具体字符串表示或完整表达式结构",
+        "reason": "只需验证求和结果的数学正确性，不依赖具体表达式形式。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "refine函数在正交假设下对M.T * M的具体简化结果是什么",
+    "e[i,j]对单位矩阵非对角元素的求值是否返回0",
+    "Sum.doit()对符号矩阵表达式的求和实现细节",
+    "是否只有符号单位矩阵的求和有问题，具体数值单位矩阵是否正常"
+  ],
+  "raw": {
+    "issue_summary": "对正交矩阵假设下推导出的单位矩阵进行元素求和时，结果错误地返回0而不是矩阵维度n。",
+    "trigger_condition": {
+      "text": "在正交矩阵假设下，对MatrixSymbol M进行M.T * M运算，得到单位矩阵表达式，然后对该表达式进行双重求和计算所有元素之和。",
+      "evidence": [
+        "Issue中代码：with assuming(Query.orthogonal(M)): e = refine((M.T * M).doit()); print(Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit())"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "单位矩阵所有元素之和的计算结果为0，而期望结果为矩阵维度n。",
+      "symptom_type": "wrong_return",
+      "evidence": [
+        "Issue中描述：'Total sum of the elements is expected to be 'n' but the answer is 0!'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "对n×n单位矩阵进行所有元素求和应返回n。",
+      "evidence": [
+        "Issue中描述：'Total sum of the elements is expected to be 'n''",
+        "相关测试2中Identity类表示单位矩阵"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Sum",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue中使用Sum进行求和计算，相关测试1和5也使用Sum。"
+      },
+      {
+        "name": "doit",
+        "kind": "method",
+        "source_path": "",
+        "reason": "Issue和测试中都调用doit()来执行求和计算。"
+      },
+      {
+        "name": "refine",
+        "kind": "function",
+        "source_path": "sympy/polys/rootisolation.py",
+        "reason": "Issue中使用refine在假设下简化矩阵表达式。"
+      },
+      {
+        "name": "assuming",
+        "kind": "function",
+        "source_path": "sympy/assumptions/assume.py",
+        "reason": "Issue中使用assuming上下文管理器设置正交矩阵假设。"
+      },
+      {
+        "name": "MatrixSymbol",
+        "kind": "class",
+        "source_path": "sympy/matrices/expressions/matexpr.py",
+        "reason": "Issue中创建矩阵符号M。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/concrete/summations.py",
+        "object": "Sum.doit",
+        "lines": "",
+        "reason": "Issue涉及Sum.doit()对矩阵表达式求和返回错误结果，可能是求和逻辑对单位矩阵处理不当。"
+      },
+      {
+        "path": "sympy/matrices/expressions/matexpr.py",
+        "object": "MatrixSymbol._entry",
+        "lines": "",
+        "reason": "矩阵元素访问e[i,j]可能未正确处理单位矩阵的非对角元素（应为0）和对角元素（应为1）。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_matrix_sum",
+        "test_file": "sympy/concrete/tests/test_sums_products.py",
+        "why_relevant": "该测试直接对矩阵进行求和，与Issue中矩阵求和场景相似。",
+        "reusable_parts": [
+          "Sum(A, (n,0,3)).doit()调用模式",
+          "Matrix构造",
+          "assert结果与Matrix比较"
+        ],
+        "possible_gap": "该测试使用具体数值矩阵，而Issue使用符号矩阵和假设推导出的单位矩阵表达式。"
+      },
+      {
+        "test_name": "test_Sum_doit",
+        "test_file": "sympy/concrete/tests/test_sums_products.py",
+        "why_relevant": "该测试验证Sum.doit()的各种行为，包括嵌套求和和KroneckerDelta，与Issue中双重求和相关。",
+        "reusable_parts": [
+          "Sum.doit()调用",
+          "嵌套求和结构",
+          "符号索引使用"
+        ],
+        "possible_gap": "测试未涉及矩阵表达式求和，特别是单位矩阵的符号求和。"
+      },
+      {
+        "test_name": "test_Identity",
+        "test_file": "sympy/matrices/expressions/tests/test_matexpr.py",
+        "why_relevant": "该测试涉及Identity矩阵，与Issue中推导出的单位矩阵相关。",
+        "reusable_parts": [
+          "MatrixSymbol和Identity使用",
+          "符号维度n"
+        ],
+        "possible_gap": "测试只验证Identity的代数性质，未测试对Identity元素的求和。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "test_matrix_sum中使用具体数值矩阵[[0,1],[n,0]]",
+        "target_pattern": "使用正交假设下推导出的符号单位矩阵表达式",
+        "reason": "Issue表明符号单位矩阵的求和计算有误，而具体数值矩阵可能正常工作。",
+        "confidence": "medium"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "直接对具体矩阵求和：Sum(A, (n,0,3)).doit()",
+        "target_pattern": "先通过假设和refine得到矩阵表达式，再对表达式元素双重求和",
+        "reason": "Issue触发路径涉及假设推导和refine，可能影响后续求和计算。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "return_value",
+        "expression_hint": "Sum(Sum(e[i, j], (i, 0, n-1)), (j, 0, n-1)).doit()的结果",
+        "reason": "直接观察求和结果是否为0（错误）或n（正确）。"
+      },
+      {
+        "kind": "type",
+        "expression_hint": "e的类型和e[i,j]的类型",
+        "reason": "检查矩阵表达式类型是否影响求和计算。"
+      },
+      {
+        "kind": "repr",
+        "expression_hint": "str(e)或repr(e)",
+        "reason": "观察refine后的矩阵表达式如何表示，是否被正确识别为单位矩阵。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "对n×n单位矩阵所有元素求和应等于n",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言具体字符串表示或完整表达式结构",
+        "reason": "只需验证求和结果的数学正确性，不依赖具体表达式形式。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入sympy相关模块：Symbol, symbols, MatrixSymbol, assuming, Q, refine, Sum",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "需要设置符号假设：n为正整数，M为正交矩阵",
+        "source": "issue",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "refine函数在正交假设下对M.T * M的具体简化结果是什么",
+      "e[i,j]对单位矩阵非对角元素的求值是否返回0",
+      "Sum.doit()对符号矩阵表达式的求和实现细节",
+      "是否只有符号单位矩阵的求和有问题，具体数值单位矩阵是否正常"
+    ]
+  }
+}

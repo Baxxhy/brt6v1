@@ -1,0 +1,316 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12308",
+  "issue_summary": "JSONField 在 admin 后台设为只读时，其值以 Python dict 的 repr 形式显示，而非有效的 JSON 字符串。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django 测试环境，包含 admin 站点、一个注册到 admin 的模型，该模型包含一个在 ModelAdmin 的 readonly_fields 中列出的 JSONField。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings(ROOT_URLCONF='...') 来配置 admin 的 URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 django.test.TestCase 或类似的测试基类，以支持数据库和客户端。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ReadonlyTest.test_readonly_field_overrides",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了 admin 后台只读字段的渲染，与触发条件（admin 只读字段显示）高度相关。",
+        "reusable_parts": [
+          "测试类 ReadonlyTest",
+          "使用 self.client.get 获取 admin change form 页面",
+          "使用 assertContains 检查响应内容"
+        ],
+        "possible_gap": "它测试的是字段覆盖（help text, label），而非特定字段类型（如 JSONField）的显示格式。"
+      },
+      {
+        "test_name": "ReadonlyTest.test_readonly_text_field",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了只读文本字段（包括换行符处理）在 admin 中的显示，展示了如何检查只读字段的渲染内容。",
+        "reusable_parts": [
+          "创建模型实例",
+          "获取 admin change form 响应",
+          "使用 assertContains 检查响应中的特定 HTML 片段"
+        ],
+        "possible_gap": "它测试的是 TextField 和换行符，而非 JSONField 和 JSON 序列化。"
+      },
+      {
+        "test_name": "ReadonlyTest.test_change_form_renders_correct_null_choice_value",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了 admin change form 中只读字段对特定值（null choice）的渲染，与检查只读字段显示逻辑相关。",
+        "reusable_parts": [
+          "创建具有特定字段值的模型实例",
+          "检查响应中特定只读字段的 HTML 输出"
+        ],
+        "possible_gap": "它测试的是 ChoiceField 和 null 值，而非 JSONField 和 JSON 序列化。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "在 Django admin 后台，一个包含 JSONField 的模型，当该字段被设置为 readonly 时，查看其 change form 页面。",
+      "evidence": [
+        "Issue 描述：'JSONField values are displayed as dict when readonly in the admin.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "JSONField 的值（例如 {\"foo\": \"bar\"}）在页面上显示为 Python dict 的 repr 形式（例如 {'foo': 'bar'}），这不是有效的 JSON 格式。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述：'{\"foo\": \"bar\"} would be displayed as {'foo': 'bar'}, which is not valid JSON.'"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.contrib.admin.utils.display_for_field",
+        "kind": "function",
+        "source_path": "django/contrib/admin/utils.py",
+        "reason": "Issue 明确指出问题在于此函数没有为 JSONField 做特殊处理，导致其值被错误地显示。"
+      },
+      {
+        "name": "django.forms.fields.JSONField.prepare_value",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 建议的修复是调用此方法来正确准备 JSONField 的值以供显示。"
+      },
+      {
+        "name": "django.forms.fields.JSONField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "这是问题涉及的字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/utils.py",
+        "object": "display_for_field",
+        "lines": "380-402",
+        "reason": "Issue 描述指出该函数没有为 JSONField 添加特殊处理，导致其值被传递给 display_for_value，从而显示为 dict 的 repr。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用的模型字段类型（如 CharField, TextField, ChoiceField）。",
+        "target_pattern": "使用一个包含 JSONField 且该字段在 admin 中设置为 readonly 的模型。",
+        "reason": "Issue 仅在 JSONField 被设置为只读时触发。需要变异测试模型和字段类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中为字段设置的简单值（如字符串、null）。",
+        "target_pattern": "为 JSONField 设置一个 Python dict 值（例如 {\"foo\": \"bar\"}）。",
+        "reason": "Issue 显示的问题是将 dict 值错误地序列化显示。需要提供 dict 作为输入。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [
+      {
+        "rule": "positive_example_polarity",
+        "severity": "hard",
+        "protected_inputs": [
+          "bar",
+          "foo"
+        ],
+        "instruction": "Inputs explicitly described by the Issue as accepted, parsed, or successful must not be used as invalid inputs and must not be placed inside assertRaises/pytest.raises.",
+        "evidence": [
+          "Issue describes 'bar' on a successful/accepted path.",
+          "Issue describes 'foo' on a successful/accepted path."
+        ]
+      }
+    ],
+    "audit_warnings": [
+      "Derived polarity audit: do not reinterpret successful Issue example(s) 'bar', 'foo' as invalid trigger inputs."
+    ]
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "只读的 JSONField 在 admin 后台应显示为格式正确的 JSON 字符串（例如 {\"foo\": \"bar\"}）。",
+      "evidence": [
+        "Issue 描述暗示了期望的显示格式是有效的 JSON。源码片段 3 中 JSONField.prepare_value 方法使用 json.dumps 来序列化值。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "repr",
+        "expression_hint": "admin change form 响应内容中，对应 JSONField 只读显示部分的 HTML 片段。",
+        "reason": "Issue 的核心是显示格式错误。观察响应中该字段的显示内容，可以判断是显示为 dict repr 还是有效 JSON。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "display_for_field 函数在处理 JSONField 实例和 dict 值时的返回值。",
+        "reason": "Issue 怀疑问题出在这个函数。观察其返回值可以确认它是否调用了 JSONField.prepare_value。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 admin change form 响应中，只读 JSONField 的显示内容是有效的 JSON 字符串（如包含双引号），而非 Python dict 的 repr（如包含单引号）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、未经转义的 JSON 字符串完全相等，因为 HTML 中可能存在转义。避免断言与具体模型无关的其他页面内容。",
+        "reason": "Issue 关注的是显示格式。检查响应中是否包含有效的 JSON 片段（如 {\"foo\": \"bar\"}）能稳定地验证修复。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "Issue 中提到的 InvalidJSONInput 案例的具体触发条件和期望行为。",
+    "display_for_field 函数中具体哪个分支导致了当前行为，以及 display_for_value 函数的具体实现。",
+    "修复后，对于已经是字符串的 JSON 输入或无效 JSON 输入，显示行为的确切细节。"
+  ],
+  "raw": {
+    "issue_summary": "JSONField 在 admin 后台设为只读时，其值以 Python dict 的 repr 形式显示，而非有效的 JSON 字符串。",
+    "trigger_condition": {
+      "text": "在 Django admin 后台，一个包含 JSONField 的模型，当该字段被设置为 readonly 时，查看其 change form 页面。",
+      "evidence": [
+        "Issue 描述：'JSONField values are displayed as dict when readonly in the admin.'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "JSONField 的值（例如 {\"foo\": \"bar\"}）在页面上显示为 Python dict 的 repr 形式（例如 {'foo': 'bar'}），这不是有效的 JSON 格式。",
+      "symptom_type": "serialization_error",
+      "evidence": [
+        "Issue 描述：'{\"foo\": \"bar\"} would be displayed as {'foo': 'bar'}, which is not valid JSON.'"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "只读的 JSONField 在 admin 后台应显示为格式正确的 JSON 字符串（例如 {\"foo\": \"bar\"}）。",
+      "evidence": [
+        "Issue 描述暗示了期望的显示格式是有效的 JSON。源码片段 3 中 JSONField.prepare_value 方法使用 json.dumps 来序列化值。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "django.contrib.admin.utils.display_for_field",
+        "kind": "function",
+        "source_path": "django/contrib/admin/utils.py",
+        "reason": "Issue 明确指出问题在于此函数没有为 JSONField 做特殊处理，导致其值被错误地显示。"
+      },
+      {
+        "name": "django.forms.fields.JSONField.prepare_value",
+        "kind": "method",
+        "source_path": "django/forms/fields.py",
+        "reason": "Issue 建议的修复是调用此方法来正确准备 JSONField 的值以供显示。"
+      },
+      {
+        "name": "django.forms.fields.JSONField",
+        "kind": "class",
+        "source_path": "django/forms/fields.py",
+        "reason": "这是问题涉及的字段类型。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/contrib/admin/utils.py",
+        "object": "display_for_field",
+        "lines": "380-402",
+        "reason": "Issue 描述指出该函数没有为 JSONField 添加特殊处理，导致其值被传递给 display_for_value，从而显示为 dict 的 repr。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ReadonlyTest.test_readonly_field_overrides",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了 admin 后台只读字段的渲染，与触发条件（admin 只读字段显示）高度相关。",
+        "reusable_parts": [
+          "测试类 ReadonlyTest",
+          "使用 self.client.get 获取 admin change form 页面",
+          "使用 assertContains 检查响应内容"
+        ],
+        "possible_gap": "它测试的是字段覆盖（help text, label），而非特定字段类型（如 JSONField）的显示格式。"
+      },
+      {
+        "test_name": "ReadonlyTest.test_readonly_text_field",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了只读文本字段（包括换行符处理）在 admin 中的显示，展示了如何检查只读字段的渲染内容。",
+        "reusable_parts": [
+          "创建模型实例",
+          "获取 admin change form 响应",
+          "使用 assertContains 检查响应中的特定 HTML 片段"
+        ],
+        "possible_gap": "它测试的是 TextField 和换行符，而非 JSONField 和 JSON 序列化。"
+      },
+      {
+        "test_name": "ReadonlyTest.test_change_form_renders_correct_null_choice_value",
+        "test_file": "tests/admin_views/tests.py",
+        "why_relevant": "它测试了 admin change form 中只读字段对特定值（null choice）的渲染，与检查只读字段显示逻辑相关。",
+        "reusable_parts": [
+          "创建具有特定字段值的模型实例",
+          "检查响应中特定只读字段的 HTML 输出"
+        ],
+        "possible_gap": "它测试的是 ChoiceField 和 null 值，而非 JSONField 和 JSON 序列化。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "object_state",
+        "current_pattern": "相似测试中使用的模型字段类型（如 CharField, TextField, ChoiceField）。",
+        "target_pattern": "使用一个包含 JSONField 且该字段在 admin 中设置为 readonly 的模型。",
+        "reason": "Issue 仅在 JSONField 被设置为只读时触发。需要变异测试模型和字段类型。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中为字段设置的简单值（如字符串、null）。",
+        "target_pattern": "为 JSONField 设置一个 Python dict 值（例如 {\"foo\": \"bar\"}）。",
+        "reason": "Issue 显示的问题是将 dict 值错误地序列化显示。需要提供 dict 作为输入。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "repr",
+        "expression_hint": "admin change form 响应内容中，对应 JSONField 只读显示部分的 HTML 片段。",
+        "reason": "Issue 的核心是显示格式错误。观察响应中该字段的显示内容，可以判断是显示为 dict repr 还是有效 JSON。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "display_for_field 函数在处理 JSONField 实例和 dict 值时的返回值。",
+        "reason": "Issue 怀疑问题出在这个函数。观察其返回值可以确认它是否调用了 JSONField.prepare_value。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "验证 admin change form 响应中，只读 JSONField 的显示内容是有效的 JSON 字符串（如包含双引号），而非 Python dict 的 repr（如包含单引号）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "避免断言完整的、未经转义的 JSON 字符串完全相等，因为 HTML 中可能存在转义。避免断言与具体模型无关的其他页面内容。",
+        "reason": "Issue 关注的是显示格式。检查响应中是否包含有效的 JSON 片段（如 {\"foo\": \"bar\"}）能稳定地验证修复。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 Django 测试环境，包含 admin 站点、一个注册到 admin 的模型，该模型包含一个在 ModelAdmin 的 readonly_fields 中列出的 JSONField。",
+        "source": "inference",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要使用 @override_settings(ROOT_URLCONF='...') 来配置 admin 的 URL。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      },
+      {
+        "hint": "测试类应继承自 django.test.TestCase 或类似的测试基类，以支持数据库和客户端。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "Issue 中提到的 InvalidJSONInput 案例的具体触发条件和期望行为。",
+      "display_for_field 函数中具体哪个分支导致了当前行为，以及 display_for_value 函数的具体实现。",
+      "修复后，对于已经是字符串的 JSON 输入或无效 JSON 输入，显示行为的确切细节。"
+    ]
+  }
+}

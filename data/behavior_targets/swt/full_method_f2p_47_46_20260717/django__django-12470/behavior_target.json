@@ -1,0 +1,340 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "django__django-12470",
+  "issue_summary": "继承模型在父类 Meta.ordering 中指定 '-pk' 时，查询结果未按降序排序。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要定义继承模型结构（Parent 和 Child），并设置 Parent.Meta.ordering = ['-pk']。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建几个 Child 实例以验证排序顺序。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应继承自 django.test.TestCase 以确保数据库事务支持。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ModelInheritanceTests.test_meta_fields_and_ordering",
+        "test_file": "tests/model_inheritance/tests.py",
+        "why_relevant": "该测试直接检查继承模型的 Meta.ordering 属性，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "模型继承的测试类结构（ModelInheritanceTests），可能包含 Restaurant 和 ItalianRestaurant 等继承模型定义。",
+          "使用 self.assertEqual 检查 _meta.ordering 的断言风格。"
+        ],
+        "possible_gap": "该测试仅检查了 ordering 属性的值，没有实际执行查询并验证生成的 SQL 排序方向。"
+      },
+      {
+        "test_name": "OrderingTests.test_order_by_ptr_field_with_default_ordering_by_expression",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试涉及继承模型（ChildArticle）的排序，并验证了 order_by 的结果顺序。",
+        "reusable_parts": [
+          "创建继承模型实例的步骤。",
+          "使用 ChildArticle.objects.order_by(...) 进行查询。",
+          "使用 assertSequenceEqual 验证结果顺序。"
+        ],
+        "possible_gap": "该测试使用显式的 order_by('article_ptr')，而不是测试从父类继承的默认 Meta.ordering。"
+      },
+      {
+        "test_name": "ModelInheritanceTest.test_inherited_fields",
+        "test_file": "tests/model_inheritance_regress/tests.py",
+        "why_relevant": "该测试检查继承字段和排序 SQL 的重复问题，涉及模型继承和 SQL 生成。",
+        "reusable_parts": [
+          "从继承模型（M2MChild）进行查询的模式。",
+          "检查 SQL 字符串片段的模式（如 sql.find('ORDER BY')）。"
+        ],
+        "possible_gap": "该测试焦点是字段重复，而非排序方向。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "定义一个父模型，其 Meta.ordering 设置为 ['-pk']；定义一个继承自该父模型的子模型；查询子模型的 QuerySet（例如 Child.objects.all()）。",
+      "evidence": [
+        "Issue 中给出的模型定义和查询示例：ordering = [\"-pk\"]，以及 print(Child.objects.all().query) 的输出。",
+        "相关测试 4 中展示了模型继承和 Meta.ordering 的检查：self.assertEqual(Restaurant._meta.ordering, [\"-rating\"])。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询中的 ORDER BY 子句是 ASC（升序），而不是预期的 DESC（降序）。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中打印的查询输出：ORDER BY \"myapp_parent\".\"id\" ASC。",
+        "Issue 中明确说明：\"The query is ordered ASC but I expect the order to be DESC.\""
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Child.objects.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发问题的操作是调用 Child.objects.all() 来获取 QuerySet。"
+      },
+      {
+        "name": "QuerySet.query",
+        "kind": "property",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中通过 print(Child.objects.all().query) 来检查生成的 SQL。"
+      },
+      {
+        "name": "Model.Meta.ordering",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 的核心是 Meta.ordering 属性在模型继承中的行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet",
+        "lines": "",
+        "reason": "Issue 中打印的 query 属性来自 QuerySet，且相关源码片段 1 和 2 指向此文件，可能涉及查询集构建或排序处理逻辑。"
+      },
+      {
+        "path": "django/db/models/options.py",
+        "object": "Options",
+        "lines": "",
+        "reason": "模型 Meta 选项（如 ordering）的处理可能在此处，特别是继承模型合并父类 Meta 时。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "SQL 查询的构建和 ORDER BY 子句的生成可能在此处。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，模型的 Meta.ordering 可能设置为正序字段（如 ['-rating'] 或 ['pub_date', 'pk']）。",
+        "target_pattern": "将父模型的 Meta.ordering 设置为 ['-pk']（负号表示降序）。",
+        "reason": "Issue 表明当父类 ordering 为 '-pk' 时，子类查询未正确继承降序语义。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中可能使用显式的 .order_by(...) 调用。",
+        "target_pattern": "不调用 .order_by()，依赖从父类继承的默认 Meta.ordering。",
+        "reason": "Issue 中 bug 是在未显式指定 order_by 时触发的，仅依赖继承的 ordering。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "当父模型 Meta.ordering 指定为 ['-pk'] 时，继承该父模型的子模型的查询结果应按主键降序排序，生成的 SQL 应包含 ORDER BY ... DESC。",
+      "evidence": [
+        "Issue 中用户的期望：\"I expect the order to be DESC.\"",
+        "相关测试 2 验证了 order_by 对继承模型字段排序的正确性，暗示了排序行为应遵循指定顺序。"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "Child.objects.all().query.get_compiler('default').as_sql()[0] 或 str(Child.objects.all().query)",
+        "reason": "Issue 的核心错误是生成的 SQL ORDER BY 子句方向错误，直接观察 SQL 字符串可以确认。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "list(Child.objects.all()) 的结果顺序，或使用 values_list('pk', flat=True) 提取的主键列表。",
+        "reason": "即使 SQL 正确，也应验证实际查询结果是否按降序排列。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 应包含 ORDER BY ... DESC 片段。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "完整 SQL 字符串相等断言，因为表名或别名可能变化。",
+        "reason": "Issue 明确指出了 ORDER BY 方向错误，检查 DESC 关键字更稳定。"
+      },
+      {
+        "assertion_goal": "查询结果应按主键降序排列。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "仅检查结果数量或第一个元素。",
+        "reason": "直接验证功能语义，不依赖具体的 SQL 字符串表示。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "缺陷是否只影响 '-pk'，还是影响所有带负号的排序字段？",
+    "缺陷是否也影响多级继承或抽象基类？",
+    "确切的 bug 位置是在查询集构建、Meta 选项合并还是 SQL 编译阶段？"
+  ],
+  "raw": {
+    "issue_summary": "继承模型在父类 Meta.ordering 中指定 '-pk' 时，查询结果未按降序排序。",
+    "trigger_condition": {
+      "text": "定义一个父模型，其 Meta.ordering 设置为 ['-pk']；定义一个继承自该父模型的子模型；查询子模型的 QuerySet（例如 Child.objects.all()）。",
+      "evidence": [
+        "Issue 中给出的模型定义和查询示例：ordering = [\"-pk\"]，以及 print(Child.objects.all().query) 的输出。",
+        "相关测试 4 中展示了模型继承和 Meta.ordering 的检查：self.assertEqual(Restaurant._meta.ordering, [\"-rating\"])。"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "生成的 SQL 查询中的 ORDER BY 子句是 ASC（升序），而不是预期的 DESC（降序）。",
+      "symptom_type": "wrong_sql",
+      "evidence": [
+        "Issue 中打印的查询输出：ORDER BY \"myapp_parent\".\"id\" ASC。",
+        "Issue 中明确说明：\"The query is ordered ASC but I expect the order to be DESC.\""
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "当父模型 Meta.ordering 指定为 ['-pk'] 时，继承该父模型的子模型的查询结果应按主键降序排序，生成的 SQL 应包含 ORDER BY ... DESC。",
+      "evidence": [
+        "Issue 中用户的期望：\"I expect the order to be DESC.\"",
+        "相关测试 2 验证了 order_by 对继承模型字段排序的正确性，暗示了排序行为应遵循指定顺序。"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "Child.objects.all",
+        "kind": "method",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中触发问题的操作是调用 Child.objects.all() 来获取 QuerySet。"
+      },
+      {
+        "name": "QuerySet.query",
+        "kind": "property",
+        "source_path": "django/db/models/query.py",
+        "reason": "Issue 中通过 print(Child.objects.all().query) 来检查生成的 SQL。"
+      },
+      {
+        "name": "Model.Meta.ordering",
+        "kind": "attribute",
+        "source_path": "",
+        "reason": "Issue 的核心是 Meta.ordering 属性在模型继承中的行为。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "django/db/models/query.py",
+        "object": "QuerySet",
+        "lines": "",
+        "reason": "Issue 中打印的 query 属性来自 QuerySet，且相关源码片段 1 和 2 指向此文件，可能涉及查询集构建或排序处理逻辑。"
+      },
+      {
+        "path": "django/db/models/options.py",
+        "object": "Options",
+        "lines": "",
+        "reason": "模型 Meta 选项（如 ordering）的处理可能在此处，特别是继承模型合并父类 Meta 时。"
+      },
+      {
+        "path": "django/db/models/sql/query.py",
+        "object": "Query",
+        "lines": "",
+        "reason": "SQL 查询的构建和 ORDER BY 子句的生成可能在此处。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "ModelInheritanceTests.test_meta_fields_and_ordering",
+        "test_file": "tests/model_inheritance/tests.py",
+        "why_relevant": "该测试直接检查继承模型的 Meta.ordering 属性，与 Issue 主题高度相关。",
+        "reusable_parts": [
+          "模型继承的测试类结构（ModelInheritanceTests），可能包含 Restaurant 和 ItalianRestaurant 等继承模型定义。",
+          "使用 self.assertEqual 检查 _meta.ordering 的断言风格。"
+        ],
+        "possible_gap": "该测试仅检查了 ordering 属性的值，没有实际执行查询并验证生成的 SQL 排序方向。"
+      },
+      {
+        "test_name": "OrderingTests.test_order_by_ptr_field_with_default_ordering_by_expression",
+        "test_file": "tests/ordering/tests.py",
+        "why_relevant": "该测试涉及继承模型（ChildArticle）的排序，并验证了 order_by 的结果顺序。",
+        "reusable_parts": [
+          "创建继承模型实例的步骤。",
+          "使用 ChildArticle.objects.order_by(...) 进行查询。",
+          "使用 assertSequenceEqual 验证结果顺序。"
+        ],
+        "possible_gap": "该测试使用显式的 order_by('article_ptr')，而不是测试从父类继承的默认 Meta.ordering。"
+      },
+      {
+        "test_name": "ModelInheritanceTest.test_inherited_fields",
+        "test_file": "tests/model_inheritance_regress/tests.py",
+        "why_relevant": "该测试检查继承字段和排序 SQL 的重复问题，涉及模型继承和 SQL 生成。",
+        "reusable_parts": [
+          "从继承模型（M2MChild）进行查询的模式。",
+          "检查 SQL 字符串片段的模式（如 sql.find('ORDER BY')）。"
+        ],
+        "possible_gap": "该测试焦点是字段重复，而非排序方向。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "config",
+        "current_pattern": "相关测试中，模型的 Meta.ordering 可能设置为正序字段（如 ['-rating'] 或 ['pub_date', 'pk']）。",
+        "target_pattern": "将父模型的 Meta.ordering 设置为 ['-pk']（负号表示降序）。",
+        "reason": "Issue 表明当父类 ordering 为 '-pk' 时，子类查询未正确继承降序语义。",
+        "confidence": "high"
+      },
+      {
+        "slot": "call_chain",
+        "current_pattern": "相关测试中可能使用显式的 .order_by(...) 调用。",
+        "target_pattern": "不调用 .order_by()，依赖从父类继承的默认 Meta.ordering。",
+        "reason": "Issue 中 bug 是在未显式指定 order_by 时触发的，仅依赖继承的 ordering。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "sql",
+        "expression_hint": "Child.objects.all().query.get_compiler('default').as_sql()[0] 或 str(Child.objects.all().query)",
+        "reason": "Issue 的核心错误是生成的 SQL ORDER BY 子句方向错误，直接观察 SQL 字符串可以确认。"
+      },
+      {
+        "kind": "order",
+        "expression_hint": "list(Child.objects.all()) 的结果顺序，或使用 values_list('pk', flat=True) 提取的主键列表。",
+        "reason": "即使 SQL 正确，也应验证实际查询结果是否按降序排列。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "生成的 SQL 应包含 ORDER BY ... DESC 片段。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "完整 SQL 字符串相等断言，因为表名或别名可能变化。",
+        "reason": "Issue 明确指出了 ORDER BY 方向错误，检查 DESC 关键字更稳定。"
+      },
+      {
+        "assertion_goal": "查询结果应按主键降序排列。",
+        "preferred_assertion_style": "order_equals",
+        "avoid": "仅检查结果数量或第一个元素。",
+        "reason": "直接验证功能语义，不依赖具体的 SQL 字符串表示。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要定义继承模型结构（Parent 和 Child），并设置 Parent.Meta.ordering = ['-pk']。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "可能需要创建几个 Child 实例以验证排序顺序。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "测试应继承自 django.test.TestCase 以确保数据库事务支持。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "缺陷是否只影响 '-pk'，还是影响所有带负号的排序字段？",
+      "缺陷是否也影响多级继承或抽象基类？",
+      "确切的 bug 位置是在查询集构建、Meta 选项合并还是 SQL 编译阶段？"
+    ]
+  }
+}

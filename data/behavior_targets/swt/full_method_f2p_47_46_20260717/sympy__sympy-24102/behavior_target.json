@@ -1,0 +1,242 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "sympy__sympy-24102",
+  "issue_summary": "parse_mathematica 函数无法解析希腊字符（如 λ），而旧的 mathematica 函数可以。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要导入 parse_mathematica 函数，可能还需要 sympify 或 Symbol 用于断言比较。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_mathematica",
+        "test_file": "sympy/parsing/tests/test_mathematica.py",
+        "why_relevant": "这是对 parse_mathematica 函数的主要测试，包含大量输入输出对的验证，展示了正常的解析流程和断言风格。",
+        "reusable_parts": [
+          "from sympy.parsing.mathematica import parse_mathematica",
+          "assert parse_mathematica(e) == sympify(d[e]) 的断言模式",
+          "使用 sympify 进行表达式比较"
+        ],
+        "possible_gap": "现有测试用例只包含 ASCII 字符（如 'x', 'y', 'Sin', 'Cos'），没有测试非 ASCII 字符（如希腊字母）。"
+      },
+      {
+        "test_name": "test_parser_mathematica_tokenizer",
+        "test_file": "sympy/parsing/tests/test_mathematica.py",
+        "why_relevant": "它直接测试了 MathematicaParser 的内部 tokenizer 方法 (_from_mathematica_to_tokens 和 _from_tokens_to_fullformlist)，这是解析流程的早期阶段，可能涉及字符处理。",
+        "reusable_parts": [
+          "parser = MathematicaParser()",
+          "chain = lambda expr: parser._from_tokens_to_fullformlist(parser._from_mathematica_to_tokens(expr))",
+          "对基本模式（如 'x', '42'）的断言"
+        ],
+        "possible_gap": "测试用例也只包含 ASCII 字符和数字，没有测试非 ASCII 字符作为 token 的情况。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "调用 parse_mathematica 函数，输入包含希腊字符（如 λ）的字符串。",
+      "evidence": [
+        "Issue 中提供了示例：parse_mathematica('λ')",
+        "Issue 描述：'Cannot parse Greek characters (and possibly others) in parse_mathematica'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 SyntaxError: unable to create a single AST for the expression",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的 traceback 信息",
+        "相关测试 3 中也使用了 raises(SyntaxError, ...) 来测试无效表达式"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "parse_mathematica",
+        "kind": "function",
+        "source_path": "sympy/parsing/mathematica.py",
+        "reason": "Issue 直接报告此函数存在缺陷，无法解析希腊字符。"
+      },
+      {
+        "name": "MathematicaParser",
+        "kind": "class",
+        "source_path": "sympy/parsing/mathematica.py",
+        "reason": "parse_mathematica 函数内部创建了 MathematicaParser 实例并调用其 parse 方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/parsing/mathematica.py",
+        "object": "MathematicaParser",
+        "lines": "",
+        "reason": "parse_mathematica 函数委托给 MathematicaParser 实例，解析失败可能发生在解析器的 tokenizer、AST 构建或转换阶段。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的输入字符串都是 ASCII 字符（如 'x', 'Sin[x]', '42'）。",
+        "target_pattern": "将输入字符串替换为包含希腊字符（如 'λ'）的字符串。",
+        "reason": "Issue 明确指出输入 'λ' 会触发 SyntaxError，而现有测试没有覆盖非 ASCII 输入。",
+        "confidence": "high"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "parse_mathematica 函数应该能够成功解析包含希腊字符的输入，并返回相应的 SymPy 表达式，就像旧的 mathematica 函数一样。",
+      "evidence": [
+        "Issue 中说明旧的 mathematica('λ') 返回 λ",
+        "parse_mathematica 函数的文档字符串描述了其功能是翻译 Mathematica 表达式为 SymPy 表达式"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 parse_mathematica('λ') 时是否抛出 SyntaxError 及其消息。",
+        "reason": "Issue 中观察到的错误现象就是 SyntaxError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功解析后返回的 SymPy 表达式的类型和 repr/str 表示。",
+        "reason": "修复后，函数应返回一个有效的 SymPy 表达式（如 Symbol('λ')），而不是抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "parse_mathematica 能够解析包含希腊字符的输入并返回一个有效的 SymPy 表达式，而不是抛出 SyntaxError。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、复杂的表达式树相等，除非有明确的预期输出。对于单个字符，可以断言返回的是 Symbol 或类似对象。",
+        "reason": "Issue 表明旧的 mathematica('λ') 返回 λ（可能是一个 Symbol），修复后 parse_mathematica 应表现出类似行为。使用 equals 或 isinstance 来验证返回对象的类型和基本属性。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "除了希腊字符 'λ'，还有哪些其他非 ASCII 字符（如 'α', 'β', '∑'）也会触发此 bug？Issue 提到了 'and possibly others'。",
+    "bug 的确切位置是在 tokenizer、AST 构建还是后续转换阶段？",
+    "修复后的预期精确输出是什么？是 Symbol('λ') 还是其他形式的表达式？Issue 只显示了旧的 mathematica 函数在 REPL 中输出 λ。",
+    "parse_mathematica 是否应该处理所有 Unicode 字符，还是仅限于特定子集？"
+  ],
+  "raw": {
+    "issue_summary": "parse_mathematica 函数无法解析希腊字符（如 λ），而旧的 mathematica 函数可以。",
+    "trigger_condition": {
+      "text": "调用 parse_mathematica 函数，输入包含希腊字符（如 λ）的字符串。",
+      "evidence": [
+        "Issue 中提供了示例：parse_mathematica('λ')",
+        "Issue 描述：'Cannot parse Greek characters (and possibly others) in parse_mathematica'"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "抛出 SyntaxError: unable to create a single AST for the expression",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中提供了完整的 traceback 信息",
+        "相关测试 3 中也使用了 raises(SyntaxError, ...) 来测试无效表达式"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "parse_mathematica 函数应该能够成功解析包含希腊字符的输入，并返回相应的 SymPy 表达式，就像旧的 mathematica 函数一样。",
+      "evidence": [
+        "Issue 中说明旧的 mathematica('λ') 返回 λ",
+        "parse_mathematica 函数的文档字符串描述了其功能是翻译 Mathematica 表达式为 SymPy 表达式"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "parse_mathematica",
+        "kind": "function",
+        "source_path": "sympy/parsing/mathematica.py",
+        "reason": "Issue 直接报告此函数存在缺陷，无法解析希腊字符。"
+      },
+      {
+        "name": "MathematicaParser",
+        "kind": "class",
+        "source_path": "sympy/parsing/mathematica.py",
+        "reason": "parse_mathematica 函数内部创建了 MathematicaParser 实例并调用其 parse 方法。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "sympy/parsing/mathematica.py",
+        "object": "MathematicaParser",
+        "lines": "",
+        "reason": "parse_mathematica 函数委托给 MathematicaParser 实例，解析失败可能发生在解析器的 tokenizer、AST 构建或转换阶段。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_mathematica",
+        "test_file": "sympy/parsing/tests/test_mathematica.py",
+        "why_relevant": "这是对 parse_mathematica 函数的主要测试，包含大量输入输出对的验证，展示了正常的解析流程和断言风格。",
+        "reusable_parts": [
+          "from sympy.parsing.mathematica import parse_mathematica",
+          "assert parse_mathematica(e) == sympify(d[e]) 的断言模式",
+          "使用 sympify 进行表达式比较"
+        ],
+        "possible_gap": "现有测试用例只包含 ASCII 字符（如 'x', 'y', 'Sin', 'Cos'），没有测试非 ASCII 字符（如希腊字母）。"
+      },
+      {
+        "test_name": "test_parser_mathematica_tokenizer",
+        "test_file": "sympy/parsing/tests/test_mathematica.py",
+        "why_relevant": "它直接测试了 MathematicaParser 的内部 tokenizer 方法 (_from_mathematica_to_tokens 和 _from_tokens_to_fullformlist)，这是解析流程的早期阶段，可能涉及字符处理。",
+        "reusable_parts": [
+          "parser = MathematicaParser()",
+          "chain = lambda expr: parser._from_tokens_to_fullformlist(parser._from_mathematica_to_tokens(expr))",
+          "对基本模式（如 'x', '42'）的断言"
+        ],
+        "possible_gap": "测试用例也只包含 ASCII 字符和数字，没有测试非 ASCII 字符作为 token 的情况。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "input",
+        "current_pattern": "相似测试中使用的输入字符串都是 ASCII 字符（如 'x', 'Sin[x]', '42'）。",
+        "target_pattern": "将输入字符串替换为包含希腊字符（如 'λ'）的字符串。",
+        "reason": "Issue 明确指出输入 'λ' 会触发 SyntaxError，而现有测试没有覆盖非 ASCII 输入。",
+        "confidence": "high"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 parse_mathematica('λ') 时是否抛出 SyntaxError 及其消息。",
+        "reason": "Issue 中观察到的错误现象就是 SyntaxError，这是判断缺陷是否触发的直接标志。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "成功解析后返回的 SymPy 表达式的类型和 repr/str 表示。",
+        "reason": "修复后，函数应返回一个有效的 SymPy 表达式（如 Symbol('λ')），而不是抛出异常。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "parse_mathematica 能够解析包含希腊字符的输入并返回一个有效的 SymPy 表达式，而不是抛出 SyntaxError。",
+        "preferred_assertion_style": "equals",
+        "avoid": "避免断言完整的、复杂的表达式树相等，除非有明确的预期输出。对于单个字符，可以断言返回的是 Symbol 或类似对象。",
+        "reason": "Issue 表明旧的 mathematica('λ') 返回 λ（可能是一个 Symbol），修复后 parse_mathematica 应表现出类似行为。使用 equals 或 isinstance 来验证返回对象的类型和基本属性。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要导入 parse_mathematica 函数，可能还需要 sympify 或 Symbol 用于断言比较。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "除了希腊字符 'λ'，还有哪些其他非 ASCII 字符（如 'α', 'β', '∑'）也会触发此 bug？Issue 提到了 'and possibly others'。",
+      "bug 的确切位置是在 tokenizer、AST 构建还是后续转换阶段？",
+      "修复后的预期精确输出是什么？是 Symbol('λ') 还是其他形式的表达式？Issue 只显示了旧的 mathematica 函数在 REPL 中输出 λ。",
+      "parse_mathematica 是否应该处理所有 Unicode 字符，还是仅限于特定子集？"
+    ]
+  }
+}

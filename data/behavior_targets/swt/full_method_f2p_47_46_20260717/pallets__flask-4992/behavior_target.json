@@ -1,0 +1,318 @@
+{
+  "schema_version": "behavior_target.lossless.v1",
+  "instance_id": "pallets__flask-4992",
+  "issue_summary": "flask.Config.from_file() 默认以文本模式打开文件，与需要二进制模式的加载函数（如 tomllib.load）不兼容，导致 TypeError。",
+  "setup": {
+    "setup_hints": [
+      {
+        "hint": "需要一个 .toml 配置文件用于测试。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要导入 tomllib（Python 3.11+）或 tomli（兼容库）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 pytest.raises 上下文管理器来捕获预期的异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_config_from_file",
+        "test_file": "tests/test_config.py",
+        "why_relevant": "它直接测试了 from_file() 方法，是生成缺陷复现测试的合适起点。",
+        "reusable_parts": [
+          "imports (flask, json, os)",
+          "app = flask.Flask(__name__)",
+          "app.config.from_file(...) 调用",
+          "common_object_test 验证配置加载"
+        ],
+        "possible_gap": "当前测试使用 json.load（接受文本文件句柄），没有测试需要二进制模式的加载器。"
+      },
+      {
+        "test_name": "test_config_missing_file",
+        "test_file": "tests/test_config.py",
+        "why_relevant": "测试了 from_file() 的错误处理，展示了 silent 参数的使用。",
+        "reusable_parts": [
+          "pytest.raises 用于捕获异常",
+          "assert 错误信息"
+        ],
+        "possible_gap": "没有测试加载器不兼容导致的 TypeError。"
+      }
+    ]
+  },
+  "trigger": {
+    "trigger_condition": {
+      "text": "使用 flask.Config.from_file() 加载一个需要二进制文件句柄的加载函数（如 tomllib.load）。",
+      "evidence": [
+        "Issue 中描述：`tomllib.load()` takes an object readable in binary mode, while `flask.Config.from_file()` opens a file in text mode",
+        "Issue 中错误信息：`TypeError: File must be opened in binary mode, e.g. use `open('foo.toml', 'rb')`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 app.config.from_file(\"config.toml\", tomllib.load) 时抛出 TypeError，提示文件必须以二进制模式打开。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误信息：`TypeError: File must be opened in binary mode, e.g. use `open('foo.toml', 'rb')`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "flask.Config.from_file",
+        "kind": "method",
+        "source_path": "src/flask/config.py",
+        "reason": "Issue 的核心是关于此方法缺少文件模式参数，导致与二进制加载器不兼容。"
+      },
+      {
+        "name": "tomllib.load",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中作为需要二进制文件句柄的加载函数示例。"
+      },
+      {
+        "name": "flask.Config.from_mapping",
+        "kind": "method",
+        "source_path": "src/flask/config.py",
+        "reason": "from_file() 内部调用 from_mapping() 来更新配置。"
+      },
+      {
+        "name": "open",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 和源码中涉及文件打开模式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/flask/config.py",
+        "object": "Config.from_file",
+        "lines": "232-273",
+        "reason": "该方法内部使用 `open(filename)` 默认以文本模式打开文件，没有提供模式参数。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "from_file 的 load 参数使用 json.load（接受文本文件句柄）。",
+        "target_pattern": "from_file 的 load 参数使用 tomllib.load（需要二进制文件句柄）。",
+        "reason": "将 load 函数替换为需要二进制模式的函数，会触发当前实现中的 TypeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "加载一个 .json 文件。",
+        "target_pattern": "加载一个 .toml 文件（或任何需要二进制模式加载的文件）。",
+        "reason": "文件扩展名和内容类型与加载器匹配，但打开模式不匹配。",
+        "confidence": "medium"
+      }
+    ],
+    "safety_constraints": [],
+    "audit_warnings": []
+  },
+  "oracle": {
+    "expected_behavior": {
+      "text": "from_file() 方法应能接受一个文件模式参数，以便支持需要二进制文件句柄的加载函数，从而成功加载配置。",
+      "evidence": [
+        "Issue 中建议：`adding a file mode parameter to flask.Config.from_file() would enable the use of a simpler expression`",
+        "Issue 中示例：`app.config.from_file(\"config.toml\", tomllib.load, mode=\"b\")`"
+      ],
+      "confidence": "high"
+    },
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 app.config.from_file(\"config.toml\", tomllib.load) 时是否抛出 TypeError。",
+        "reason": "Issue 中明确描述了此异常是错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "app.config.from_file 的返回值（应为 False 或抛出异常）。",
+        "reason": "方法在成功时应返回 True，失败时返回 False 或抛出异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用前后 app.config 字典的内容。",
+        "reason": "验证配置是否成功加载或未加载。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 tomllib.load 作为加载器调用 from_file 时，应抛出 TypeError 异常（在当前有缺陷的版本中）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因 Python 版本或环境而异。",
+        "reason": "Issue 的核心是抛出 TypeError，断言异常类型是稳定的。"
+      },
+      {
+        "assertion_goal": "异常消息应包含与文件模式相关的提示（如 'binary mode'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、可能变化的错误消息。",
+        "reason": "Issue 中给出了错误消息片段，可以作为稳定断言依据。"
+      }
+    ]
+  },
+  "uncertainties": [
+    "tomllib 是否在测试环境中可用（Python 版本依赖）。",
+    "from_file 方法内部对 root_path 的处理是否会影响测试文件的路径构造。",
+    "除了 tomllib.load，是否还有其他需要二进制模式的常见加载函数。"
+  ],
+  "raw": {
+    "issue_summary": "flask.Config.from_file() 默认以文本模式打开文件，与需要二进制模式的加载函数（如 tomllib.load）不兼容，导致 TypeError。",
+    "trigger_condition": {
+      "text": "使用 flask.Config.from_file() 加载一个需要二进制文件句柄的加载函数（如 tomllib.load）。",
+      "evidence": [
+        "Issue 中描述：`tomllib.load()` takes an object readable in binary mode, while `flask.Config.from_file()` opens a file in text mode",
+        "Issue 中错误信息：`TypeError: File must be opened in binary mode, e.g. use `open('foo.toml', 'rb')`"
+      ],
+      "confidence": "high"
+    },
+    "error_symptom": {
+      "text": "调用 app.config.from_file(\"config.toml\", tomllib.load) 时抛出 TypeError，提示文件必须以二进制模式打开。",
+      "symptom_type": "exception",
+      "evidence": [
+        "Issue 中错误信息：`TypeError: File must be opened in binary mode, e.g. use `open('foo.toml', 'rb')`"
+      ],
+      "confidence": "high"
+    },
+    "expected_behavior": {
+      "text": "from_file() 方法应能接受一个文件模式参数，以便支持需要二进制文件句柄的加载函数，从而成功加载配置。",
+      "evidence": [
+        "Issue 中建议：`adding a file mode parameter to flask.Config.from_file() would enable the use of a simpler expression`",
+        "Issue 中示例：`app.config.from_file(\"config.toml\", tomllib.load, mode=\"b\")`"
+      ],
+      "confidence": "high"
+    },
+    "target_apis": [
+      {
+        "name": "flask.Config.from_file",
+        "kind": "method",
+        "source_path": "src/flask/config.py",
+        "reason": "Issue 的核心是关于此方法缺少文件模式参数，导致与二进制加载器不兼容。"
+      },
+      {
+        "name": "tomllib.load",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 中作为需要二进制文件句柄的加载函数示例。"
+      },
+      {
+        "name": "flask.Config.from_mapping",
+        "kind": "method",
+        "source_path": "src/flask/config.py",
+        "reason": "from_file() 内部调用 from_mapping() 来更新配置。"
+      },
+      {
+        "name": "open",
+        "kind": "function",
+        "source_path": "",
+        "reason": "Issue 和源码中涉及文件打开模式。"
+      }
+    ],
+    "suspected_bug_locations": [
+      {
+        "path": "src/flask/config.py",
+        "object": "Config.from_file",
+        "lines": "232-273",
+        "reason": "该方法内部使用 `open(filename)` 默认以文本模式打开文件，没有提供模式参数。"
+      }
+    ],
+    "related_test_seeds": [
+      {
+        "test_name": "test_config_from_file",
+        "test_file": "tests/test_config.py",
+        "why_relevant": "它直接测试了 from_file() 方法，是生成缺陷复现测试的合适起点。",
+        "reusable_parts": [
+          "imports (flask, json, os)",
+          "app = flask.Flask(__name__)",
+          "app.config.from_file(...) 调用",
+          "common_object_test 验证配置加载"
+        ],
+        "possible_gap": "当前测试使用 json.load（接受文本文件句柄），没有测试需要二进制模式的加载器。"
+      },
+      {
+        "test_name": "test_config_missing_file",
+        "test_file": "tests/test_config.py",
+        "why_relevant": "测试了 from_file() 的错误处理，展示了 silent 参数的使用。",
+        "reusable_parts": [
+          "pytest.raises 用于捕获异常",
+          "assert 错误信息"
+        ],
+        "possible_gap": "没有测试加载器不兼容导致的 TypeError。"
+      }
+    ],
+    "mutation_hints": [
+      {
+        "slot": "argument",
+        "current_pattern": "from_file 的 load 参数使用 json.load（接受文本文件句柄）。",
+        "target_pattern": "from_file 的 load 参数使用 tomllib.load（需要二进制文件句柄）。",
+        "reason": "将 load 函数替换为需要二进制模式的函数，会触发当前实现中的 TypeError。",
+        "confidence": "high"
+      },
+      {
+        "slot": "input",
+        "current_pattern": "加载一个 .json 文件。",
+        "target_pattern": "加载一个 .toml 文件（或任何需要二进制模式加载的文件）。",
+        "reason": "文件扩展名和内容类型与加载器匹配，但打开模式不匹配。",
+        "confidence": "medium"
+      }
+    ],
+    "observation_points": [
+      {
+        "kind": "exception",
+        "expression_hint": "调用 app.config.from_file(\"config.toml\", tomllib.load) 时是否抛出 TypeError。",
+        "reason": "Issue 中明确描述了此异常是错误现象。"
+      },
+      {
+        "kind": "return_value",
+        "expression_hint": "app.config.from_file 的返回值（应为 False 或抛出异常）。",
+        "reason": "方法在成功时应返回 True，失败时返回 False 或抛出异常。"
+      },
+      {
+        "kind": "state",
+        "expression_hint": "调用前后 app.config 字典的内容。",
+        "reason": "验证配置是否成功加载或未加载。"
+      }
+    ],
+    "assertion_hints": [
+      {
+        "assertion_goal": "使用 tomllib.load 作为加载器调用 from_file 时，应抛出 TypeError 异常（在当前有缺陷的版本中）。",
+        "preferred_assertion_style": "raises",
+        "avoid": "断言完整的异常消息字符串，因为消息可能因 Python 版本或环境而异。",
+        "reason": "Issue 的核心是抛出 TypeError，断言异常类型是稳定的。"
+      },
+      {
+        "assertion_goal": "异常消息应包含与文件模式相关的提示（如 'binary mode'）。",
+        "preferred_assertion_style": "contains_fragment",
+        "avoid": "断言完整的、可能变化的错误消息。",
+        "reason": "Issue 中给出了错误消息片段，可以作为稳定断言依据。"
+      }
+    ],
+    "setup_hints": [
+      {
+        "hint": "需要一个 .toml 配置文件用于测试。",
+        "source": "inference",
+        "confidence": "medium"
+      },
+      {
+        "hint": "可能需要导入 tomllib（Python 3.11+）或 tomli（兼容库）。",
+        "source": "issue",
+        "confidence": "high"
+      },
+      {
+        "hint": "使用 pytest.raises 上下文管理器来捕获预期的异常。",
+        "source": "retrieved_test",
+        "confidence": "high"
+      }
+    ],
+    "uncertainties": [
+      "tomllib 是否在测试环境中可用（Python 版本依赖）。",
+      "from_file 方法内部对 root_path 的处理是否会影响测试文件的路径构造。",
+      "除了 tomllib.load，是否还有其他需要二进制模式的常见加载函数。"
+    ]
+  }
+}
