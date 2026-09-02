@@ -113,6 +113,29 @@ def _decode_test_output(raw: bytes, log_dir: Path) -> str:
         return raw.decode("utf-8", errors="backslashreplace")
 
 
+def _parse_pytest_single_test_progress(log: str) -> dict[str, str]:
+    """Parse only an unambiguous one-test progress line from old pytest."""
+
+    if len(re.findall(r"\bcollected\s+1\s+item\b", log)) != 1:
+        return {}
+    matches = re.findall(
+        r"(?m)^\s*(\S+\.py(?:\S*)?)\s+([.FE])\s+\[100%\]\s*$",
+        log,
+    )
+    if len(matches) != 1:
+        return {}
+    test_path, progress = matches[0]
+    summaries = {
+        ".": ("PASSED", r"\b1\s+passed\b"),
+        "F": ("FAILED", r"\b1\s+failed\b"),
+        "E": ("ERROR", r"\b1\s+error\b"),
+    }
+    status, summary_pattern = summaries[progress]
+    if re.search(summary_pattern, log, flags=re.IGNORECASE) is None:
+        return {}
+    return {test_path: status}
+
+
 def _run_git(repo: Path, *args: str) -> str:
     process = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -251,7 +274,7 @@ def install() -> None:
     _configure_container_reuse(os.environ)
 
     import docker
-    from src import docker_utils, utils
+    from src import docker_utils, log_parsers, utils
     from src.constants import MAP_VERSION_TO_INSTALL
     from src.exec_spec import ExecSpec
 
@@ -267,6 +290,18 @@ def install() -> None:
         ExecSpec,
         repo_root,
     )
+
+    original_pytest_v2_parser = log_parsers.parse_log_pytest_v2
+
+    def parse_pytest_v2_with_single_test_fallback(log: str) -> dict[str, str]:
+        parsed = original_pytest_v2_parser(log)
+        return parsed or _parse_pytest_single_test_progress(log)
+
+    for repo, parser in list(log_parsers.MAP_REPO_TO_PARSER.items()):
+        if parser is original_pytest_v2_parser:
+            log_parsers.MAP_REPO_TO_PARSER[repo] = (
+                parse_pytest_v2_with_single_test_fallback
+            )
 
     utils.setup_logger = _bounded_setup_logger
 

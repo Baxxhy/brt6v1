@@ -15,6 +15,7 @@ from brt6.evaluation.swtbench_runtime_compat import (
     _decode_test_output,
     _lock_filename,
     _make_tree_world_accessible,
+    _parse_pytest_single_test_progress,
     _retryable_build_failure,
 )
 from brt6.runtime.swt_cached_compat import offline_eval_commands
@@ -86,6 +87,45 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
         self.assertIn("git apply -v -", converted)
         self.assertIn("python -m pytest tests/test_generated.py", converted)
         self.assertIn("git checkout base123", converted)
+
+    def test_old_pytest_single_test_progress_is_parsed_conservatively(self) -> None:
+        passed = """
+collected 1 item
+
+astropy/wcs/tests/test_brt_case.py .                    [100%]
+
+===================== 1 passed, 1 warnings in 0.20 seconds =====================
+"""
+        failed = """
+collected 1 item
+
+astropy/wcs/tests/test_brt_case.py F                    [100%]
+
+========================== 1 failed in 0.20 seconds ===========================
+"""
+
+        self.assertEqual(
+            _parse_pytest_single_test_progress(passed),
+            {"astropy/wcs/tests/test_brt_case.py": "PASSED"},
+        )
+        self.assertEqual(
+            _parse_pytest_single_test_progress(failed),
+            {"astropy/wcs/tests/test_brt_case.py": "FAILED"},
+        )
+
+    def test_old_pytest_fallback_rejects_ambiguous_or_incomplete_logs(self) -> None:
+        self.assertEqual(
+            _parse_pytest_single_test_progress(
+                "collected 2 items\npath/test_case.py .F [100%]\n1 passed, 1 failed"
+            ),
+            {},
+        )
+        self.assertEqual(
+            _parse_pytest_single_test_progress(
+                "collected 1 item\npath/test_case.py . [100%]"
+            ),
+            {},
+        )
 
     def test_cached_image_cleanup_is_a_noop(self) -> None:
         remover = getattr(runtime_compat, "_preserve_cached_image", None)
