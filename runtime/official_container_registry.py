@@ -188,6 +188,7 @@ class OfficialContainerRegistry:
                 )
 
             candidates = []
+            incompatible = []
             for container in client.containers.list(all=True):
                 name = str(getattr(container, "name", "") or "")
                 if not _is_official_name(name, expected_image):
@@ -197,6 +198,13 @@ class OfficialContainerRegistry:
                     continue
                 if container_is_reusable(container, expected_image):
                     candidates.append(container)
+                else:
+                    incompatible.append(name)
+            if incompatible:
+                raise ContainerRegistryError(
+                    f"incompatible official containers for {instance_id}: "
+                    f"{sorted(incompatible)}"
+                )
             if len(candidates) > 1:
                 names = sorted(str(container.name) for container in candidates)
                 raise ContainerRegistryError(

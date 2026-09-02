@@ -18,6 +18,10 @@ from brt6.runtime.official_docker_runtime import (
     docker_storage_preflight,
     safe_runtime_request,
 )
+from brt6.runtime.official_container_registry import (
+    ContainerRegistryError,
+    OfficialContainerRegistry,
+)
 from brt6.scripts.official_generation_container import (
     _normalize_swt_repo_commands,
     _remove_container_by_name,
@@ -41,6 +45,85 @@ def issue_row() -> dict:
 
 
 class OfficialRuntimeContractTests(unittest.TestCase):
+    def test_registry_reserves_the_exact_official_name(self) -> None:
+        class NotFound(Exception):
+            pass
+
+        client = mock.Mock()
+        client.containers.get.side_effect = NotFound()
+        client.containers.list.return_value = []
+        image = "exec.eval.x86_64.environment.instance:latest"
+        name = "exec.eval.x86_64.environment.instance.12345"
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = OfficialContainerRegistry(Path(tmp) / "registry.json")
+            resolution = registry.resolve(
+                client,
+                instance_id="owner__repo-1",
+                expected_image=image,
+                preferred_name=name,
+            )
+            stored = json.loads(registry.path.read_text(encoding="utf-8"))
+
+        self.assertEqual(resolution.name, name)
+        self.assertFalse(resolution.reused)
+        self.assertEqual(
+            stored["instances"]["owner__repo-1"],
+            {"container_name": name, "image": image},
+        )
+
+    def test_registry_adopts_one_compatible_official_container(self) -> None:
+        class NotFound(Exception):
+            pass
+
+        image = "exec.eval.x86_64.environment.instance:latest"
+        container = mock.Mock()
+        container.name = "exec.eval.x86_64.environment.instance.777"
+        container.attrs = {
+            "Config": {"Image": image},
+            "State": {"Status": "running", "Dead": False},
+        }
+        client = mock.Mock()
+        client.containers.get.side_effect = NotFound()
+        client.containers.list.return_value = [container]
+        with tempfile.TemporaryDirectory() as tmp:
+            resolution = OfficialContainerRegistry(
+                Path(tmp) / "registry.json"
+            ).resolve(
+                client,
+                instance_id="owner__repo-1",
+                expected_image=image,
+                preferred_name="exec.eval.x86_64.environment.instance.12345",
+            )
+
+        self.assertIs(resolution.container, container)
+        self.assertTrue(resolution.reused)
+        self.assertTrue(resolution.adopted)
+
+    def test_registry_rejects_ambiguous_official_containers(self) -> None:
+        image = "exec.eval.x86_64.environment.instance:latest"
+        containers = []
+        for suffix in ("111", "222"):
+            container = mock.Mock()
+            container.name = f"exec.eval.x86_64.environment.instance.{suffix}"
+            container.attrs = {
+                "Config": {"Image": image},
+                "State": {"Status": "running", "Dead": False},
+            }
+            containers.append(container)
+        client = mock.Mock()
+        client.containers.list.return_value = containers
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = OfficialContainerRegistry(Path(tmp) / "registry.json")
+            with self.assertRaisesRegex(
+                ContainerRegistryError, "multiple compatible official containers"
+            ):
+                registry.resolve(
+                    client,
+                    instance_id="owner__repo-1",
+                    expected_image=image,
+                    preferred_name="exec.eval.x86_64.environment.instance.12345",
+                )
+
     def test_official_setup_normalization_is_narrow_and_auditable(self) -> None:
         sklearn, sklearn_changes = _normalize_swt_repo_commands(
             {"repo": "scikit-learn/scikit-learn"},
@@ -400,6 +483,34 @@ class OfficialRuntimeContractTests(unittest.TestCase):
                 runtime.manifest["instance_image_cache_policy"],
                 "preserve_cached_image",
             )
+
+    def test_close_preserves_persistent_official_container(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = OfficialDockerRuntime(
+                dataset_mode="swt",
+                issue_row=issue_row(),
+                official_python="/opt/official/bin/python",
+                harness_root="/bench/swt",
+                source_repo=tmp,
+                output_dir=tmp,
+                startup_timeout=1800,
+            )
+            runtime.container_id = "container123"
+            runtime.container_name = "exec.eval.x86_64.environment.instance.123"
+            runtime.image = "exec.eval.x86_64.environment.instance:latest"
+            runtime.image_owned = False
+            runtime.container_persistent = True
+            runtime.manifest = {"status": "RUNNING"}
+
+            with mock.patch(
+                "brt6.runtime.official_docker_runtime._run"
+            ) as docker_command:
+                runtime.close()
+
+            docker_command.assert_not_called()
+            self.assertEqual(runtime.manifest["status"], "PERSISTENT_READY")
+            self.assertFalse(runtime.manifest["container_cleanup_attempted"])
+            self.assertFalse(runtime.manifest["instance_image_cleanup_attempted"])
 
     def test_close_waits_for_daemon_then_retries_timed_out_image_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

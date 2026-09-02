@@ -626,6 +626,7 @@ def main() -> int:
             "llm_provider": args.llm_provider,
             "llm_model": args.model,
             "runtime_backend": args.runtime_backend,
+            "max_workers": args.max_workers,
             "patch_cov_enabled": ablation_config.compute_patch_coverage,
             "behavior_target_source": behavior_target_source,
             "behavior_target_source_signature": (
@@ -687,6 +688,7 @@ def main() -> int:
         if iid in issues
     ]
     summary = {
+        "max_workers": args.max_workers,
         "total": len(ordered_results),
         "ok": sum(1 for r in ordered_results if r.get("status") not in {"ERROR", "SKIP", "MISSING_SUMMARY"}),
         "skip": sum(1 for r in results if r.get("status") == "SKIP"),
