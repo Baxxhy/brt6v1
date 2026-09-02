@@ -535,7 +535,16 @@ def _save_checkpoint(
     executable_fail = execution.returncode != 0 and execution.status not in {
         "SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR", "TIMEOUT",
     }
-    static_problem = audit_candidate(behavior, candidate.code) if behavior else ""
+    static_problem = (
+        audit_candidate(
+            behavior,
+            candidate.code,
+            issue_text=issue_text,
+            execution_log=execution.stdout + "\n" + execution.stderr,
+        )
+        if behavior
+        else ""
+    )
     oracle_contract = (
         oracle_contract_summary(behavior, candidate.code) if behavior else {}
     )

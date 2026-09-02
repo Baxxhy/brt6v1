@@ -24,7 +24,7 @@ from ..core.schema import (
     VerifierDecision,
 )
 from ..core.utils import extract_json_object, safe_json_dump, truncate_text, write_text
-from .semantic_guard import oracle_contract_summary
+from .semantic_guard import audit_candidate, oracle_contract_summary
 
 
 _DECISIONS = {"accept", "repair_setup", "repair_trigger", "repair_oracle", "reject"}
@@ -189,6 +189,26 @@ def verify_strict_semantics(
                     "未确认 Oracle 来自 Issue、使用公开行为且具有可证伪协议。"
                     + result.reason
                 )
+
+    deterministic_problem = audit_candidate(
+        behavior,
+        candidate.code,
+        issue_text=issue_text,
+        execution_log=execution.stdout + "\n" + execution.stderr,
+    )
+    if deterministic_problem and result.failure_class != "timeout":
+        if "命名空间" in deterministic_problem or "不得显式覆盖" in deterministic_problem:
+            repair_decision, failure_class = "repair_trigger", "target_not_hit"
+        elif "前置类型断言" in deterministic_problem:
+            repair_decision, failure_class = "repair_oracle", "oracle_wrong"
+        elif "不是合法 Python" in deterministic_problem or "类定义阶段" in deterministic_problem:
+            repair_decision, failure_class = "repair_setup", "setup"
+        else:
+            repair_decision, failure_class = "repair_oracle", "oracle_wrong"
+        result.decision = repair_decision
+        result.failure_class = failure_class
+        result.next_action = repair_decision
+        result.reason = deterministic_problem + (" " + result.reason if result.reason else "")
 
     safe_json_dump(
         result.to_dict(),

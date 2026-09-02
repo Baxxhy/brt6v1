@@ -272,8 +272,16 @@ def _semantic_path_problem(
     behavior: BehaviorEvidence,
     source_context: str,
     code: str,
+    *,
+    issue_text: str = "",
+    execution_log: str = "",
 ) -> str:
-    generic_problem = audit_candidate(behavior, code)
+    generic_problem = audit_candidate(
+        behavior,
+        code,
+        issue_text=issue_text,
+        execution_log=execution_log,
+    )
     if generic_problem:
         return generic_problem
     behavior_text = issue_evidence_text(behavior).lower()
@@ -498,7 +506,7 @@ def generate_candidate(
     code = _wrap_if_needed(response, host, safe_id)
     for validation_attempt in range(2):
         semantic_problem = _semantic_path_problem(
-            behavior, source_context, code
+            behavior, source_context, code, issue_text=issue_text
         )
         if not semantic_problem:
             break
@@ -578,7 +586,10 @@ def generate_candidate(
             )
             for validation_attempt in range(2):
                 semantic_problem = _semantic_path_problem(
-                    behavior, source_context, fallback_code
+                    behavior,
+                    source_context,
+                    fallback_code,
+                    issue_text=issue_text,
                 )
                 if not semantic_problem:
                     break
@@ -822,7 +833,11 @@ def repair_candidate(
             )
     for validation_attempt in range(2):
         semantic_problem = _semantic_path_problem(
-            behavior, source_context, code
+            behavior,
+            source_context,
+            code,
+            issue_text=issue_text,
+            execution_log=execution.stdout + "\n" + execution.stderr,
         )
         if not semantic_problem:
             break

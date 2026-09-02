@@ -314,6 +314,131 @@ class ViewTests:
         self.assertIn("module_context", audit_candidate(behavior, missing))
         self.assertEqual(audit_candidate(behavior, restored), "")
 
+    def test_issue_namespace_rejects_same_named_class_from_another_api(self) -> None:
+        issue = """
+from django.db import models
+file = models.FilePathField(path=dynamic_path)
+FilePathField.path should accept a callable.
+"""
+        behavior = BehaviorTarget(
+            "django__django-10924",
+            expected_behavior={"text": "FilePathField path accepts a callable"},
+        )
+        wrong = """
+from django.forms import FilePathField
+def test_case():
+    field = FilePathField(path=lambda: '/tmp')
+    assert callable(field.path)
+"""
+        correct = """
+from django.db.models import FilePathField
+def test_case():
+    field = FilePathField(path=lambda: '/tmp')
+    assert callable(field.path)
+"""
+
+        self.assertIn(
+            "django.db.models.FilePathField",
+            audit_candidate(behavior, wrong, issue_text=issue),
+        )
+        self.assertEqual(
+            audit_candidate(behavior, correct, issue_text=issue),
+            "",
+        )
+
+    def test_default_setting_test_must_not_override_the_setting(self) -> None:
+        issue = (
+            "Set default FILE_UPLOAD_PERMISSIONS to 0o644. In absence of "
+            "explicitly configured FILE_UPLOAD_PERMISSIONS permissions differ."
+        )
+        behavior = BehaviorTarget(
+            "django__django-10914",
+            expected_behavior={"text": "The default file mode is 0o644."},
+        )
+        overridden = """
+@override_settings(FILE_UPLOAD_PERMISSIONS=None)
+def test_case():
+    assert saved_mode() == 0o644
+"""
+        default = """
+def test_case():
+    assert saved_mode() == 0o644
+"""
+
+        self.assertIn(
+            "不得显式覆盖 FILE_UPLOAD_PERMISSIONS",
+            audit_candidate(behavior, overridden, issue_text=issue),
+        )
+        self.assertEqual(
+            audit_candidate(behavior, default, issue_text=issue),
+            "",
+        )
+
+    def test_unrelated_leading_type_precondition_cannot_mask_behavior(self) -> None:
+        behavior = BehaviorTarget(
+            "astropy__astropy-6938",
+            expected_behavior={"text": "Exponent E is replaced by D."},
+        )
+        candidate = """
+def test_case():
+    value = public_api()
+    assert isinstance(value, chararray.chararray)
+    assert 'D' in value
+"""
+
+        self.assertIn("前置类型断言", audit_candidate(behavior, candidate))
+
+    def test_strict_accept_is_overridden_by_deterministic_issue_guard(self) -> None:
+        llm = _StaticLLM(
+            {
+                "decision": "accept",
+                "failure_class": "issue_aligned",
+                "target_hit": True,
+                "oracle_grounded_in_issue": True,
+                "uses_public_behavior": True,
+                "oracle_falsifiable": True,
+                "reason": "looks aligned",
+                "next_action": "accept",
+            }
+        )
+        issue = "from django.db import models\nmodels.FilePathField path accepts callable"
+        behavior = BehaviorTarget(
+            "django__django-10924",
+            expected_behavior={"text": "FilePathField path accepts callable"},
+        )
+        candidate = CandidateTest(
+            "django__django-10924",
+            code=(
+                "from django.forms import FilePathField\n"
+                "def test_case():\n"
+                "    assert callable(FilePathField(path=lambda: '/tmp').path)\n"
+            ),
+        )
+        execution = ExecutionResult(
+            "django__django-10924",
+            returncode=1,
+            stdout="FAILED TypeError: expected str, got function",
+            status="ASSERTION_FAIL",
+        )
+        with tempfile.TemporaryDirectory() as raw:
+            Path(raw, "prompts").mkdir()
+            Path(raw, "responses").mkdir()
+            decision, strict = verify_strict_semantics(
+                issue,
+                behavior,
+                None,
+                candidate,
+                execution,
+                "",
+                llm,
+                raw,
+                0,
+            )
+
+        self.assertEqual(decision.decision, "repair_trigger")
+        self.assertEqual(strict.failure_class, "target_not_hit")
+        self.assertIn("django.db.models.FilePathField", decision.reason)
+
     def test_executor_returns_real_buggy_log_without_dynamic_tracing(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             result = run_command_in_conda(

@@ -182,6 +182,154 @@ def _required_message_tokens(behavior: BehaviorEvidence) -> set[str]:
     return required
 
 
+def _issue_import_aliases(issue_text: str) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for module, imported in re.findall(
+        r"(?m)^\s*from\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+import\s+([^\n]+)",
+        issue_text,
+    ):
+        for item in imported.strip(" ()").split(","):
+            parts = re.split(r"\s+as\s+", item.strip())
+            name = parts[0].strip()
+            if not re.fullmatch(r"[A-Za-z_]\w*", name):
+                continue
+            alias = parts[1].strip() if len(parts) == 2 else name
+            aliases[alias] = f"{module}.{name}"
+    for module, alias in re.findall(
+        r"(?m)^\s*import\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)"
+        r"(?:\s+as\s+([A-Za-z_]\w*))?\s*$",
+        issue_text,
+    ):
+        aliases[alias or module.split(".", 1)[0]] = module
+    return aliases
+
+
+def _tree_import_aliases(tree: ast.Module) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                aliases[alias.asname or alias.name.split(".", 1)[0]] = alias.name
+    return aliases
+
+
+def _resolve_imported_reference(node: ast.AST, aliases: dict[str, str]) -> str:
+    reference = _name(node)
+    if not reference:
+        return ""
+    root, _, remainder = reference.partition(".")
+    origin = aliases.get(root)
+    if not origin:
+        return ""
+    return f"{origin}.{remainder}" if remainder else origin
+
+
+def _namespace_mismatch(issue_text: str, tree: ast.Module) -> tuple[str, str] | None:
+    issue_aliases = _issue_import_aliases(issue_text)
+    expected: set[str] = set()
+    for alias, class_name in re.findall(
+        r"\b([A-Za-z_]\w*)\.([A-Z][A-Za-z0-9_]*)\b", issue_text
+    ):
+        if alias in issue_aliases:
+            expected.add(f"{issue_aliases[alias]}.{class_name}")
+    for alias, origin in issue_aliases.items():
+        if origin.rsplit(".", 1)[-1][:1].isupper() and re.search(
+            rf"\b{re.escape(alias)}\s*\(", issue_text
+        ):
+            expected.add(origin)
+    if not expected:
+        return None
+
+    candidate_aliases = _tree_import_aliases(tree)
+    used = {
+        resolved
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for resolved in [_resolve_imported_reference(node.func, candidate_aliases)]
+        if resolved
+    }
+    for expected_reference in sorted(expected):
+        leaf = expected_reference.rsplit(".", 1)[-1]
+        for actual_reference in sorted(used):
+            if (
+                actual_reference.rsplit(".", 1)[-1] == leaf
+                and actual_reference != expected_reference
+            ):
+                return expected_reference, actual_reference
+    return None
+
+
+def _explicit_default_override(issue_text: str, tree: ast.Module) -> str:
+    lowered = issue_text.lower()
+    default_contract = any(
+        marker in lowered
+        for marker in (
+            "set default",
+            "by default",
+            "not explicitly configured",
+            "absence of explicitly configured",
+            "未显式配置",
+            "默认值",
+            "默认配置",
+        )
+    )
+    if not default_contract:
+        return ""
+    settings = set(re.findall(r"\b[A-Z][A-Z0-9_]{4,}\b", issue_text))
+    if not settings:
+        return ""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.keyword) and node.arg in settings:
+            return node.arg
+        targets: list[ast.AST] = []
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            if isinstance(node, ast.Assign):
+                targets.extend(node.targets)
+            else:
+                targets.append(node.target)
+        for target in targets:
+            if _name(target).rsplit(".", 1)[-1] in settings:
+                return _name(target).rsplit(".", 1)[-1]
+    return ""
+
+
+def _leading_type_precondition(
+    behavior: BehaviorEvidence, test_node: ast.AST
+) -> str:
+    expected = _expected_text(behavior)
+    if any(
+        marker in expected
+        for marker in (
+            "类型",
+            "实例",
+            " type",
+            "instance of",
+            " class",
+        )
+    ):
+        return ""
+    assertions: list[tuple[int, str]] = []
+    for node in ast.walk(test_node):
+        if isinstance(node, ast.Assert):
+            kind = "isinstance" if (
+                isinstance(node.test, ast.Call)
+                and _name(node.test.func).rsplit(".", 1)[-1] == "isinstance"
+            ) else "assert"
+            assertions.append((getattr(node, "lineno", 0), kind))
+        elif isinstance(node, ast.Call):
+            leaf = _name(node.func).rsplit(".", 1)[-1]
+            if leaf.startswith("assert"):
+                kind = "isinstance" if leaf.lower() == "assertisinstance" else "assert"
+                assertions.append((getattr(node, "lineno", 0), kind))
+    assertions.sort()
+    if len(assertions) > 1 and assertions[0][1] == "isinstance":
+        return "isinstance"
+    return ""
+
+
 def oracle_contract_summary(
     behavior: BehaviorEvidence,
     code: str,
@@ -263,8 +411,12 @@ def oracle_contract_summary(
 def audit_candidate(
     behavior: BehaviorEvidence,
     code: str,
+    *,
+    issue_text: str = "",
+    execution_log: str = "",
 ) -> str:
     """Return a repair instruction when the candidate is semantically unsafe."""
+    del execution_log
     try:
         tree = ast.parse(code)
     except SyntaxError:
@@ -280,6 +432,31 @@ def audit_candidate(
         return (
             f"完整 BRT 文件必须只有一个可收集测试入口，当前有 {len(test_nodes)} 个。"
             "保留最直接复现 Issue 的一个测试，删除 baseline、对照组和备用测试。"
+        )
+
+    mismatch = _namespace_mismatch(issue_text, tree) if issue_text else None
+    if mismatch:
+        expected_reference, actual_reference = mismatch
+        return (
+            "候选使用了与 Issue 同名但不同命名空间的 API："
+            f"当前是 {actual_reference}，Issue 明确调用的是 {expected_reference}。"
+            "必须沿用 Issue 的导入和公开 API，再验证该 API 的目标行为。"
+        )
+
+    overridden_setting = (
+        _explicit_default_override(issue_text, tree) if issue_text else ""
+    )
+    if overridden_setting:
+        return (
+            f"Issue 验证的是未显式配置时的默认行为，不得显式覆盖 {overridden_setting}。"
+            "请删除 override_settings、settings 赋值或同名关键字覆盖，让测试观察真实默认值。"
+        )
+
+    if _leading_type_precondition(behavior, test_nodes[0]):
+        return (
+            "首个前置类型断言会在目标行为执行或观察前失败，并且 expected_behavior "
+            "并未要求该返回类型。请删除此前置类型断言，直接构造 Issue 的触发路径，"
+            "让最终 Oracle 只验证修复后公开行为。"
         )
 
     if "NO_TESTS_COLLECTED" in code:
