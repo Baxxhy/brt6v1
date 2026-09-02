@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -24,6 +23,9 @@ if str(PACKAGE_ROOT) not in sys.path:
 from brt6.evaluation.official_benchmarks import (  # noqa: E402
     export_official_predictions,
     generation_completeness,
+)
+from brt6.evaluation.swtbench_runtime_compat import (  # noqa: E402
+    _configure_container_reuse,
 )
 
 
@@ -239,6 +241,8 @@ def main() -> int:
 
     official_commit = _git_head(official_root)
     environment = os.environ.copy()
+    if args.dataset == "swt":
+        _configure_container_reuse(environment)
     python_paths = [str(workspace), str(PACKAGE_ROOT), str(official_root), str(official_root / "src")]
     if environment.get("PYTHONPATH"):
         python_paths.append(environment["PYTHONPATH"])
@@ -269,6 +273,9 @@ def main() -> int:
                     "make official exception stringification side-effect free",
                     "rotate host-side official harness logs at a bounded size",
                     "preserve the shared cached instance image after all six official evaluation states finish",
+                    "reuse one readable persistent container per benchmark instance across all six states",
+                    "serialize each instance with a lock stored under /root",
+                    "remove runtime package installation from cached-image evaluation scripts",
                     "decode Docker test output as strict UTF-8 first and auditably escape only invalid bytes",
                     "patch both official run_evaluation module aliases loaded by src.main",
                 ],
@@ -280,7 +287,6 @@ def main() -> int:
             else None
         ),
         "command": command,
-        "command_sha256": hashlib.sha256(command_text.encode()).hexdigest(),
         "cwd": str(workspace),
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

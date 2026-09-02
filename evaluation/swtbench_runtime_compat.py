@@ -7,8 +7,8 @@ unchanged.  It only makes host-side source transport and cleanup reliable.
 
 from __future__ import annotations
 
+import fcntl
 import json
-import hashlib
 import logging
 import logging.handlers
 import os
@@ -16,6 +16,8 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping, MutableMapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +28,60 @@ _CLONE_RE = re.compile(
 )
 _RESET_RE = re.compile(r"^git reset --hard ([0-9a-f]{40})$", re.MULTILINE)
 _INSTALLED = False
+_CONTAINER_PREFIX = "brt6-swt-"
+_DEFAULT_LOCK_DIR = Path("/root/Baxxhy/BugReproduce/brt6/.runtime/locks")
+
+
+def readable_container_name(instance_id: str) -> str:
+    """Return the stable, human-readable container name for one SWT instance."""
+
+    rendered = re.sub(r"[^0-9A-Za-z_.-]+", "_", instance_id).strip("._")
+    if not rendered:
+        raise ValueError("instance_id is empty after sanitization")
+    name = f"{_CONTAINER_PREFIX}{rendered}"
+    if len(name) > 128:
+        raise ValueError(f"instance_id is too long for a Docker name: {instance_id!r}")
+    return name
+
+
+def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
+    """Enable one persistent official container per benchmark instance."""
+
+    environment["SWT_REUSE_CONTAINERS"] = "1"
+    environment["SWT_KEEP_CONTAINERS"] = "1"
+    environment["SWT_CONTAINER_REUSE_SCOPE"] = "instance"
+    environment["SWT_SKIP_EVAL_INSTALL"] = "1"
+    environment["BRT_SWT_CONTAINER_LOCK_DIR"] = str(_DEFAULT_LOCK_DIR)
+
+
+def _container_is_reusable(attrs: Mapping[str, Any], expected_image: str) -> bool:
+    """Accept only a healthy container created from the expected image tag."""
+
+    config = attrs.get("Config") or {}
+    state = attrs.get("State") or {}
+    status = str(state.get("Status") or "").lower()
+    return (
+        config.get("Image") == expected_image
+        and not bool(state.get("Dead"))
+        and status in {"created", "running", "exited"}
+    )
+
+
+@contextmanager
+def _instance_lock(instance_id: str):
+    """Serialize all six official states for a single benchmark instance."""
+
+    lock_dir = Path(
+        os.environ.get("BRT_SWT_CONTAINER_LOCK_DIR", str(_DEFAULT_LOCK_DIR))
+    )
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / f"{readable_container_name(instance_id)}.lock"
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _preserve_cached_image(client, image_id, logger=None):
@@ -50,7 +106,6 @@ def _decode_test_output(raw: bytes, log_dir: Path) -> str:
             "schema_version": 1,
             "policy": "utf-8-strict-then-backslashreplace",
             "raw_bytes": len(raw),
-            "raw_sha256": hashlib.sha256(raw).hexdigest(),
             "error_start": error.start,
             "error_end": error.end,
             "error_reason": error.reason,
@@ -198,6 +253,7 @@ def install() -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
+    _configure_container_reuse(os.environ)
 
     import docker
     from src import docker_utils, utils
@@ -216,6 +272,11 @@ def install() -> None:
         ExecSpec,
         repo_root,
     )
+
+    def get_readable_instance_container_name(exec_spec) -> str:
+        return readable_container_name(exec_spec.instance_id)
+
+    ExecSpec.get_instance_container_name = get_readable_instance_container_name
 
     utils.setup_logger = _bounded_setup_logger
 
@@ -347,6 +408,42 @@ def install() -> None:
 
     docker_build.build_image = reliable_build_image
 
+    original_build_container = docker_build.build_container
+
+    def reuse_validated_container(
+        exec_spec, client, logger, nocache, force_rebuild=False, build_mode="api"
+    ):
+        container_name = readable_container_name(exec_spec.instance_id)
+        try:
+            container = client.containers.get(container_name)
+        except docker.errors.NotFound:
+            container = None
+        if container is not None:
+            container.reload()
+            if _container_is_reusable(
+                container.attrs, exec_spec.instance_image_key
+            ):
+                logger.info(
+                    f"Reusing persistent container {container_name} for "
+                    f"{exec_spec.instance_id}."
+                )
+                return container
+            logger.warning(
+                f"Replacing incompatible container {container_name} for "
+                f"{exec_spec.instance_id}."
+            )
+            container.remove(force=True)
+        return original_build_container(
+            exec_spec,
+            client,
+            logger,
+            nocache,
+            force_rebuild=force_rebuild,
+            build_mode=build_mode,
+        )
+
+    docker_build.build_container = reuse_validated_container
+
     def evaluation_error_str(error) -> str:
         return (
             f"{error.instance_id}: {Exception.__str__(error)}\n"
@@ -406,21 +503,26 @@ def install() -> None:
         def run_instance_with_one_image_cleanup(
             test_spec, pred, rm_image, *args: Any, **kwargs: Any
         ):
-            try:
-                return original_run_instance(test_spec, pred, False, *args, **kwargs)
-            finally:
-                if rm_image:
-                    client = docker.from_env()
-                    try:
-                        remove_image(client, test_spec.exec_spec.instance_image_key)
-                    except Exception as error:
-                        print(
-                            "Deferred instance-image cleanup failed for "
-                            f"{test_spec.instance_id}: {type(error).__name__}: "
-                            f"{str(error)[-2000:]}"
-                        )
-                    finally:
-                        client.close()
+            with _instance_lock(test_spec.instance_id):
+                try:
+                    return original_run_instance(
+                        test_spec, pred, False, *args, **kwargs
+                    )
+                finally:
+                    if rm_image:
+                        client = docker.from_env()
+                        try:
+                            remove_image(
+                                client, test_spec.exec_spec.instance_image_key
+                            )
+                        except Exception as error:
+                            print(
+                                "Deferred instance-image cleanup failed for "
+                                f"{test_spec.instance_id}: {type(error).__name__}: "
+                                f"{str(error)[-2000:]}"
+                            )
+                        finally:
+                            client.close()
 
         run_evaluation.run_instance = run_instance_with_one_image_cleanup
 

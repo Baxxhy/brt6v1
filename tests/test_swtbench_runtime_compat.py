@@ -10,14 +10,62 @@ from pathlib import Path
 from brt6.evaluation import swtbench_runtime_compat as runtime_compat
 from brt6.evaluation.swtbench_runtime_compat import (
     _bounded_setup_logger,
+    _configure_container_reuse,
+    _container_is_reusable,
     _decode_test_output,
     _make_tree_world_accessible,
     _retryable_build_failure,
+    readable_container_name,
 )
 from brt6.runtime.swt_cached_compat import offline_eval_commands
 
 
 class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
+    def test_container_name_is_readable_and_stable_for_all_six_states(self) -> None:
+        names = {
+            readable_container_name("astropy__astropy-7746")
+            for _state in (
+                "pred_pre", "pred_post", "gold_pre", "gold_post", "base_pre", "base_post"
+            )
+        }
+
+        self.assertEqual(names, {"brt6-swt-astropy__astropy-7746"})
+        self.assertEqual(
+            readable_container_name("django__django-10914"),
+            "brt6-swt-django__django-10914",
+        )
+
+    def test_container_reuse_environment_uses_root_and_instance_scope(self) -> None:
+        environment = {}
+
+        _configure_container_reuse(environment)
+
+        self.assertEqual(environment["SWT_REUSE_CONTAINERS"], "1")
+        self.assertEqual(environment["SWT_KEEP_CONTAINERS"], "1")
+        self.assertEqual(environment["SWT_CONTAINER_REUSE_SCOPE"], "instance")
+        self.assertEqual(environment["SWT_SKIP_EVAL_INSTALL"], "1")
+        self.assertEqual(
+            environment["BRT_SWT_CONTAINER_LOCK_DIR"],
+            "/root/Baxxhy/BugReproduce/brt6/.runtime/locks",
+        )
+
+    def test_reuse_rejects_wrong_image_or_broken_state(self) -> None:
+        healthy = {
+            "Config": {"Image": "exec.eval.expected:latest"},
+            "State": {"Status": "running", "Dead": False},
+        }
+        self.assertTrue(_container_is_reusable(healthy, "exec.eval.expected:latest"))
+        self.assertFalse(_container_is_reusable(healthy, "exec.eval.other:latest"))
+        self.assertFalse(
+            _container_is_reusable(
+                {
+                    "Config": {"Image": "exec.eval.expected:latest"},
+                    "State": {"Status": "dead", "Dead": True},
+                },
+                "exec.eval.expected:latest",
+            )
+        )
+
     def test_cached_eval_removes_every_runtime_install_and_keeps_state_commands(self) -> None:
         commands = [
             "source /opt/miniconda3/bin/activate",
@@ -85,7 +133,18 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
             )
             self.assertEqual(diagnostic["invalid_bytes_hex"], "d8")
             self.assertEqual(diagnostic["raw_bytes"], 17)
-            self.assertEqual(len(diagnostic["raw_sha256"]), 64)
+            self.assertEqual(
+                set(diagnostic),
+                {
+                    "schema_version",
+                    "policy",
+                    "raw_bytes",
+                    "error_start",
+                    "error_end",
+                    "error_reason",
+                    "invalid_bytes_hex",
+                },
+            )
 
     def test_logger_is_bounded_and_records_log_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
