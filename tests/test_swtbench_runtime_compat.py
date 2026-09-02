@@ -13,26 +13,18 @@ from brt6.evaluation.swtbench_runtime_compat import (
     _configure_container_reuse,
     _container_is_reusable,
     _decode_test_output,
+    _lock_filename,
     _make_tree_world_accessible,
     _retryable_build_failure,
-    readable_container_name,
 )
 from brt6.runtime.swt_cached_compat import offline_eval_commands
 
 
 class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
-    def test_container_name_is_readable_and_stable_for_all_six_states(self) -> None:
-        names = {
-            readable_container_name("astropy__astropy-7746")
-            for _state in (
-                "pred_pre", "pred_post", "gold_pre", "gold_post", "base_pre", "base_post"
-            )
-        }
-
-        self.assertEqual(names, {"brt6-swt-astropy__astropy-7746"})
+    def test_lock_name_uses_instance_id_without_defining_a_container_name(self) -> None:
         self.assertEqual(
-            readable_container_name("django__django-10914"),
-            "brt6-swt-django__django-10914",
+            _lock_filename("astropy__astropy-7746"),
+            "astropy__astropy-7746.lock",
         )
 
     def test_container_reuse_environment_uses_root_and_instance_scope(self) -> None:

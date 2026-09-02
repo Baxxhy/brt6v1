@@ -28,9 +28,9 @@
 - [ ] 在 `runtime/swt_cached_compat.py` 实现 eval 命令转换，并在 shim 安装时包装 `ExecSpec.eval_script_list`。
 - [ ] 重新运行测试并确认通过。
 
-### 任务 2：可读名称的实例容器复用
+### 任务 2：官方名称的实例容器复用
 
-- [ ] 编写失败测试：相同实例六状态得到同一可读容器名；名称只含固定前缀和实例 ID；损坏容器只重建该容器；不同实例名称不同。
+- [ ] 编写失败测试：相同实例六状态使用 SWT-Bench 官方容器名；损坏容器只重建该容器；不同实例名称不同。
 - [ ] 运行目标测试，确认当前 shim 未设置复用契约而失败。
 - [ ] 在 `evaluation/swtbench_runtime_compat.py` 配置 `SWT_REUSE_CONTAINERS=1`、实例作用域和 `/root` 锁目录，增加复用前健康检查与精确恢复。
 - [ ] 在 `scripts/run_official_eval_after_generation.py` 写入同样环境契约和 manifest。

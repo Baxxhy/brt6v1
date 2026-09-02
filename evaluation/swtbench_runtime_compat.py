@@ -28,20 +28,15 @@ _CLONE_RE = re.compile(
 )
 _RESET_RE = re.compile(r"^git reset --hard ([0-9a-f]{40})$", re.MULTILINE)
 _INSTALLED = False
-_CONTAINER_PREFIX = "brt6-swt-"
 _DEFAULT_LOCK_DIR = Path("/root/Baxxhy/BugReproduce/brt6/.runtime/locks")
 
 
-def readable_container_name(instance_id: str) -> str:
-    """Return the stable, human-readable container name for one SWT instance."""
-
+def _lock_filename(instance_id: str) -> str:
+    """Return a filesystem-safe lock name without changing Docker naming."""
     rendered = re.sub(r"[^0-9A-Za-z_.-]+", "_", instance_id).strip("._")
     if not rendered:
         raise ValueError("instance_id is empty after sanitization")
-    name = f"{_CONTAINER_PREFIX}{rendered}"
-    if len(name) > 128:
-        raise ValueError(f"instance_id is too long for a Docker name: {instance_id!r}")
-    return name
+    return f"{rendered}.lock"
 
 
 def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
@@ -75,7 +70,7 @@ def _instance_lock(instance_id: str):
         os.environ.get("BRT_SWT_CONTAINER_LOCK_DIR", str(_DEFAULT_LOCK_DIR))
     )
     lock_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = lock_dir / f"{readable_container_name(instance_id)}.lock"
+    lock_path = lock_dir / _lock_filename(instance_id)
     with lock_path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
@@ -273,11 +268,6 @@ def install() -> None:
         repo_root,
     )
 
-    def get_readable_instance_container_name(exec_spec) -> str:
-        return readable_container_name(exec_spec.instance_id)
-
-    ExecSpec.get_instance_container_name = get_readable_instance_container_name
-
     utils.setup_logger = _bounded_setup_logger
 
     remove_image = _preserve_cached_image
@@ -413,7 +403,7 @@ def install() -> None:
     def reuse_validated_container(
         exec_spec, client, logger, nocache, force_rebuild=False, build_mode="api"
     ):
-        container_name = readable_container_name(exec_spec.instance_id)
+        container_name = exec_spec.get_instance_container_name()
         try:
             container = client.containers.get(container_name)
         except docker.errors.NotFound:
