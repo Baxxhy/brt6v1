@@ -45,7 +45,7 @@ def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
     environment["SWT_REUSE_CONTAINERS"] = "1"
     environment["SWT_KEEP_CONTAINERS"] = "1"
     environment["SWT_CONTAINER_REUSE_SCOPE"] = "instance"
-    environment["SWT_SKIP_EVAL_INSTALL"] = "0"
+    environment["SWT_SKIP_EVAL_INSTALL"] = "1"
     environment["PIP_NO_INDEX"] = "1"
     environment["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
     environment["HF_HUB_OFFLINE"] = "1"

@@ -28,12 +28,22 @@ _OFFLINE_EXPORT = (
 
 
 def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]:
-    """Keep required source builds while making every pip command offline."""
+    """Reuse the official image build and keep optional installs offline.
+
+    ``git clean -fdx`` removes ignored extension modules and generated source
+    files baked into old project images.  Keep ignored files while still
+    deleting ordinary untracked test files between evaluation states.
+    """
 
     diagnostics = {"git status", "git show", f"git diff {base_commit}"}
     converted = [_OFFLINE_EXPORT]
     for command in commands:
         if command in diagnostics:
+            continue
+        command = re.sub(r"\bgit clean -fdx\b", "git clean -fd", command)
+        if "pip install" in command and re.search(
+            r"(?:^|\s)-e\s+\.(?:\[[^]]+\])?(?:\s|$)", command
+        ):
             continue
         if "pip install" in command:
             command = re.sub(
