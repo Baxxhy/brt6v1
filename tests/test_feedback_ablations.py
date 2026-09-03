@@ -24,8 +24,12 @@ from brt6.core.schema import (
     VerifierDecision,
 )
 from brt6.execution.feedback import (
+    _candidate_residual_state,
     _repair_focus,
+    _residual_transition,
+    _seed_residual_state,
     _seed_result_score,
+    _semantic_feedback_payload,
     _selected_protocol_result_fields,
     _uses_adaptive_seed_pipelines,
     run_instance_pipeline,
@@ -252,6 +256,114 @@ class FeedbackAblationTests(unittest.TestCase):
 
         self.assertLess(unresolved, executable)
 
+    def test_seed_pass_only_establishes_executable_host(self) -> None:
+        state = _seed_residual_state(
+            HostContext("demo", seed_execution_status="PASS")
+        )
+
+        self.assertEqual(state["stage"], "TRIGGER")
+        self.assertEqual(state["depth"], 1)
+        self.assertTrue(state["host_ready"])
+        self.assertIsNone(state["trigger_satisfied"])
+        self.assertEqual(state["semantic_status"], "UNKNOWN_NOT_VERIFIED")
+
+    def test_candidate_residual_tracks_trigger_oracle_and_completion(self) -> None:
+        execution = ExecutionResult(
+            "demo", returncode=1, status="ASSERTION_FAIL"
+        )
+        trigger = _candidate_residual_state(
+            0,
+            execution,
+            VerifierDecision("demo", "repair_trigger", "target not hit"),
+            StrictVerifierResult(
+                "demo",
+                decision="repair_trigger",
+                failure_class="target_not_hit",
+            ),
+        )
+        oracle = _candidate_residual_state(
+            1,
+            execution,
+            VerifierDecision("demo", "repair_oracle", "wrong oracle"),
+            StrictVerifierResult(
+                "demo",
+                decision="repair_oracle",
+                failure_class="oracle_wrong",
+                target_hit=True,
+            ),
+        )
+        complete = _candidate_residual_state(
+            2,
+            execution,
+            VerifierDecision("demo", "accept", "issue reproduced"),
+            StrictVerifierResult(
+                "demo",
+                decision="accept",
+                failure_class="issue_aligned",
+                target_hit=True,
+                oracle_grounded_in_issue=True,
+                uses_public_behavior=True,
+                oracle_falsifiable=True,
+            ),
+        )
+
+        self.assertEqual((trigger["stage"], trigger["depth"]), ("TRIGGER", 1))
+        self.assertEqual((oracle["stage"], oracle["depth"]), ("ORACLE", 2))
+        self.assertEqual((complete["stage"], complete["depth"]), ("SEARCH_ACCEPTED", 3))
+        self.assertEqual(
+            _residual_transition(trigger, oracle)["relation"], "IMPROVED"
+        )
+        self.assertEqual(
+            _residual_transition(oracle, complete)["relation"], "SEARCH_ACCEPTED"
+        )
+
+    def test_semantic_feedback_contains_actionable_parent_child_difference(self) -> None:
+        current = {
+            "stage": "ORACLE",
+            "depth": 2,
+            "next_gap": "ORACLE",
+        }
+        transition = {
+            "relation": "IMPROVED",
+            "parent_stage": "TRIGGER",
+            "child_stage": "ORACLE",
+            "depth_delta": 1,
+        }
+
+        payload = _semantic_feedback_payload(
+            VerifierDecision("demo", "repair_oracle", "wrong oracle"),
+            StrictVerifierResult(
+                "demo",
+                failure_class="oracle_wrong",
+                target_hit=True,
+            ),
+            current,
+            transition,
+        )
+
+        residual = payload["residual_feedback"]
+        self.assertEqual(residual["current_state"], current)
+        self.assertEqual(residual["last_transition"], transition)
+        self.assertIn("Preserve setup and trigger", residual["instruction"])
+
+    def test_seed_score_does_not_let_residual_depth_dominate(self) -> None:
+        trigger_score = _seed_result_score(
+            {"status": "UNRELATED_FAIL"},
+            {
+                "score": 300,
+                "verifier": {"residual_state": {"depth": 1}},
+            },
+        )
+        oracle_score = _seed_result_score(
+            {"status": "UNRELATED_FAIL"},
+            {
+                "score": 100,
+                "verifier": {"residual_state": {"depth": 2}},
+            },
+        )
+
+        self.assertGreater(trigger_score, oracle_score)
+
     def test_mutation_ablation_does_not_reuse_legacy_joint_signature(self) -> None:
         config = AblationConfig(mutation=False)
         self.assertNotIn("joint_top3", config.signature)
@@ -471,6 +583,28 @@ class FeedbackAblationTests(unittest.TestCase):
         self.assertEqual(result.host_context["reference_seed_tests"], [])
         self.assertEqual(list(output.rglob("mutation*")), [])
 
+    def test_residual_difference_reaches_repair_and_is_saved(self) -> None:
+        _, _, repair, _, _, output, temp = self._run_forced_decisions(
+            AblationConfig(), ["repair_trigger", "accept"]
+        )
+        self.addCleanup(temp.cleanup)
+
+        feedback = repair.call_args_list[0].args[11]["residual_feedback"]
+        self.assertEqual(feedback["current_state"]["stage"], "TRIGGER")
+        self.assertEqual(
+            feedback["last_transition"]["relation"], "INITIALIZED"
+        )
+        self.assertIn("target behavior", feedback["instruction"])
+
+        trace = json.loads(
+            (output / "residual_trace.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [item["state"]["stage"] for item in trace["rounds"]],
+            ["TRIGGER", "SEARCH_ACCEPTED"],
+        )
+        self.assertEqual(trace["final"]["stage"], "SEARCH_ACCEPTED")
+
     def test_mutation_ablation_runs_three_independent_seed_pipelines(self) -> None:
         result, planner, repair, _, _, output, temp = self._run_forced_decisions(
             AblationConfig(mutation=False),
@@ -503,6 +637,22 @@ class FeedbackAblationTests(unittest.TestCase):
         self.assertEqual(planner.call_count, 2)  # initial + one feedback replan
         self.assertEqual(result.trigger_replan_calls, 1)
         self.assertGreaterEqual(repair.call_count, 2)
+
+    def test_buggy_pass_exhaustion_is_not_exported_as_a_final_test(self) -> None:
+        executions = [
+            ExecutionResult("demo__repo-1", returncode=0, status="PASS")
+            for _ in range(4)
+        ]
+        result, _, _, _, _, output, temp = self._run_forced_decisions(
+            AblationConfig(),
+            ["repair_trigger"] * 4,
+            executions=executions,
+        )
+        self.addCleanup(temp.cleanup)
+
+        self.assertEqual(result.status, "TRIGGER_UNRESOLVED")
+        self.assertEqual(result.final_test_path, "")
+        self.assertFalse((output / "final_test.py").exists())
 
     def test_generic_iteration_uses_only_generic_repair(self) -> None:
         result, planner, repair, dependency, rebind, _, temp = self._run_forced_decisions(

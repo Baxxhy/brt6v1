@@ -24,7 +24,7 @@ from ..core.schema import (
     VerifierDecision,
 )
 from ..core.utils import extract_json_object, safe_json_dump, truncate_text, write_text
-from .semantic_guard import audit_candidate, oracle_contract_summary
+from .semantic_guard import oracle_contract_summary
 
 
 _DECISIONS = {"accept", "repair_setup", "repair_trigger", "repair_oracle", "reject"}
@@ -40,12 +40,21 @@ _FAILURE_CLASSES = {
     "oracle_too_strong",
     "issue_aligned",
 }
+_POST_FIX_RISKS = {"low", "medium", "high", "unknown"}
 
 
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _strings(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
 
 
 def _forced_result(
@@ -59,7 +68,6 @@ def _forced_result(
         "SYNTAX_ERROR": ("repair_setup", "syntax"),
         "COLLECT_ERROR": ("repair_setup", "collect"),
         "TIMEOUT": ("reject", "timeout"),
-        "PASS": ("repair_trigger", "buggy_pass"),
     }
     if execution.status not in mapping:
         return None
@@ -75,6 +83,15 @@ def _forced_result(
         oracle_falsifiable=False,
         reason=reason or execution.status,
         next_action=decision,
+        observed_behavior=reason or execution.status,
+        semantic_gap=("reach the target behavior" if execution.status == "PASS" else "restore executable setup"),
+        preserve=["the selected seed protocol and Issue-grounded behavior"],
+        change=[decision.replace("repair_", "")],
+        avoid=[execution.status],
+        next_operator=("CALL_CHAIN_EXTEND" if execution.status == "PASS" else "CONFIG_MUTATION"),
+        expected_effect="buggy execution reaches an Issue-aligned, falsifiable failure",
+        failure_origin=("test_body" if execution.status == "PASS" else "setup"),
+        post_fix_failure_risk="unknown",
     )
 
 
@@ -154,6 +171,21 @@ def verify_strict_semantics(
             or _as_bool(data.get("oracle_falsifiable")),
             reason=str(data.get("reason") or ""),
             next_action=str(data.get("next_action") or decision),
+            observed_behavior=str(data.get("observed_behavior") or ""),
+            target_behavior=str(data.get("target_behavior") or ""),
+            semantic_gap=str(data.get("semantic_gap") or data.get("gap") or ""),
+            preserve=_strings(data.get("preserve")),
+            # Each execution round changes one semantic coordinate only.
+            change=_strings(data.get("change"))[:1],
+            avoid=_strings(data.get("avoid")),
+            next_operator=str(data.get("next_operator") or data.get("operator") or ""),
+            expected_effect=str(data.get("expected_effect") or ""),
+            failure_origin=str(data.get("failure_origin") or ""),
+            post_fix_failure_risk=(
+                str(data.get("post_fix_failure_risk") or "unknown").lower()
+                if str(data.get("post_fix_failure_risk") or "unknown").lower() in _POST_FIX_RISKS
+                else "unknown"
+            ),
         )
 
         if result.decision == "accept":
@@ -189,26 +221,14 @@ def verify_strict_semantics(
                     "未确认 Oracle 来自 Issue、使用公开行为且具有可证伪协议。"
                     + result.reason
                 )
-
-    deterministic_problem = audit_candidate(
-        behavior,
-        candidate.code,
-        issue_text=issue_text,
-        execution_log=execution.stdout + "\n" + execution.stderr,
-    )
-    if deterministic_problem and result.failure_class != "timeout":
-        if "命名空间" in deterministic_problem or "不得显式覆盖" in deterministic_problem:
-            repair_decision, failure_class = "repair_trigger", "target_not_hit"
-        elif "前置类型断言" in deterministic_problem:
-            repair_decision, failure_class = "repair_oracle", "oracle_wrong"
-        elif "不是合法 Python" in deterministic_problem or "类定义阶段" in deterministic_problem:
-            repair_decision, failure_class = "repair_setup", "setup"
-        else:
-            repair_decision, failure_class = "repair_oracle", "oracle_wrong"
-        result.decision = repair_decision
-        result.failure_class = failure_class
-        result.next_action = repair_decision
-        result.reason = deterministic_problem + (" " + result.reason if result.reason else "")
+            elif result.post_fix_failure_risk == "high":
+                result.decision = "repair_oracle"
+                result.failure_class = "oracle_too_strong"
+                result.next_action = result.decision
+                result.semantic_gap = result.semantic_gap or "remove unrelated or over-constrained oracle clauses"
+                result.reason = (
+                    "即使目标修复实现，当前测试仍有高风险因无关约束失败。" + result.reason
+                )
 
     safe_json_dump(
         result.to_dict(),

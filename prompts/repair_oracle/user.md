@@ -23,4 +23,6 @@ Exception 或因为路径中偶然出现单个字符而成立/失败的脆弱断
 观测结果：{observation_json}
 Verifier 反馈：{verifier_feedback}
 
+严格服从 Semantic Delta：保留 setup 和 trigger，本轮只执行 Oracle 对应的唯一一项 change，删除该项直接涉及且由 avoid 指出的无关 baseline、完整格式猜测、私有状态或过强断言；其他差异留给后续轮次。post_fix_failure_risk 必须降到 low。
+
 必须优先完成 Verifier 反馈中的 Oracle 修复目标；返回代码必须对公开观察协议产生实质修改，不能只改注释或原样返回当前测试。

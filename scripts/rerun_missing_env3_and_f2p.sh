@@ -85,9 +85,7 @@ for instance_id in "${IDS[@]}"; do
       --instance_id "$instance_id" \
       --model deepseek-v3 \
       --max_workers 1 \
-      --max_feedback_rounds 3 \
-      --max_env_rounds 2 \
-      --max_brt_rounds 3 \
+      --max_semantic_rounds 5 \
       --validation_mode buggy_only \
       --timeout 1800 \
       --temperature 0.1 \

@@ -34,7 +34,9 @@ assertRaises/pytest.raises。若目标是验证错误消息，必须沿用 iCoRe
 行为目标：{behavior_json}
 HostContext：{host_context_json}
 相关源码：{code_context}
-相似测试代码：{seed_test_code}
+当前测试代码（这是本轮唯一父候选）：{seed_test_code}
 上一轮反馈：{feedback}
 
-要求：保留可执行上下文，只修改输入值、参数、对象状态、mock、配置、调用链、边界值或 operator 中与 Issue 相关的部分。不要裸 assert False。只输出 Python 代码，不要 markdown，不要解释。
+若附带 Semantic Delta，只实施其中 `change` 描述的一项改变。CONTEXT 只改变前置状态或输入，INTERACTION 只改变调用/顺序/状态迁移，OBSERVATION 只改变 Issue 支持的公共行为断言。`preserve` 是默认保持项；若上游改变令下游失效，本轮不要顺手修复，交给下一轮执行反馈。不得重新从 seed 或 Issue 整体生成另一条路线。
+
+输出修改后的完整 Python 文件。不要裸 assert False，不要 markdown，不要解释。

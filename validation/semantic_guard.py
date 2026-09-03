@@ -7,7 +7,7 @@ import builtins
 import re
 
 from ..core.behavior_evidence import BehaviorEvidence, expected_behavior_text
-from .mutation_adherence import oracle_kinds
+from .oracle_contract import oracle_kinds
 
 
 _ORACLE_LITERAL_CALLS = {
@@ -90,6 +90,19 @@ def _oracle_string_literals(tree: ast.AST) -> set[str]:
                 if isinstance(child, ast.Constant) and isinstance(child.value, str):
                     values.add(child.value.lower())
     return values
+
+
+def _unsupported_long_oracle_literal(
+    behavior: BehaviorEvidence, issue_text: str, tree: ast.Module
+) -> str:
+    """Find an exact rendered string that is not promised by the Issue."""
+
+    promised = (issue_text + "\n" + _expected_text(behavior)).lower()
+    for literal in sorted(_oracle_string_literals(tree), key=len, reverse=True):
+        compact = " ".join(literal.split())
+        if len(compact) >= 60 and compact not in promised:
+            return compact
+    return ""
 
 
 def _assigned_names(node: ast.AST) -> set[str]:
@@ -563,6 +576,16 @@ def audit_candidate(
             f"Issue 已给出可直接执行的最小复现调用，但候选额外传入 {schema_keyword}="
             " 改变了输入 schema，可能让 fixed 版本因另一个前置条件失败。请删除"
             "该额外参数，原样保留 Issue 的输入和目标调用，只观察承诺的修复行为。"
+        )
+
+    unsupported_literal = _unsupported_long_oracle_literal(
+        behavior, issue_text, tree
+    )
+    if unsupported_literal:
+        return (
+            "候选精确断言了 Issue/expected_behavior 未承诺的长格式化文本："
+            + repr(unsupported_literal[:120])
+            + "。请只保留 Issue 明确要求的稳定片段或公开结构，避免 fixed 版本因无关格式失败。"
         )
 
     if "NO_TESTS_COLLECTED" in code:

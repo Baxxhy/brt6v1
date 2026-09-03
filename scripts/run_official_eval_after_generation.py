@@ -29,8 +29,10 @@ from brt6.evaluation.swtbench_runtime_compat import (  # noqa: E402
 )
 
 
-INCOMPLETE_GENERATION_EXIT = 3
 F2P_ONLY_MARKER = "F2P_ONLY"
+DEFAULT_LOCAL_SWT_DATASET = (
+    PROJECT_ROOT / "data" / "official" / "swe_bench_lite_test.json"
+)
 
 
 def parse_bool(value: str) -> bool:
@@ -147,6 +149,10 @@ def main() -> int:
         default=str(PROJECT_ROOT / "evaluation/vendor/swtbench"),
     )
     parser.add_argument(
+        "--official-dataset-name",
+        default=str(DEFAULT_LOCAL_SWT_DATASET),
+    )
+    parser.add_argument(
         "--tddbench-root", default=str(PACKAGE_ROOT / "TDD-Bench-Verified")
     )
     args = parser.parse_args()
@@ -167,26 +173,11 @@ def main() -> int:
     generation_gate = generation_completeness(export_manifest)
     manifest_path = evaluation_dir / "official_run_manifest.json"
     if not generation_gate["complete"]:
-        now = datetime.now(timezone.utc).astimezone().isoformat()
-        refusal = {
-            "schema_version": 1,
-            "status": "refused_incomplete_generation",
-            "started_at": now,
-            "finished_at": now,
-            "returncode": INCOMPLETE_GENERATION_EXIT,
-            "dataset": args.dataset,
-            "run_id": run_id,
-            "model_name": args.model_name,
-            "predictions": export_manifest,
-            "generation_gate": generation_gate,
-            "reason": generation_gate["reason"],
-            "official_harness_invoked": False,
-        }
-        manifest_path.write_text(
-            json.dumps(refusal, indent=2) + "\n", encoding="utf-8"
+        print(
+            generation_gate["reason"]
+            + "; continuing with empty patches counted as F2P failures",
+            file=sys.stderr,
         )
-        print(generation_gate["reason"], file=sys.stderr)
-        return INCOMPLETE_GENERATION_EXIT
 
     official_root = Path(
         args.swtbench_root if args.dataset == "swt" else args.tddbench_root
@@ -221,12 +212,17 @@ def main() -> int:
     _link_official_sources(workspace, official_root, args.dataset)
     runtime_shim = _install_swt_runtime_shim(workspace) if args.dataset == "swt" else None
     if args.dataset == "swt":
+        official_dataset_name = str(Path(args.official_dataset_name).resolve())
+        if not Path(official_dataset_name).is_file():
+            raise SystemExit(
+                f"local official SWT dataset is missing: {official_dataset_name}"
+            )
         command = [
             str(official_python),
             "-m",
             "src.main",
             "--dataset_name",
-            "princeton-nlp/SWE-bench_Lite",
+            official_dataset_name,
             "--predictions_path",
             str(predictions_path),
             "--filter_swt",
@@ -278,8 +274,13 @@ def main() -> int:
         "official_commit": official_commit,
         "official_entrypoint": str(required_entry),
         "official_python": str(official_python),
+        "official_dataset_name": (
+            official_dataset_name if args.dataset == "swt" else args.dataset_file
+        ),
         "predictions": export_manifest,
         "generation_gate": generation_gate,
+        "generation_policy": "evaluate_available_count_missing_as_f2p_failure",
+        "missing_generation_ids": generation_gate["missing_ids"],
         "official_harness_invoked": True,
         "evaluation_scope": "f2p_only" if not args.compute_coverage else "f2p_and_coverage",
         "compute_coverage": args.compute_coverage,
@@ -291,12 +292,14 @@ def main() -> int:
                 "shim_source": str(PROJECT_ROOT / "evaluation" / "swtbench_runtime_compat.py"),
                 "changes": [
                     "resolve official requirements metadata from the project-local cache",
+                    "load the unchanged SWE-bench Lite rows from the project-local official cache",
                     "treat an already-absent instance image as successful cleanup",
                     "make official exception stringification side-effect free",
                     "rotate host-side official harness logs at a bounded size",
                     "preserve the shared cached instance image after all six official evaluation states finish",
                     "reuse the official SWT-Bench container name per instance across all six states",
                     "serialize each instance with a lock stored under /root",
+                    "restore the benchmark checkout and remove ordinary untracked files before and after every state",
                     "reuse ignored build artifacts baked into the official image and skip project reinstall",
                     "force optional pip commands and dataset access offline",
                     "decode Docker test output as strict UTF-8 first and auditably escape only invalid bytes",

@@ -27,18 +27,6 @@ BUGGY_ONLY_VERIFIER_USER_PROMPT = load_prompt("verifier", "user")
 JOINT_SEED_VERIFIER_SYSTEM_PROMPT = load_prompt("joint_seed_verifier", "system")
 JOINT_SEED_VERIFIER_USER_PROMPT = load_prompt("joint_seed_verifier", "user")
 
-REPAIR_SETUP_SYSTEM_PROMPT = load_prompt("repair_setup", "system")
-REPAIR_SETUP_USER_PROMPT = load_prompt("repair_setup", "user")
-
-REPAIR_TRIGGER_SYSTEM_PROMPT = load_prompt("repair_trigger", "system")
-REPAIR_TRIGGER_USER_PROMPT = load_prompt("repair_trigger", "user")
-
-REPAIR_ORACLE_SYSTEM_PROMPT = load_prompt("repair_oracle", "system")
-REPAIR_ORACLE_USER_PROMPT = load_prompt("repair_oracle", "user")
-
-REPAIR_GENERIC_SYSTEM_PROMPT = load_prompt("repair_generic", "system")
-REPAIR_GENERIC_USER_PROMPT = load_prompt("repair_generic", "user")
-
 SURROGATE_PATCH_SYSTEM_PROMPT = load_prompt("surrogate_patch", "system")
 SURROGATE_PATCH_USER_PROMPT = load_prompt("surrogate_patch", "user")
 
@@ -51,12 +39,6 @@ JOINT_SEED_PROTOCOL_RECOVERY_SYSTEM_PROMPT = load_prompt(
 SEED_MUTATION_PLAN_SYSTEM_PROMPT = load_prompt("mutation_plan", "system")
 SEED_MUTATION_PLAN_USER_PROMPT = load_prompt("mutation_plan", "user")
 
-OBSERVATION_ORACLE_SYSTEM_PROMPT = load_prompt("observation_oracle", "system")
-JOINT_SEED_OBSERVATION_ORACLE_SYSTEM_PROMPT = load_prompt(
-    "joint_seed_observation_oracle", "system"
-)
-OBSERVATION_ORACLE_PROBE_PROMPT = load_prompt("observation_oracle", "probe")
-OBSERVATION_ORACLE_REBIND_PROMPT = load_prompt("observation_oracle", "rebind")
 
 STRICT_SEMANTIC_VERIFIER_SYSTEM_PROMPT = load_prompt("strict_semantic_verifier", "system")
 STRICT_SEMANTIC_VERIFIER_USER_PROMPT = load_prompt("strict_semantic_verifier", "user")

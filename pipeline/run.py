@@ -18,7 +18,7 @@ from ..core.behavior_target_cache import (
     validate_behavior_target_cache,
 )
 from ..core.config import (
-    DEFAULT_MAX_FEEDBACK_ROUNDS,
+    DEFAULT_MAX_SEMANTIC_ROUNDS,
     DEFAULT_MAX_TOKENS,
     DEFAULT_MAX_WORKERS,
     DEFAULT_TEMPERATURE,
@@ -86,10 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base_url", default=None)
     parser.add_argument("--conda_env", default="")
     parser.add_argument("--max_workers", type=int, default=DEFAULT_MAX_WORKERS)
-    parser.add_argument("--max_feedback_rounds", type=int, default=DEFAULT_MAX_FEEDBACK_ROUNDS)
-    parser.add_argument("--max_env_rounds", type=int, default=None)
-    parser.add_argument("--max_brt_rounds", type=int, default=None)
-    parser.add_argument("--max_patch_rounds", type=int, default=3)
+    parser.add_argument("--max_semantic_rounds", type=int, default=DEFAULT_MAX_SEMANTIC_ROUNDS)
     parser.add_argument("--num_candidates", type=int, default=1)
     parser.add_argument("--instance_id", default=None)
     parser.add_argument(
@@ -181,7 +178,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=_parse_bool,
         default=True,
     )
-    parser.add_argument("--enable_observation_oracle", type=_parse_bool, default=True)
+    parser.add_argument(
+        "--semantic-delta",
+        "--enable_semantic_delta",
+        dest="enable_semantic_delta",
+        type=_parse_bool,
+        default=True,
+    )
     parser.add_argument("--enable_strict_semantic_verifier", type=_parse_bool, default=True)
     parser.add_argument(
         "--behavior-target",
@@ -207,6 +210,7 @@ def ablation_config_from_args(args: argparse.Namespace) -> AblationConfig:
         environment_feedback=args.enable_environment_feedback,
         trigger_feedback=args.enable_trigger_feedback,
         assertion_feedback=args.enable_assertion_feedback,
+        semantic_delta=args.enable_semantic_delta,
     ).validate()
 
 
@@ -489,15 +493,11 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
                 conda_env=conda_env,
                 timeout=args.timeout,
                 no_conda=True,
-                max_feedback_rounds=args.max_feedback_rounds,
-                max_env_rounds=args.max_env_rounds,
-                max_brt_rounds=args.max_brt_rounds,
-                max_patch_rounds=args.max_patch_rounds,
+                max_semantic_rounds=args.max_semantic_rounds,
                 validation_mode=args.validation_mode,
                 generate_only=args.generate_only,
                 enable_protocol_recovery=args.enable_protocol_recovery,
                 enable_seed_mutation=args.enable_seed_mutation,
-                enable_observation_oracle=args.enable_observation_oracle,
                 enable_strict_semantic_verifier=args.enable_strict_semantic_verifier,
                 enable_behavior_target=args.enable_behavior_target,
                 ablation_config=ablation_config,
@@ -524,7 +524,6 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
             "traceback": traceback.format_exc(),
             "protocol_recovery_enabled": args.enable_protocol_recovery,
             "seed_mutation_enabled": args.enable_seed_mutation,
-            "observation_oracle_enabled": args.enable_observation_oracle,
             "strict_verifier_enabled": args.enable_strict_semantic_verifier,
             "behavior_target_enabled": args.enable_behavior_target,
             "behavior_target_source": args.behavior_target_source,
@@ -540,13 +539,11 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
             "selected_seed_file": "",
             "selected_seed_name": "",
             "seed_fallback_used": False,
-            "mutation_ops": [],
-            "mutation_plan_calls": 0,
+            "delta_calls": 0,
             "repair_route_counts": {},
             "oracle_type": "",
             "strict_verifier_decision": "",
             "strict_failure_class": "",
-            "oracle_rebound": False,
             "final_reason": str(exc),
         }
         safe_json_dump(err, str(out_dir / "summary.json"))
@@ -698,7 +695,7 @@ def main() -> int:
         "defaults": {
             "max_workers": DEFAULT_MAX_WORKERS,
             "num_candidates": 1,
-            "max_feedback_rounds": DEFAULT_MAX_FEEDBACK_ROUNDS,
+            "max_semantic_rounds": DEFAULT_MAX_SEMANTIC_ROUNDS,
             "validation_mode": "buggy_only",
             "generate_only": False,
             "enable_protocol_recovery": args.enable_protocol_recovery,
@@ -707,7 +704,7 @@ def main() -> int:
             "enable_environment_feedback": args.enable_environment_feedback,
             "enable_trigger_feedback": args.enable_trigger_feedback,
             "enable_assertion_feedback": args.enable_assertion_feedback,
-            "enable_observation_oracle": args.enable_observation_oracle,
+            "enable_semantic_delta": args.enable_semantic_delta,
             "enable_strict_semantic_verifier": args.enable_strict_semantic_verifier,
             "enable_behavior_target": args.enable_behavior_target,
             "behavior_target_source": behavior_target_source,

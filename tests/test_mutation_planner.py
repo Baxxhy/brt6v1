@@ -196,7 +196,7 @@ class MutationPlannerTests(unittest.TestCase):
             any("target_symbol" in item for item in plan.validation_errors)
         )
 
-    def test_seed_anchor_must_match_literal_and_call_structure(self) -> None:
+    def test_semantic_plan_does_not_require_exact_seed_anchor(self) -> None:
         plan = self._validate(
             {
                 "status": "PROPOSED",
@@ -213,9 +213,63 @@ class MutationPlannerTests(unittest.TestCase):
                 ],
             }
         )
+        self.assertEqual(plan.status, "VALID")
+
+    def test_semantic_plan_keeps_one_change_and_its_audit_contract(self) -> None:
+        plan = self._validate(
+            {
+                "status": "PROPOSED",
+                "operator": "ARG_VALUE_REPLACE",
+                "gap": "the seed calls target_api with value 1",
+                "target_file": "pkg/mod.py",
+                "target_symbol": "target_api",
+                "preserve": ["the existing runner and result oracle"],
+                "change": ["call target_api with value 2"],
+                "avoid": ["changing the result oracle"],
+                "expected_effect": "the buggy target path is reached",
+                "evidence": ["the Issue requires value 2"],
+                "risk": "low",
+            }
+        )
+
+        self.assertEqual(plan.status, "VALID")
+        self.assertEqual(
+            plan.validation_evidence["change"],
+            ["call target_api with value 2"],
+        )
+        self.assertEqual(
+            plan.validation_evidence["avoid"],
+            ["changing the result oracle"],
+        )
+        self.assertEqual(
+            plan.validation_evidence["evidence"],
+            ["the Issue requires value 2"],
+        )
+
+    def test_semantic_plan_rejects_multiple_changes_in_one_round(self) -> None:
+        plan = self._validate(
+            {
+                "status": "PROPOSED",
+                "operator": "ARG_VALUE_REPLACE",
+                "gap": "the seed does not reach the target path",
+                "target_file": "pkg/mod.py",
+                "target_symbol": "target_api",
+                "preserve": ["the existing runner and result oracle"],
+                "change": [
+                    "call target_api with value 2",
+                    "replace the fixture state",
+                ],
+                "avoid": ["changing the result oracle"],
+                "expected_effect": "the buggy target path is reached",
+                "evidence": ["the Issue requires value 2"],
+                "risk": "low",
+            }
+        )
+
         self.assertEqual(plan.status, "INVALID")
-        self.assertTrue(
-            any("seed_anchor" in item for item in plan.validation_errors)
+        self.assertIn(
+            "semantic plan must contain exactly one change",
+            plan.validation_errors,
         )
 
     def test_mixed_plan_keeps_only_the_safe_trigger_step(self) -> None:

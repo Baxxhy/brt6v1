@@ -12,7 +12,7 @@ from ..core.behavior_evidence import (
     expected_behavior_text,
 )
 from ..core.schema import DualVersionResult
-from .mutation_adherence import oracle_kinds
+from .oracle_contract import oracle_kinds
 
 
 def _name(node: ast.AST) -> str:

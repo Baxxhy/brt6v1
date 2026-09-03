@@ -13,6 +13,7 @@ _COMPONENTS = (
     "environment_feedback",
     "trigger_feedback",
     "assertion_feedback",
+    "semantic_delta",
 )
 
 _VARIANTS = {
@@ -38,6 +39,11 @@ _VARIANTS = {
         "w/o Assertion Feedback",
         "_wo_assertion_feedback",
     ),
+    "semantic_delta": (
+        "wo_semantic_delta",
+        "w/o Semantic Delta Contract",
+        "_wo_semantic_delta",
+    ),
 }
 
 
@@ -51,6 +57,7 @@ class AblationConfig:
     environment_feedback: bool = True
     trigger_feedback: bool = True
     assertion_feedback: bool = True
+    semantic_delta: bool = True
 
     def disabled_components(self) -> list[str]:
         return [name for name in _COMPONENTS if not bool(getattr(self, name))]
@@ -122,6 +129,9 @@ class AblationConfig:
             ),
             "mutation_planning_mode": (
                 "validated_explicit_plan" if self.mutation else "disabled"
+            ),
+            "semantic_delta_mode": (
+                "preserve_change_avoid" if self.semantic_delta else "disabled"
             ),
             "effective_feedback_routes": {
                 "mode": (

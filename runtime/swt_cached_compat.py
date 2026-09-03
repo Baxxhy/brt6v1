@@ -48,9 +48,26 @@ def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]
     """
 
     diagnostics = {"git status", "git show", f"git diff {base_commit}"}
+    capture_pre_state = re.compile(
+        rf"^git diff HEAD {re.escape(base_commit)} >> /root/pre_state\.patch$"
+    )
+    restore_pre_state = "git apply /root/pre_state.patch"
+    checkout_base = f"git checkout {base_commit}"
+    clean_checkout = [
+        f"git reset --hard {base_commit}",
+        "git clean -fd",
+    ]
     converted = [_OFFLINE_EXPORT]
     for command in commands:
         if command in diagnostics:
+            continue
+        if capture_pre_state.fullmatch(command):
+            converted.extend(clean_checkout)
+            continue
+        if command == checkout_base:
+            converted.extend(clean_checkout)
+            continue
+        if command == restore_pre_state:
             continue
         command = re.sub(r"\bgit clean -fdx\b", "git clean -fd", command)
         if "pip install" in command and re.search(

@@ -186,53 +186,26 @@ class ProtocolRecovery(JsonMixin):
 
 
 @dataclass
-class MutationStep(JsonMixin):
-    """One evidence-grounded trigger edit proposed for a retrieved seed."""
-
-    op: str
-    target_file: str = ""
-    target_symbol: str = ""
-    seed_anchor: str = ""
-    before: str = ""
-    after: str = ""
-    rationale: str = ""
-    risk: str = "medium"
-
-
-@dataclass
-class MutationPlan(JsonMixin):
-    """Validated trigger-only plan.
-
-    ``status`` is ``VALID`` only after structural and evidence validation.
-    ``ABSTAIN`` and ``INVALID`` plans are persisted for auditability but must
-    never be presented to the test generator as instructions.
-    """
+class SemanticDelta(JsonMixin):
+    """The one semantic difference applied during a feedback round."""
 
     instance_id: str
     round_id: int = 0
+    schema_version: str = "semantic_delta.v2"
+    action: str = "KEEP"
+    dimension: str = ""
+    seed_fact: str = ""
+    target_fact: str = ""
+    change: str = ""
+    preserve: list[str] = field(default_factory=list)
+    avoid: list[str] = field(default_factory=list)
+    reason: str = ""
     status: str = "INVALID"
-    trigger_goal: str = ""
-    steps: list[MutationStep] = field(default_factory=list)
-    preserve_from_seed: list[str] = field(default_factory=list)
-    why_target_will_be_reached: str = ""
-    risk: str = "medium"
-    validation_errors: list[str] = field(default_factory=list)
-    validation_evidence: dict[str, Any] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
 
     @property
-    def mutation_ops(self) -> list[str]:
-        return [step.op for step in self.steps]
-
-    @property
-    def is_usable(self) -> bool:
-        return self.status == "VALID" and bool(self.steps)
-
-    def to_dict(self) -> dict[str, Any]:
-        payload = dataclasses.asdict(self)
-        # Keep this derived field in artifacts for compatibility with existing
-        # statistics scripts without allowing callers to construct fake ops.
-        payload["mutation_ops"] = self.mutation_ops
-        return payload
+    def is_actionable(self) -> bool:
+        return self.status == "VALID" and self.action == "MUTATE"
 
 
 @dataclass
@@ -247,6 +220,16 @@ class StrictVerifierResult(JsonMixin):
     oracle_falsifiable: bool = False
     reason: str = ""
     next_action: str = "reject"
+    observed_behavior: str = ""
+    target_behavior: str = ""
+    semantic_gap: str = ""
+    preserve: list[str] = field(default_factory=list)
+    change: list[str] = field(default_factory=list)
+    avoid: list[str] = field(default_factory=list)
+    next_operator: str = ""
+    expected_effect: str = ""
+    failure_origin: str = ""
+    post_fix_failure_risk: str = "unknown"
 
 
 @dataclass
@@ -262,9 +245,9 @@ class CandidateTest(JsonMixin):
     response_path: str = ""
     status: str = "CREATED"
     notes: str = ""
-    mutation_plan_status: str = ""
-    mutation_plan_risk: str = ""
-    mutation_adherence: dict[str, Any] = field(default_factory=dict)
+    semantic_delta: dict[str, Any] = field(default_factory=dict)
+    delta_history: list[dict[str, Any]] = field(default_factory=list)
+    delta_application: dict[str, Any] = field(default_factory=dict)
     oracle_contract_kinds: list[str] = field(default_factory=list)
     oracle_contract_preserved: bool = True
     oracle_contract_violation: str = ""
@@ -289,9 +272,9 @@ class CandidateCheckpoint(JsonMixin):
     target_hit: bool = False
     oracle_grounded_in_issue: bool = False
     uses_public_behavior: bool = False
-    mutation_plan_status: str = ""
-    mutation_plan_risk: str = ""
-    mutation_adherence: dict[str, Any] = field(default_factory=dict)
+    semantic_delta: dict[str, Any] = field(default_factory=dict)
+    delta_history: list[dict[str, Any]] = field(default_factory=list)
+    delta_application: dict[str, Any] = field(default_factory=dict)
     oracle_contract_kinds: list[str] = field(default_factory=list)
     oracle_contract_preserved: bool = True
     oracle_contract_violation: str = ""
@@ -378,29 +361,24 @@ class FinalResult(JsonMixin):
     notes: str = ""
     protocol_recovery_enabled: bool = False
     seed_mutation_enabled: bool = False
-    observation_oracle_enabled: bool = False
     strict_verifier_enabled: bool = False
     selected_seed_file: str = ""
     selected_seed_name: str = ""
     seed_fallback_used: bool = False
-    mutation_ops: list[str] = field(default_factory=list)
-    mutation_plan_calls: int = 0
-    mutation_plan_valid_calls: int = 0
-    mutation_plan_invalid_calls: int = 0
-    mutation_plan_abstentions: int = 0
-    selected_seed_mutation_plan_calls: int = 0
-    all_seed_mutation_plan_calls: int = 0
-    trigger_replan_calls: int = 0
-    final_mutation_plan_status: str = ""
-    final_mutation_plan_risk: str = ""
-    final_mutation_adherence: dict[str, Any] = field(default_factory=dict)
+    delta_calls: int = 0
+    valid_delta_calls: int = 0
+    keep_delta_calls: int = 0
+    selected_seed_delta_calls: int = 0
+    all_seed_delta_calls: int = 0
+    final_semantic_delta: dict[str, Any] = field(default_factory=dict)
+    delta_history: list[dict[str, Any]] = field(default_factory=list)
+    final_delta_application: dict[str, Any] = field(default_factory=dict)
     repair_route_counts: dict[str, int] = field(default_factory=dict)
     selected_seed_repair_route_counts: dict[str, int] = field(default_factory=dict)
     all_seed_repair_route_counts: dict[str, int] = field(default_factory=dict)
     oracle_type: str = ""
     strict_verifier_decision: str = ""
     strict_failure_class: str = ""
-    oracle_rebound: bool = False
     final_reason: str = ""
     seed_mode: str = ""
     selected_seed_index: int = -1
@@ -417,6 +395,6 @@ class FinalResult(JsonMixin):
     placement_dir: str = ""
     runner_kind: str = ""
     selector: str = ""
-    method_version: str = "p0-validated-mutation-oracle-feedback-v4"
+    method_version: str = "execution-guided-single-delta-v1"
     behavior_schema_version: str = "behavior_target.lossless.v1"
     surrogate_patch_calls: int = 0

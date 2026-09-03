@@ -10,6 +10,8 @@ HostContext：{host_context_json}
 执行日志：{execution_log}
 Verifier 反馈：{verifier_feedback}
 
+严格服从 Semantic Delta：保留 preserve，本轮只执行 change 指定的唯一一项 Trigger 变化，避开 avoid；其他差异留给后续轮次。若 last_transition=STAGNANT，必须换用不同 operator；若为 REGRESSED，必须以已恢复的父候选为基础。
+
 修复前先核对：
 1. 测试是否实际调用 target_apis 中的 API；
 2. 是否使用 Issue 明确给出的输入、边界值、配置、operator 或调用顺序；

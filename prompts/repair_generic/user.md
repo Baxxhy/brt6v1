@@ -16,4 +16,6 @@ ProtocolRecovery：{protocol_json}
 执行日志：{execution_log}
 Verifier 反馈：{verifier_feedback}
 
+若反馈含 Semantic Delta Contract，必须保留 preserve、本轮只执行 change 中唯一的一项修改、避开 avoid，并让本轮修改产生 expected_effect；其他差异留给后续执行轮次，不得同时自由重写 setup、trigger 和 oracle。
+
 综合以上所有信息完成一次修复，只输出完整 Python 代码。

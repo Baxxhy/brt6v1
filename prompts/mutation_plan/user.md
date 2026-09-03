@@ -1,61 +1,38 @@
-根据完整 Issue 证据、BehaviorTarget Trigger、单一 seed、相关源码和测试协议，生成一个仅修改 Trigger 的最小计划。
+请比较当前测试与目标行为，并提出本轮唯一 Delta。
 
-BehaviorTarget：{behavior_json}
-HostContext：{host_context_json}
-ProtocolRecovery：{protocol_json}
-相关生产代码：
+BehaviorTarget：
+{behavior_json}
+
+HostContext：
+{host_context_json}
+
+ProtocolRecovery：
+{protocol_json}
+
+相关源码：
 {source_context}
 
-当前相似测试 seed：
+当前测试（第一轮为 retrieved seed，之后为上一轮候选）：
 {seed_test_code}
 
-上一轮真实执行反馈：{execution_feedback}
-Verifier 反馈：{verifier_feedback}
+上一轮真实执行：
+{execution_feedback}
 
-允许的 op 只有：
-- ARG_VALUE_REPLACE
-- ARG_BOUNDARY_EXPAND
-- OPERATOR_FLIP
-- CALL_CHAIN_EXTEND
-- STATE_MUTATION
-- FIXTURE_DATA_MUTATION
-- CONFIG_MUTATION
-- MOCK_BEHAVIOR_MUTATION
-- LIFECYCLE_TRIGGER
-- SERIALIZATION_TRIGGER
-- WARNING_LOG_TRIGGER
+上一轮 Verifier：
+{verifier_feedback}
 
-选择规则：
-1. 初始轮只规划 Issue 明确要求、且 seed 尚未包含的最小 Trigger 差异。
-2. buggy PASS 或 target_not_hit 时，使用执行日志和 Verifier 指出的具体缺口；不要重新规划 Oracle。
-3. 若 seed 已经包含正确 Trigger，只需 Oracle 变化，则返回 ABSTAIN，由后续 Oracle 模块处理。
-4. 每个 step 的 before、after 和 seed_anchor 必须具体；seed_anchor/before 必须逐 AST 对应 seed 中真实存在的代码，包括常量和关键字参数，不能写“修改输入”“调用目标 API”等泛化描述。
-5. 如果无法同时给出真实文件、符号和 seed anchor，返回 ABSTAIN。
+已尝试 Delta 历史：
+{delta_history}
 
-有安全计划时只输出：
-{{
-  "status": "PROPOSED",
-  "trigger_goal": "",
-  "steps": [
-    {{
-      "op": "ARG_VALUE_REPLACE",
-      "target_file": "真实/相对/路径.py",
-      "target_symbol": "真实类或函数符号",
-      "seed_anchor": "seed 中真实存在的代码表达式",
-      "before": "seed 中的原值或原调用",
-      "after": "Issue 要求的新值或新调用",
-      "rationale": "为什么该修改会进入目标路径",
-      "risk": "low|medium"
-    }}
-  ],
-  "preserve_from_seed": [],
-  "why_target_will_be_reached": ""
-}}
-没有安全计划时只输出：
-{{
-  "status": "ABSTAIN",
-  "trigger_goal": "",
-  "steps": [],
-  "preserve_from_seed": [],
-  "why_target_will_be_reached": "证据不足的具体原因"
-}}
+要求：
+1. 只选 CONTEXT、INTERACTION、OBSERVATION 中一个最前置差异。
+2. `change` 必须是一项可直接用于修改当前测试的动作，不能串联多个修改。
+3. `preserve` 是默认保持项，不是静态硬约束；若上游改变使下游失效，留给后续轮。
+4. `avoid` 写入执行已经证伪的路径，不能重复历史失败动作。
+5. 证据不足时输出 KEEP；不能复制上一轮 KEEP 理由。
+
+MUTATE 唯一格式：
+{{"schema_version":"semantic_delta.v2","action":"MUTATE","dimension":"CONTEXT|INTERACTION|OBSERVATION","seed_fact":"当前候选事实","target_fact":"目标事实","change":"本轮唯一修改","preserve":["默认保持项"],"avoid":["已证伪路径"],"reason":"为何是最前置差异"}}
+
+KEEP 唯一格式：
+{{"schema_version":"semantic_delta.v2","action":"KEEP","dimension":"","seed_fact":"当前事实","target_fact":"当前无法可靠到达的目标事实","change":"","preserve":[],"avoid":[],"reason":"为何无法提出可靠单步差异"}}

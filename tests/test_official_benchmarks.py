@@ -121,7 +121,7 @@ class OfficialBenchmarkExportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             new_file_patch("../outside.py", "pass\n")
 
-    def test_official_runner_refuses_incomplete_generation_before_docker(self) -> None:
+    def test_official_runner_allows_incomplete_generation_before_harness(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             outputs = root / "generation"
@@ -156,12 +156,19 @@ class OfficialBenchmarkExportTests(unittest.TestCase):
                 text=True,
                 check=False,
             )
-            self.assertEqual(process.returncode, 3, process.stderr)
-            manifest = json.loads(
-                (evaluation / "official_run_manifest.json").read_text(encoding="utf-8")
+            self.assertEqual(process.returncode, 1, process.stderr)
+            self.assertIn(
+                "continuing with empty patches counted as F2P failures",
+                process.stderr,
             )
-            self.assertEqual(manifest["status"], "refused_incomplete_generation")
-            self.assertFalse(manifest["official_harness_invoked"])
+            predictions_manifest = json.loads(
+                (evaluation / "official_predictions.manifest.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(predictions_manifest["total_instances"], 1)
+            self.assertEqual(predictions_manifest["generated_instances"], 0)
+            self.assertEqual(predictions_manifest["missing_instances"], 1)
 
 
 if __name__ == "__main__":

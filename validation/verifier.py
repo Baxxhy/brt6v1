@@ -21,7 +21,6 @@ from ..core.behavior_evidence import (
     render_evidence_prompt,
 )
 from ..core.schema import CandidateTest, ExecutionResult, VerifierDecision
-from .semantic_guard import audit_candidate
 from ..core.utils import extract_json_object
 
 
@@ -166,19 +165,6 @@ def verify_buggy_only(
             status,
             ["setup"],
             next_action,
-        )
-    semantic_problem = audit_candidate(behavior, candidate.code)
-    if semantic_problem:
-        oracle_problem = any(
-            marker in semantic_problem
-            for marker in ("oracle", "断言", "raises", "hasattr", "expected_behavior")
-        )
-        return VerifierDecision(
-            candidate.instance_id,
-            "repair_oracle" if oracle_problem else "repair_trigger",
-            semantic_problem,
-            ["oracle" if oracle_problem else "trigger"],
-            semantic_problem,
         )
     if status == "PASS":
         if missing_check_target:

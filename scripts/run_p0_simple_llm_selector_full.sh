@@ -36,6 +36,8 @@ Options:
                        Enable trigger repair feedback (default: on).
   --assertion-feedback {on|off}
                        Enable observation/assertion repair feedback (default: on).
+  --semantic-delta {on|off}
+                       Enable preserve/change/avoid search state (default: on).
   -h, --help           Show this help message.
 
 At most one component may be off. Any ablation runs F2P only; the all-on
@@ -56,6 +58,7 @@ ENABLE_SPECIALIZED_FEEDBACK=${ENABLE_SPECIALIZED_FEEDBACK:-true}
 ENABLE_ENVIRONMENT_FEEDBACK=${ENABLE_ENVIRONMENT_FEEDBACK:-true}
 ENABLE_TRIGGER_FEEDBACK=${ENABLE_TRIGGER_FEEDBACK:-true}
 ENABLE_ASSERTION_FEEDBACK=${ENABLE_ASSERTION_FEEDBACK:-true}
+ENABLE_SEMANTIC_DELTA=${ENABLE_SEMANTIC_DELTA:-true}
 BEHAVIOR_TARGET_CACHE=${BEHAVIOR_TARGET_CACHE:-}
 
 normalize_switch() {
@@ -139,7 +142,7 @@ while [[ $# -gt 0 ]]; do
       fi
       shift
       ;;
-    --mutation|--specialized-feedback|--environment-feedback|--trigger-feedback|--assertion-feedback)
+    --mutation|--specialized-feedback|--environment-feedback|--trigger-feedback|--assertion-feedback|--semantic-delta)
       if [[ $# -lt 2 ]]; then
         echo "$1 requires on or off" >&2
         usage >&2
@@ -155,10 +158,11 @@ while [[ $# -gt 0 ]]; do
         --environment-feedback) ENABLE_ENVIRONMENT_FEEDBACK=$NORMALIZED ;;
         --trigger-feedback) ENABLE_TRIGGER_FEEDBACK=$NORMALIZED ;;
         --assertion-feedback) ENABLE_ASSERTION_FEEDBACK=$NORMALIZED ;;
+        --semantic-delta) ENABLE_SEMANTIC_DELTA=$NORMALIZED ;;
       esac
       shift 2
       ;;
-    --mutation=*|--specialized-feedback=*|--environment-feedback=*|--trigger-feedback=*|--assertion-feedback=*)
+    --mutation=*|--specialized-feedback=*|--environment-feedback=*|--trigger-feedback=*|--assertion-feedback=*|--semantic-delta=*)
       OPTION_NAME=${1%%=*}
       OPTION_VALUE=${1#*=}
       NORMALIZED=$(normalize_switch "$OPTION_VALUE") || {
@@ -171,6 +175,7 @@ while [[ $# -gt 0 ]]; do
         --environment-feedback) ENABLE_ENVIRONMENT_FEEDBACK=$NORMALIZED ;;
         --trigger-feedback) ENABLE_TRIGGER_FEEDBACK=$NORMALIZED ;;
         --assertion-feedback) ENABLE_ASSERTION_FEEDBACK=$NORMALIZED ;;
+        --semantic-delta) ENABLE_SEMANTIC_DELTA=$NORMALIZED ;;
       esac
       shift
       ;;
@@ -307,6 +312,10 @@ elif [ "$ENABLE_ASSERTION_FEEDBACK" = "false" ]; then
   RUN_VARIANT_SUFFIX="_wo_assertion_feedback"
   ABLATION_ID=wo_assertion_feedback
   METHOD_VARIANT="w/o Assertion Feedback"
+elif [ "$ENABLE_SEMANTIC_DELTA" = "false" ]; then
+  RUN_VARIANT_SUFFIX="_wo_semantic_delta"
+  ABLATION_ID=wo_semantic_delta
+  METHOD_VARIANT="w/o Semantic Delta Contract"
 fi
 if [ "$ABLATION_ID" != "full" ]; then
   COMPUTE_PATCH_COVERAGE=false
@@ -332,6 +341,11 @@ export BRT_LLM_PROVIDER=$LLM_PROVIDER
 ISSUE_WORKERS=${ISSUE_WORKERS:-6}
 GENERATION_WORKERS=${GENERATION_WORKERS:-6}
 EVALUATION_WORKERS=${EVALUATION_WORKERS:-6}
+MAX_SEMANTIC_ROUNDS=${MAX_SEMANTIC_ROUNDS:-5}
+if [[ ! "$MAX_SEMANTIC_ROUNDS" =~ ^[1-5]$ ]]; then
+  echo "MAX_SEMANTIC_ROUNDS must be an integer from 1 to 5" >&2
+  exit 2
+fi
 RUNTIME_BACKEND=${RUNTIME_BACKEND:-official_docker}
 if [[ "$RUNTIME_BACKEND" != "official_docker" ]]; then
   echo "brt6 generation only supports RUNTIME_BACKEND=official_docker" >&2
@@ -394,23 +408,6 @@ if [[ -n "$GIT_TRACKED_STATUS" && "${BRT_ALLOW_DIRTY_WORKTREE:-0}" != "1" ]]; th
   echo "Set BRT_ALLOW_DIRTY_WORKTREE=1 only for a non-comparable development run." >&2
   exit 2
 fi
-DATASET_SHA256=$(sha256sum "$INSTANCES_PATH" | awk '{print $1}')
-EVALUATOR_CONTRACT_SHA256=$(
-  sha256sum \
-    "$PROJECT_ROOT/evaluation/official_benchmarks.py" \
-    "$PROJECT_ROOT/scripts/run_official_eval_after_generation.py" \
-  | sha256sum | awk '{print $1}'
-)
-GENERATION_RUNTIME_CONTRACT_SHA256=$(
-  sha256sum \
-    "$PROJECT_ROOT/runtime/official_docker_runtime.py" \
-    "$PROJECT_ROOT/scripts/official_generation_container.py" \
-    "$PROJECT_ROOT/execution/executor.py" \
-    "$PROJECT_ROOT/execution/feedback.py" \
-    "$PROJECT_ROOT/pipeline/run.py" \
-  | sha256sum | awk '{print $1}'
-)
-
 BEHAVIOR_CACHE_VALIDATION_PATH=""
 if [[ -n "$BEHAVIOR_TARGET_CACHE" ]]; then
   BEHAVIOR_CACHE_VALIDATION_PATH=$RUN_DIR/behavior_target_cache_validation.json
@@ -428,12 +425,8 @@ fi
   "$BEHAVIOR_CACHE_VALIDATION_PATH" \
   "$GIT_COMMIT" \
   "$GIT_BRANCH" \
-  "$GIT_TRACKED_CLEAN" \
-  "$DATASET_SHA256" \
-  "$EVALUATOR_CONTRACT_SHA256" \
-  "$GENERATION_RUNTIME_CONTRACT_SHA256" <<PY
+  "$GIT_TRACKED_CLEAN" <<PY
 import json
-import hashlib
 import sys
 from pathlib import Path
 
@@ -463,9 +456,6 @@ config = {
     "framework_git_commit": sys.argv[3],
     "framework_git_branch": sys.argv[4],
     "tracked_worktree_clean": sys.argv[5] == "true",
-    "dataset_sha256": sys.argv[6],
-    "evaluator_contract_sha256": sys.argv[7],
-    "generation_runtime_contract_sha256": sys.argv[8],
     "generation_runtime_backend": "$RUNTIME_BACKEND",
     "host_project_environment_created": False,
     "formal_evaluator": "official_swtbench" if "$DATASET_MODE" == "swt" else "official_tddbench",
@@ -478,23 +468,6 @@ config["ablation_signature"] = ";".join(
         "environment_feedback", "trigger_feedback", "assertion_feedback",
     )
 )
-lineage_payload = {
-    "dataset_mode": config["dataset_mode"],
-    "llm_provider": config["llm_provider"],
-    "llm_model": config["llm_model"],
-    "dataset_sha256": config["dataset_sha256"],
-    "framework_git_commit": config["framework_git_commit"],
-    "evaluator_contract_sha256": config["evaluator_contract_sha256"],
-    "generation_runtime_contract_sha256": config[
-        "generation_runtime_contract_sha256"
-    ],
-    "behavior_target_source_signature": config[
-        "behavior_target_source_signature"
-    ],
-}
-config["experiment_lineage_signature"] = hashlib.sha256(
-    json.dumps(lineage_payload, sort_keys=True, separators=(",", ":")).encode()
-).hexdigest()
 Path(sys.argv[1]).write_text(
     json.dumps(config, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",
@@ -510,8 +483,6 @@ echo "llm_model=$MODEL"
 echo "instances_path=$INSTANCES_PATH"
 echo "dataset_size=$DATASET_SIZE"
 echo "framework_git_commit=$GIT_COMMIT"
-echo "evaluator_contract_sha256=$EVALUATOR_CONTRACT_SHA256"
-echo "generation_runtime_contract_sha256=$GENERATION_RUNTIME_CONTRACT_SHA256"
 echo "behavior_target_enabled=$ENABLE_BEHAVIOR_TARGET"
 echo "behavior_target_source=$("$PYTHON_BIN" -c 'import json,sys; print(json.load(open(sys.argv[1]))["behavior_target_source"]["mode"])' "$RUN_DIR/run_config.json")"
 if [[ -n "$BEHAVIOR_TARGET_CACHE" ]]; then
@@ -609,9 +580,7 @@ GENERATION_COMMAND=(
   --llm-provider "$LLM_PROVIDER" \
   --model "$MODEL" \
   --max_workers "$GENERATION_WORKERS" \
-  --max_feedback_rounds 3 \
-  --max_env_rounds 2 \
-  --max_brt_rounds 3 \
+  --max_semantic_rounds "$MAX_SEMANTIC_ROUNDS" \
   --validation_mode buggy_only \
   --timeout 1800 \
   --temperature 0.1 \
@@ -622,6 +591,7 @@ GENERATION_COMMAND=(
   --enable_environment_feedback "$ENABLE_ENVIRONMENT_FEEDBACK" \
   --enable_trigger_feedback "$ENABLE_TRIGGER_FEEDBACK" \
   --enable_assertion_feedback "$ENABLE_ASSERTION_FEEDBACK" \
+  --enable_semantic_delta "$ENABLE_SEMANTIC_DELTA" \
   "${BEHAVIOR_CACHE_ARGS[@]}" \
   "${GENERATION_RUNTIME_ARGS[@]}"
 )
@@ -791,10 +761,6 @@ completion = {
     'framework_git_commit': run_config.get('framework_git_commit', ''),
     'framework_git_branch': run_config.get('framework_git_branch', ''),
     'tracked_worktree_clean': run_config.get('tracked_worktree_clean', False),
-    'dataset_sha256': run_config.get('dataset_sha256', ''),
-    'evaluator_contract_sha256': run_config.get('evaluator_contract_sha256', ''),
-    'generation_runtime_contract_sha256': run_config.get('generation_runtime_contract_sha256', ''),
-    'experiment_lineage_signature': run_config.get('experiment_lineage_signature', ''),
     'instances_path': str(instances_path),
     'issue_rewrite_returncode': issue_rc,
     'generation_returncode': generation_rc,
@@ -810,8 +776,8 @@ completion = {
     'formal_evaluation_skip_reason': generation_gate.get(
         'formal_evaluation_skip_reason', ''
     ),
-    'mutation_plan_calls': sum(
-        int(summary.get('mutation_plan_calls') or 0)
+    'delta_calls': sum(
+        int(summary.get('delta_calls') or 0)
         for summary in instance_summaries
     ),
     'repair_route_counts': repair_route_counts,

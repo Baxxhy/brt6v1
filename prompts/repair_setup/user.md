@@ -44,5 +44,7 @@ HostContext：{host_context_json}
 执行日志：{execution_log}
 Verifier 反馈：{verifier_feedback}
 
+严格服从 Semantic Delta：保留 preserve，本轮只处理 setup 对应的唯一一项 change，避开 avoid；其他差异留给后续轮次，不得顺手改 Trigger 或 Oracle。
+
 必须优先完成 Verifier 反馈中的 next_action。若反馈指出具体 import、fixture、
 class、nodeid 或 setup 问题，返回代码必须实质修改对应位置，不能原样返回。

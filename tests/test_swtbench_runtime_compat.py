@@ -103,7 +103,8 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
     def test_cached_eval_preserves_image_build_artifacts_without_reinstall(self) -> None:
         commands = [
             "source /opt/miniconda3/bin/activate",
-            "git clean -fdx",
+            "cd /testbed",
+            "git diff HEAD base123 >> /root/pre_state.patch",
             "git status",
             "git show",
             "git diff base123",
@@ -112,6 +113,7 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
             "git apply -v -",
             "python -m pytest tests/test_generated.py",
             "git checkout base123",
+            "git apply /root/pre_state.patch",
         ]
 
         converted = offline_eval_commands(commands, base_commit="base123")
@@ -122,8 +124,10 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
             "export PIP_NO_INDEX=1 PIP_DISABLE_PIP_VERSION_CHECK=1 "
             "HF_HUB_OFFLINE=1 HF_DATASETS_OFFLINE=1 TRANSFORMERS_OFFLINE=1",
         )
-        self.assertIn("git clean -fd", converted)
+        self.assertEqual(rendered.count("git reset --hard base123"), 2)
+        self.assertEqual(rendered.count("git clean -fd"), 2)
         self.assertNotIn("git clean -fdx", converted)
+        self.assertNotIn("/root/pre_state.patch", rendered)
         self.assertNotIn("python -m pip install -e .[test] --verbose", rendered)
         self.assertIn(
             "python -c 'import roman' || python -m pip install --no-index "
@@ -135,7 +139,7 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
         self.assertNotIn("git diff base123", converted)
         self.assertIn("git apply -v -", converted)
         self.assertIn("python -m pytest tests/test_generated.py", converted)
-        self.assertIn("git checkout base123", converted)
+        self.assertNotIn("git checkout base123", converted)
 
     def test_old_pytest_single_test_progress_is_parsed_conservatively(self) -> None:
         passed = """
