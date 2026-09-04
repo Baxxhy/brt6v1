@@ -1010,21 +1010,40 @@ def prepare_instance_worktree(
     if not source_repo or not base_commit:
         return source_repo, {"status": "SKIPPED", "reason": "missing source repo or base_commit", "repo_path": source_repo}
     worktree = Path(output_dir) / "worktree"
-    if worktree.exists():
+
+    try:
+        worktree_timeout = max(
+            1, int(os.environ.get("BRT_WORKTREE_TIMEOUT", "1200"))
+        )
+    except ValueError:
+        worktree_timeout = 1200
+
+    def discard_partial_worktree() -> None:
         _run_local(
             f"git worktree remove --force {shlex.quote(str(worktree))}",
             source_repo,
-            timeout=300,
+            timeout=worktree_timeout,
         )
         if worktree.exists():
             shutil.rmtree(worktree)
+        _run_local("git worktree prune", source_repo, timeout=worktree_timeout)
+
+    if worktree.exists():
+        discard_partial_worktree()
     ensure_dir(worktree.parent)
     add_cmd = f"git worktree add --force --detach {shlex.quote(str(worktree))} {shlex.quote(base_commit)}"
-    add_result = _run_local(add_cmd, source_repo, timeout=300)
+    add_result = _run_local(add_cmd, source_repo, timeout=worktree_timeout)
     if add_result["returncode"] != 0:
+        discard_partial_worktree()
         clone_cmd = f"git clone --shared {shlex.quote(source_repo)} {shlex.quote(str(worktree))}"
-        clone_result = _run_local(clone_cmd, str(Path(output_dir)), timeout=600)
-        checkout_result = _run_local(f"git checkout --force {shlex.quote(base_commit)}", str(worktree), timeout=300) if clone_result["returncode"] == 0 else {}
+        clone_result = _run_local(
+            clone_cmd, str(Path(output_dir)), timeout=worktree_timeout
+        )
+        checkout_result = _run_local(
+            f"git checkout --force {shlex.quote(base_commit)}",
+            str(worktree),
+            timeout=worktree_timeout,
+        ) if clone_result["returncode"] == 0 else {}
         add_result = {"worktree_add": add_result, "clone": clone_result, "checkout": checkout_result}
         if clone_result["returncode"] != 0 or checkout_result.get("returncode") != 0:
             return str(worktree), {"status": "WORKTREE_ERROR", "details": add_result, "repo_path": str(worktree)}

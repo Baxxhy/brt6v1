@@ -4,14 +4,15 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 PACKAGE_ROOT=$(cd "$PROJECT_ROOT/.." && pwd)
+TMUX_SOCKET_NAME=brt6-runs
 
 usage() {
   cat <<'EOF'
 Usage: bash scripts/launch_semantic_delta_full.sh [options]
 
 Launch the complete Semantic Delta pipeline in a detached tmux session.
-The pipeline starts with IssueRewrite, generates every selected instance, and
-runs the official evaluation only after the generation gate succeeds.
+The pipeline starts with IssueRewrite, generates the selected instances, and
+runs the official evaluation for all dataset rows; missing tests count as failures.
 
 Options:
   --dataset {swt|tdd}            Dataset (default: swt).
@@ -22,6 +23,9 @@ Options:
   --issue-workers N              IssueRewrite workers (default: 6).
   --generation-workers N         Generation workers (default: 6).
   --evaluation-workers N         Official evaluation workers (default: 6).
+  --generation-timeout N         Per-instance generation timeout in seconds (default: 3600).
+  --worktree-timeout N           Git staging timeout in seconds (default: 1200).
+  --evaluation-timeout N         Per-instance evaluation timeout in seconds (default: 3600).
   --instances PATH               Override the generation dataset.
   --gold-dataset PATH            Override the official evaluation dataset.
   --official-python PATH         Override the official harness Python.
@@ -43,6 +47,9 @@ MAX_ROUNDS=5
 ISSUE_WORKERS_VALUE=6
 GENERATION_WORKERS_VALUE=6
 EVALUATION_WORKERS_VALUE=6
+GENERATION_TIMEOUT_VALUE=3600
+WORKTREE_TIMEOUT_VALUE=1200
+EVALUATION_TIMEOUT_VALUE=3600
 INSTANCES_FILE=""
 GOLD_FILE=""
 OFFICIAL_PYTHON=""
@@ -61,7 +68,7 @@ require_value() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --dataset|--model|--model-id|--max-rounds|--issue-workers|--generation-workers|--evaluation-workers|--instances|--gold-dataset|--official-python|--run-name|--session)
+    --dataset|--model|--model-id|--max-rounds|--issue-workers|--generation-workers|--evaluation-workers|--generation-timeout|--worktree-timeout|--evaluation-timeout|--instances|--gold-dataset|--official-python|--run-name|--session)
       require_value "$1" "${2:-}"
       case "$1" in
         --dataset) DATASET=$2 ;;
@@ -71,6 +78,9 @@ while [[ $# -gt 0 ]]; do
         --issue-workers) ISSUE_WORKERS_VALUE=$2 ;;
         --generation-workers) GENERATION_WORKERS_VALUE=$2 ;;
         --evaluation-workers) EVALUATION_WORKERS_VALUE=$2 ;;
+        --generation-timeout) GENERATION_TIMEOUT_VALUE=$2 ;;
+        --worktree-timeout) WORKTREE_TIMEOUT_VALUE=$2 ;;
+        --evaluation-timeout) EVALUATION_TIMEOUT_VALUE=$2 ;;
         --instances) INSTANCES_FILE=$2 ;;
         --gold-dataset) GOLD_FILE=$2 ;;
         --official-python) OFFICIAL_PYTHON=$2 ;;
@@ -160,9 +170,9 @@ is_positive_integer() {
   [[ "$1" =~ ^[1-9][0-9]*$ ]]
 }
 
-for value in "$ISSUE_WORKERS_VALUE" "$GENERATION_WORKERS_VALUE" "$EVALUATION_WORKERS_VALUE"; do
+for value in "$ISSUE_WORKERS_VALUE" "$GENERATION_WORKERS_VALUE" "$EVALUATION_WORKERS_VALUE" "$GENERATION_TIMEOUT_VALUE" "$WORKTREE_TIMEOUT_VALUE" "$EVALUATION_TIMEOUT_VALUE"; do
   if ! is_positive_integer "$value"; then
-    echo "worker counts must be positive integers" >&2
+    echo "worker counts and timeouts must be positive integers" >&2
     exit 2
   fi
 done
@@ -201,7 +211,7 @@ if [[ -e "$RUN_DIR" || -e "$LAUNCHER_LOG" ]]; then
   echo "refusing to overwrite existing run artifacts for: $RUN_NAME" >&2
   exit 2
 fi
-if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+if env SHELL=/bin/sh tmux -L "$TMUX_SOCKET_NAME" -f /dev/null has-session -t "$SESSION_NAME" 2>/dev/null; then
   echo "tmux session already exists: $SESSION_NAME" >&2
   exit 2
 fi
@@ -218,6 +228,10 @@ ENVIRONMENT=(
   "GENERATION_WORKERS=$GENERATION_WORKERS_VALUE"
   "EVALUATION_WORKERS=$EVALUATION_WORKERS_VALUE"
   "MAX_SEMANTIC_ROUNDS=$MAX_ROUNDS"
+  "GENERATION_TIMEOUT=$GENERATION_TIMEOUT_VALUE"
+  "BRT_WORKTREE_TIMEOUT=$WORKTREE_TIMEOUT_VALUE"
+  "FORMAL_EVAL_TIMEOUT=$EVALUATION_TIMEOUT_VALUE"
+  "ALLOW_INCOMPLETE_FORMAL_EVAL=true"
   "COMPUTE_PATCH_COVERAGE=$COMPUTE_COVERAGE"
 )
 if [[ "$ALLOW_DIRTY" == true ]]; then
@@ -230,7 +244,7 @@ else
 fi
 
 COMMAND=(
-  bash "$SCRIPT_DIR/run_p0_simple_llm_selector_full.sh"
+  env -u BASH_ENV /bin/bash --noprofile --norc "$SCRIPT_DIR/run_p0_simple_llm_selector_full.sh"
   --dataset "$DATASET"
   --model "$MODEL_PROVIDER"
   --behavior-target on
@@ -245,10 +259,12 @@ COMMAND=(
 printf -v escaped_root '%q' "$PROJECT_ROOT"
 printf -v escaped_log '%q' "$LAUNCHER_LOG"
 printf -v escaped_command '%q ' "${ENVIRONMENT[@]}" "${COMMAND[@]}"
-tmux new-session -d -s "$SESSION_NAME" \
+env SHELL=/bin/sh tmux -L "$TMUX_SOCKET_NAME" -f /dev/null new-session -d -s "$SESSION_NAME" \
   "cd $escaped_root && exec $escaped_command > $escaped_log 2>&1"
 
 printf 'session=%s\n' "$SESSION_NAME"
+printf 'tmux_socket=%s\n' "$TMUX_SOCKET_NAME"
+printf 'attach_command=tmux -L %s attach -t %s\n' "$TMUX_SOCKET_NAME" "$SESSION_NAME"
 printf 'run_name=%s\n' "$RUN_NAME"
 printf 'run_dir=%s\n' "$RUN_DIR"
 printf 'launcher_log=%s\n' "$LAUNCHER_LOG"

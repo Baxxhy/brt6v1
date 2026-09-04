@@ -99,6 +99,46 @@ class OfficialRuntimeContractTests(unittest.TestCase):
         self.assertTrue(resolution.reused)
         self.assertTrue(resolution.adopted)
 
+    def test_registry_replaces_stale_instance_mapping(self) -> None:
+        class NotFound(Exception):
+            pass
+
+        expected_image = "exec.eval.x86_64.new.instance:latest"
+        preferred_name = "exec.eval.x86_64.new.instance.12345"
+        client = mock.Mock()
+        client.containers.get.side_effect = NotFound()
+        client.containers.list.return_value = []
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = OfficialContainerRegistry(Path(tmp) / "registry.json")
+            registry.path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "instances": {
+                            "owner__repo-1": {
+                                "container_name": "exec.eval.x86_64.old.instance.9",
+                                "image": "exec.eval.x86_64.old.instance:latest",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            resolution = registry.resolve(
+                client,
+                instance_id="owner__repo-1",
+                expected_image=expected_image,
+                preferred_name=preferred_name,
+            )
+            stored = json.loads(registry.path.read_text(encoding="utf-8"))
+
+        self.assertEqual(resolution.name, preferred_name)
+        self.assertFalse(resolution.reused)
+        self.assertEqual(
+            stored["instances"]["owner__repo-1"],
+            {"container_name": preferred_name, "image": expected_image},
+        )
+
     def test_registry_rejects_ambiguous_official_containers(self) -> None:
         image = "exec.eval.x86_64.environment.instance:latest"
         containers = []
@@ -368,6 +408,52 @@ class OfficialRuntimeContractTests(unittest.TestCase):
             ensure_env.assert_not_called()
             isolate_env.assert_not_called()
             execute_setup.assert_not_called()
+
+    def test_worktree_failure_cleans_partial_directory_before_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source"
+            source.mkdir()
+            output = Path(tmp) / "output"
+            worktree = output / "worktree"
+            context = InstanceContext(
+                instance_id="i",
+                issue_text="issue",
+                repo="owner/repo",
+                base_commit="base123",
+                buggy_repo_path=str(source),
+                metadata={"version": "1"},
+            )
+            calls = []
+
+            def fake_run(command, cwd, timeout=300):
+                calls.append((command, cwd, timeout))
+                if command.startswith("git worktree add"):
+                    worktree.mkdir(parents=True)
+                    (worktree / "partial").write_text("partial", encoding="utf-8")
+                    return {"returncode": 124, "timeout": True}
+                if command.startswith("git clone"):
+                    self.assertFalse(worktree.exists())
+                    worktree.mkdir(parents=True)
+                return {"returncode": 0, "timeout": False}
+
+            runtime = mock.Mock()
+            runtime.manifest_path = output / "official_generation_runtime.json"
+            with mock.patch.object(feedback, "_run_local", side_effect=fake_run), mock.patch(
+                "brt6.runtime.official_docker_runtime.active_runtime",
+                return_value=runtime,
+            ), mock.patch.dict(os.environ, {"BRT_WORKTREE_TIMEOUT": "1200"}):
+                _, meta = feedback.prepare_instance_worktree(
+                    context, str(output), "", 120, True
+                )
+
+            commands = [item[0] for item in calls]
+            add_index = next(i for i, item in enumerate(commands) if item.startswith("git worktree add"))
+            remove_index = next(i for i, item in enumerate(commands) if item.startswith("git worktree remove"))
+            clone_index = next(i for i, item in enumerate(commands) if item.startswith("git clone"))
+            self.assertLess(add_index, remove_index)
+            self.assertLess(remove_index, clone_index)
+            self.assertEqual(calls[add_index][2], 1200)
+            self.assertEqual(meta["status"], "PASS")
 
     def test_container_command_uses_official_testbed_and_maps_host_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

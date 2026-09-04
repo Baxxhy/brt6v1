@@ -163,29 +163,30 @@ class OfficialContainerRegistry:
                 if image != expected_image or not _is_official_name(
                     name, expected_image
                 ):
-                    raise ContainerRegistryError(
-                        f"registry conflict for {instance_id}: expected "
-                        f"{expected_image}, found {image or 'missing image'} / "
-                        f"{name or 'missing name'}"
+                    # The official harness may legitimately change the image
+                    # identity for an instance. Never reuse the stale entry;
+                    # resolve or create a container for the current image.
+                    entries.pop(instance_id, None)
+                    entry = None
+                if entry is not None:
+                    try:
+                        container = client.containers.get(name)
+                    except Exception as error:
+                        if not _not_found(error):
+                            raise
+                        container = None
+                    if container is not None and not container_is_reusable(
+                        container, expected_image
+                    ):
+                        raise ContainerRegistryError(
+                            f"registered container is incompatible: {name}"
+                        )
+                    return ContainerResolution(
+                        name=name,
+                        container=container,
+                        reused=container is not None,
+                        adopted=False,
                     )
-                try:
-                    container = client.containers.get(name)
-                except Exception as error:
-                    if not _not_found(error):
-                        raise
-                    container = None
-                if container is not None and not container_is_reusable(
-                    container, expected_image
-                ):
-                    raise ContainerRegistryError(
-                        f"registered container is incompatible: {name}"
-                    )
-                return ContainerResolution(
-                    name=name,
-                    container=container,
-                    reused=container is not None,
-                    adopted=False,
-                )
 
             candidates = []
             incompatible = []

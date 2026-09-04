@@ -582,7 +582,7 @@ GENERATION_COMMAND=(
   --max_workers "$GENERATION_WORKERS" \
   --max_semantic_rounds "$MAX_SEMANTIC_ROUNDS" \
   --validation_mode buggy_only \
-  --timeout 1800 \
+  --timeout "${GENERATION_TIMEOUT:-3600}" \
   --temperature 0.1 \
   --max_tokens 4096 \
   --enable_behavior_target "$ENABLE_BEHAVIOR_TARGET" \
@@ -606,12 +606,14 @@ GENERATION_RC=$?
 echo "__BRT_STAGE__ generation_end rc=$GENERATION_RC $(date --iso-8601=seconds)"
 
 GENERATION_GATE_PATH=$RUN_DIR/generation_gate.json
+ALLOW_INCOMPLETE_FORMAL_EVAL=${ALLOW_INCOMPLETE_FORMAL_EVAL:-false}
 FORMAL_EVALUATION_ALLOWED=$("$PYTHON_BIN" - \
   "$INSTANCES_PATH" "$GENERATION_DIR" "$GENERATION_RC" "$GENERATION_GATE_PATH" <<'PY'
 import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from brt6.core.run_gate import formal_evaluation_allowed
 
 instances_path = Path(sys.argv[1])
 generation_dir = Path(sys.argv[2])
@@ -630,11 +632,14 @@ for row in rows:
         present = False
     (generated_ids if present else missing_ids).append(instance_id)
 artifacts_complete = bool(rows) and not missing_ids
-allowed = generation_rc == 0 and artifacts_complete
+allow_incomplete = str(__import__("os").environ.get("ALLOW_INCOMPLETE_FORMAL_EVAL", "false")).lower() in {"1", "true", "yes", "on"}
+allowed = formal_evaluation_allowed(
+    generation_rc, len(generated_ids), len(rows), allow_incomplete
+)
 reasons = []
-if generation_rc != 0:
+if generation_rc != 0 and not allow_incomplete:
     reasons.append(f"generation returned {generation_rc}")
-if not artifacts_complete:
+if not artifacts_complete and not allow_incomplete:
     reasons.append(
         f"only {len(generated_ids)}/{len(rows)} non-empty final_test.py artifacts exist"
     )
@@ -647,6 +652,7 @@ gate = {
     "generated_ids": generated_ids,
     "missing_ids": missing_ids,
     "artifacts_complete": artifacts_complete,
+    "allow_incomplete_formal_eval": allow_incomplete,
     "formal_evaluation_allowed": allowed,
     "formal_evaluation_skip_reason": "; ".join(reasons),
 }
@@ -666,7 +672,7 @@ if [[ "$FORMAL_EVALUATION_ALLOWED" == "true" ]]; then
     --outputs-dir "$GENERATION_DIR" \
     --dataset-file "$GOLD_DATASET" \
     --max-workers "$EVALUATION_WORKERS" \
-    --timeout 1800 \
+    --timeout "${FORMAL_EVAL_TIMEOUT:-3600}" \
     --evaluation-dir "$FORMAL_DIR" \
     --run-id "$(basename "$RUN_DIR")" \
     --model-name "brt6-$MODEL" \

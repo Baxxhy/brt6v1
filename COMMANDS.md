@@ -92,6 +92,9 @@ bash scripts/launch_semantic_delta_full.sh \
   --issue-workers 20 \
   --generation-workers 20 \
   --evaluation-workers 20 \
+  --generation-timeout 3600 \
+  --worktree-timeout 1200 \
+  --evaluation-timeout 3600 \
   --gold-dataset /root/Baxxhy/BugReproduce/brt6/data/official/swt276_official_eval.json \
   --f2p-only \
   --allow-dirty \
@@ -99,3 +102,4 @@ bash scripts/launch_semantic_delta_full.sh \
 ```
 
 该命令会自动创建带时间戳的实验目录和 tmux 会话，依次执行 IssueRewrite、生成、完整性检查和官方 F2P 评测。
+启动器固定使用隔离的 `brt6-runs` tmux socket，并禁用 Bash 启动文件。进入控制台使用启动结果打印的命令，格式为 `tmux -L brt6-runs attach -t 会话名`。
