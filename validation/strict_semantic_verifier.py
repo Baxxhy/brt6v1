@@ -203,12 +203,12 @@ def verify_strict_semantics(
                 result.decision = "repair_trigger"
                 result.failure_class = "buggy_pass"
                 result.next_action = result.decision
-                result.reason = "buggy 版本没有形成可执行失败。" + result.reason
+                result.reason = "The buggy version did not produce an executable failure. " + result.reason
             elif result.failure_class != "issue_aligned" or not result.target_hit:
                 result.decision = "repair_trigger"
                 result.failure_class = "target_not_hit"
                 result.next_action = result.decision
-                result.reason = "LLM 未确认失败路径与 Issue 对齐。" + result.reason
+                result.reason = "The model did not confirm that the failure path aligns with the issue. " + result.reason
             elif not (
                 result.oracle_grounded_in_issue
                 and result.uses_public_behavior
@@ -218,7 +218,7 @@ def verify_strict_semantics(
                 result.failure_class = "oracle_wrong"
                 result.next_action = result.decision
                 result.reason = (
-                    "未确认 Oracle 来自 Issue、使用公开行为且具有可证伪协议。"
+                    "The oracle was not confirmed as issue-grounded, public, and falsifiable. "
                     + result.reason
                 )
             elif result.post_fix_failure_risk == "high":
@@ -227,7 +227,7 @@ def verify_strict_semantics(
                 result.next_action = result.decision
                 result.semantic_gap = result.semantic_gap or "remove unrelated or over-constrained oracle clauses"
                 result.reason = (
-                    "即使目标修复实现，当前测试仍有高风险因无关约束失败。" + result.reason
+                    "The test has a high risk of failing on a correct fix because of unrelated constraints. " + result.reason
                 )
 
     safe_json_dump(

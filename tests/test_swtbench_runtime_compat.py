@@ -4,6 +4,7 @@ import json
 import logging.handlers
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -12,7 +13,9 @@ from brt6.evaluation import swtbench_runtime_compat as runtime_compat
 from brt6.runtime import swt_cached_compat
 from brt6.evaluation.swtbench_runtime_compat import (
     _bounded_setup_logger,
+    _bounded_exec_run,
     _configure_container_reuse,
+    _configure_docker_api_timeout,
     _container_is_reusable,
     _decode_test_output,
     _lock_filename,
@@ -26,22 +29,54 @@ from brt6.runtime.swt_cached_compat import offline_eval_commands
 
 
 class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
-    def test_persistent_container_cleanup_is_a_noop(self) -> None:
+    def test_bounded_exec_timeout_kills_container(self) -> None:
+        release = threading.Event()
+        container = mock.Mock()
+        container.id = "container-id"
+        container.attrs = {"State": {"Status": "running"}}
+        container.client.api.exec_create.return_value = {"Id": "exec-id"}
+        container.client.api.exec_start.side_effect = lambda _exec_id: release.wait(1)
+        container.kill.side_effect = lambda: release.set()
+
+        with self.assertRaises(TimeoutError):
+            _bounded_exec_run(container, "/bin/bash /eval.sh", timeout=0.01)
+
+        container.kill.assert_called_once_with()
+
+    def test_persistent_container_cleanup_kills_but_does_not_remove(self) -> None:
         container = mock.Mock()
         container.name = "exec.eval.x86_64.environment.instance.owner__repo-1"
+        container.attrs = {"State": {"Status": "running"}}
 
         _preserve_official_container(mock.Mock(), container, "quiet")
 
+        container.reload.assert_called_once_with()
+        container.kill.assert_called_once_with()
         container.stop.assert_not_called()
         container.remove.assert_not_called()
 
-    def test_running_reused_container_is_stopped_for_official_start(self) -> None:
+    def test_running_reused_container_is_killed_for_official_start(self) -> None:
         container = mock.Mock()
         container.attrs = {"State": {"Status": "running"}}
 
         _prepare_container_for_official_start(container)
 
-        container.stop.assert_called_once_with(timeout=15)
+        container.kill.assert_called_once_with()
+        container.stop.assert_not_called()
+
+    def test_docker_clients_receive_a_control_plane_timeout(self) -> None:
+        docker_module = mock.Mock()
+        original_from_env = docker_module.from_env
+        client = mock.sentinel.client
+        original_from_env.return_value = client
+
+        _configure_docker_api_timeout(
+            docker_module,
+            {"BRT_SWT_DOCKER_API_TIMEOUT": "300"},
+        )
+
+        self.assertIs(docker_module.from_env(version="auto"), client)
+        original_from_env.assert_called_once_with(version="auto", timeout=300)
 
     def test_vendored_metadata_path_stays_inside_project_cache(self) -> None:
         root = Path("/root/project/evaluation/vendor/swtbench_metadata")
@@ -126,6 +161,9 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
         )
         self.assertEqual(rendered.count("git reset --hard base123"), 2)
         self.assertEqual(rendered.count("git clean -fd"), 2)
+        self.assertEqual(
+            rendered.count("find . -type f -name '*.py[co]' -delete"), 2
+        )
         self.assertNotIn("git clean -fdx", converted)
         self.assertNotIn("/root/pre_state.patch", rendered)
         self.assertNotIn("python -m pip install -e .[test] --verbose", rendered)

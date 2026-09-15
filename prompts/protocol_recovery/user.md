@@ -2,4 +2,5 @@
 BehaviorTarget：{behavior_json}
 相关测试：{seed_test}
 自动恢复结果：{protocol_json}
-输出字段必须与自动恢复结果相同。
+只返回本次审计允许修正的字段：
+{"test_framework":"pytest|unittest|django|unknown","runner_hints":[],"protocol_risks":[]}

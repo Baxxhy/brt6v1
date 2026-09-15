@@ -160,7 +160,12 @@ def behavior_prompt_payload(behavior: Any, config: AblationConfig) -> dict[str, 
     """
 
     _ = config
-    return behavior.to_dict()
+    payload = behavior.to_dict()
+    if isinstance(payload, dict):
+        # Keep the lossless raw copy in artifacts, but do not resend fields
+        # that are already present in the normalized setup/trigger/oracle view.
+        payload.pop("raw", None)
+    return payload
 
 
 def render_ablation_prompt(

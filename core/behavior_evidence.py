@@ -61,6 +61,15 @@ def behavior_target_payload(evidence: BehaviorEvidence) -> dict:
     return evidence.to_dict() if isinstance(evidence, BehaviorTarget) else {}
 
 
+def behavior_prompt_view(evidence: BehaviorEvidence) -> dict:
+    """Return downstream evidence without the lossless duplicate raw payload."""
+
+    payload = evidence.to_dict()
+    if isinstance(evidence, BehaviorTarget):
+        payload.pop("raw", None)
+    return payload
+
+
 def raw_issue_payload(evidence: BehaviorEvidence) -> dict:
     return evidence.to_dict() if isinstance(evidence, RawIssueContext) else {}
 
@@ -74,18 +83,18 @@ def render_evidence_prompt(prompt: str, evidence: BehaviorEvidence) -> str:
     if isinstance(evidence, BehaviorTarget):
         return prompt
     rendered = prompt.replace(
-        "BehaviorTarget.trigger.safety_constraints 是硬约束",
-        "本消融不构建 BehaviorTarget；约束必须直接来自原始 Issue",
+        "BehaviorTarget.trigger.safety_constraints are hard constraints",
+        "This ablation does not build a BehaviorTarget; constraints must come directly from the issue",
     )
     rendered = rendered.replace("Issue/BehaviorTarget", "Issue")
-    rendered = rendered.replace("BehaviorTarget：", "原始 Issue（未结构化）：")
-    rendered = rendered.replace("行为目标：", "原始 Issue（未结构化）：")
+    rendered = rendered.replace("BehaviorTarget:", "Raw issue (unstructured):")
+    rendered = rendered.replace("Behavior target:", "Raw issue (unstructured):")
     rendered = rendered.replace(
-        "BehaviorTarget", "结构化行为目标（本消融未提供）"
+        "BehaviorTarget", "Structured behavior target unavailable in this ablation"
     )
     return (
-        "【实验条件：w/o Behavior Target】\n"
-        "未执行 IssueRewrite，未构建 Environment/Trigger/Assertion 三段表示；"
-        "请直接使用原始 Issue 与下方未改变的检索证据。\n\n"
+        "Experiment condition: without BehaviorTarget.\n"
+        "IssueRewrite was not run, so no Environment/Trigger/Assertion representation exists. "
+        "Please use the raw issue and unchanged retrieved evidence below.\n\n"
         + rendered
     )

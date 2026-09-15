@@ -8,13 +8,11 @@ Docker 直接复用本机已有的官方 `exec.eval.*` 镜像。每个实例沿�
 
 ## 新机器复现
 
-完整的安全导出、自动安装、密钥配置和全量实验说明见
-[README_REPRODUCE.md](README_REPRODUCE.md)。当前私有仓库按仓库所有者要求跟踪 `.secrets/api_pool.json`；公开导出前必须移除并轮换其中的 key。
+从 GitHub 下载后，在没有 Git、Conda、Docker 或 Python 项目环境的 Ubuntu 服务器上，按
+[2026-9-15 复现文档](2026-9-15复现文档.md) 顺序安装、配置 API、准备数据和镜像，先跑 3 条再跑全量。文档同时说明断点恢复、进程回收和发布前检查。
 
-```bash
-bash scripts/bootstrap_official_benchmarks.sh
-bash scripts/run_official_swt_full.sh
-```
+[中文2026-9-9配置文档.md](中文2026-9-9配置文档.md) 和
+[README_REPRODUCE.md](README_REPRODUCE.md) 保留作历史参考，其中部分入口及环境流程已过时；新机器以本节链接的新文档为准。
 
 ## 快速运行
 

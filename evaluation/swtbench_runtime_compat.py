@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from collections.abc import Mapping, MutableMapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -33,6 +34,7 @@ _CLONE_RE = re.compile(
 )
 _RESET_RE = re.compile(r"^git reset --hard ([0-9a-f]{40})$", re.MULTILINE)
 _INSTALLED = False
+_DEFAULT_DOCKER_API_TIMEOUT = 1200
 _DEFAULT_LOCK_DIR = Path("/root/Baxxhy/BugReproduce/brt6/.runtime/locks")
 _DEFAULT_SWT_METADATA_ROOT = Path(__file__).resolve().parent / "vendor/swtbench_metadata"
 
@@ -55,6 +57,31 @@ def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
     environment["HF_DATASETS_OFFLINE"] = "1"
     environment["TRANSFORMERS_OFFLINE"] = "1"
     environment["BRT_SWT_CONTAINER_LOCK_DIR"] = str(_DEFAULT_LOCK_DIR)
+    environment.setdefault(
+        "BRT_SWT_DOCKER_API_TIMEOUT", str(_DEFAULT_DOCKER_API_TIMEOUT)
+    )
+
+
+def _configure_docker_api_timeout(docker_module, environment: Mapping[str, str]) -> None:
+    """Give Docker control-plane calls more time than the SDK default."""
+
+    original_from_env = docker_module.from_env
+    if getattr(original_from_env, "_brt_swt_timeout_wrapper", False) is True:
+        return
+    timeout = int(
+        environment.get(
+            "BRT_SWT_DOCKER_API_TIMEOUT", str(_DEFAULT_DOCKER_API_TIMEOUT)
+        )
+    )
+    if timeout <= 0:
+        raise ValueError("BRT_SWT_DOCKER_API_TIMEOUT must be positive")
+
+    def from_env_with_timeout(*args, **kwargs):
+        kwargs.setdefault("timeout", timeout)
+        return original_from_env(*args, **kwargs)
+
+    from_env_with_timeout._brt_swt_timeout_wrapper = True
+    docker_module.from_env = from_env_with_timeout
 
 
 def _container_is_reusable(attrs: Mapping[str, Any], expected_image: str) -> bool:
@@ -93,13 +120,31 @@ def _preserve_cached_image(client, image_id, logger=None):
     return None
 
 
+def _kill_running_container(container) -> None:
+    """Terminate the dedicated idle container without a 15-second grace wait."""
+
+    container.reload()
+    state = container.attrs.get("State") or {}
+    if str(state.get("Status") or "").lower() == "running":
+        container.kill()
+
+
 def _preserve_official_container(client, container, logger=None):
-    """Keep the official instance container for the next generation/eval state."""
+    """Keep the official instance container stopped for the next eval state."""
 
     del client
     if container is None:
         return None
-    message = f"Preserving persistent container {container.name}."
+    try:
+        _kill_running_container(container)
+    except Exception as exc:  # noqa: BLE001 - cleanup must not hide eval output
+        message = f"Failed to stop persistent container {container.name}: {exc}"
+        if logger not in (None, "quiet"):
+            logger.warning(message)
+        elif logger is None:
+            print(message)
+        return None
+    message = f"Preserving stopped persistent container {container.name}."
     if logger not in (None, "quiet"):
         logger.info(message)
     elif logger is None:
@@ -113,8 +158,38 @@ def _prepare_container_for_official_start(container) -> None:
     container.reload()
     status = str((container.attrs.get("State") or {}).get("Status") or "").lower()
     if status == "running":
-        container.stop(timeout=15)
+        container.kill()
         container.reload()
+
+
+def _bounded_exec_run(container, cmd, timeout=60):
+    """Run Docker exec without leaving a blocking non-daemon thread."""
+
+    state: dict[str, Any] = {}
+
+    def run_command() -> None:
+        try:
+            exec_id = container.client.api.exec_create(container.id, cmd)["Id"]
+            state["result"] = container.client.api.exec_start(exec_id)
+        except BaseException as error:  # recorded and re-raised in caller
+            state["error"] = error
+
+    thread = threading.Thread(
+        target=run_command,
+        name=f"swt-exec-{getattr(container, 'id', 'unknown')}",
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        try:
+            _kill_running_container(container)
+        finally:
+            thread.join(30)
+        raise TimeoutError(f"Command {cmd!r} timed out after {timeout} seconds")
+    if "error" in state:
+        raise state["error"]
+    return state.get("result")
 
 
 def _decode_test_output(raw: bytes, log_dir: Path) -> str:
@@ -168,7 +243,7 @@ def _run_git(repo: Path, *args: str) -> str:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        timeout=300,
+        timeout=600,
         check=False,
     )
     if process.returncode:
@@ -211,7 +286,7 @@ def _stage_checkout(source_repo: Path, commit: str, destination: Path) -> None:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=1800,
+            timeout=3600,
             check=False,
         )
         if process.returncode:
@@ -305,6 +380,8 @@ def install() -> None:
     from src.exec_spec import ExecSpec
 
     from brt6.runtime.swt_cached_compat import configure_cached_official_runtime
+
+    _configure_docker_api_timeout(docker, os.environ)
 
     repo_root = Path(
         os.environ.get(
@@ -514,6 +591,8 @@ def install() -> None:
         run_evaluation.EvaluationError.__str__ = evaluation_error_str
         run_evaluation.remove_image = remove_image
         run_evaluation.cleanup_container = _preserve_official_container
+
+        run_evaluation.exec_run_with_timeout = _bounded_exec_run
 
         def eval_in_container(
             log_dir,

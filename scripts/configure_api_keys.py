@@ -105,6 +105,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--provider", choices=tuple(PROVIDER_DEFAULTS))
+    parser.add_argument("--base-url")
+    parser.add_argument("--model")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--from-env", action="store_true")
     args = parser.parse_args()
@@ -114,6 +116,15 @@ def main() -> int:
 
     provider = args.provider or "deepseek"
     entries = _entries_from_environment(provider) if args.from_env else []
+    if entries and (args.base_url or args.model):
+        entries = [
+            {
+                **entry,
+                "base_url": args.base_url or entry["base_url"],
+                "model": args.model or entry["model"],
+            }
+            for entry in entries
+        ]
     if args.from_env and not entries:
         prefix = "GPT" if provider == "gpt" else "DEEPSEEK"
         print(
@@ -130,8 +141,10 @@ def main() -> int:
         if not keys:
             print("No keys supplied", file=sys.stderr)
             return 2
-        base_url = input(f"Base URL [{default_base}]: ").strip() or default_base
-        model = input(f"Model [{default_model}]: ").strip() or default_model
+        base_default = args.base_url or default_base
+        model_default = args.model or default_model
+        base_url = input(f"Base URL [{base_default}]: ").strip() or base_default
+        model = input(f"Model [{model_default}]: ").strip() or model_default
         entries = [
             {
                 "name": f"{provider}-{index}",

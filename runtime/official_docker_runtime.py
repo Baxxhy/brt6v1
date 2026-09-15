@@ -26,6 +26,7 @@ from typing import Any, Iterator
 from ..core.behavior_evidence import BehaviorEvidence
 from ..core.schema import ExecutionResult
 from ..core.utils import safe_json_dump
+from ..execution.executor import enable_child_subreaper, terminate_process_tree
 from .official_container_registry import InstanceLock
 
 
@@ -91,17 +92,29 @@ def _run(
 ) -> subprocess.CompletedProcess:
     environment = dict(os.environ)
     environment.setdefault("DOCKER_HOST", DEFAULT_DOCKER_HOST)
-    return subprocess.run(
+    enable_child_subreaper()
+    binary_mode = input_bytes is not None
+    proc = subprocess.Popen(
         command,
         cwd=cwd,
-        input=input_bytes,
+        stdin=subprocess.PIPE if binary_mode else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        timeout=timeout,
-        check=False,
-        text=input_bytes is None,
+        text=not binary_mode,
         env=environment,
+        start_new_session=True,
     )
+    try:
+        stdout, stderr = proc.communicate(input=input_bytes, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        stdout, stderr = terminate_process_tree(proc)
+        exc.stdout = stdout
+        exc.stderr = stderr
+        raise
+    except BaseException:
+        terminate_process_tree(proc)
+        raise
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
 
 
 def _env_flag(name: str, default: bool) -> tuple[bool, str]:

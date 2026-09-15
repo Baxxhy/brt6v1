@@ -37,6 +37,14 @@ def lock_filename(instance_id: str) -> str:
     return f"{rendered}.lock"
 
 
+def instance_scoped_container_name(preferred_name: str, instance_id: str) -> str:
+    suffix = re.sub(r"[^0-9A-Za-z_.-]+", "_", instance_id).strip("._")[-80:]
+    if not suffix:
+        raise ValueError("instance_id is empty after sanitization")
+    prefix = preferred_name[: max(1, 240 - len(suffix))].rstrip(".")
+    return f"{prefix}.{suffix}"
+
+
 class InstanceLock:
     """Cross-process exclusive ownership of one benchmark instance."""
 
@@ -116,6 +124,19 @@ class OfficialContainerRegistry:
         self.path = path or DEFAULT_REGISTRY_PATH
         self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
 
+    def lookup(self, instance_id: str) -> dict[str, str] | None:
+        """Return a frozen registry identity without touching Docker."""
+
+        with self._locked() as payload:
+            entry = payload["instances"].get(instance_id)
+            if not isinstance(entry, dict):
+                return None
+            image = str(entry.get("image") or "")
+            name = str(entry.get("container_name") or "")
+            if not image or not name:
+                return None
+            return {"image": image, "container_name": name}
+
     @contextmanager
     def _locked(self) -> Iterator[dict[str, Any]]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -156,10 +177,26 @@ class OfficialContainerRegistry:
             )
         with self._locked() as payload:
             entries = payload["instances"]
+            owners_by_name: dict[str, list[str]] = {}
+            for owner, value in entries.items():
+                if not isinstance(value, dict):
+                    continue
+                registered_name = str(value.get("container_name") or "")
+                if registered_name:
+                    owners_by_name.setdefault(registered_name, []).append(owner)
+            owned_names = {
+                name: sorted(owners)[0] for name, owners in owners_by_name.items()
+            }
             entry = entries.get(instance_id)
             if entry is not None:
                 name = str(entry.get("container_name") or "")
                 image = str(entry.get("image") or "")
+                if len(owners_by_name.get(name, [])) > 1 and owned_names[name] != instance_id:
+                    # Repair registries created before one-container/one-instance
+                    # ownership was enforced. The lexical first owner keeps the
+                    # cached container; every other owner receives a new name.
+                    entries.pop(instance_id, None)
+                    entry = None
                 if image != expected_image or not _is_official_name(
                     name, expected_image
                 ):
@@ -178,8 +215,15 @@ class OfficialContainerRegistry:
                     if container is not None and not container_is_reusable(
                         container, expected_image
                     ):
-                        raise ContainerRegistryError(
-                            f"registered container is incompatible: {name}"
+                        # This container is exclusively owned by the current
+                        # registry entry. Remove a dead/stale Docker object and
+                        # reserve the same official name for clean recreation.
+                        container.remove(force=True)
+                        return ContainerResolution(
+                            name=name,
+                            container=None,
+                            reused=False,
+                            adopted=False,
                         )
                     return ContainerResolution(
                         name=name,
@@ -193,6 +237,8 @@ class OfficialContainerRegistry:
             for container in client.containers.list(all=True):
                 name = str(getattr(container, "name", "") or "")
                 if not _is_official_name(name, expected_image):
+                    continue
+                if name in owned_names and owned_names[name] != instance_id:
                     continue
                 attrs = _container_attrs(container)
                 if (attrs.get("Config") or {}).get("Image") != expected_image:
@@ -212,7 +258,12 @@ class OfficialContainerRegistry:
                     f"multiple compatible official containers for {instance_id}: {names}"
                 )
             container = candidates[0] if candidates else None
-            name = str(container.name) if container is not None else preferred_name
+            if container is not None:
+                name = str(container.name)
+            elif preferred_name in owned_names and owned_names[preferred_name] != instance_id:
+                name = instance_scoped_container_name(preferred_name, instance_id)
+            else:
+                name = preferred_name
             entries[instance_id] = {
                 "container_name": name,
                 "image": expected_image,
@@ -232,6 +283,20 @@ class OfficialContainerRegistry:
                 f"refusing to register non-official container name: {container_name}"
             )
         with self._locked() as payload:
+            duplicate_owner = next(
+                (
+                    owner
+                    for owner, value in payload["instances"].items()
+                    if owner != instance_id
+                    and isinstance(value, dict)
+                    and value.get("container_name") == container_name
+                ),
+                None,
+            )
+            if duplicate_owner is not None:
+                raise ContainerRegistryError(
+                    f"container {container_name} is already owned by {duplicate_owner}"
+                )
             entry = payload["instances"].get(instance_id)
             expected = {
                 "container_name": container_name,

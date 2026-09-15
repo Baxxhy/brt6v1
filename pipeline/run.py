@@ -75,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
             "before generation. If omitted, the launcher regenerates targets."
         ),
     )
+    parser.add_argument("--alignment-verifier", choices=("strict", "issue2test"), default="strict")
     parser.add_argument("--model", default="deepseek-v3")
     parser.add_argument(
         "--llm-provider",
@@ -96,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Comma-separated recovery subset. The full dataset is still used "
             "to validate a frozen BehaviorTarget cache, but only these IDs are run."
         ),
+    )
+    parser.add_argument(
+        "--instance_ids_file",
+        default="",
+        help="Newline-delimited recovery subset; mutually exclusive with ID flags.",
     )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--resume", action="store_true")
@@ -246,6 +252,13 @@ def configure_behavior_target_source(args: argparse.Namespace) -> dict:
             "source_signature": "behavior_target_disabled",
         }
     if not raw_cache:
+        if args.alignment_verifier == "issue2test" and os.environ.get("BRT4_BEHAVIOR_CACHE_DIR"):
+            return {
+                "mode": "frozen_c1_issue_rewrite",
+                "cache_path": os.environ["BRT4_BEHAVIOR_CACHE_DIR"],
+                "cache_id": "semantic_delta_swt_full_20260903_155525",
+                "source_signature": "",
+            }
         return {
             "mode": "regenerated",
             "cache_id": "",
@@ -351,10 +364,25 @@ def _interleave_by_conda_env(
 def select_instance_ids(args: argparse.Namespace, issues: dict[str, dict]) -> list[str]:
     """Select one auditable generation subset without changing cache identity."""
 
-    if args.instance_id and str(args.instance_ids or "").strip():
-        raise ValueError("--instance_id and --instance_ids are mutually exclusive")
+    selectors = [
+        bool(args.instance_id),
+        bool(str(args.instance_ids or "").strip()),
+        bool(str(args.instance_ids_file or "").strip()),
+    ]
+    if sum(selectors) > 1:
+        raise ValueError(
+            "--instance_id, --instance_ids, and --instance_ids_file are mutually exclusive"
+        )
     if args.instance_id:
         requested = [str(args.instance_id)]
+    elif str(args.instance_ids_file or "").strip():
+        requested = [
+            line.strip()
+            for line in Path(args.instance_ids_file).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if len(requested) != len(set(requested)):
+            raise ValueError("--instance_ids_file contains duplicate instance IDs")
     elif str(args.instance_ids or "").strip():
         requested = [
             item.strip()
@@ -438,6 +466,7 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
             previous_signature_matches = False
         if (
             previous_signature_matches
+            and previous.get("alignment_verifier", "strict") == args.alignment_verifier
             and previous_status not in {"ERROR", "SETUP_ERROR", "ENV_UNRESOLVED"}
         ):
             return {"instance_id": instance_id, "status": "SKIP"}
@@ -452,7 +481,11 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
         args.top_code,
         args.top_tests,
     )
-    client = LLMClient(
+    client_type = LLMClient
+    if args.alignment_verifier == "issue2test":
+        from ..validation.csu_client import CSUClient
+        client_type = CSUClient
+    client = client_type(
         provider=args.llm_provider,
         model=args.model,
         api_key=args.api_key,
@@ -501,8 +534,10 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
                 enable_strict_semantic_verifier=args.enable_strict_semantic_verifier,
                 enable_behavior_target=args.enable_behavior_target,
                 ablation_config=ablation_config,
+                alignment_verifier=args.alignment_verifier,
             )
         result_payload = result.to_dict()
+        result_payload["alignment_verifier"] = args.alignment_verifier
         result_payload["llm_provider"] = args.llm_provider
         result_payload["llm_model"] = args.model
         result_payload["behavior_target_source"] = args.behavior_target_source
@@ -604,6 +639,8 @@ def _load_instance_summary(output_dir: Path, instance_id: str, fallback: dict | 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    if args.alignment_verifier == "issue2test":
+        args.enable_strict_semantic_verifier = False
     try:
         ablation_config = ablation_config_from_args(args)
     except ValueError as exc:
@@ -622,6 +659,8 @@ def main() -> int:
             "dataset_mode": args.dataset_mode,
             "llm_provider": args.llm_provider,
             "llm_model": args.model,
+            "alignment_verifier": args.alignment_verifier,
+            "ranking": "unchanged_component1",
             "runtime_backend": args.runtime_backend,
             "max_workers": args.max_workers,
             "patch_cov_enabled": ablation_config.compute_patch_coverage,

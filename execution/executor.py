@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import re
 import shlex
+import ctypes
 import os
 import shutil
 import signal
 import subprocess
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -17,6 +20,67 @@ from ..core.behavior_evidence import (
     target_apis,
 )
 from ..core.schema import ExecutionResult
+
+
+_SUBREAPER_LOCK = threading.Lock()
+_SUBREAPER_CONFIGURED = False
+
+
+def enable_child_subreaper() -> bool:
+    """Adopt orphaned command descendants so this controller can reap them."""
+
+    global _SUBREAPER_CONFIGURED
+    if _SUBREAPER_CONFIGURED:
+        return True
+    if not sys.platform.startswith("linux"):
+        return False
+    with _SUBREAPER_LOCK:
+        if _SUBREAPER_CONFIGURED:
+            return True
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            # Linux PR_SET_CHILD_SUBREAPER. Descendants orphaned while a test
+            # command is being stopped are reparented here instead of PID 1.
+            if libc.prctl(36, 1, 0, 0, 0) != 0:
+                return False
+        except (AttributeError, OSError):
+            return False
+        _SUBREAPER_CONFIGURED = True
+        return True
+
+
+def _reap_process_group(pgid: int, timeout: float = 2.0) -> None:
+    """Reap adopted descendants belonging to one command process group."""
+
+    if not _SUBREAPER_CONFIGURED:
+        return
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            pid, _status = os.waitpid(-pgid, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid > 0:
+            continue
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.01)
+
+
+def _terminate_leftover_group(pgid: int) -> None:
+    """Stop background descendants left after the direct command has exited."""
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        _reap_process_group(pgid)
+        return
+    time.sleep(0.05)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    _reap_process_group(pgid)
 
 
 def no_tests_executed(stdout: str, stderr: str = "") -> bool:
@@ -68,7 +132,8 @@ def run_subprocess_tree(
     shell: bool = False,
     executable: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run in a process group and terminate the full runner tree on timeout."""
+    """Run in a process group and always reap it after interruption or timeout."""
+    enable_child_subreaper()
     proc = subprocess.Popen(
         command,
         shell=shell,
@@ -82,22 +147,39 @@ def run_subprocess_tree(
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        stdout, stderr = terminate_process_tree(proc)
+        exc.stdout = stdout
+        exc.stderr = stderr
+        raise exc
+    except BaseException:
+        terminate_process_tree(proc)
+        raise
+    _terminate_leftover_group(proc.pid)
+    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+
+
+def terminate_process_tree(
+    proc: subprocess.Popen,
+    *,
+    grace_seconds: float = 10.0,
+) -> tuple[str, str]:
+    """Terminate a session leader and wait until the direct child is reaped."""
+
+    if proc.poll() is None:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
+    try:
+        output = proc.communicate(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
         try:
-            stdout, stderr = proc.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            stdout, stderr = proc.communicate()
-        exc.stdout = stdout
-        exc.stderr = stderr
-        raise exc
-    return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        output = proc.communicate()
+    _terminate_leftover_group(proc.pid)
+    return output
 
 
 def _pythonpath_export(cwd: str, extra_entries: list[str] | None = None) -> str:

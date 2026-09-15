@@ -76,7 +76,7 @@ def format_surrogate_source_context(
         if not item.path:
             continue
         chunks.append(
-            f"【允许修改源码 {index}】\n"
+            f"Allowed source file {index}:\n"
             f"path: {item.path}\n"
             f"object: {item.obj_name}\n"
             f"lines: {item.code_start_line}-{item.code_end_line}\n"

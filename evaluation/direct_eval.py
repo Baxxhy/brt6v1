@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from ..execution.executor import no_tests_executed
+from ..execution.executor import no_tests_executed, run_subprocess_tree
 
 from ..io.io_utils import load_issue_data
 from ..core.utils import ensure_dir, safe_json_dump, sanitize_instance_id
@@ -86,15 +86,12 @@ def repo_path(repo_root_base: str, issue: dict[str, Any]) -> str:
 def run_shell(cmd: str, cwd: str, timeout: int | None = None) -> dict[str, Any]:
     started = time.time()
     try:
-        proc = subprocess.run(
+        proc = run_subprocess_tree(
             cmd,
+            cwd,
+            timeout if timeout is not None else 365 * 24 * 60 * 60,
             shell=True,
             executable="/bin/bash",
-            cwd=cwd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
         )
         return {
             "command": cmd,

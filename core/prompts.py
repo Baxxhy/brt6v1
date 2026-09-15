@@ -8,6 +8,13 @@ from ..prompts.loader import load_prompt
 ISSUE_REWRITE_SYSTEM_PROMPT = load_prompt("issue_rewrite", "system")
 ISSUE_REWRITE_USER_PROMPT = load_prompt("issue_rewrite", "user")
 
+BEHAVIOR_DISAMBIGUATION_SYSTEM_PROMPT = load_prompt(
+    "behavior_disambiguation", "system"
+)
+BEHAVIOR_DISAMBIGUATION_USER_PROMPT = load_prompt(
+    "behavior_disambiguation", "user"
+)
+
 HOST_CONTEXT_SYSTEM_PROMPT = load_prompt("behavior_target", "system")
 HOST_CONTEXT_USER_PROMPT = load_prompt("behavior_target", "user")
 

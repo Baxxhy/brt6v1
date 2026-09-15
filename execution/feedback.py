@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..execution.executor import run_command_in_conda
+from ..execution.executor import run_command_in_conda, run_subprocess_tree
 from ..execution.delta_loop import (
     repeated_keep,
     semantic_round_budget,
@@ -518,15 +518,12 @@ def _evidence_result_fields(
 
 def _run_local(command: str, cwd: str, timeout: int = 300) -> dict[str, Any]:
     try:
-        proc = subprocess.run(
+        proc = run_subprocess_tree(
             command,
+            cwd,
+            timeout,
             shell=True,
             executable="/bin/bash",
-            cwd=cwd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
         )
         return {
             "command": command,
@@ -1273,6 +1270,7 @@ def run_instance_pipeline(
     _forced_seed_index: int | None = None,
     _prepared_repo_path: str = "",
     _prepare_meta: dict[str, Any] | None = None,
+    alignment_verifier: str = "strict",
 ) -> FinalResult:
     ensure_dir(output_dir)
     ensure_dir(Path(output_dir) / "prompts")
@@ -1327,6 +1325,7 @@ def run_instance_pipeline(
                     enable_strict_semantic_verifier,
                     enable_behavior_target=enable_behavior_target,
                     ablation_config=config,
+                    alignment_verifier=alignment_verifier,
                     _adaptive_disabled=True,
                     _forced_seed_index=None,
                 )
@@ -1393,6 +1392,7 @@ def run_instance_pipeline(
                     enable_strict_semantic_verifier,
                     enable_behavior_target=enable_behavior_target,
                     ablation_config=config,
+                    alignment_verifier=alignment_verifier,
                     _adaptive_disabled=True,
                     _forced_seed_index=seed_index,
                     _prepared_repo_path=prepared_repo_path,
@@ -1711,7 +1711,9 @@ def run_instance_pipeline(
                     config,
                 )
             except Exception as exc:  # noqa: BLE001
-                protocol.protocol_risks.append(f"协议模型审计失败，保留 AST 恢复结果：{exc}")
+                protocol.protocol_risks.append(
+                    f"Protocol model audit failed; retaining the AST recovery result: {exc}"
+                )
             protocol.save_json(str(Path(output_dir) / "protocol_recovery.json"))
         host.save_json(str(Path(output_dir) / "host_context.json"))
         candidate = None
@@ -1834,7 +1836,13 @@ def run_instance_pipeline(
             effective_source = format_effective_source_context(
                 behavior, context.retrieved_code, context.buggy_repo_path
             )
-            if enable_strict_semantic_verifier:
+            if alignment_verifier == "issue2test":
+                from ..validation.issue2test_verifier import verify_issue2test
+                decision, strict_result = verify_issue2test(
+                    context.issue_text, behavior, protocol, candidate, execution,
+                    effective_source, llm_client, output_dir, brt_attempt,
+                )
+            elif enable_strict_semantic_verifier:
                 decision, strict_result = verify_strict_semantics(
                     context.issue_text, behavior, protocol, candidate,
                     execution, effective_source, llm_client, output_dir,
@@ -1850,7 +1858,10 @@ def run_instance_pipeline(
             safe_json_dump(decision.to_dict(), str(Path(output_dir) / f"verifier_round_{brt_attempt}.json"))
             current_residual = None
             residual_transition = None
-            if config.specialized_feedback and config.semantic_delta:
+            if alignment_verifier == "issue2test":
+                semantic_feedback = decision.to_dict()
+                semantic_feedback["verifier"] = "issue2test_local_phase3_no_gold_v1"
+            elif config.specialized_feedback and config.semantic_delta:
                 current_residual = _candidate_residual_state(
                     brt_attempt, execution, decision, strict_result
                 )

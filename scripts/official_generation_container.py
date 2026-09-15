@@ -64,6 +64,15 @@ def _remove_container_by_name(client, name: str) -> dict[str, str | int]:
         return {"name": name, "returncode": 1, "error": repr(exc)[-2000:]}
 
 
+def _cached_runtime_identity(registry, instance_id: str, spec) -> tuple[str, str]:
+    """Prefer the frozen baseline identity before evaluating harness hashes."""
+
+    registered = registry.lookup(instance_id)
+    if registered is not None:
+        return registered["image"], registered["container_name"]
+    return spec.instance_image_key, spec.get_instance_container_name()
+
+
 def _normalize_swt_repo_commands(
     request: dict[str, str], commands: list[str]
 ) -> tuple[list[str], list[dict[str, str]]]:
@@ -238,7 +247,10 @@ def _start_swt_cached(
     logger = setup_logger(
         f"brt6-generation-{request['instance_id']}", log_path, "w"
     )
-    image = spec.instance_image_key
+    registry = OfficialContainerRegistry()
+    image, preferred_name = _cached_runtime_identity(
+        registry, request["instance_id"], spec
+    )
     try:
         client.images.get(image)
     except docker.errors.ImageNotFound as exc:
@@ -269,12 +281,11 @@ def _start_swt_cached(
     try:
         config = MAP_VERSION_TO_INSTALL[spec.repo][spec.version]
         user = "root" if not config.get("execute_test_as_nonroot", False) else "nonroot"
-        registry = OfficialContainerRegistry()
         resolution = registry.resolve(
             client,
             instance_id=request["instance_id"],
             expected_image=image,
-            preferred_name=spec.get_instance_container_name(),
+            preferred_name=preferred_name,
         )
         name = resolution.name
         container = resolution.container

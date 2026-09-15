@@ -517,7 +517,7 @@ def audit_candidate(
     try:
         tree = ast.parse(code)
     except SyntaxError:
-        return "候选文件不是合法 Python，必须先修复语法。"
+        return "The candidate is not valid Python; repair its syntax first."
 
     test_nodes = [
         node
@@ -527,17 +527,17 @@ def audit_candidate(
     ]
     if len(test_nodes) != 1:
         return (
-            f"完整 BRT 文件必须只有一个可收集测试入口，当前有 {len(test_nodes)} 个。"
-            "保留最直接复现 Issue 的一个测试，删除 baseline、对照组和备用测试。"
+            f"A complete BRT file must contain exactly one collectable test entry; found {len(test_nodes)}. "
+            "Keep the single test that most directly reproduces the issue and remove baselines, controls, and backup tests."
         )
 
     mismatch = _namespace_mismatch(issue_text, tree) if issue_text else None
     if mismatch:
         expected_reference, actual_reference = mismatch
         return (
-            "候选使用了与 Issue 同名但不同命名空间的 API："
-            f"当前是 {actual_reference}，Issue 明确调用的是 {expected_reference}。"
-            "必须沿用 Issue 的导入和公开 API，再验证该 API 的目标行为。"
+            "The candidate uses an API with the same name as the issue but from a different namespace: "
+            f"it currently uses {actual_reference}, while the issue explicitly calls {expected_reference}. "
+            "Use the import and public API from the issue, then verify that API's target behavior."
         )
 
     overridden_setting = (
@@ -545,15 +545,15 @@ def audit_candidate(
     )
     if overridden_setting:
         return (
-            f"Issue 验证的是未显式配置时的默认行为，不得显式覆盖 {overridden_setting}。"
-            "请删除 override_settings、settings 赋值或同名关键字覆盖，让测试观察真实默认值。"
+            f"The issue concerns default behavior when {overridden_setting} is not explicitly configured. "
+            "Remove override_settings, settings assignments, or same-named keyword overrides so the test observes the real default."
         )
 
     if _leading_type_precondition(behavior, test_nodes[0]):
         return (
-            "首个前置类型断言会在目标行为执行或观察前失败，并且 expected_behavior "
-            "并未要求该返回类型。请删除此前置类型断言，直接构造 Issue 的触发路径，"
-            "让最终 Oracle 只验证修复后公开行为。"
+            "The leading type assertion fails before the target behavior is executed or observed, "
+            "and expected_behavior does not require that return type. Remove this precondition, "
+            "construct the issue trigger directly, and let the final oracle verify only public post-fix behavior."
         )
 
     rendered_literal = (
@@ -561,9 +561,10 @@ def audit_candidate(
     )
     if rendered_literal:
         return (
-            f"候选把 API 属性名 {rendered_literal!r} 猜成了展示文本，但 Issue 只在"
-            "属性访问中使用该名称，没有给出相同的渲染值。必须直接沿用 Issue 的"
-            "精确输出示例或断言更稳定的公开结构，不能由标识符推断格式化文本。"
+            f"The candidate guesses that API attribute name {rendered_literal!r} is rendered text, "
+            "but the issue uses it only for attribute access and does not provide that rendered value. "
+            "Use an exact output example from the issue or assert a more stable public structure; "
+            "do not infer formatted text from an identifier."
         )
 
     schema_keyword = (
@@ -573,9 +574,9 @@ def audit_candidate(
     )
     if schema_keyword:
         return (
-            f"Issue 已给出可直接执行的最小复现调用，但候选额外传入 {schema_keyword}="
-            " 改变了输入 schema，可能让 fixed 版本因另一个前置条件失败。请删除"
-            "该额外参数，原样保留 Issue 的输入和目标调用，只观察承诺的修复行为。"
+            f"The issue provides a directly executable minimal reproducer, but the candidate additionally passes {schema_keyword}=, "
+            "which changes the input schema and may make a fixed version fail for another precondition. "
+            "Remove the extra argument, preserve the issue input and target call exactly, and observe only the promised fixed behavior."
         )
 
     unsupported_literal = _unsupported_long_oracle_literal(
@@ -583,58 +584,57 @@ def audit_candidate(
     )
     if unsupported_literal:
         return (
-            "候选精确断言了 Issue/expected_behavior 未承诺的长格式化文本："
+            "The candidate exactly asserts long formatted text not promised by the issue or expected_behavior: "
             + repr(unsupported_literal[:120])
-            + "。请只保留 Issue 明确要求的稳定片段或公开结构，避免 fixed 版本因无关格式失败。"
+            + ". Keep only stable fragments or public structure explicitly required by the issue, avoiding failures caused by unrelated formatting."
         )
 
     if "NO_TESTS_COLLECTED" in code:
         return (
-            "不得把 ExitCode.NO_TESTS_COLLECTED 当作成功；"
-            "候选必须证明至少一个目标测试真实执行。"
+            "Do not treat ExitCode.NO_TESTS_COLLECTED as success; "
+            "the candidate must demonstrate that at least one target test actually ran."
         )
 
     unresolved_class_name = _unresolved_class_scope_name(tree)
     if unresolved_class_name:
         return (
-            "类定义阶段引用了未恢复的模块级名称 "
-            f"{unresolved_class_name!r}；请从 ProtocolRecovery.module_context "
-            "恢复对应赋值和必要 setup 调用，或移除该类级依赖。"
+            "The class definition references an unrecovered module-level name "
+            f"{unresolved_class_name!r}. Restore its assignment and required setup calls from "
+            "ProtocolRecovery.module_context, or remove that class-level dependency."
         )
 
     for node in ast.walk(tree):
         if isinstance(node, ast.JoinedStr):
             return (
-                "生成测试必须兼容基准实例可能使用的 Python 3.5；"
-                "不得使用 f-string，请改用 str.format() 或普通字符串拼接。"
+                "The generated test must remain compatible with benchmark instances that may use Python 3.5. "
+                "Do not use f-strings; use str.format() or ordinary string concatenation."
             )
         if isinstance(node, ast.Call):
             call_name = _name(node.func)
             if call_name.endswith(".makepyfile") and node.args:
                 return (
-                    "pytester.makepyfile() 使用位置参数时会按当前外层测试函数命名内层"
-                    "模块；生成的 BRT 外层文件采用同名规则，会触发 ImportPathMismatchError。"
-                    "必须改用唯一的关键字文件名，例如 "
-                    "pytester.makepyfile(test_brt_inner_case=content)，并让 runpytest() "
-                    "显式运行该唯一文件。"
+                    "When pytester.makepyfile() uses a positional argument, it names the inner module after "
+                    "the current outer test function. The generated BRT follows the same outer naming rule, "
+                    "which causes ImportPathMismatchError. Use a unique keyword filename such as "
+                    "pytester.makepyfile(test_brt_inner_case=content), and have runpytest() explicitly run that file."
                 )
             call_leaf = call_name.rsplit(".", 1)[-1].lower()
             if call_leaf in {"importorskip", "symlink_or_skip"}:
                 return (
-                    f"BRT 不得调用 {call_leaf}：它可能把未执行目标路径的候选标成成功。"
-                    "请直接构造本地、确定性且可执行的输入，并用公开行为验证修复。"
+                    f"A BRT must not call {call_leaf}; it may mark a candidate successful without executing the target path. "
+                    "Construct local, deterministic, executable input directly and verify the fix through public behavior."
                 )
             if call_name in {
                 "pytest.skip",
                 "unittest.skip",
             } or call_name.endswith(".skip"):
                 return (
-                    "BRT 不得无条件调用 skip。缺少平台或依赖时应恢复真实"
-                    "可执行上下文，不能把未执行的测试当作通过。"
+                    "A BRT must not call skip unconditionally. Restore a genuinely executable context when a platform or dependency is missing; "
+                    "an unexecuted test must not count as passing."
                 )
             if call_name in {"pytest.raises", "raises"} and node.args:
                 if _name(node.args[0]) in {"Exception", "BaseException"}:
-                    return "不得用宽泛 Exception/BaseException 作为 oracle；必须验证 Issue 指定的稳定行为。"
+                    return "Do not use broad Exception/BaseException as the oracle; verify the stable behavior specified by the issue."
         if isinstance(
             node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
         ):
@@ -646,14 +646,13 @@ def audit_candidate(
                     or leaf.startswith("requires_")
                 ):
                     return (
-                        "BRT 不得使用会跳过完整测试的条件/decorator；"
-                        "测试必须在基准环境中真实执行目标路径。"
+                        "A BRT must not use a condition or decorator that skips the complete test; "
+                        "the test must execute the target path in the benchmark environment."
                     )
                 if leaf == "image_comparison":
                     return (
-                        "生成测试没有随仓库提交 expected baseline 图片，不能使用 "
-                        "image_comparison。请改用数值、对象状态、路径或稳定文本片段"
-                        "验证 Issue 的公开行为。"
+                        "The generated test does not ship an expected baseline image with the repository, so it cannot use "
+                        "image_comparison. Verify public issue behavior with numeric values, object state, paths, or stable text fragments."
                     )
                 if isinstance(decorator, ast.Call) and any(
                     keyword.arg == "skip_on_importerror"
@@ -662,22 +661,22 @@ def audit_candidate(
                     for keyword in decorator.keywords
                 ):
                     return (
-                        "BRT 不得设置 skip_on_importerror=True；"
-                        "请选择基准环境可执行的 backend 或无 GUI 的公开状态验证。"
+                        "A BRT must not set skip_on_importerror=True. "
+                        "Choose a backend executable in the benchmark environment or verify public state without a GUI."
                     )
         if isinstance(node, ast.Assert):
             if isinstance(node.test, ast.Constant) and node.test.value is True:
-                return "不得使用 assert True 或其他占位 oracle。"
+                return "Do not use assert True or another placeholder oracle."
             if isinstance(node.test, ast.BoolOp) and isinstance(node.test.op, ast.Or):
                 values = node.test.values
                 if any(_opposites(a, b) for i, a in enumerate(values) for b in values[i + 1 :]):
-                    return "检测到恒真的 A or not A / 相反比较断言；必须改为 expected_behavior 的可证伪 oracle。"
+                    return "Detected a tautological A or not A/opposite-comparison assertion; replace it with a falsifiable oracle for expected_behavior."
         if isinstance(node, ast.Try):
             for handler in node.handlers:
                 broad = handler.type is None or _name(handler.type) in {"Exception", "BaseException"}
                 swallowed = all(isinstance(item, (ast.Pass, ast.Return, ast.Continue)) for item in handler.body)
                 if broad and swallowed:
-                    return "不得用 broad try/except 吞掉目标路径异常；只捕获 Issue 明确要求观察的异常。"
+                    return "Do not swallow target-path exceptions with a broad try/except; catch only exceptions the issue explicitly requires observing."
 
     expected = _expected_text(behavior)
     no_raise = any(
@@ -689,8 +688,8 @@ def audit_candidate(
     )
     if no_raise and re.search(r"(?:pytest\.raises|assertRaises|\braises\s*\()", code):
         return (
-            "expected_behavior 要求正常执行/不再抛异常，但候选用 raises 接受了 buggy 异常。"
-            "应直接调用目标路径，并对修复后返回值、状态或输出建立正向断言。"
+            "expected_behavior requires successful execution without the exception, but the candidate uses raises to accept the buggy exception. "
+            "Call the target path directly and make a positive assertion about the post-fix return value, state, or output."
         )
 
     positive_capability = any(
@@ -708,8 +707,8 @@ def audit_candidate(
     )
     if positive_capability and negative_hasattr:
         return (
-            "expected_behavior 要求能力/属性存在，但候选断言 hasattr 为 False，"
-            "这是把 buggy 的缺失行为当成正确结果。必须改成正向存在性和语义断言。"
+            "expected_behavior requires the capability or attribute to exist, but the candidate asserts hasattr is False, "
+            "treating the buggy absence as correct. Replace it with a positive existence and semantic assertion."
         )
     required_message_tokens = _required_message_tokens(behavior)
     oracle_literals = _oracle_string_literals(tree)
@@ -720,8 +719,8 @@ def audit_candidate(
     ):
         tokens = ", ".join(sorted(required_message_tokens))
         return (
-            "BehaviorTarget 的 assertion_hints 明确要求修复后的消息包含/提及标识符 "
-            f"{tokens}，但候选 oracle 没有断言这些新证据。不得正向匹配 buggy 的旧"
-            " error_symptom；应让 buggy 因缺少新标识符而失败、fixed 因包含它而通过。"
+            "BehaviorTarget assertion_hints explicitly require the post-fix message to contain or mention identifiers "
+            f"{tokens}, but the candidate oracle does not assert this new evidence. Do not positively match the old buggy "
+            "error_symptom; the buggy version should fail because the new identifiers are absent, while the fixed version should pass because they are present."
         )
     return ""

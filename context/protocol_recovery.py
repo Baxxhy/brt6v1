@@ -245,15 +245,15 @@ def recover_test_protocol(
     risks: list[str] = []
     source = test_path.read_text(encoding="utf-8", errors="replace") if test_path.is_file() else related_test.code_content
     if not test_path.is_file():
-        risks.append("完整测试文件不存在，协议恢复仅使用检索片段。")
+        risks.append("The full test file is unavailable; protocol recovery uses the retrieved fragment only.")
     try:
         tree = ast.parse(source)
     except SyntaxError:
         tree = ast.Module(body=[], type_ignores=[])
-        risks.append("相关测试源码无法通过 AST 解析。")
+        risks.append("The related test source could not be parsed as an AST.")
     target, cls = _target_test(tree, related_test.name)
     if target is None:
-        risks.append("无法在完整文件中定位目标测试入口。")
+        risks.append("The target test entry could not be located in the full file.")
     imports = [_source(node, source) for node in tree.body if isinstance(node, (ast.Import, ast.ImportFrom))]
     marks = [
         _source(node, source)
@@ -298,7 +298,7 @@ def recover_test_protocol(
     command = icore_test_command(repo, version, related_test.file, selector)
     framework = _framework(source, cls)
     if fixtures and not conftests and framework == "pytest":
-        risks.append("测试使用 fixture，但父目录 conftest 中未定位到对应定义；fixture 可能来自插件。")
+        risks.append("The test uses a fixture not found in parent conftest files; it may come from a plugin.")
     return ProtocolRecovery(
         instance_id=instance_id,
         test_file=related_test.file,
@@ -315,7 +315,7 @@ def recover_test_protocol(
         local_helpers=helpers,
         local_models=models,
         conftest_context=conftests,
-        runner_hints=[f"使用项目原生命令：{command}", "新 BRT 放在 seed test 同目录并只执行自身 nodeid。"],
+        runner_hints=[f"Use the project's native command: {command}", "Place the new BRT beside the seed test and execute only its own node id."],
         protocol_risks=risks,
         selected_seed_name=related_test.name,
         placement_dir=str(Path(related_test.file).parent),

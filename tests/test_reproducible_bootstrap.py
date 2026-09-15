@@ -100,6 +100,43 @@ class ReproducibleBootstrapTests(unittest.TestCase):
             ["deepseek", "gpt"],
         )
 
+    def test_configuring_pool_can_pin_gateway_and_model(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "xiaojing.json"
+            env = {
+                **os.environ,
+                "DEEPSEEK_API_KEY": "test-key",
+                "DEEPSEEK_BASE_URL": "https://wrong.invalid/v1",
+                "DEEPSEEK_MODEL": "wrong-model",
+            }
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(PROJECT_ROOT / "scripts" / "configure_api_keys.py"),
+                    "--output",
+                    str(output),
+                    "--provider",
+                    "deepseek",
+                    "--from-env",
+                    "--base-url",
+                    "https://api.open.xiaojingai.com/v1",
+                    "--model",
+                    "deepseek-v4-flash",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            payload["apis"][0]["base_url"],
+            "https://api.open.xiaojingai.com/v1",
+        )
+        self.assertEqual(payload["apis"][0]["model"], "deepseek-v4-flash")
+
     def test_api_pool_json_environment_supports_multiple_keys(self) -> None:
         payload = {
             "apis": [

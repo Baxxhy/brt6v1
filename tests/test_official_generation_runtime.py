@@ -23,6 +23,7 @@ from brt6.runtime.official_container_registry import (
     OfficialContainerRegistry,
 )
 from brt6.scripts.official_generation_container import (
+    _cached_runtime_identity,
     _normalize_swt_repo_commands,
     _remove_container_by_name,
 )
@@ -45,6 +46,61 @@ def issue_row() -> dict:
 
 
 class OfficialRuntimeContractTests(unittest.TestCase):
+    def test_registry_recreates_registered_dead_container(self) -> None:
+        image = "exec.eval.x86_64.environment.instance:latest"
+        name = "exec.eval.x86_64.environment.instance.12345"
+        container = mock.Mock()
+        container.name = name
+        container.attrs = {
+            "Config": {"Image": image},
+            "State": {"Status": "dead", "Dead": True},
+        }
+        client = mock.Mock()
+        client.containers.get.return_value = container
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = OfficialContainerRegistry(Path(tmp) / "registry.json")
+            registry.path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "instances": {
+                            "owner__repo-1": {
+                                "container_name": name,
+                                "image": image,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            resolution = registry.resolve(
+                client,
+                instance_id="owner__repo-1",
+                expected_image=image,
+                preferred_name=name,
+            )
+
+        container.remove.assert_called_once_with(force=True)
+        self.assertEqual(resolution.name, name)
+        self.assertIsNone(resolution.container)
+        self.assertFalse(resolution.reused)
+
+    def test_cached_runtime_identity_does_not_recompute_image(self) -> None:
+        registry = mock.Mock()
+        registry.lookup.return_value = {
+            "image": "exec.eval.cached:latest",
+            "container_name": "exec.eval.cached.instance",
+        }
+        spec = mock.Mock()
+        type(spec).instance_image_key = mock.PropertyMock(
+            side_effect=ValueError("requirements lookup must not run")
+        )
+
+        image, name = _cached_runtime_identity(registry, "owner__repo-1", spec)
+
+        self.assertEqual(image, "exec.eval.cached:latest")
+        self.assertEqual(name, "exec.eval.cached.instance")
+
     def test_registry_reserves_the_exact_official_name(self) -> None:
         class NotFound(Exception):
             pass
@@ -98,6 +154,72 @@ class OfficialRuntimeContractTests(unittest.TestCase):
         self.assertIs(resolution.container, container)
         self.assertTrue(resolution.reused)
         self.assertTrue(resolution.adopted)
+
+    def test_registry_never_assigns_one_container_to_two_instances(self) -> None:
+        class NotFound(Exception):
+            pass
+
+        image = "exec.eval.x86_64.environment.instance:latest"
+        container = mock.Mock()
+        container.name = "exec.eval.x86_64.environment.instance.777"
+        container.attrs = {
+            "Config": {"Image": image},
+            "State": {"Status": "running", "Dead": False},
+        }
+        client = mock.Mock()
+        client.containers.get.side_effect = NotFound()
+        client.containers.list.return_value = [container]
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = OfficialContainerRegistry(Path(tmp) / "registry.json")
+            first = registry.resolve(
+                client,
+                instance_id="owner__repo-1",
+                expected_image=image,
+                preferred_name="exec.eval.x86_64.environment.instance.111",
+            )
+            second = registry.resolve(
+                client,
+                instance_id="owner__repo-2",
+                expected_image=image,
+                preferred_name="exec.eval.x86_64.environment.instance.111",
+            )
+
+        self.assertEqual(first.name, container.name)
+        self.assertNotEqual(second.name, first.name)
+        self.assertFalse(second.reused)
+
+    def test_registry_repairs_legacy_duplicate_mapping(self) -> None:
+        class NotFound(Exception):
+            pass
+
+        image = "exec.eval.x86_64.environment.instance:latest"
+        shared_name = "exec.eval.x86_64.environment.instance.111"
+        client = mock.Mock()
+        client.containers.get.side_effect = NotFound()
+        client.containers.list.return_value = []
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = OfficialContainerRegistry(Path(tmp) / "registry.json")
+            registry.path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "instances": {
+                            "owner__repo-1": {"container_name": shared_name, "image": image},
+                            "owner__repo-2": {"container_name": shared_name, "image": image},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            repaired = registry.resolve(
+                client,
+                instance_id="owner__repo-2",
+                expected_image=image,
+                preferred_name=shared_name,
+            )
+
+        self.assertNotEqual(repaired.name, shared_name)
+        self.assertFalse(repaired.reused)
 
     def test_registry_replaces_stale_instance_mapping(self) -> None:
         class NotFound(Exception):

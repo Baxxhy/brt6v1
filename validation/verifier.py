@@ -125,17 +125,17 @@ def _ask_llm(
         if any(marker in reason for marker in setup_markers):
             result.decision = "repair_setup"
             result.focus = ["setup"]
-            result.next_action = result.next_action or "恢复可执行测试上下文后重新运行。"
+            result.next_action = result.next_action or "Restore an executable test context, then run again."
         elif any(marker in reason for marker in trigger_markers) or re.search(
             r"未(?:能|能正确|正确)?[^。；，,]{0,12}触发", reason
         ):
             result.decision = "repair_trigger"
             result.focus = ["trigger"]
-            result.next_action = result.next_action or "按 Issue 的精确输入和调用链修复触发路径。"
+            result.next_action = result.next_action or "Repair the trigger using the issue's exact input and call path."
         elif any(marker in reason for marker in oracle_markers):
             result.decision = "repair_oracle"
             result.focus = ["oracle"]
-            result.next_action = result.next_action or "用 expected_behavior 重写最小稳定 oracle。"
+            result.next_action = result.next_action or "Rewrite the smallest stable oracle from expected_behavior."
     return result
 
 
@@ -152,12 +152,12 @@ def verify_buggy_only(
     status = execution.status
     missing_check_target = _missing_check_target(behavior, source_context)
     if status in {"SETUP_ERROR", "SYNTAX_ERROR", "COLLECT_ERROR"}:
-        next_action = "修复 import、fixture、class、setup 或语法。"
+        next_action = "Repair imports, fixtures, class context, setup, or syntax."
         if missing_check_target and ".check(" in candidate.code:
             next_action = (
-                "保留真实 check() 调用，只修复字段/对象缺少模型绑定、name、app_label "
-                "或其他元数据的问题。优先复用 HostContext 模型并通过 _meta.get_field() "
-                "取得字段；standalone Field 可调用 set_attributes_from_name()。"
+                "Keep the real check() call. Repair only missing model binding, name, app_label, "
+                "or related metadata. Prefer the HostContext model and obtain fields through "
+                "_meta.get_field(); a standalone Field may use set_attributes_from_name()."
             )
         return VerifierDecision(
             candidate.instance_id,
@@ -172,14 +172,14 @@ def verify_buggy_only(
                 candidate.instance_id,
                 "repair_trigger",
                 (
-                    "这是缺失系统检查类 Issue；buggy 版本通过说明当前测试没有用"
-                    " check() 观察修复后应新增的检查证据。"
+                    "This issue concerns a missing system check. Passing on the buggy version means "
+                    "the test did not use check() to observe evidence expected after the fix."
                 ),
                 ["trigger", "oracle"],
                 (
-                    "必须调用源码真实 check() 生命周期，并断言 expected_behavior "
-                    "要求新增的稳定检查结果存在；不得改用 clean()、save()、构造器"
-                    "异常或普通值长度验证替代系统检查。"
+                    "Call the real check() lifecycle and assert the stable result required by "
+                    "expected_behavior. Do not substitute clean(), save(), constructor exceptions, "
+                    "or ordinary value-length checks."
                 ),
             )
         if llm_client:
@@ -198,18 +198,18 @@ def verify_buggy_only(
                 if decision.decision == "accept":
                     decision.decision = "repair_trigger"
                     decision.reason = (
-                        "buggy 版本通过，不能接受为 BRT。"
-                        + (f" 语义分析：{decision.reason}" if decision.reason else "")
+                        "The buggy version passes, so this cannot be accepted as a BRT."
+                        + (f" Semantic analysis: {decision.reason}" if decision.reason else "")
                     )
                     decision.focus = ["trigger"]
                     decision.next_action = (
                         decision.next_action
-                        or "找出尚未覆盖的 Issue 输入、状态、调用链或优化分支。"
+                        or "Find the issue input, state, call chain, or optimized branch that remains uncovered."
                     )
                 return decision
             except Exception:  # noqa: BLE001
                 pass
-        return VerifierDecision(candidate.instance_id, "repair_trigger", "buggy 版本通过，说明缺陷路径未触发。", ["trigger"], "加强输入、状态或调用链变异。")
+        return VerifierDecision(candidate.instance_id, "repair_trigger", "The buggy version passes, so the defect path was not triggered.", ["trigger"], "Strengthen the issue-grounded input, state, or call-chain adaptation.")
     if status in {"ISSUE_ALIGNED_FAIL", "ASSERTION_FAIL"}:
         if (
             status == "ASSERTION_FAIL"
@@ -222,11 +222,11 @@ def verify_buggy_only(
                 candidate.instance_id,
                 "accept",
                 (
-                    "测试调用了源码中的 check() 生命周期，并因修复后应出现的检查证据"
-                    "在 buggy 版本中缺失而断言失败；这与缺少检查类 Issue 对齐。"
+                    "The test invokes the real check() lifecycle and fails because evidence expected "
+                    "after the fix is absent on the buggy version; this matches a missing-check issue."
                 ),
                 ["trigger", "oracle"],
-                "接受当前 BRT。",
+                "Accept the current BRT.",
             )
         if (
             status == "ASSERTION_FAIL"
@@ -237,11 +237,11 @@ def verify_buggy_only(
                 candidate.instance_id,
                 "accept",
                 (
-                    "测试调用了目标行为并捕获修复后应出现的日志；buggy 版本因没有日志"
-                    "证据而断言失败，与缺失日志类 Issue 对齐。"
+                    "The test invokes the target behavior and captures the log expected after the fix. "
+                    "It fails on the buggy version because that evidence is absent, matching the issue."
                 ),
                 ["trigger", "oracle"],
-                "接受当前 BRT。",
+                "Accept the current BRT.",
             )
         if llm_client:
             try:
@@ -259,8 +259,8 @@ def verify_buggy_only(
             except Exception:  # noqa: BLE001
                 pass
         if status == "ASSERTION_FAIL":
-            return VerifierDecision(candidate.instance_id, "repair_oracle", "断言失败但是否对齐不确定。", ["oracle"], "插桩观测后重写 assert。")
-        return VerifierDecision(candidate.instance_id, "repair_trigger", "关键词规则认为相关，但未完成语义验证。", ["trigger", "oracle"], "重新核对目标 API、输入和失败语义。")
+            return VerifierDecision(candidate.instance_id, "repair_oracle", "The assertion fails, but issue alignment is uncertain.", ["oracle"], "Observe the behavior, then rewrite the assertion.")
+        return VerifierDecision(candidate.instance_id, "repair_trigger", "Keyword rules suggest relevance, but semantic validation is incomplete.", ["trigger", "oracle"], "Recheck the target API, input, and failure semantics.")
     if status == "UNRELATED_FAIL" and llm_client:
         try:
             return _ask_llm(
@@ -277,5 +277,5 @@ def verify_buggy_only(
         except Exception:  # noqa: BLE001
             pass
     if status == "TIMEOUT":
-        return VerifierDecision(candidate.instance_id, "reject", "执行超时。", ["setup"], "放弃或缩小测试。")
-    return VerifierDecision(candidate.instance_id, "repair_trigger", f"失败类型 {status}，和 issue 对齐不足。", ["trigger", "oracle"], "重新对齐触发路径。")
+        return VerifierDecision(candidate.instance_id, "reject", "Execution timed out.", ["setup"], "Abandon or reduce the test.")
+    return VerifierDecision(candidate.instance_id, "repair_trigger", f"Failure type {status} is insufficiently aligned with the issue.", ["trigger", "oracle"], "Realign the trigger path.")

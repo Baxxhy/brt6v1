@@ -123,7 +123,8 @@ class FeedbackAblationTests(unittest.TestCase):
             ablated_payload["trigger"]["mutation_hints"][0]["target_pattern"],
             "bad value",
         )
-        self.assertEqual(ablated_payload["raw"]["mutation_hints"][0]["raw"], True)
+        self.assertNotIn("raw", ablated_payload)
+        self.assertEqual(behavior.to_dict()["raw"]["mutation_hints"][0]["raw"], True)
 
     def test_mutation_ablation_uses_same_generation_prompt_without_plan(self) -> None:
         behavior = BehaviorTarget(

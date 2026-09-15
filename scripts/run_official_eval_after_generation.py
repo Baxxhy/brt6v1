@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from brt6.evaluation.official_benchmarks import (  # noqa: E402
 from brt6.evaluation.swtbench_runtime_compat import (  # noqa: E402
     _configure_container_reuse,
 )
+from brt6.execution.executor import run_subprocess_tree, terminate_process_tree  # noqa: E402
 
 
 F2P_ONLY_MARKER = "F2P_ONLY"
@@ -72,6 +74,26 @@ def _safe_run_id(value: str) -> str:
     if not rendered:
         raise ValueError("run_id is empty after sanitization")
     return rendered
+
+
+def _stop_running_official_containers(workspace: Path) -> None:
+    """Stop containers orphaned when the official harness is interrupted."""
+
+    try:
+        listed = run_subprocess_tree(
+            ["docker", "ps", "-q", "--filter", "name=exec.eval."],
+            str(workspace),
+            60,
+        )
+        container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+        if container_ids:
+            run_subprocess_tree(
+                ["docker", "kill", *container_ids],
+                str(workspace),
+                600,
+            )
+    except Exception as error:  # cleanup failure must not hide the interrupt
+        print(f"failed to stop interrupted official containers: {error}", file=sys.stderr)
 
 
 def _link_official_sources(workspace: Path, official_root: Path, dataset: str) -> None:
@@ -153,6 +175,12 @@ def main() -> int:
         default=str(DEFAULT_LOCAL_SWT_DATASET),
     )
     parser.add_argument(
+        "--instance-id",
+        action="append",
+        default=[],
+        help="Evaluate only this instance; repeat for a targeted reevaluation.",
+    )
+    parser.add_argument(
         "--tddbench-root", default=str(PACKAGE_ROOT / "TDD-Bench-Verified")
     )
     args = parser.parse_args()
@@ -226,15 +254,21 @@ def main() -> int:
             "--predictions_path",
             str(predictions_path),
             "--filter_swt",
-            "--max_workers",
-            str(args.max_workers),
-            "--run_id",
-            run_id,
-            "--compute_coverage",
-            str(args.compute_coverage).lower(),
-            "--timeout",
-            str(args.timeout),
         ]
+        if args.instance_id:
+            command.extend(["--instance_ids", *dict.fromkeys(args.instance_id)])
+        command.extend(
+            [
+                "--max_workers",
+                str(args.max_workers),
+                "--run_id",
+                run_id,
+                "--compute_coverage",
+                str(args.compute_coverage).lower(),
+                "--timeout",
+                str(args.timeout),
+            ]
+        )
     else:
         command = [
             str(official_python),
@@ -281,6 +315,7 @@ def main() -> int:
         "generation_gate": generation_gate,
         "generation_policy": "evaluate_available_count_missing_as_f2p_failure",
         "missing_generation_ids": generation_gate["missing_ids"],
+        "requested_instance_ids": list(dict.fromkeys(args.instance_id)),
         "official_harness_invoked": True,
         "evaluation_scope": "f2p_only" if not args.compute_coverage else "f2p_and_coverage",
         "compute_coverage": args.compute_coverage,
@@ -321,15 +356,34 @@ def main() -> int:
     )
 
     log_path = evaluation_dir / "official_harness.log"
-    with log_path.open("a", encoding="utf-8") as log:
-        process = subprocess.run(
-            command,
-            cwd=workspace,
-            env=environment,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+    process: subprocess.Popen | None = None
+    previous_handlers: dict[int, Any] = {}
+
+    def request_shutdown(signum, _frame):
+        raise KeyboardInterrupt(f"official evaluation interrupted by signal {signum}")
+
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        previous_handlers[signum] = signal.getsignal(signum)
+        signal.signal(signum, request_shutdown)
+    try:
+        with log_path.open("a", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                command,
+                cwd=workspace,
+                env=environment,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            try:
+                returncode = process.wait()
+            except BaseException:
+                terminate_process_tree(process)
+                _stop_running_official_containers(workspace)
+                raise
+    finally:
+        for signum, previous in previous_handlers.items():
+            signal.signal(signum, previous)
     report_path = _report_path(workspace, args.dataset, args.model_name, run_id)
     report: dict[str, Any] = {}
     if report_path.is_file():
@@ -348,15 +402,15 @@ def main() -> int:
         )
     manifest.update(
         {
-            "status": "complete" if process.returncode == 0 and report else "failed",
+            "status": "complete" if returncode == 0 and report else "failed",
             "finished_at": datetime.now(timezone.utc).astimezone().isoformat(),
-            "returncode": process.returncode,
+            "returncode": returncode,
             "official_report_path": str(report_path),
         }
     )
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    if process.returncode != 0:
-        return process.returncode
+    if returncode != 0:
+        return returncode
     if not report:
         print(f"official harness did not create its report: {report_path}", file=sys.stderr)
         return 2

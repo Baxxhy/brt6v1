@@ -307,13 +307,13 @@ def generate_candidate(
         host_context_json=host_context_json,
         code_context=source_context,
         seed_test_code=seed_test_code,
-        feedback=_prompt_text(feedback or "无", MAX_PROMPT_FEEDBACK_CHARS),
+        feedback=_prompt_text(feedback or "None", MAX_PROMPT_FEEDBACK_CHARS),
     )
     system_prompt = MUTATION_GENERATION_SYSTEM_PROMPT
     user_prompt = render_evidence_prompt(user_prompt, behavior)
     if protocol is not None:
         user_prompt += (
-            "\n\n【必须保留的测试协议】\n"
+            "\n\nRequired test protocol to preserve:\n"
             + _prompt_json(protocol.to_dict(), MAX_PROMPT_PROTOCOL_CHARS)
         )
     effective_delta = (
@@ -323,13 +323,13 @@ def generate_candidate(
     )
     if effective_delta is not None:
         user_prompt += (
-            "\n\n【本轮唯一 Semantic Delta】\n"
+            "\n\nThe only Semantic Delta for this round:\n"
             + json.dumps(effective_delta.to_dict(), ensure_ascii=False)
-            + "\n以当前测试为唯一父候选，只落实 change 指定的一项修改。"
-            + "preserve 是默认保持项；上游改变导致的下游问题留给下一轮。"
+            + "\nUse the current test as the only parent and apply only the stated change. "
+            + "Preserve is the default; leave downstream effects for a later round."
         )
     if delta_history:
-        user_prompt += "\n\n【此前 Delta 轨迹】\n" + _prompt_json(
+        user_prompt += "\n\nPrevious Semantic Delta trace:\n" + _prompt_json(
             delta_history, MAX_PROMPT_FEEDBACK_CHARS
         )
     user_prompt = render_ablation_prompt(user_prompt, config)

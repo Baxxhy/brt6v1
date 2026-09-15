@@ -70,6 +70,11 @@ def strip_content(hunk):
     return new_hunk, first_idx - 1
 
 def remove_binary_diffs(diff_content):
+    # Preserve an actually empty prediction as empty.  Returning a trailing
+    # newline here makes the official runner treat a missing candidate as a
+    # non-empty patch and execute the entire six-view suite unnecessarily.
+    if not diff_content or not diff_content.strip():
+        return ""
     binary_file_indicator = 'Binary files'
 
     lines = diff_content.splitlines()
@@ -449,5 +454,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 

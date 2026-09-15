@@ -8,6 +8,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 from .api_pool import configured_apis
 from ..core.config import (
@@ -47,12 +48,16 @@ class LLMClient:
         self.provider = cfg.provider or DEFAULT_LLM_PROVIDER
         self.model = cfg.model or DEFAULT_MODEL
         self._uses_local_pool = False
+        requested_model = model
+        self._requested_model = requested_model
         local_api = self._pick_local_api(self.provider) if not api_key else None
         if local_api:
             local_key, local_base, local_model = local_api
             self.api_key = local_key
             self.base_url = (local_base or cfg.base_url or "https://api.deepseek.com").rstrip("/")
-            self.model = local_model or self.model
+            # An explicit method configuration must not be silently replaced by
+            # a model alias stored in a generic credential pool.
+            self.model = requested_model or local_model or self.model
             self._uses_local_pool = True
         else:
             multi_key = self._pick_env_key(self.provider) if not api_key else None
@@ -78,9 +83,39 @@ class LLMClient:
         self.wait_forever = str(
             os.environ.get("BRT_LLM_WAIT_FOREVER") or ""
         ).strip().lower() in {"1", "true", "yes", "on"}
+        self.stream = str(os.environ.get("BRT_LLM_STREAM") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        self.truncation_max_tokens = int(
+            os.environ.get(
+                "BRT_LLM_TRUNCATION_MAX_TOKENS",
+                max(8192, int(self.max_tokens)),
+            )
+        )
         if not self.api_key:
             env_name = "GPT_API_KEY" if self.provider == "gpt" else "DEEPSEEK_API_KEY"
             raise ValueError(f"missing {self.provider} API key; set {env_name}")
+        self._validate_allowed_host()
+
+    @staticmethod
+    def _allowed_hosts() -> set[str]:
+        raw = str(os.environ.get("BRT_ALLOWED_API_HOST") or "")
+        return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+    def _validate_allowed_host(self) -> None:
+        allowed = self._allowed_hosts()
+        if not allowed:
+            return
+        host = (urlsplit(self.base_url).hostname or "").lower()
+        if host not in allowed:
+            expected = ", ".join(sorted(allowed))
+            raise ValueError(
+                f"configured LLM host {host or '<missing>'!r} is not allowed; "
+                f"expected one of: {expected}"
+            )
 
     @classmethod
     def _next_index(cls, provider: str, size: int) -> int:
@@ -118,8 +153,11 @@ class LLMClient:
             if entry:
                 self.api_key, base_url, local_model = entry
                 self.base_url = (base_url or self.base_url).rstrip("/")
-                if local_model:
+                if self._requested_model:
+                    self.model = self._requested_model
+                elif local_model:
                     self.model = local_model
+                self._validate_allowed_host()
                 return
         rotated = self._pick_env_key(self.provider)
         if rotated:
@@ -134,7 +172,15 @@ class LLMClient:
             return url + "/v1/chat/completions"
         return url
 
-    def chat(self, system_prompt: str, user_prompt: str, temperature: float | None = None, max_tokens: int | None = None) -> str:
+    def chat(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        attempt_limit: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> str:
         payload = {
             "model": self.model,
             "messages": [
@@ -144,29 +190,88 @@ class LLMClient:
             "temperature": self.temperature if temperature is None else temperature,
             "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
         }
+        if os.environ.get("BRT_DISABLE_THINKING", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            payload["thinking"] = {"type": "disabled"}
+        if reasoning_effort is not None:
+            payload["reasoning_effort"] = reasoning_effort
+        if self.stream:
+            payload["stream"] = True
         data = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
         last_error: Exception | None = None
-        max_attempts = max(
-            self.max_attempts,
-            len(configured_apis(self.provider)),
-            len(self._env_keys(self.provider)),
-        )
+        # Bound one logical call independently of the pool size.  Failed
+        # instances are retried by the stage-level resume loop, which keeps
+        # scheduling fair: one unavailable request cannot occupy a worker
+        # forever merely because many credentials are configured.
+        max_attempts = max(1, self.max_attempts)
+        if attempt_limit is not None:
+            max_attempts = max(1, min(max_attempts, attempt_limit))
+        wait_forever = self.wait_forever and attempt_limit is None
         attempt = 0
-        while self.wait_forever or attempt < max_attempts:
+        while wait_forever or attempt < max_attempts:
             payload["model"] = self.model
             data = json.dumps(payload).encode("utf-8")
             url = self._chat_url(self.base_url)
             headers["Authorization"] = f"Bearer {self.api_key}"
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=self.request_timeout) as resp:  # noqa: S310
-                    body = resp.read().decode("utf-8")
-                parsed = json.loads(body)
-                return parsed["choices"][0]["message"]["content"]
+                open_request = getattr(self, 'open_request', urllib.request.urlopen)
+                with open_request(req, timeout=self.request_timeout) as resp:  # noqa: S310
+                    if self.stream:
+                        parts: list[str] = []
+                        finish_reason = ""
+                        self.last_usage = {}
+                        self.last_model = payload["model"]
+                        for raw_line in resp:
+                            line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not line.startswith("data:"):
+                                continue
+                            event = line[5:].strip()
+                            if not event or event == "[DONE]":
+                                continue
+                            chunk = json.loads(event)
+                            self.last_usage = chunk.get("usage") or self.last_usage
+                            self.last_model = chunk.get("model") or self.last_model
+                            choices = chunk.get("choices") or []
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta") or {}
+                            piece = delta.get("content")
+                            if isinstance(piece, str):
+                                parts.append(piece)
+                            finish_reason = str(
+                                choices[0].get("finish_reason") or finish_reason
+                            )
+                        content = "".join(parts)
+                    else:
+                        body = resp.read().decode("utf-8")
+                        parsed = json.loads(body)
+                        self.last_usage = parsed.get("usage") or {}
+                        self.last_model = parsed.get("model") or payload["model"]
+                        choice = parsed["choices"][0]
+                        content = choice["message"].get("content")
+                        finish_reason = str(choice.get("finish_reason") or "")
+                self.last_finish_reason = finish_reason
+                if finish_reason == "length":
+                    current_limit = int(payload["max_tokens"])
+                    payload["max_tokens"] = min(
+                        max(current_limit * 2, current_limit + 1),
+                        max(current_limit, self.truncation_max_tokens),
+                    )
+                    raise RuntimeError(
+                        "LLM response was truncated at the provider output limit"
+                    )
+                if not isinstance(content, str) or not content.strip():
+                    raise RuntimeError("LLM returned empty content")
+                return content
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")
                 last_error = RuntimeError(f"LLM HTTP {exc.code}: {body[:500]}")
@@ -178,7 +283,7 @@ class LLMClient:
                 if exc.code in {401, 403, 429} or exc.code >= 500:
                     self._rotate_api()
                 if exc.code == 429 and (
-                    self.wait_forever or attempt < max_attempts - 1
+                    wait_forever or attempt < max_attempts - 1
                 ):
                     retry_after = exc.headers.get("Retry-After")
                     try:
@@ -199,7 +304,7 @@ class LLMClient:
                 last_error = exc
                 self._rotate_api()
             attempt += 1
-            if self.wait_forever or attempt < max_attempts:
+            if wait_forever or attempt < max_attempts:
                 time.sleep(
                     min(self.backoff_base * (2 ** min(attempt - 1, 8)), 180.0)
                 )

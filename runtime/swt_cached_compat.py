@@ -43,8 +43,10 @@ def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]
     """Reuse the official image build and keep optional installs offline.
 
     ``git clean -fdx`` removes ignored extension modules and generated source
-    files baked into old project images.  Keep ignored files while still
-    deleting ordinary untracked test files between evaluation states.
+    files baked into old project images.  Keep those artifacts while deleting
+    ordinary untracked test files and Python bytecode between evaluation
+    states.  Bytecode cannot be retained safely because a fixed-version run
+    may otherwise leak imported behavior into the following buggy-version run.
     """
 
     diagnostics = {"git status", "git show", f"git diff {base_commit}"}
@@ -56,6 +58,7 @@ def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]
     clean_checkout = [
         f"git reset --hard {base_commit}",
         "git clean -fd",
+        "find . -type f -name '*.py[co]' -delete",
     ]
     converted = [_OFFLINE_EXPORT]
     for command in commands:

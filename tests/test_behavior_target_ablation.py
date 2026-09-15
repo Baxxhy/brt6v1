@@ -93,11 +93,11 @@ class BehaviorTargetAblationTests(unittest.TestCase):
         self.assertEqual([item.name for item in ablated], ["first", "second"])
 
     def test_prompt_text_changes_only_for_ablation(self) -> None:
-        prompt = "BehaviorTarget：{}\n行为目标：{}"
+        prompt = "BehaviorTarget: {}\nBehavior target: {}"
         self.assertEqual(render_evidence_prompt(prompt, BehaviorTarget("x")), prompt)
         rendered = render_evidence_prompt(prompt, RawIssueContext("x", "issue"))
-        self.assertIn("w/o Behavior Target", rendered)
-        self.assertIn("原始 Issue（未结构化）", rendered)
+        self.assertIn("without BehaviorTarget", rendered)
+        self.assertIn("Raw issue (unstructured)", rendered)
 
     def test_full_launcher_skips_rewrite_coverage_and_cache_when_disabled(self) -> None:
         launcher = (

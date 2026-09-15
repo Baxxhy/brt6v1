@@ -6,11 +6,11 @@ from ..core.schema import ExecutionResult, SemanticDelta
 from ..validation.delta_guard import GuardResult
 
 
-MAX_SEMANTIC_ROUNDS = 5
+MAX_SEMANTIC_ROUNDS = 10
 
 
 def semantic_round_budget(requested: int) -> int:
-    """Keep the paper algorithm bounded to one through five rounds."""
+    """Keep the paper algorithm bounded to one through ten rounds."""
 
     return min(MAX_SEMANTIC_ROUNDS, max(1, int(requested)))
 

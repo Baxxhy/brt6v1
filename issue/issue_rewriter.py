@@ -206,16 +206,45 @@ def rewrite_issue(
         try:
             data = extract_json_object(response)
         except ValueError as first_error:
-            retry_prompt = (
-                user_prompt
-                + "\n\n上一次响应无法解析为完整 JSON："
+            # Some OpenAI-compatible gateways return a normal HTTP response but
+            # stop long JSON generations at a provider-side output cap.  Keep
+            # the original prompt for the first attempt, then request the same
+            # schema in a deliberately compact form.  Optional lists may be
+            # empty, so this changes serialization length rather than semantics.
+            compact_rules = (
+                "\n\nThe previous response was incomplete or invalid JSON: "
                 + str(first_error)
-                + "。请重新输出单个完整合法 JSON 对象；不要省略字段，不要截断，"
-                + "不要输出 Markdown 或解释。"
+                + ". Return the same required JSON schema in a compact form. "
+                + "Use at most one item in each list, at most two short evidence "
+                + "quotes, and no string longer than 120 characters. Use empty "
+                + "lists for optional details. Finish every bracket. Return JSON only."
             )
-            response = llm_client.chat(ISSUE_REWRITE_SYSTEM_PROMPT, retry_prompt)
-            write_text(str(Path(output_dir) / "response_json_retry.txt"), response)
-            data = extract_json_object(response)
+            last_error: ValueError = first_error
+            data = None
+            for retry_index in range(1, 3):
+                retry_prompt = user_prompt + compact_rules
+                if retry_index == 2:
+                    retry_prompt += (
+                        " For this final retry, leave suspected_bug_locations, "
+                        "related_test_seeds, mutation_hints, observation_points, "
+                        "assertion_hints, setup_hints, and uncertainties empty."
+                    )
+                response = llm_client.chat(
+                    ISSUE_REWRITE_SYSTEM_PROMPT, retry_prompt
+                )
+                retry_name = (
+                    "response_json_retry.txt"
+                    if retry_index == 1
+                    else f"response_json_retry_{retry_index}.txt"
+                )
+                write_text(str(Path(output_dir) / retry_name), response)
+                try:
+                    data = extract_json_object(response)
+                    break
+                except ValueError as retry_error:
+                    last_error = retry_error
+            if data is None:
+                raise last_error
         behavior = apply_behavior_safety_constraints(
             context.issue_text, behavior_from_dict(context.instance_id, data)
         )

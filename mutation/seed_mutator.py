@@ -6,7 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..core.behavior_evidence import BehaviorEvidence, render_evidence_prompt
+from ..core.behavior_evidence import (
+    BehaviorEvidence,
+    behavior_prompt_view,
+    render_evidence_prompt,
+)
 from ..core.prompts import SEED_MUTATION_PLAN_SYSTEM_PROMPT, SEED_MUTATION_PLAN_USER_PROMPT
 from ..core.schema import HostContext, ProtocolRecovery, RetrievedCode, RetrievedTest, SemanticDelta
 from ..core.utils import extract_json_object, safe_json_dump, truncate_text, write_text
@@ -69,12 +73,12 @@ def propose_semantic_delta(
         related_test.code_content if related_test else host.seed_test_code
     )
     prompt = SEED_MUTATION_PLAN_USER_PROMPT.format(
-        behavior_json=_json(behavior.to_dict(), MAX_PROMPT_BEHAVIOR_CHARS),
+        behavior_json=_json(behavior_prompt_view(behavior), MAX_PROMPT_BEHAVIOR_CHARS),
         host_context_json=_json(host.to_dict(), MAX_PROMPT_HOST_CHARS),
         protocol_json=_json(protocol.to_dict() if protocol else {}, MAX_PROMPT_PROTOCOL_CHARS),
         source_context=_text(format_code_context(source), MAX_PROMPT_SOURCE_CHARS),
         seed_test_code=_text(current_test, MAX_PROMPT_SEED_CHARS),
-        execution_feedback=_text(execution_feedback or "无：这是该 seed 的第一轮。", MAX_PROMPT_EXECUTION_CHARS),
+        execution_feedback=_text(execution_feedback or "None; this is the first round for this seed.", MAX_PROMPT_EXECUTION_CHARS),
         verifier_feedback=_json(verifier_feedback or {}, MAX_PROMPT_VERIFIER_CHARS),
         delta_history=_json(delta_history or [], MAX_PROMPT_HISTORY_CHARS),
     )
@@ -90,9 +94,9 @@ def propose_semantic_delta(
         except ValueError as exc:
             retry_prompt = (
                 prompt
-                + "\n\n仅修复 JSON 协议，不改变刚才的语义决定。解析错误："
+                + "\n\nPlease repair only the JSON structure without changing the semantic decision. Parse error: "
                 + str(exc)
-                + "。只输出一个完整 JSON 对象。"
+                + ". Return one complete JSON object only."
             )
             response = llm_client.chat(SEED_MUTATION_PLAN_SYSTEM_PROMPT, retry_prompt)
             write_text(
