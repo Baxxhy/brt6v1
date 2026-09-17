@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--code_retrieval_path", required=True)
     parser.add_argument("--test_retrieval_path", required=True)
     parser.add_argument("--output_dir", required=True)
-    parser.add_argument("--model", default="deepseek-v3")
+    parser.add_argument("--model", default="deepseek-v4-flash")
     parser.add_argument(
         "--llm-provider",
         choices=("deepseek", "gpt"),

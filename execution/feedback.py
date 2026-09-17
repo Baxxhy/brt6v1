@@ -146,7 +146,7 @@ def _save_behavior_evidence(evidence: BehaviorEvidence, output_dir: str | Path) 
 
 def _method_version(config: AblationConfig) -> str:
     if config.ablation_id == "full":
-        return "p0-validated-mutation-oracle-feedback-v4"
+        return "p0-lossless-target-direct-fallback-v5"
     if config.ablation_id == "wo_behavior_target":
         return "p0-wo-behavior-target-v1"
     if config.ablation_id == "wo_mutation":
@@ -181,6 +181,26 @@ def _empty_repair_route_counts() -> dict[str, int]:
         "assertion": 0,
         "generic": 0,
     }
+
+
+def _should_run_direct_fallback(
+    config: AblationConfig,
+    attempts: list[dict[str, Any]],
+) -> bool:
+    """Run the direct route only after the full target-guided route exhausts.
+
+    The fallback is part of the full method rather than any one-factor
+    ablation.  A merely failing candidate is insufficient: the strict route
+    must have accepted it and exported an actual test file.
+    """
+
+    if config.ablation_id != "full":
+        return False
+    return not any(
+        str(item.get("status") or "") == "ISSUE_ALIGNED_FAIL"
+        and Path(str(item.get("final_test_path") or "")).is_file()
+        for item in attempts
+    )
 
 
 def _selected_protocol_result_fields(
@@ -1332,9 +1352,13 @@ def run_instance_pipeline(
             prepared_repo_path = ""
             prepared_meta: dict[str, Any] | None = None
             if not generate_only:
-                prepared_repo_path, prepared_meta = prepare_instance_worktree(
-                    context, output_dir, conda_env, timeout, no_conda
-                )
+                if _prepared_repo_path and _prepare_meta is not None:
+                    prepared_repo_path = _prepared_repo_path
+                    prepared_meta = dict(_prepare_meta)
+                else:
+                    prepared_repo_path, prepared_meta = prepare_instance_worktree(
+                        context, output_dir, conda_env, timeout, no_conda
+                    )
                 conda_env = str(prepared_meta.get("env_name") or conda_env)
                 context.buggy_repo_path = prepared_repo_path
                 safe_json_dump(
@@ -1437,6 +1461,63 @@ def run_instance_pipeline(
                 attempts[-1]["switch_reason"] = reason
                 if has_next:
                     switch_reasons.append(f"seed_{seed_index}: {reason}")
+
+            # Component 1 is additive: retain its accepted output, and invoke
+            # direct adaptation only when none of the three target-guided
+            # branches produced a strictly accepted BRT.  This route never
+            # reads fixed-side outcomes and therefore remains usable at
+            # generation time.
+            direct_fallback_attempted = _should_run_direct_fallback(
+                config, attempts
+            )
+            direct_fallback_used = False
+            direct_fallback_status = "NOT_ATTEMPTED"
+            direct_fallback_dir = Path(output_dir) / "direct_fallback"
+            direct_fallback_summary: dict[str, Any] = {}
+            if direct_fallback_attempted:
+                direct_config = AblationConfig(
+                    behavior_target=False,
+                    mutation=config.mutation,
+                    specialized_feedback=config.specialized_feedback,
+                    environment_feedback=config.environment_feedback,
+                    trigger_feedback=config.trigger_feedback,
+                    assertion_feedback=config.assertion_feedback,
+                    semantic_delta=config.semantic_delta,
+                ).validate()
+                fallback_result = run_instance_pipeline(
+                    copy.deepcopy(context),
+                    llm_client,
+                    str(direct_fallback_dir),
+                    conda_env,
+                    timeout,
+                    no_conda,
+                    max_semantic_rounds,
+                    validation_mode,
+                    generate_only,
+                    enable_protocol_recovery,
+                    enable_seed_mutation,
+                    enable_strict_semantic_verifier,
+                    enable_behavior_target=False,
+                    ablation_config=direct_config,
+                    alignment_verifier=alignment_verifier,
+                    _prepared_repo_path=prepared_repo_path,
+                    _prepare_meta=prepared_meta,
+                )
+                direct_fallback_status = fallback_result.status
+                fallback_summary_path = direct_fallback_dir / "summary.json"
+                if fallback_summary_path.is_file():
+                    try:
+                        direct_fallback_summary = json.loads(
+                            fallback_summary_path.read_text(encoding="utf-8")
+                        )
+                    except (OSError, json.JSONDecodeError):
+                        direct_fallback_summary = fallback_result.to_dict()
+                else:
+                    direct_fallback_summary = fallback_result.to_dict()
+                direct_fallback_used = bool(
+                    direct_fallback_status == "ISSUE_ALIGNED_FAIL"
+                    and (direct_fallback_dir / "final_test.py").is_file()
+                )
             # Prefer agreement among independent iCoRe seeds, but only after
             # hard executability/Oracle eligibility. The consensus key stays
             # readable and is never converted to a digest.
@@ -1474,11 +1555,35 @@ def run_instance_pipeline(
             )
             assert best is not None
             _, _, _, selected_dir, selected_summary, selected_checkpoint = best
-            selected_seed_index = int(selected_dir.name.rsplit("_", 1)[-1])
-            selected_seed_delta_calls = int(selected_summary.get("delta_calls") or 0)
-            selected_seed_routes = dict(
-                selected_summary.get("repair_route_counts") or {}
+            target_primary_status = str(selected_summary.get("status") or "")
+            selection_route = "target_primary"
+            if direct_fallback_used:
+                selected_dir = direct_fallback_dir
+                selected_summary = dict(direct_fallback_summary)
+                selected_checkpoint = _best_checkpoint_from_summary(selected_dir)
+                selection_route = "direct_fallback_after_target_exhaustion"
+            selected_seed_index = int(
+                selected_summary.get("selected_seed_index")
+                if direct_fallback_used
+                else selected_dir.name.rsplit("_", 1)[-1]
             )
+            selected_seed_delta_calls = int(
+                selected_summary.get("selected_seed_delta_calls")
+                or selected_summary.get("delta_calls")
+                or 0
+            )
+            selected_seed_routes = dict(
+                selected_summary.get("selected_seed_repair_route_counts")
+                or selected_summary.get("repair_route_counts")
+                or {}
+            )
+            fallback_attempts = list(
+                direct_fallback_summary.get("seed_attempts_summary") or []
+            )
+            selected_attempts = fallback_attempts if direct_fallback_used else attempts
+            selected_switch_reasons = list(
+                direct_fallback_summary.get("seed_switch_reasons") or []
+            ) if direct_fallback_used else switch_reasons
             all_seed_delta_calls = sum(int(item.get("delta_calls") or 0) for item in attempts)
             all_seed_valid_calls = sum(int(item.get("valid_delta_calls") or 0) for item in attempts)
             all_seed_keep_calls = sum(int(item.get("keep_delta_calls") or 0) for item in attempts)
@@ -1489,6 +1594,28 @@ def run_instance_pipeline(
                 )
                 for route in _empty_repair_route_counts()
             }
+            if direct_fallback_attempted:
+                all_seed_delta_calls += int(
+                    direct_fallback_summary.get("all_seed_delta_calls")
+                    or direct_fallback_summary.get("delta_calls")
+                    or 0
+                )
+                all_seed_valid_calls += int(
+                    direct_fallback_summary.get("valid_delta_calls") or 0
+                )
+                all_seed_keep_calls += int(
+                    direct_fallback_summary.get("keep_delta_calls") or 0
+                )
+                fallback_routes = dict(
+                    direct_fallback_summary.get("all_seed_repair_route_counts")
+                    or direct_fallback_summary.get("repair_route_counts")
+                    or {}
+                )
+                all_seed_routes = {
+                    route: int(all_seed_routes.get(route) or 0)
+                    + int(fallback_routes.get(route) or 0)
+                    for route in _empty_repair_route_counts()
+                }
             selected_exportable = True
             top_final = Path(output_dir) / "final_test.py"
             if selected_exportable:
@@ -1512,12 +1639,19 @@ def run_instance_pipeline(
                     "final_test_path": str(top_final) if selected_exportable else "",
                     "seed_mode": "adaptive_top3",
                     "selected_seed_index": selected_seed_index,
-                    "seed_attempts_count": len(attempts),
-                    "seed_attempts_summary": attempts,
-                    "seed_switch_reasons": switch_reasons,
+                    "seed_attempts_count": len(selected_attempts),
+                    "seed_attempts_summary": selected_attempts,
+                    "seed_switch_reasons": selected_switch_reasons,
+                    "target_seed_attempts_summary": attempts,
+                    "direct_fallback_seed_attempts_summary": fallback_attempts,
                     "selected_seed_reason": selected_checkpoint.get("reason")
                     or selected_summary.get("final_reason")
                     or "selected by adaptive seed score",
+                    "selection_route": selection_route,
+                    "target_primary_status": target_primary_status,
+                    "direct_fallback_attempted": direct_fallback_attempted,
+                    "direct_fallback_used": direct_fallback_used,
+                    "direct_fallback_status": direct_fallback_status,
                     "final_oracle_risk": {},
                     "final_surrogate_risk": {},
                     "behavior_target_enabled": enable_behavior_target,
@@ -1535,12 +1669,27 @@ def run_instance_pipeline(
                     "repair_route_counts": all_seed_routes,
                 }
             )
-            safe_json_dump(attempts, str(Path(output_dir) / "seed_attempts_summary.json"))
+            safe_json_dump(
+                selected_attempts,
+                str(Path(output_dir) / "seed_attempts_summary.json"),
+            )
+            safe_json_dump(
+                attempts,
+                str(Path(output_dir) / "target_seed_attempts_summary.json"),
+            )
+            safe_json_dump(
+                fallback_attempts,
+                str(Path(output_dir) / "direct_fallback_seed_attempts_summary.json"),
+            )
             safe_json_dump(
                 {
                     "selected_seed_index": selected_seed_index,
                     "selected_seed_dir": str(selected_dir),
                     "selected_seed_reason": selected_summary["selected_seed_reason"],
+                    "selection_route": selection_route,
+                    "direct_fallback_attempted": direct_fallback_attempted,
+                    "direct_fallback_used": direct_fallback_used,
+                    "direct_fallback_status": direct_fallback_status,
                 },
                 str(Path(output_dir) / "selected_seed_summary.json"),
             )
@@ -1572,10 +1721,17 @@ def run_instance_pipeline(
                 notes=str(selected_summary.get("notes") or ""),
                 seed_mode="adaptive_top3",
                 selected_seed_index=selected_seed_index,
-                seed_attempts_count=len(attempts),
-                seed_attempts_summary=attempts,
-                seed_switch_reasons=switch_reasons,
+                seed_attempts_count=len(selected_attempts),
+                seed_attempts_summary=selected_attempts,
+                seed_switch_reasons=selected_switch_reasons,
+                target_seed_attempts_summary=attempts,
+                direct_fallback_seed_attempts_summary=fallback_attempts,
                 selected_seed_reason=str(selected_summary.get("selected_seed_reason") or ""),
+                selection_route=selection_route,
+                target_primary_status=target_primary_status,
+                direct_fallback_attempted=direct_fallback_attempted,
+                direct_fallback_used=direct_fallback_used,
+                direct_fallback_status=direct_fallback_status,
                 final_oracle_risk=selected_summary.get("final_oracle_risk") or {},
                 final_surrogate_risk=selected_summary.get("final_surrogate_risk") or {},
                 final_reason=str(selected_summary.get("final_reason") or ""),
@@ -1736,6 +1892,7 @@ def run_instance_pipeline(
             llm_client,
             related_source=context.retrieved_code,
             related_test=related_test,
+            issue_text=context.issue_text,
         ) if enable_seed_mutation else None
         if initial_delta is not None:
             semantic_deltas.append(initial_delta)
@@ -1954,6 +2111,7 @@ def run_instance_pipeline(
                 related_test=related_test,
                 current_candidate_code=candidate.code,
                 delta_history=[item.to_dict() for item in semantic_deltas],
+                issue_text=context.issue_text,
             ) if enable_seed_mutation else None
             if delta is not None:
                 semantic_deltas.append(delta)

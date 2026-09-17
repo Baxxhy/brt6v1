@@ -692,7 +692,7 @@ class OfficialRuntimeContractTests(unittest.TestCase):
                 "preserve_cached_image",
             )
 
-    def test_close_preserves_persistent_official_container(self) -> None:
+    def test_close_stops_but_preserves_persistent_official_container(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime = OfficialDockerRuntime(
                 dataset_mode="swt",
@@ -710,15 +710,53 @@ class OfficialRuntimeContractTests(unittest.TestCase):
             runtime.container_persistent = True
             runtime.manifest = {"status": "RUNNING"}
 
+            stopped = subprocess.CompletedProcess(
+                ["docker", "kill", "container123"], 0, "container123\n", ""
+            )
             with mock.patch(
-                "brt6.runtime.official_docker_runtime._run"
+                "brt6.runtime.official_docker_runtime._run",
+                return_value=stopped,
             ) as docker_command:
                 runtime.close()
 
-            docker_command.assert_not_called()
+            docker_command.assert_called_once_with(
+                ["docker", "kill", "container123"], timeout=120
+            )
             self.assertEqual(runtime.manifest["status"], "PERSISTENT_READY")
-            self.assertFalse(runtime.manifest["container_cleanup_attempted"])
+            self.assertTrue(runtime.manifest["container_cleanup_attempted"])
+            self.assertEqual(runtime.manifest["container_cleanup_returncode"], 0)
             self.assertFalse(runtime.manifest["instance_image_cleanup_attempted"])
+
+    def test_close_accepts_already_stopped_persistent_container(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = OfficialDockerRuntime(
+                dataset_mode="swt",
+                issue_row=issue_row(),
+                official_python="/opt/official/bin/python",
+                harness_root="/bench/swt",
+                source_repo=tmp,
+                output_dir=tmp,
+                startup_timeout=1800,
+            )
+            runtime.container_id = "container123"
+            runtime.image = "exec.eval.x86_64.environment.instance:latest"
+            runtime.container_persistent = True
+            runtime.manifest = {"status": "RUNNING"}
+            stopped = subprocess.CompletedProcess(
+                ["docker", "kill", "container123"],
+                1,
+                "",
+                "Error response from daemon: container is not running",
+            )
+
+            with mock.patch(
+                "brt6.runtime.official_docker_runtime._run",
+                return_value=stopped,
+            ):
+                runtime.close()
+
+            self.assertEqual(runtime.manifest["status"], "PERSISTENT_READY")
+            self.assertEqual(runtime.manifest["container_cleanup_returncode"], 0)
 
     def test_close_waits_for_daemon_then_retries_timed_out_image_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from brt6.evaluation.official_benchmarks import (
     export_official_predictions,
@@ -13,10 +14,29 @@ from brt6.evaluation.official_benchmarks import (
     new_file_patch,
     resolve_generated_test_path,
 )
-from brt6.scripts.run_official_eval_after_generation import _f2p_only_marker
+from brt6.scripts.run_official_eval_after_generation import (
+    _f2p_only_marker,
+    _stop_running_official_containers,
+)
 
 
 class OfficialBenchmarkExportTests(unittest.TestCase):
+    def test_interrupt_cleanup_preserves_preexisting_eval_containers(self) -> None:
+        with mock.patch(
+            "brt6.scripts.run_official_eval_after_generation._running_official_container_ids",
+            return_value={"existing", "created"},
+        ), mock.patch(
+            "brt6.scripts.run_official_eval_after_generation.run_subprocess_tree"
+        ) as run:
+            run.return_value = subprocess.CompletedProcess([], 0, "created\n", "")
+            _stop_running_official_containers(Path("/tmp"), {"existing"})
+
+        run.assert_called_once_with(
+            ["docker", "kill", "created"],
+            "/tmp",
+            600,
+        )
+
     def test_run_scoped_f2p_marker_disables_only_its_evaluation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             run = Path(tmp) / "run"

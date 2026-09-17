@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=/root/Baxxhy/BugReproduce/brt6
-PACKAGE_ROOT=/root/Baxxhy/BugReproduce
-PYTHON=/root/miniconda3/envs/icore/bin/python
-SWT_PYTHON=/root/miniconda3/envs/swtbench/bin/python
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+PACKAGE_ROOT=$(cd "$ROOT/.." && pwd)
+PYTHON=${PYTHON_BIN:-/root/miniconda3/envs/icore/bin/python}
+SWT_PYTHON=${SWTBENCH_PYTHON:-/root/miniconda3/envs/swtbench/bin/python}
 DATASET=$ROOT/data/issues/swt276_issues.json
 OFFICIAL_DATASET=$ROOT/data/official/swt276_official_eval.json
 CODE_RETRIEVAL=$ROOT/retrieval_results/code/code_retrieval_results_gpt.json
 TEST_RETRIEVAL=$ROOT/retrieval_results/test/icore/gpt/related_tests.json
-POOL=${BRT_API_POOL_FILE:-$ROOT/.secrets/api_pool_xiaojing_deepseekv4flash.json}
+POOL=${BRT_API_POOL_FILE:-$ROOT/.secrets/api_pool.json}
 RUN_TIMESTAMP=${RUN_TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}
 RUN_DIR=${RUN_DIR:-$ROOT/results/runs/xiaojing_deepseekv4flash_smoke3_${RUN_TIMESTAMP}}
 IDS=$RUN_DIR/instance_ids.txt
@@ -45,15 +46,13 @@ export BRT_ALLOWED_API_HOST=api.open.xiaojingai.com
 export BRT_MODEL_ID=deepseek-v4-flash
 export BRT_DISABLE_THINKING=1
 export BRT_LLM_STREAM=1
-export BRT3_LLM_REQUEST_TIMEOUT=1200
-export BRT3_LLM_MAX_ATTEMPTS=3
-export BRT_LLM_WAIT_FOREVER=0
+export BRT3_LLM_REQUEST_TIMEOUT=600
+export BRT3_LLM_MAX_ATTEMPTS=2
 export BRT_LLM_TRUNCATION_MAX_TOKENS=8192
-export BRT_CSU_MAX_INFLIGHT=3
 export BRT_REQUIRE_OFFICIAL_DOCKER=1
 export BRT_ALLOW_DIRTY_WORKTREE=1
 export BRT_OFFICIAL_DOCKER_STARTUP_TIMEOUT=7200
-export DOCKER_HOST=unix:///run/mutate-docker.sock
+export DOCKER_HOST=${DOCKER_HOST:-unix:///run/mutate-docker.sock}
 export TMPDIR=$RUN_DIR/tmp
 export TEMP=$TMPDIR
 export TMP=$TMPDIR
@@ -105,7 +104,7 @@ BRT4_BEHAVIOR_CACHE_DIR="$DESIGN1" \
   --instances_path "$DATASET" \
   --code_retrieval_path "$CODE_RETRIEVAL" \
   --test_retrieval_path "$TEST_RETRIEVAL" \
-  --repo_root_base /root/Baxxhy/BugReproduce/swe_repos \
+  --repo_root_base "${REPO_ROOT:-$PACKAGE_ROOT/swe_repos}" \
   --output_dir "$DESIGN2" --instance_ids_file "$IDS" \
   --model deepseek-v4-flash --llm-provider deepseek \
   --temperature 0.1 --max_tokens 4096 --max_workers 3 \

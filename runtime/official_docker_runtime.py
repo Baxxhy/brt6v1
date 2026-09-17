@@ -777,11 +777,40 @@ class OfficialDockerRuntime:
             return
 
         if self.container_persistent:
+            # Preserve the container object for later reuse, but do not leave
+            # one live ``tail -f /dev/null`` process per completed instance.
+            # The official test commands can leave zombie descendants behind
+            # because that command is PID 1 and does not reap children.  A
+            # full SWT-Lite run otherwise accumulates hundreds of running
+            # containers and thousands of tasks until process creation and
+            # Docker control-plane calls stall.  ``docker kill`` transitions
+            # the reusable container to ``exited`` and releases all of its
+            # processes; the startup helper restarts it on the next use.
+            try:
+                stop = _run(
+                    ["docker", "kill", self.container_id],
+                    timeout=120,
+                )
+                stop_returncode = int(stop.returncode)
+                stop_stdout = str(stop.stdout or "")[-2000:]
+                stop_stderr = str(stop.stderr or "")[-2000:]
+            except Exception as exc:  # cleanup must not hide the instance result
+                stop_returncode = -1
+                stop_stdout = ""
+                stop_stderr = repr(exc)[-2000:]
+            if stop_returncode != 0 and "is not running" in stop_stderr.lower():
+                stop_returncode = 0
             self.manifest.update(
                 {
-                    "status": "PERSISTENT_READY",
-                    "container_cleanup_attempted": False,
-                    "container_cleanup_returncode": 0,
+                    "status": (
+                        "PERSISTENT_READY"
+                        if stop_returncode == 0
+                        else "PERSISTENT_STOP_ERROR"
+                    ),
+                    "container_cleanup_attempted": True,
+                    "container_cleanup_returncode": stop_returncode,
+                    "container_cleanup_stdout": stop_stdout,
+                    "container_cleanup_stderr": stop_stderr,
                     "instance_image_cleanup_attempted": False,
                     "instance_image_cleanup_returncode": 0,
                     "instance_image_cache_policy": "preserve_cached_image",

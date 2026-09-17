@@ -1174,29 +1174,9 @@ Oracle 必须独立依据 expected_behavior 构造；
 <seed 所在目录>/test_brt_<sanitized_instance_id>.py
 ```
 
-### 14.5 执行前静态语义检查
+### 14.5 执行前代码整理
 
-生成后先调用 `_semantic_path_problem()` 和 `audit_candidate()`。如果发现问题，最多追加 2 次模型纠错。
-
-主要硬检查包括：
-
-- 必须是合法 Python；
-- 必须恰好有 1 个测试入口；
-- 不得调用与 Issue 同名但命名空间不同的 API；
-- Issue 测默认行为时，不得显式覆盖该配置；
-- 不得在目标行为前加入无关类型前置断言；
-- 不得猜测 Issue 没给出的渲染文本；
-- 不得擅自给 Issue 的最小复现调用增加 schema 参数；
-- 不得把“0 tests collected”当成功；
-- class 定义阶段引用的模块变量必须恢复；
-- 为兼容旧 benchmark Python，不得使用 f-string；
-- 不得 `importorskip`、`skip`、条件跳过或 `requires_*` decorator；
-- 不得 `pytest.raises(Exception/BaseException)`；
-- 不得使用 `assert True` 或 `A or not A`；
-- 不得 broad `try/except` 后 pass/return；
-- expected behavior 是“不抛异常”时，不得用 raises 接受 buggy 异常；
-- expected behavior 要求能力存在时，不得断言 `not hasattr`；
-- assertion hints 要求新消息 token 时，Oracle 必须实际检查该 token。
+生成器会清理代码围栏、整理缩进并尝试 AST 解析，随后将候选交给真实 buggy 环境执行。历史上的独立静态语义审计层已经删除，不再作为生成后的附加过滤器。
 
 ### 14.6 Mutation Adherence
 
@@ -1425,7 +1405,7 @@ Oracle 是否来自 Issue、观察公开行为并且可证伪？
 - `repair_trigger/target_not_hit`；或
 - `repair_oracle/oracle_wrong`。
 
-模型之后还会再次执行 `audit_candidate()`。确定性规则发现问题时，可以覆盖模型决定。
+代码还会用 `oracle_contract_summary()` 检查候选是否具有可证伪的公开观察；已经删除的历史独立审计层不再参与决定。
 
 ### 18.4 输出
 

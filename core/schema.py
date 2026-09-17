@@ -386,6 +386,13 @@ class FinalResult(JsonMixin):
     seed_attempts_summary: list[dict[str, Any]] = field(default_factory=list)
     seed_switch_reasons: list[str] = field(default_factory=list)
     selected_seed_reason: str = ""
+    selection_route: str = "target_primary"
+    target_primary_status: str = ""
+    direct_fallback_attempted: bool = False
+    direct_fallback_used: bool = False
+    direct_fallback_status: str = ""
+    target_seed_attempts_summary: list[dict[str, Any]] = field(default_factory=list)
+    direct_fallback_seed_attempts_summary: list[dict[str, Any]] = field(default_factory=list)
     final_oracle_risk: dict[str, Any] = field(default_factory=dict)
     final_surrogate_risk: dict[str, Any] = field(default_factory=dict)
     candidate_repo_path: str = ""

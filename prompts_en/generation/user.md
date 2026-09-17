@@ -1,5 +1,14 @@
 Based on similarity testing, perform minimal mutation to generate 1 BRT.
 
+Raw Issue (lossless source of facts):
+{issue_text}
+
+Evidence priority: inputs, calls, symptoms, and expected behavior stated
+explicitly in the raw Issue are hard constraints. The BehaviorTarget organizes
+those facts and adds repository evidence, but low-confidence fields and
+uncertainties are hypotheses only. They must not override, narrow, or rewrite
+an explicit Issue fact.
+
 Instance: {instance_id}
 Test function name must be: test_brt_{safe_instance_id}
 Placement strategy: Generate a complete new Python test file, which will be saved as test_brt_{safe_instance_id}.py in the same directory as the most similar test.

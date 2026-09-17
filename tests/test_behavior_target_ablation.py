@@ -4,18 +4,25 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from brt6.context.host_context import rank_related_tests
+from brt6.core.ablation import AblationConfig
 from brt6.core.behavior_evidence import render_evidence_prompt
 from brt6.core.schema import (
     BehaviorTarget,
+    HostContext,
     InstanceContext,
     RawIssueContext,
     RetrievedCode,
     RetrievedTest,
 )
-from brt6.execution.feedback import _load_behavior_evidence
+from brt6.execution.feedback import (
+    _load_behavior_evidence,
+    _should_run_direct_fallback,
+)
+from brt6.generation.generator import generate_candidate
+from brt6.mutation.seed_mutator import propose_semantic_delta
 from brt6.pipeline.run import build_parser
 
 
@@ -98,6 +105,142 @@ class BehaviorTargetAblationTests(unittest.TestCase):
         rendered = render_evidence_prompt(prompt, RawIssueContext("x", "issue"))
         self.assertIn("without BehaviorTarget", rendered)
         self.assertIn("Raw issue (unstructured)", rendered)
+
+    def test_full_generation_keeps_raw_issue_beside_structured_target(self) -> None:
+        marker = "LOSSLESS_ISSUE_FACT_314159"
+        behavior = BehaviorTarget("x", issue_summary="normalized summary")
+        host = HostContext("x", seed_test_code="def test_seed():\n    assert True\n")
+        seed = RetrievedTest(
+            "x",
+            name="test_seed",
+            file="tests/test_seed.py",
+            code_content=host.seed_test_code,
+        )
+        llm = Mock()
+        llm.chat.return_value = "def test_generated():\n    assert False\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            generate_candidate(
+                "x",
+                behavior,
+                host,
+                seed,
+                [],
+                llm,
+                tmp,
+                tmp,
+                write_to_repo=False,
+                issue_text=marker,
+            )
+            prompt = (Path(tmp) / "prompts" / "generation_round_0.txt").read_text(
+                encoding="utf-8"
+            )
+        self.assertIn(marker, prompt)
+        self.assertIn("normalized summary", prompt)
+        self.assertIn("lossless source of facts", prompt)
+
+    def test_raw_issue_is_not_duplicated_in_generation_prompt(self) -> None:
+        marker = "RAW_ISSUE_SINGLE_COPY_271828"
+        behavior = RawIssueContext("x", marker)
+        host = HostContext("x", seed_test_code="def test_seed():\n    assert True\n")
+        seed = RetrievedTest(
+            "x",
+            name="test_seed",
+            file="tests/test_seed.py",
+            code_content=host.seed_test_code,
+        )
+        llm = Mock()
+        llm.chat.return_value = "def test_generated():\n    assert False\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            generate_candidate(
+                "x",
+                behavior,
+                host,
+                seed,
+                [],
+                llm,
+                tmp,
+                tmp,
+                write_to_repo=False,
+                issue_text=marker,
+            )
+            prompt = (Path(tmp) / "prompts" / "generation_round_0.txt").read_text(
+                encoding="utf-8"
+            )
+        self.assertEqual(prompt.count(marker), 1)
+        self.assertIn('"structured_target": "unavailable"', prompt)
+
+    def test_delta_planner_keeps_raw_issue_beside_structured_target(self) -> None:
+        marker = "DELTA_ISSUE_FACT_161803"
+        behavior = BehaviorTarget("x", issue_summary="normalized delta summary")
+        host = HostContext("x", seed_test_code="def test_seed():\n    assert True\n")
+        llm = Mock()
+        llm.chat.return_value = json.dumps(
+            {
+                "schema_version": "semantic_delta.v2",
+                "action": "KEEP",
+                "dimension": "",
+                "seed_fact": "seed",
+                "target_fact": "target",
+                "change": "",
+                "preserve": [],
+                "avoid": [],
+                "reason": "insufficient evidence",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "prompts").mkdir()
+            (Path(tmp) / "responses").mkdir()
+            propose_semantic_delta(
+                "x",
+                0,
+                behavior,
+                host,
+                None,
+                llm,
+                tmp,
+                issue_text=marker,
+            )
+            prompt = (Path(tmp) / "prompts" / "delta_round_0.txt").read_text(
+                encoding="utf-8"
+            )
+        self.assertIn(marker, prompt)
+        self.assertIn("normalized delta summary", prompt)
+
+    def test_direct_fallback_runs_only_after_full_target_exhaustion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exported = Path(tmp) / "final_test.py"
+            exported.write_text("def test_x():\n    assert False\n", encoding="utf-8")
+            accepted = [
+                {
+                    "status": "ISSUE_ALIGNED_FAIL",
+                    "final_test_path": str(exported),
+                }
+            ]
+            unresolved = [
+                {"status": "TRIGGER_UNRESOLVED", "final_test_path": ""}
+            ]
+            self.assertFalse(
+                _should_run_direct_fallback(AblationConfig(), accepted)
+            )
+            self.assertTrue(
+                _should_run_direct_fallback(
+                    AblationConfig(),
+                    [
+                        {
+                            "status": "ISSUE_ALIGNED_FAIL",
+                            "final_test_path": str(Path(tmp) / "missing.py"),
+                        }
+                    ],
+                )
+            )
+            self.assertTrue(
+                _should_run_direct_fallback(AblationConfig(), unresolved)
+            )
+            self.assertFalse(
+                _should_run_direct_fallback(
+                    AblationConfig(behavior_target=False), unresolved
+                )
+            )
 
     def test_full_launcher_skips_rewrite_coverage_and_cache_when_disabled(self) -> None:
         launcher = (

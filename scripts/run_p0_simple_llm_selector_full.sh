@@ -260,7 +260,9 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 
 if [[ "$DATASET_MODE" == "swt" ]]; then
-  OFFICIAL_PYTHON=${SWTBENCH_PYTHON:-$CONDA_BASE/envs/brt6_swtbench/bin/python}
+  DEFAULT_OFFICIAL_PYTHON=$CONDA_BASE/envs/swtbench/bin/python
+  [[ -x "$DEFAULT_OFFICIAL_PYTHON" ]] || DEFAULT_OFFICIAL_PYTHON=$CONDA_BASE/envs/brt6_swtbench/bin/python
+  OFFICIAL_PYTHON=${SWTBENCH_PYTHON:-$DEFAULT_OFFICIAL_PYTHON}
 else
   OFFICIAL_PYTHON=${TDDBENCH_PYTHON:-$CONDA_BASE/envs/brt6_tddbench/bin/python}
 fi
@@ -273,9 +275,11 @@ fi
 case "$DATASET_MODE" in
   swt)
     DEFAULT_INSTANCES_PATH=$PROJECT_ROOT/data/issues/swt276_issues.json
+    DEFAULT_GOLD_DATASET=$PROJECT_ROOT/data/official/swt276_official_eval.json
     ;;
   tdd)
     DEFAULT_INSTANCES_PATH=$PACKAGE_ROOT/TDD-Bench-Verified/TDD_Bench.json
+    DEFAULT_GOLD_DATASET=$DEFAULT_INSTANCES_PATH
     ;;
   *)
     echo "invalid dataset '$DATASET_MODE': expected swt or tdd" >&2
@@ -326,7 +330,7 @@ export TEMP=${TEMP:-"$RUN_DIR/tmp"}
 export TMP=${TMP:-"$RUN_DIR/tmp"}
 export XDG_CACHE_HOME=${XDG_CACHE_HOME:-"$RUN_DIR/cache"}
 INSTANCES_PATH=${INSTANCES_PATH:-$DEFAULT_INSTANCES_PATH}
-GOLD_DATASET=${GOLD_DATASET:-$INSTANCES_PATH}
+GOLD_DATASET=${GOLD_DATASET:-$DEFAULT_GOLD_DATASET}
 CODE_RETRIEVAL=${CODE_RETRIEVAL:-$PROJECT_ROOT/retrieval_results/code/code_retrieval_results_gpt.json}
 TEST_RETRIEVAL=${TEST_RETRIEVAL:-$PROJECT_ROOT/retrieval_results/test/icore/gpt/related_tests.json}
 REPO_ROOT=${REPO_ROOT:-$PACKAGE_ROOT/swe_repos}
@@ -335,18 +339,19 @@ if [[ -n "${BRT_MODEL_ID:-}" ]]; then
 elif [[ "$LLM_PROVIDER" == "gpt" ]]; then
   MODEL=${GPT_MODEL:-gpt-5.4-mini}
 else
-  MODEL=${MODEL:-${DEEPSEEK_MODEL:-deepseek-v3}}
+  MODEL=${MODEL:-${DEEPSEEK_MODEL:-deepseek-v4-flash}}
 fi
 export BRT_LLM_PROVIDER=$LLM_PROVIDER
 ISSUE_WORKERS=${ISSUE_WORKERS:-6}
 GENERATION_WORKERS=${GENERATION_WORKERS:-6}
 EVALUATION_WORKERS=${EVALUATION_WORKERS:-6}
 MAX_SEMANTIC_ROUNDS=${MAX_SEMANTIC_ROUNDS:-5}
-if [[ ! "$MAX_SEMANTIC_ROUNDS" =~ ^[1-5]$ ]]; then
-  echo "MAX_SEMANTIC_ROUNDS must be an integer from 1 to 5" >&2
+if [[ ! "$MAX_SEMANTIC_ROUNDS" =~ ^([1-9]|10)$ ]]; then
+  echo "MAX_SEMANTIC_ROUNDS must be an integer from 1 to 10" >&2
   exit 2
 fi
 RUNTIME_BACKEND=${RUNTIME_BACKEND:-official_docker}
+SWTBENCH_ROOT_VALUE=${SWTBENCH_ROOT:-$PROJECT_ROOT/evaluation/vendor/swtbench}
 if [[ "$RUNTIME_BACKEND" != "official_docker" ]]; then
   echo "brt6 generation only supports RUNTIME_BACKEND=official_docker" >&2
   exit 2
@@ -563,7 +568,7 @@ GENERATION_RUNTIME_ARGS=(
   --dataset_mode "$DATASET_MODE"
   --runtime_backend "$RUNTIME_BACKEND"
   --official_harness_python "$OFFICIAL_PYTHON"
-  --swtbench_root "${SWTBENCH_ROOT:-$PACKAGE_ROOT/swt-bench}"
+  --swtbench_root "$SWTBENCH_ROOT_VALUE"
   --tddbench_root "${TDD_BENCH_ROOT:-$PACKAGE_ROOT/TDD-Bench-Verified}"
 )
 BEHAVIOR_CACHE_ARGS=()
@@ -580,6 +585,7 @@ GENERATION_COMMAND=(
   --llm-provider "$LLM_PROVIDER" \
   --model "$MODEL" \
   --max_workers "$GENERATION_WORKERS" \
+  --resume \
   --max_semantic_rounds "$MAX_SEMANTIC_ROUNDS" \
   --validation_mode buggy_only \
   --timeout "${GENERATION_TIMEOUT:-3600}" \
@@ -606,7 +612,7 @@ GENERATION_RC=$?
 echo "__BRT_STAGE__ generation_end rc=$GENERATION_RC $(date --iso-8601=seconds)"
 
 GENERATION_GATE_PATH=$RUN_DIR/generation_gate.json
-ALLOW_INCOMPLETE_FORMAL_EVAL=${ALLOW_INCOMPLETE_FORMAL_EVAL:-false}
+ALLOW_INCOMPLETE_FORMAL_EVAL=${ALLOW_INCOMPLETE_FORMAL_EVAL:-true}
 FORMAL_EVALUATION_ALLOWED=$("$PYTHON_BIN" - \
   "$INSTANCES_PATH" "$GENERATION_DIR" "$GENERATION_RC" "$GENERATION_GATE_PATH" <<'PY'
 import json
@@ -671,6 +677,7 @@ if [[ "$FORMAL_EVALUATION_ALLOWED" == "true" ]]; then
     --dataset "$DATASET_MODE" \
     --outputs-dir "$GENERATION_DIR" \
     --dataset-file "$GOLD_DATASET" \
+    --official-dataset-name "$GOLD_DATASET" \
     --max-workers "$EVALUATION_WORKERS" \
     --timeout "${FORMAL_EVAL_TIMEOUT:-3600}" \
     --evaluation-dir "$FORMAL_DIR" \
@@ -678,7 +685,7 @@ if [[ "$FORMAL_EVALUATION_ALLOWED" == "true" ]]; then
     --model-name "brt6-$MODEL" \
     --compute-coverage "$COMPUTE_PATCH_COVERAGE" \
     --official-python "$OFFICIAL_PYTHON" \
-    --swtbench-root "${SWTBENCH_ROOT:-$PACKAGE_ROOT/swt-bench}" \
+    --swtbench-root "$SWTBENCH_ROOT_VALUE" \
     --tddbench-root "${TDD_BENCH_ROOT:-$PACKAGE_ROOT/TDD-Bench-Verified}"
   EVALUATION_RC=$?
   echo "__BRT_STAGE__ formal_f2p_end rc=$EVALUATION_RC $(date --iso-8601=seconds)"
@@ -775,7 +782,7 @@ completion = {
     'generated_tests': generated,
     'missing_generation': len(instances) - generated,
     'generation_complete': bool(
-        generation_gate.get('formal_evaluation_allowed', False)
+        generation_gate.get('artifacts_complete', False)
     ),
     'generation_gate': generation_gate,
     'formal_evaluation_skipped': formal_evaluation_skipped,

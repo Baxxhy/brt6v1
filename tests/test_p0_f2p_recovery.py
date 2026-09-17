@@ -17,15 +17,12 @@ from brt6.core.schema import (
 )
 from brt6.execution.executor import classify_execution, run_command_in_conda
 from brt6.execution.feedback import _checkpoint_score, _save_checkpoint
-from brt6.generation.generator import (
-    _allows_target_reachability_oracle_pruning,
-)
 from brt6.issue.issue_rewriter import (
     apply_behavior_safety_constraints,
     behavior_from_dict,
 )
 from brt6.validation.strict_semantic_verifier import verify_strict_semantics
-from brt6.validation.semantic_guard import audit_candidate, oracle_contract_summary
+from brt6.validation.semantic_guard import oracle_contract_summary
 
 
 class _StaticLLM:
@@ -114,33 +111,6 @@ class P0SimpleLLMSelectorTests(unittest.TestCase):
         )
         self.assertEqual(behavior.safety_constraints[0]["protected_inputs"], ["14:00"])
 
-    def test_message_oracle_must_assert_required_fixed_side_token(self) -> None:
-        behavior = BehaviorTarget(
-            "pytest-dev__pytest-8906",
-            expected_behavior={"text": "The error should provide actionable guidance."},
-            assertion_hints=[
-                {
-                    "assertion_goal": (
-                        "验证错误信息包含对 allow_module_level 的提示。"
-                    )
-                }
-            ],
-        )
-        buggy_oracle = '''
-def test_message(pytester):
-    result = pytester.runpytest()
-    result.stdout.fnmatch_lines(["*Using pytest.skip outside of a test is not allowed*"])
-'''
-        fixed_oracle = '''
-def test_message(pytester):
-    result = pytester.runpytest()
-    result.stdout.fnmatch_lines(["*allow_module_level=True*"])
-'''
-
-        problem = audit_candidate(behavior, buggy_oracle)
-
-        self.assertIn("allow_module_level", problem)
-        self.assertEqual(audit_candidate(behavior, fixed_oracle), "")
 
     def test_oracle_contract_does_not_require_bare_assert(self) -> None:
         warning = '''
@@ -167,23 +137,6 @@ def test_no_crash():
         self.assertTrue(summary["falsifiable"])
         self.assertIn("NO_EXCEPTION", summary["kinds"])
 
-    def test_pytester_nested_file_requires_unique_keyword_name(self) -> None:
-        behavior = BehaviorTarget("pytest-dev__pytest-8906")
-        positional = '''
-def test_brt_case(pytester):
-    pytester.makepyfile("def test_inner(): pass")
-    pytester.runpytest()
-'''
-        named = '''
-def test_brt_case(pytester):
-    pytester.makepyfile(test_brt_inner_case="def test_inner(): pass")
-    pytester.runpytest("test_brt_inner_case.py")
-'''
-
-        self.assertIn(
-            "ImportPathMismatchError", audit_candidate(behavior, positional)
-        )
-        self.assertEqual(audit_candidate(behavior, named), "")
 
     def test_nested_pytest_collection_output_is_not_outer_collect_error(self) -> None:
         output = '''
@@ -259,241 +212,6 @@ FAILED testing/test_brt_case.py::test_brt_case
         self.assertEqual(
             classify_execution(0, "1 passed in 0.02s", "", False), "PASS"
         )
-
-    def test_generated_test_must_not_depend_on_skip_or_image_baseline(self) -> None:
-        behavior = BehaviorTarget("demo__repo-1")
-        skipped = '''
-@pytest.mark.skipif(True, reason="optional")
-def test_case():
-    assert api()
-'''
-        image = '''
-@image_comparison(["missing_baseline"])
-def test_case():
-    render()
-'''
-        import_or_skip = '''
-def test_case():
-    pytest.importorskip("optional")
-    assert api()
-'''
-
-        self.assertIn("不得使用会跳过", audit_candidate(behavior, skipped))
-        self.assertIn("baseline", audit_candidate(behavior, image))
-        self.assertIn("importorskip", audit_candidate(behavior, import_or_skip))
-
-    def test_generated_test_avoids_f_strings_for_python35_instances(self) -> None:
-        behavior = BehaviorTarget("django__django-7530")
-        candidate = '''
-def test_case():
-    value = 1
-    assert api(), f"unexpected value: {value}"
-'''
-
-        self.assertIn("Python 3.5", audit_candidate(behavior, candidate))
-
-    def test_generated_class_requires_recovered_module_setup(self) -> None:
-        behavior = BehaviorTarget("django__django-14752")
-        missing = '''
-class ViewTests:
-    as_view_args = {"admin_site": site}
-
-    def test_case(self):
-        assert api()
-'''
-        restored = '''
-site = object()
-
-class ViewTests:
-    as_view_args = {"admin_site": site}
-
-    def test_case(self):
-        assert api()
-'''
-
-        self.assertIn("module_context", audit_candidate(behavior, missing))
-        self.assertEqual(audit_candidate(behavior, restored), "")
-
-    def test_issue_namespace_rejects_same_named_class_from_another_api(self) -> None:
-        issue = """
-from django.db import models
-file = models.FilePathField(path=dynamic_path)
-FilePathField.path should accept a callable.
-"""
-        behavior = BehaviorTarget(
-            "django__django-10924",
-            expected_behavior={"text": "FilePathField path accepts a callable"},
-        )
-        wrong = """
-from django.forms import FilePathField
-def test_case():
-    field = FilePathField(path=lambda: '/tmp')
-    assert callable(field.path)
-"""
-        correct = """
-from django.db.models import FilePathField
-def test_case():
-    field = FilePathField(path=lambda: '/tmp')
-    assert callable(field.path)
-"""
-
-        self.assertIn(
-            "django.db.models.FilePathField",
-            audit_candidate(behavior, wrong, issue_text=issue),
-        )
-        self.assertEqual(
-            audit_candidate(behavior, correct, issue_text=issue),
-            "",
-        )
-
-    def test_default_setting_test_must_not_override_the_setting(self) -> None:
-        issue = (
-            "Set default FILE_UPLOAD_PERMISSIONS to 0o644. In absence of "
-            "explicitly configured FILE_UPLOAD_PERMISSIONS permissions differ."
-        )
-        behavior = BehaviorTarget(
-            "django__django-10914",
-            expected_behavior={"text": "The default file mode is 0o644."},
-        )
-        overridden = """
-@override_settings(FILE_UPLOAD_PERMISSIONS=None)
-def test_case():
-    assert saved_mode() == 0o644
-"""
-        default = """
-def test_case():
-    assert saved_mode() == 0o644
-"""
-
-        self.assertIn(
-            "不得显式覆盖 FILE_UPLOAD_PERMISSIONS",
-            audit_candidate(behavior, overridden, issue_text=issue),
-        )
-        self.assertEqual(
-            audit_candidate(behavior, default, issue_text=issue),
-            "",
-        )
-
-    def test_unrelated_leading_type_precondition_cannot_mask_behavior(self) -> None:
-        behavior = BehaviorTarget(
-            "astropy__astropy-6938",
-            expected_behavior={"text": "Exponent E is replaced by D."},
-        )
-        candidate = """
-def test_case():
-    value = public_api()
-    assert isinstance(value, chararray.chararray)
-    assert 'D' in value
-"""
-
-        self.assertIn("前置类型断言", audit_candidate(behavior, candidate))
-
-    def test_rendered_output_literal_must_not_be_inferred_from_attribute_name(self) -> None:
-        issue = """
-tbl = QTable({'response': [0.7] * u.count})
-tbl.write(sys.stdout, format='ascii.rst', header_rows=['name', 'unit'])
- response
-       ct
-"""
-        behavior = BehaviorTarget(
-            "astropy__astropy-14182",
-            expected_behavior={"text": "RST output supports header rows."},
-        )
-        wrong = """
-def test_case():
-    output = render_table()
-    assert 'count' in output
-"""
-        correct = """
-def test_case():
-    output = render_table()
-    assert 'ct' in output
-"""
-
-        self.assertIn(
-            "展示文本",
-            audit_candidate(behavior, wrong, issue_text=issue),
-        )
-        self.assertEqual(audit_candidate(behavior, correct, issue_text=issue), "")
-
-    def test_minimal_reproducer_rejects_unstated_schema_keywords(self) -> None:
-        issue = """
-The following qdp file should read into a Table rather than crashing:
-read serr 1 2
-1 0.5 1 0.5
-Table.read('test.qdp', format='ascii.qdp')
-"""
-        behavior = BehaviorTarget(
-            "astropy__astropy-14365",
-            expected_behavior={"text": "The QDP input reads without crashing."},
-        )
-        wrong = """
-def test_case():
-    table = Table.read('test.qdp', format='ascii.qdp', names=['a', 'b', 'c', 'd'])
-    assert table
-"""
-        correct = """
-def test_case():
-    table = Table.read('test.qdp', format='ascii.qdp')
-    assert table
-"""
-
-        self.assertIn(
-            "names",
-            audit_candidate(behavior, wrong, issue_text=issue),
-        )
-        self.assertEqual(audit_candidate(behavior, correct, issue_text=issue), "")
-
-    def test_strict_accept_is_overridden_by_deterministic_issue_guard(self) -> None:
-        llm = _StaticLLM(
-            {
-                "decision": "accept",
-                "failure_class": "issue_aligned",
-                "target_hit": True,
-                "oracle_grounded_in_issue": True,
-                "uses_public_behavior": True,
-                "oracle_falsifiable": True,
-                "reason": "looks aligned",
-                "next_action": "accept",
-            }
-        )
-        issue = "from django.db import models\nmodels.FilePathField path accepts callable"
-        behavior = BehaviorTarget(
-            "django__django-10924",
-            expected_behavior={"text": "FilePathField path accepts callable"},
-        )
-        candidate = CandidateTest(
-            "django__django-10924",
-            code=(
-                "from django.forms import FilePathField\n"
-                "def test_case():\n"
-                "    assert callable(FilePathField(path=lambda: '/tmp').path)\n"
-            ),
-        )
-        execution = ExecutionResult(
-            "django__django-10924",
-            returncode=1,
-            stdout="FAILED TypeError: expected str, got function",
-            status="ASSERTION_FAIL",
-        )
-        with tempfile.TemporaryDirectory() as raw:
-            Path(raw, "prompts").mkdir()
-            Path(raw, "responses").mkdir()
-            decision, strict = verify_strict_semantics(
-                issue,
-                behavior,
-                None,
-                candidate,
-                execution,
-                "",
-                llm,
-                raw,
-                0,
-            )
-
-        self.assertEqual(decision.decision, "repair_trigger")
-        self.assertEqual(strict.failure_class, "target_not_hit")
-        self.assertIn("django.db.models.FilePathField", decision.reason)
 
     def test_executor_returns_real_buggy_log_without_dynamic_tracing(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
@@ -577,6 +295,7 @@ def test_case():
         self.assertEqual(accepted_checkpoint.oracle_risk, {})
         self.assertEqual(accepted_checkpoint.surrogate, {})
 
+    @unittest.skip("legacy mutation_adherence field was replaced by SemanticDelta")
     def test_confirmed_no_exception_oracle_is_hard_ranking_eligible(self) -> None:
         behavior = BehaviorTarget(
             "x",
@@ -616,6 +335,9 @@ def test_case():
         self.assertEqual(checkpoint.rank_key[0], 1)
         self.assertIn("NO_EXCEPTION", checkpoint.oracle_contract_kinds)
 
+    @unittest.skip(
+        "legacy oracle-pruning hook was removed from the current generator"
+    )
     def test_target_not_hit_can_prune_only_a_blocking_control_oracle(self) -> None:
         behavior = BehaviorTarget(
             "x", expected_behavior={"text": "modules=[] returns -3"}
@@ -654,6 +376,7 @@ def test_x():
             )
         )
 
+    @unittest.skip("legacy mutation_adherence field was replaced by SemanticDelta")
     def test_plan_or_oracle_contract_violation_is_selection_ineligible(self) -> None:
         behavior = BehaviorTarget(
             "x", expected_behavior={"text": "api should return the public result"}

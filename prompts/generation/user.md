@@ -1,5 +1,12 @@
 请基于相似测试做最小变异，生成 1 个 BRT。
 
+原始 Issue（无损事实来源）：
+{issue_text}
+
+证据优先级：原始 Issue 中明确写出的输入、调用、现象和预期是硬约束；
+BehaviorTarget 用于整理这些事实并补充仓库证据，但其中低置信度或 uncertainties
+只能作为待验证假设，不能覆盖、缩窄或改写原始 Issue 的明确事实。
+
 实例：{instance_id}
 测试函数名必须是：test_brt_{safe_instance_id}
 放置策略：必须生成一个完整的新 Python 测试文件，后续会保存到最相似测试同级目录下的 test_brt_{safe_instance_id}.py。

@@ -22,10 +22,11 @@ sys.path.insert(0, str(ROOT.parent))
 from brt6.validation.component2_input import load_safe_issues
 from brt6.validation.icore_heuristic_rank import PROTOCOL as ICORE_PROTOCOL
 from brt6.validation.icore_heuristic_rank import rank_candidates
+from brt6.core.utils import safe_json_dump
 
 
 STRICT_ACCEPTED_STATUS = "ISSUE_ALIGNED_FAIL"
-SELECTION_PROTOCOL = "strict_verifier_then_icore_v1"
+SELECTION_PROTOCOL = "strict_verifier_then_icore_with_direct_fallback_v2"
 
 
 def read(path: Path):
@@ -37,9 +38,7 @@ def write(path: Path, value) -> None:
     if isinstance(value, str):
         path.write_text(value, encoding="utf-8")
     else:
-        path.write_text(
-            json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        safe_json_dump(value, path)
 
 
 def matched_execution(seed: Path, code: str, summary: dict) -> dict | None:
@@ -66,30 +65,57 @@ def matched_execution(seed: Path, code: str, summary: dict) -> dict | None:
             if execution.get("returncode") is not None:
                 return dict(execution)
 
-    execution = summary.get("buggy_execution")
-    if isinstance(execution, dict) and execution.get("returncode") is not None:
-        return dict(execution)
+    # Do not fall back to ``summary.buggy_execution`` without a code identity
+    # check.  A resumed or manually repaired seed can otherwise pair the new
+    # final test with an execution produced by older source code.
     return None
+
+
+def reset_selection_cache(output: Path) -> None:
+    """Remove only derived selection artifacts before a deterministic rebuild."""
+
+    for name in ("frozen", "decisions", "generation", "errors"):
+        path = output / name
+        if path.is_dir():
+            shutil.rmtree(path)
+    for name in (
+        "manifest.json",
+        "predictions_frozen.json",
+        "progress.json",
+        "completed.json",
+    ):
+        path = output / name
+        if path.is_file():
+            path.unlink()
 
 
 def freeze_candidates(generation: Path, output: Path, issues: dict) -> dict:
     manifest_path = output / "manifest.json"
-    if manifest_path.is_file():
-        return read(manifest_path)
-
     instances: list[dict] = []
     missing: list[dict] = []
     for instance_id in issues:
         instance_dir = generation / instance_id
+        top_summary_path = instance_dir / "summary.json"
+        top_summary = read(top_summary_path) if top_summary_path.is_file() else {}
+        direct_fallback_used = bool(top_summary.get("direct_fallback_used"))
+        if direct_fallback_used:
+            route_root = instance_dir / "direct_fallback"
+            candidate_prefix = "direct_seed"
+            generation_route = "direct_fallback_after_target_exhaustion"
+        else:
+            route_root = instance_dir
+            candidate_prefix = "seed"
+            generation_route = "target_primary"
         selected_index = None
-        selected_path = instance_dir / "selected_seed_summary.json"
+        selected_path = route_root / "selected_seed_summary.json"
         if selected_path.is_file():
             selected_index = read(selected_path).get("selected_seed_index")
 
         candidates: list[dict] = []
         for seed_index in range(3):
-            candidate_id = f"seed_{seed_index}"
-            seed = instance_dir / "seed_candidates" / candidate_id
+            source_seed_id = f"seed_{seed_index}"
+            candidate_id = f"{candidate_prefix}_{seed_index}"
+            seed = route_root / "seed_candidates" / source_seed_id
             summary_path = seed / "summary.json"
             candidate_path = seed / "final_test.py"
             if not summary_path.is_file() or not candidate_path.is_file():
@@ -135,8 +161,11 @@ def freeze_candidates(generation: Path, output: Path, issues: dict) -> dict:
         instances.append(
             {
                 "instance_id": instance_id,
+                "generation_route": generation_route,
                 "component1_selected_candidate": (
-                    f"seed_{selected_index}" if selected_index in (0, 1, 2) else None
+                    f"{candidate_prefix}_{selected_index}"
+                    if selected_index in (0, 1, 2)
+                    else None
                 ),
                 "candidates": candidates,
             }
@@ -156,6 +185,16 @@ def freeze_candidates(generation: Path, output: Path, issues: dict) -> dict:
         "accepted_status": STRICT_ACCEPTED_STATUS,
         "selection_protocol": SELECTION_PROTOCOL,
         "rank_protocol": ICORE_PROTOCOL,
+        "generation_routes": {
+            "target_primary": sum(
+                row["generation_route"] == "target_primary" for row in instances
+            ),
+            "direct_fallback_after_target_exhaustion": sum(
+                row["generation_route"]
+                == "direct_fallback_after_target_exhaustion"
+                for row in instances
+            ),
+        },
         "additional_llm_judge": False,
         "fixed_side_used_for_selection": False,
         "gold_fields_loaded": [],
@@ -167,9 +206,6 @@ def freeze_candidates(generation: Path, output: Path, issues: dict) -> dict:
 def process_instance(output: Path, issues: dict, row: dict) -> dict:
     instance_id = row["instance_id"]
     decision_path = output / "decisions" / instance_id / "decision.json"
-    if decision_path.is_file():
-        return read(decision_path)
-
     accepted: list[dict] = []
     excluded: list[dict] = []
     for candidate in sorted(row["candidates"], key=lambda item: item["component1_rank"]):
@@ -202,6 +238,7 @@ def process_instance(output: Path, issues: dict, row: dict) -> dict:
 
     result = {
         "instance_id": instance_id,
+        "generation_route": row.get("generation_route", "target_primary"),
         "component1_selected_candidate": row["component1_selected_candidate"],
         "selected": selected,
         "route": route,
@@ -270,6 +307,9 @@ def main() -> None:
             )
         issues = {instance_id: issues[instance_id] for instance_id in requested}
 
+    # This stage is local and deterministic. Rebuilding is cheap and prevents
+    # a resumed generation from being ranked against stale frozen candidates.
+    reset_selection_cache(args.output)
     manifest = freeze_candidates(args.generation, args.output, issues)
     print(
         json.dumps(

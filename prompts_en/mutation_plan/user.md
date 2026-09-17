@@ -1,5 +1,13 @@
 Compare the current test against the target behavior and propose the single Delta for this round.
 
+Raw Issue (lossless source of facts):
+{issue_text}
+
+Evidence priority: explicit Issue facts take precedence over structured
+inference. Low-confidence BehaviorTarget fields and uncertainties may help
+locate a difference, but must not introduce a trigger, exception, or expected
+value that the Issue does not require.
+
 BehaviorTarget:
 {behavior_json}
 

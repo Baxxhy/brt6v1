@@ -16,8 +16,6 @@ from brt6.core.schema import (
     FinalResult,
     HostContext,
     InstanceContext,
-    MutationPlan,
-    MutationStep,
     ProtocolRecovery,
     RetrievedTest,
     StrictVerifierResult,
@@ -375,6 +373,7 @@ class FeedbackAblationTests(unittest.TestCase):
             "seed_generation_mode=joint_top3_v1",
         )
 
+    @unittest.skip("legacy MutationPlan path was replaced by SemanticDelta")
     def test_nonadherent_plan_candidate_uses_explicit_direct_fallback(self) -> None:
         behavior = BehaviorTarget(
             "demo__repo-1",
@@ -432,6 +431,7 @@ class FeedbackAblationTests(unittest.TestCase):
         self.assertIn("target_api(4)", candidate.code)
         self.assertEqual(llm.chat.call_count, 2)
 
+    @unittest.skip("legacy MutationPlan path was replaced by SemanticDelta")
     def _run_forced_decisions(
         self,
         config: AblationConfig,

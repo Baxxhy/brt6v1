@@ -19,6 +19,7 @@ from ..validation.delta_guard import normalize_delta
 
 
 MAX_PROMPT_BEHAVIOR_CHARS = 30_000
+MAX_PROMPT_ISSUE_CHARS = 30_000
 MAX_PROMPT_HOST_CHARS = 30_000
 MAX_PROMPT_PROTOCOL_CHARS = 20_000
 MAX_PROMPT_SOURCE_CHARS = 60_000
@@ -65,6 +66,7 @@ def propose_semantic_delta(
     related_test: RetrievedTest | None = None,
     current_candidate_code: str = "",
     delta_history: list[dict[str, Any]] | None = None,
+    issue_text: str = "",
 ) -> SemanticDelta:
     """Ask for exactly one frontier Delta and retry only malformed JSON once."""
 
@@ -72,8 +74,14 @@ def propose_semantic_delta(
     current_test = current_candidate_code or (
         related_test.code_content if related_test else host.seed_test_code
     )
+    prompt_behavior = behavior_prompt_view(behavior)
+    if prompt_behavior.get("schema_version") == "raw_issue_context.v1":
+        prompt_behavior = dict(prompt_behavior)
+        prompt_behavior.pop("issue_text", None)
+        prompt_behavior["structured_target"] = "unavailable"
     prompt = SEED_MUTATION_PLAN_USER_PROMPT.format(
-        behavior_json=_json(behavior_prompt_view(behavior), MAX_PROMPT_BEHAVIOR_CHARS),
+        issue_text=_text(issue_text, MAX_PROMPT_ISSUE_CHARS),
+        behavior_json=_json(prompt_behavior, MAX_PROMPT_BEHAVIOR_CHARS),
         host_context_json=_json(host.to_dict(), MAX_PROMPT_HOST_CHARS),
         protocol_json=_json(protocol.to_dict() if protocol else {}, MAX_PROMPT_PROTOCOL_CHARS),
         source_context=_text(format_code_context(source), MAX_PROMPT_SOURCE_CHARS),

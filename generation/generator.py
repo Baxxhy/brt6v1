@@ -284,9 +284,15 @@ def generate_candidate(
     ensure_dir(Path(output_dir) / "responses")
     safe_id = sanitize_instance_id(instance_id)
     config = (ablation_config or AblationConfig()).validate()
-    behavior_json = _prompt_json(
-        behavior_prompt_payload(behavior, config), MAX_PROMPT_BEHAVIOR_CHARS
-    )
+    prompt_behavior = behavior_prompt_payload(behavior, config)
+    if prompt_behavior.get("schema_version") == "raw_issue_context.v1":
+        # This prompt has a dedicated lossless Issue field. Avoid giving the
+        # ablation a second copy of the same text while preserving the full
+        # RawIssueContext artifact for all other pipeline stages.
+        prompt_behavior = dict(prompt_behavior)
+        prompt_behavior.pop("issue_text", None)
+        prompt_behavior["structured_target"] = "unavailable"
+    behavior_json = _prompt_json(prompt_behavior, MAX_PROMPT_BEHAVIOR_CHARS)
     source_context = _prompt_text(
         format_effective_source_context(
             behavior, related_source, buggy_repo
@@ -303,6 +309,7 @@ def generate_candidate(
         instance_id=instance_id,
         safe_instance_id=safe_id,
         insert_strategy=host.insert_strategy,
+        issue_text=_prompt_text(issue_text, MAX_PROMPT_ISSUE_CHARS),
         behavior_json=behavior_json,
         host_context_json=host_context_json,
         code_context=source_context,

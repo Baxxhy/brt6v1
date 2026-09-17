@@ -1,5 +1,11 @@
 请比较当前测试与目标行为，并提出本轮唯一 Delta。
 
+原始 Issue（无损事实来源）：
+{issue_text}
+
+证据优先级：原始 Issue 的明确事实高于结构化推断。BehaviorTarget 中低置信度或
+uncertainties 只能帮助定位差异，不能单独引入 Issue 未要求的 trigger、异常或 expected value。
+
 BehaviorTarget：
 {behavior_json}
 

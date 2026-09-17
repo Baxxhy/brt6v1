@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=/root/Baxxhy/BugReproduce/brt6
-PACKAGE_ROOT=/root/Baxxhy/BugReproduce
-PYTHON=/root/miniconda3/envs/icore/bin/python
-SWT_PYTHON=/root/miniconda3/envs/swtbench/bin/python
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+PACKAGE_ROOT=$(cd "$ROOT/.." && pwd)
+PYTHON=${PYTHON_BIN:-/root/miniconda3/envs/icore/bin/python}
+SWT_PYTHON=${SWTBENCH_PYTHON:-/root/miniconda3/envs/swtbench/bin/python}
 GENERATION_DATASET=$ROOT/data/issues/swt276_issues.json
 OFFICIAL_DATASET=$ROOT/data/official/swt276_official_eval.json
 CODE_RETRIEVAL=$ROOT/retrieval_results/code/code_retrieval_results_gpt.json
 TEST_RETRIEVAL=$ROOT/retrieval_results/test/icore/gpt/related_tests.json
-POOL=${BRT_API_POOL_FILE:-$ROOT/.secrets/api_pool_xiaojing_deepseekv4flash.json}
+POOL=${BRT_API_POOL_FILE:-$ROOT/.secrets/api_pool.json}
 
 RUN_TIMESTAMP=${RUN_TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}
 RUN_DIR=${RUN_DIR:-$ROOT/results/runs/trait_xiaojing_deepseekv4flash_full_${RUN_TIMESTAMP}}
@@ -61,15 +62,13 @@ export BRT_ALLOWED_API_HOST=api.open.xiaojingai.com
 export BRT_MODEL_ID=deepseek-v4-flash
 export BRT_DISABLE_THINKING=1
 export BRT_LLM_STREAM=1
-export BRT3_LLM_REQUEST_TIMEOUT=1200
-export BRT3_LLM_MAX_ATTEMPTS=3
-export BRT_LLM_WAIT_FOREVER=1
+export BRT3_LLM_REQUEST_TIMEOUT=600
+export BRT3_LLM_MAX_ATTEMPTS=2
 export BRT_LLM_TRUNCATION_MAX_TOKENS=8192
-export BRT_CSU_MAX_INFLIGHT=20
 export BRT_REQUIRE_OFFICIAL_DOCKER=1
 export BRT_ALLOW_DIRTY_WORKTREE=1
 export BRT_OFFICIAL_DOCKER_STARTUP_TIMEOUT=7200
-export DOCKER_HOST=unix:///run/mutate-docker.sock
+export DOCKER_HOST=${DOCKER_HOST:-unix:///run/mutate-docker.sock}
 export TMPDIR=$RUN_DIR/tmp
 export TEMP=$TMPDIR
 export TMP=$TMPDIR
@@ -84,6 +83,40 @@ require_file() {
     echo "required file is missing: $1" >&2
     exit 2
   fi
+}
+
+json_stage_complete() {
+  local path=$1
+  local expected=$2
+  local mode=$3
+  "$PYTHON" - "$path" "$expected" "$mode" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+expected = int(sys.argv[2])
+mode = sys.argv[3]
+try:
+    value = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+if not isinstance(value, dict):
+    raise SystemExit(1)
+if mode == "generation":
+    ok = (
+        int(value.get("total") or -1) == expected
+        and int(value.get("error") or 0) == 0
+        and len(value.get("results") or []) == expected
+    )
+elif mode == "selection":
+    ok = int(value.get("instances") or -1) == expected
+elif mode == "evaluation":
+    ok = int(value.get("total_instances") or -1) == expected
+else:
+    ok = False
+raise SystemExit(0 if ok else 1)
+PY
 }
 
 for required in \
@@ -110,14 +143,17 @@ if (( RUNNING_EVAL_CONTAINERS > 0 )); then
   exit 2
 fi
 
-cat > "$RUN_DIR/run_config.json" <<EOF
+REQUESTED_CONFIG=$RUN_DIR/run_config.requested.json
+cat > "$REQUESTED_CONFIG" <<EOF
 {
   "method": "TRAIT",
+  "algorithm_revision": "lossless_issue_target_fallback_v1",
   "instances": 276,
-  "design1": "single reproduction target recovery",
+  "design1": "lossless raw issue plus evidence-constrained reproduction target recovery",
   "design2": "three independently adapted retrieved tests with semantic-delta feedback",
+  "fallback": "direct adaptation only after all target-guided branches fail strict acceptance",
   "candidate_acceptance": "frozen strict semantic verifier verdict",
-  "post_selection": "local deterministic iCoRe ranking",
+  "post_selection": "route-preserving local deterministic iCoRe ranking",
   "additional_issue2test_judge": false,
   "model": "deepseek-v4-flash",
   "provider": "deepseek",
@@ -132,7 +168,8 @@ cat > "$RUN_DIR/run_config.json" <<EOF
   "semantic_rounds": 5,
   "workers": 20,
   "maximum_concurrent_model_requests": 20,
-  "api_timeout_seconds": 1200,
+  "api_timeout_seconds_per_endpoint": 600,
+  "logical_request_timeout_upper_bound_seconds": 1200,
   "docker_timeout_seconds": 7200,
   "compute_coverage": false,
   "fixed_side_used_during_generation_or_selection": false,
@@ -140,6 +177,64 @@ cat > "$RUN_DIR/run_config.json" <<EOF
   "official_evaluation_dataset": "$OFFICIAL_DATASET"
 }
 EOF
+
+if [[ -f "$RUN_DIR/run_config.json" ]]; then
+  if ! cmp -s "$RUN_DIR/run_config.json" "$REQUESTED_CONFIG"; then
+    echo "refusing to mix a new configuration into existing run directory: $RUN_DIR" >&2
+    echo "requested configuration was saved to: $REQUESTED_CONFIG" >&2
+    exit 2
+  fi
+  rm -f "$REQUESTED_CONFIG"
+else
+  mv "$REQUESTED_CONFIG" "$RUN_DIR/run_config.json"
+fi
+
+if [[ -f "$RUN_DIR/design1.done" ]]; then
+  "$PYTHON" "$ROOT/scripts/list_missing_behavior_targets.py" \
+    --instances-path "$GENERATION_DATASET" \
+    --target-root "$DESIGN1" \
+    --output "$MISSING_TARGETS" \
+    --report "$RUN_DIR/design1_completion.json" >/dev/null
+  if [[ -s "$MISSING_TARGETS" ]]; then
+    progress "stage 1 marker is stale; resuming missing BehaviorTargets"
+    rm -f "$RUN_DIR/design1.done"
+  fi
+fi
+
+if [[ -f "$RUN_DIR/design2.done" ]] && \
+   ! json_stage_complete "$DESIGN2/summary.json" 276 generation; then
+  progress "stage 2 marker is stale; rebuilding incomplete adaptation outputs"
+  rm -f "$RUN_DIR/design2.done" "$RUN_DIR/selection.done" \
+    "$RUN_DIR/evaluation.done" "$RUN_DIR/completed.done"
+fi
+
+if [[ -f "$RUN_DIR/selection.done" ]] && \
+   ! json_stage_complete "$SELECTION/completed.json" 276 selection; then
+  progress "stage 3 marker is stale; rebuilding deterministic selection"
+  rm -f "$RUN_DIR/selection.done" "$RUN_DIR/evaluation.done" \
+    "$RUN_DIR/completed.done"
+fi
+
+if [[ -f "$RUN_DIR/evaluation.done" ]] && \
+   ! json_stage_complete "$EVALUATION/metrics.json" 276 evaluation; then
+  progress "stage 4 marker is stale; rerunning incomplete official evaluation"
+  rm -f "$RUN_DIR/evaluation.done" "$RUN_DIR/completed.done"
+fi
+
+# A missing or invalid upstream marker makes every downstream artifact stale.
+# This matters after an interrupted resume: a previously completed selection
+# must never be reused after generation has produced new candidates.
+if [[ ! -f "$RUN_DIR/design1.done" ]]; then
+  rm -f "$RUN_DIR/design2.done" "$RUN_DIR/selection.done" \
+    "$RUN_DIR/evaluation.done" "$RUN_DIR/completed.done"
+fi
+if [[ ! -f "$RUN_DIR/design2.done" ]]; then
+  rm -f "$RUN_DIR/selection.done" "$RUN_DIR/evaluation.done" \
+    "$RUN_DIR/completed.done"
+fi
+if [[ ! -f "$RUN_DIR/selection.done" ]]; then
+  rm -f "$RUN_DIR/evaluation.done" "$RUN_DIR/completed.done"
+fi
 
 if [[ ! -f "$RUN_DIR/design1.done" ]]; then
   progress "stage 1/4: reproduction target recovery"
@@ -179,7 +274,7 @@ if [[ ! -f "$RUN_DIR/design2.done" ]]; then
     --instances_path "$GENERATION_DATASET" \
     --code_retrieval_path "$CODE_RETRIEVAL" \
     --test_retrieval_path "$TEST_RETRIEVAL" \
-    --repo_root_base /root/Baxxhy/BugReproduce/swe_repos \
+    --repo_root_base "${REPO_ROOT:-$PACKAGE_ROOT/swe_repos}" \
     --output_dir "$DESIGN2" \
     --model deepseek-v4-flash --llm-provider deepseek \
     --temperature 0.1 --max_tokens 4096 --max_workers 20 \

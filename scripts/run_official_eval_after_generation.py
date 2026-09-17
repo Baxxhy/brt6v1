@@ -76,22 +76,37 @@ def _safe_run_id(value: str) -> str:
     return rendered
 
 
-def _stop_running_official_containers(workspace: Path) -> None:
-    """Stop containers orphaned when the official harness is interrupted."""
+def _running_official_container_ids(workspace: Path) -> set[str]:
+    """Return the currently running official evaluation container IDs."""
+
+    listed = run_subprocess_tree(
+        ["docker", "ps", "-q", "--filter", "name=exec.eval."],
+        str(workspace),
+        60,
+    )
+    if listed.returncode != 0:
+        raise RuntimeError(listed.stderr.strip() or "docker ps failed")
+    return {line.strip() for line in listed.stdout.splitlines() if line.strip()}
+
+
+def _stop_running_official_containers(
+    workspace: Path,
+    preexisting_container_ids: set[str],
+) -> None:
+    """Stop only official containers created by this harness invocation."""
 
     try:
-        listed = run_subprocess_tree(
-            ["docker", "ps", "-q", "--filter", "name=exec.eval."],
-            str(workspace),
-            60,
+        container_ids = sorted(
+            _running_official_container_ids(workspace) - preexisting_container_ids
         )
-        container_ids = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
         if container_ids:
-            run_subprocess_tree(
+            killed = run_subprocess_tree(
                 ["docker", "kill", *container_ids],
                 str(workspace),
                 600,
             )
+            if killed.returncode != 0:
+                raise RuntimeError(killed.stderr.strip() or "docker kill failed")
     except Exception as error:  # cleanup failure must not hide the interrupt
         print(f"failed to stop interrupted official containers: {error}", file=sys.stderr)
 
@@ -358,6 +373,20 @@ def main() -> int:
     log_path = evaluation_dir / "official_harness.log"
     process: subprocess.Popen | None = None
     previous_handlers: dict[int, Any] = {}
+    try:
+        preexisting_official_containers = _running_official_container_ids(workspace)
+    except Exception as error:
+        # Without a baseline, daemon-wide cleanup cannot establish ownership.
+        # Continue the evaluation, but leave interrupt cleanup conservative.
+        print(
+            "failed to snapshot preexisting official containers; "
+            f"interrupt cleanup will not kill daemon-wide containers: {error}",
+            file=sys.stderr,
+        )
+        preexisting_official_containers = set()
+        container_cleanup_safe = False
+    else:
+        container_cleanup_safe = True
 
     def request_shutdown(signum, _frame):
         raise KeyboardInterrupt(f"official evaluation interrupted by signal {signum}")
@@ -379,7 +408,11 @@ def main() -> int:
                 returncode = process.wait()
             except BaseException:
                 terminate_process_tree(process)
-                _stop_running_official_containers(workspace)
+                if container_cleanup_safe:
+                    _stop_running_official_containers(
+                        workspace,
+                        preexisting_official_containers,
+                    )
                 raise
     finally:
         for signum, previous in previous_handlers.items():

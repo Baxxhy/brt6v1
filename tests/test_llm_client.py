@@ -10,7 +10,11 @@ from brt6.llm.llm_client import LLMClient
 
 
 class LLMClientTests(unittest.TestCase):
-    def setUp(self) -> None:
+    def setUp(self):
+        policy = patch("brt6.llm.llm_client.pool_policy", return_value={})
+        policy.start()
+        self.addCleanup(policy.stop)
+
         LLMClient._key_indices.clear()
 
     def test_gpt_provider_uses_only_gpt_pool_and_model(self) -> None:
@@ -182,6 +186,73 @@ class LLMClientTests(unittest.TestCase):
         self.assertTrue(captured[0]["stream"])
         self.assertEqual(client.last_usage, {"total_tokens": 3})
         self.assertEqual(client.last_model, "test-model")
+
+    def test_streaming_response_stops_at_done_without_waiting_for_eof(self) -> None:
+        client = LLMClient(api_key="test-key", base_url="https://example.invalid")
+        client.stream = True
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __iter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"OK"}}]}\n\n'
+                yield b"data: [DONE]\n\n"
+                raise AssertionError("client read past the stream terminator")
+
+        client.open_request = lambda request, timeout: Response()
+        self.assertEqual(client.chat("system", "user"), "OK")
+
+    def test_streaming_response_has_wall_clock_deadline(self) -> None:
+        client = LLMClient(api_key="test-key", base_url="https://example.invalid")
+        client.stream = True
+        client.request_timeout = 10
+        client.max_attempts = 1
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def __iter__(self):
+                yield b'data: {"choices":[{"delta":{"content":"late"}}]}\n\n'
+
+        client.open_request = lambda request, timeout: Response()
+        with patch(
+            "brt6.llm.llm_client.time.monotonic",
+            side_effect=[100.0, 111.0],
+        ):
+            with self.assertRaisesRegex(RuntimeError, "request deadline"):
+                client.chat("system", "user")
+
+    def test_immediate_failover_is_bounded_to_one_pool_cycle(self) -> None:
+        with patch(
+            "brt6.llm.llm_client.pool_policy",
+            return_value={"immediate_failover": True},
+        ), patch(
+            "brt6.llm.llm_client.configured_apis",
+            return_value=[
+                ("key-1", "https://one.example/v1", "model"),
+                ("key-2", "https://two.example/v1", "model"),
+            ],
+        ):
+            client = LLMClient(provider="deepseek", model="model")
+            client.max_attempts = 10
+            with patch.object(
+                client,
+                "open_request",
+                side_effect=TimeoutError("timed out"),
+                create=True,
+            ) as request, patch("brt6.llm.llm_client.time.sleep"):
+                with self.assertRaisesRegex(RuntimeError, "after 2 attempts"):
+                    client.chat("system", "user")
+
+        self.assertEqual(request.call_count, 2)
 
 
 if __name__ == "__main__":

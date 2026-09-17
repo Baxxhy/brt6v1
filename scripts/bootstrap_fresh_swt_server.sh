@@ -12,7 +12,8 @@ REPO_ROOT=$WORKSPACE_ROOT/swe_repos
 BOOTSTRAP_ROOT=$PROJECT_ROOT/.bootstrap
 CONDA_STORAGE_ROOT=$WORKSPACE_ROOT/.brt5-conda
 RUNTIME_ENV_FILE=$BOOTSTRAP_ROOT/use_fresh_swt_server.sh
-CONTROLLER_ENV=brt5_icore
+CONTROLLER_ENV=icore
+OFFICIAL_SWT_ENV=swtbench
 ENV_PREFIX=brt5_
 INSTALL_SYSTEM_PACKAGES=true
 PREWARM=true
@@ -33,7 +34,7 @@ Conda distribution.
 Options:
   --conda-exe PATH          Explicit path to the installed conda executable.
   --controller-python PATH  Reuse an already prepared Python 3.10+ controller;
-                            skip creating/installing the brt5_icore controller.
+                            skip creating/installing the icore controller.
   --skip-system-packages    Skip apt-get (only after installing prerequisites).
   --skip-prewarm            Skip the 52 SWT template environments (not run-ready).
   --prewarm-workers N       Concurrent SWT environment builds, 1-8 (default: 4).
@@ -79,9 +80,11 @@ fi
 
 required_project_files=(
   requirements.txt
+  requirements-reproduce.txt
   data/issues/swt276_issues.json
   retrieval_results/code/code_retrieval_results_gpt.json
   retrieval_results/test/icore/gpt/related_tests.json
+  evaluation/vendor/swtbench/src/main.py
   scripts/bootstrap_repositories.py
   scripts/prewarm_swt_environments.py
   scripts/validate_behavior_target_cache.py
@@ -296,13 +299,35 @@ else
   fi
   "$PYTHON_BIN" -m pip install --upgrade \
     pip==26.1.2 setuptools==82.0.1 wheel==0.47.0
-  "$PYTHON_BIN" -m pip install -r "$PROJECT_ROOT/requirements.txt"
+  "$PYTHON_BIN" -m pip install -r "$PROJECT_ROOT/requirements-reproduce.txt"
   "$PYTHON_BIN" -m pip check
   "$PYTHON_BIN" -c \
     'import datasets, packaging, requests, sys; assert sys.version_info[:2] == (3, 12); print("controller_python=" + sys.executable)'
 fi
 
+echo "== Create the official SWT harness environment =="
+if "$CONDA_EXE" run -n "$OFFICIAL_SWT_ENV" python -c 'import sys' >/dev/null 2>&1; then
+  "$CONDA_EXE" install -n "$OFFICIAL_SWT_ENV" -y python=3.12 pip
+else
+  "$CONDA_EXE" create -n "$OFFICIAL_SWT_ENV" -y python=3.12 pip
+fi
+OFFICIAL_SWT_PREFIX=$(
+  "$CONDA_EXE" run -n "$OFFICIAL_SWT_ENV" python -c 'import sys; print(sys.prefix)' |
+    tail -n 1 | tr -d '\r'
+)
+SWTBENCH_PYTHON=$OFFICIAL_SWT_PREFIX/bin/python
+if [[ ! -x "$SWTBENCH_PYTHON" ]]; then
+  echo "Official SWT Python was not created: $SWTBENCH_PYTHON" >&2
+  exit 2
+fi
+"$SWTBENCH_PYTHON" -m pip install --upgrade \
+  pip==26.1.2 setuptools==82.0.1 wheel==0.47.0
+"$SWTBENCH_PYTHON" -m pip install -r "$PROJECT_ROOT/requirements-reproduce.txt"
+PYTHONPATH="$PROJECT_ROOT/evaluation/vendor/swtbench" \
+  "$SWTBENCH_PYTHON" -c 'import docker, src.main, unidiff; print("official_swt_python=ready")'
+
 export PYTHON_BIN
+export SWTBENCH_PYTHON
 export PYTHONPATH="$WORKSPACE_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export BRT_WORKSPACE_ROOT=$WORKSPACE_ROOT
 export BRT4_CONDA_ENV_PREFIX=$ENV_PREFIX
@@ -388,6 +413,7 @@ echo "== Write the stable runtime environment =="
   printf 'export CONDA_ENVS_PATH=%q\n' "$CONDA_ENVS_PATH"
   printf 'export CONDA_PKGS_DIRS=%q\n' "$CONDA_PKGS_DIRS"
   printf 'export PYTHON_BIN=%q\n' "$PYTHON_BIN"
+  printf 'export SWTBENCH_PYTHON=%q\n' "$SWTBENCH_PYTHON"
   printf 'export BRT_WORKSPACE_ROOT=%q\n' "$WORKSPACE_ROOT"
   printf 'export BRT4_CONDA_ENV_PREFIX=%q\n' "$ENV_PREFIX"
   printf 'export BRT4_ENV_CACHE_DIR=%q\n' "$BRT4_ENV_CACHE_DIR"

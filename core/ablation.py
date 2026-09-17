@@ -16,6 +16,8 @@ _COMPONENTS = (
     "semantic_delta",
 )
 
+_ALGORITHM_REVISION = "lossless_issue_target_fallback_v1"
+
 _VARIANTS = {
     "behavior_target": ("wo_behavior_target", "w/o Behavior Target", "_wo_behavior_target"),
     "mutation": ("wo_mutation", "w/o Mutation Planning", "_wo_mutation"),
@@ -107,6 +109,10 @@ class AblationConfig:
         signature = ";".join(
             f"{name}={int(bool(getattr(self, name)))}" for name in _COMPONENTS
         )
+        signature += f";algorithm_revision={_ALGORITHM_REVISION}"
+        signature += ";direct_fallback={}".format(
+            int(not self.is_ablation)
+        )
         if not self.mutation:
             signature += ";seed_generation_mode=independent_top3_v1"
         return signature
@@ -122,6 +128,9 @@ class AblationConfig:
             "run_suffix": self.run_suffix,
             "compute_patch_coverage": self.compute_patch_coverage,
             "signature": self.signature,
+            "algorithm_revision": _ALGORITHM_REVISION,
+            "raw_issue_channel": "lossless_dedicated",
+            "direct_fallback": bool(not self.is_ablation),
             "seed_generation_mode": (
                 "validated_plan_per_seed"
                 if self.mutation

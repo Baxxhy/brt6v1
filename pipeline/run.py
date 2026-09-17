@@ -10,6 +10,7 @@ import subprocess
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..core.ablation import AblationConfig, ablation_signature_from_summary
@@ -76,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--alignment-verifier", choices=("strict", "issue2test"), default="strict")
-    parser.add_argument("--model", default="deepseek-v3")
+    parser.add_argument("--model", default="deepseek-v4-flash")
     parser.add_argument(
         "--llm-provider",
         choices=("deepseek", "gpt"),
@@ -482,9 +483,6 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
         args.top_tests,
     )
     client_type = LLMClient
-    if args.alignment_verifier == "issue2test":
-        from ..validation.csu_client import CSUClient
-        client_type = CSUClient
     client = client_type(
         provider=args.llm_provider,
         model=args.model,
@@ -496,7 +494,14 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
     ensure_dir(out_dir)
     running_marker = out_dir / ".running"
     running_marker.write_text(
-        json.dumps({"instance_id": instance_id}, ensure_ascii=False),
+        json.dumps(
+            {
+                "instance_id": instance_id,
+                "pid": os.getpid(),
+                "started_at": datetime.now(timezone.utc).astimezone().isoformat(),
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     try:

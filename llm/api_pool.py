@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL = "deepseek-v3"
+DEFAULT_BASE_URL = "https://api.open.xiaojingai.com/v1"
+DEFAULT_MODEL = "deepseek-v4-flash"
 DEFAULT_GPT_BASE_URL = "https://aigc.x-see.cn/v1"
 DEFAULT_GPT_MODEL = "gpt-5.4-mini"
 SUPPORTED_PROVIDERS = ("deepseek", "gpt")
@@ -97,6 +97,14 @@ def _entries_from_file(path: Path) -> list[tuple[str, str, str, str]]:
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"invalid API pool file: {path}") from exc
     return _normalize_entries(payload)
+
+
+def pool_policy() -> dict:
+    path = _configured_file()
+    if path is None:
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return payload if isinstance(payload, dict) else {}
 
 
 def _provider_entries_from_environment(

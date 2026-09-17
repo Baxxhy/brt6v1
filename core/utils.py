@@ -6,6 +6,7 @@ import dataclasses
 import json
 import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,9 +40,34 @@ def _jsonable(obj: Any) -> Any:
 
 
 def safe_json_dump(obj: Any, path: str | os.PathLike[str]) -> None:
-    ensure_dir(Path(path).parent)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=2, default=_jsonable)
+    """Atomically replace *path* with a complete JSON document.
+
+    Long-running experiments are often interrupted while writing a checkpoint.
+    Writing directly to the destination can leave a truncated but existing JSON
+    file, which later resume logic may mistake for a usable artifact.  A sibling
+    temporary file plus ``os.replace`` keeps the previous complete checkpoint
+    visible until the new document has been written successfully.
+    """
+
+    destination = Path(path)
+    ensure_dir(destination.parent)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=destination.parent,
+            prefix=f".{destination.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            json.dump(obj, temporary, ensure_ascii=False, indent=2, default=_jsonable)
+            temporary.flush()
+        os.replace(temporary_path, destination)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def safe_json_load(path: str | os.PathLike[str]) -> Any:
@@ -69,20 +95,43 @@ def extract_json_object(text: str) -> dict[str, Any]:
         candidates.append(raw[start : end + 1])
     last_error: Exception | None = None
     for candidate in candidates:
-        try:
-            value = json.loads(candidate)
-            if isinstance(value, dict):
-                return value
-            raise ValueError(f"JSON parsed but is {type(value).__name__}, not object")
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-        try:
-            value = json.JSONDecoder(strict=False).decode(candidate)
-            if isinstance(value, dict):
-                return value
-            raise ValueError(f"JSON parsed but is {type(value).__name__}, not object")
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
+        variants = [candidate]
+        # Models occasionally place Python/regex notation such as ``\x03``
+        # or ``\d`` inside a JSON string without escaping the backslash.  The
+        # object is otherwise complete, so preserve that notation literally
+        # instead of discarding an entire seed.  This fallback runs only after
+        # the original text fails strict parsing and does not alter valid JSON
+        # escape sequences.
+        repaired = re.sub(
+            r'\\+(?=[^"\\/bfnrtu])',
+            lambda match: (
+                match.group(0) + "\\"
+                if len(match.group(0)) % 2
+                else match.group(0)
+            ),
+            candidate,
+        )
+        if repaired != candidate:
+            variants.append(repaired)
+        for variant in variants:
+            try:
+                value = json.loads(variant)
+                if isinstance(value, dict):
+                    return value
+                raise ValueError(
+                    f"JSON parsed but is {type(value).__name__}, not object"
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+            try:
+                value = json.JSONDecoder(strict=False).decode(variant)
+                if isinstance(value, dict):
+                    return value
+                raise ValueError(
+                    f"JSON parsed but is {type(value).__name__}, not object"
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
     raise ValueError(f"failed to parse JSON object from response: {last_error}")
 
 

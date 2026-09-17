@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from collections import Counter
 from datetime import datetime
@@ -17,6 +18,24 @@ def read_json(path: Path, default: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         return default
+
+
+def running_marker_is_live(marker: Path) -> bool:
+    payload = read_json(marker, {})
+    try:
+        pid = int(payload.get("pid") or 0)
+    except (AttributeError, TypeError, ValueError):
+        pid = 0
+    if pid > 0:
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+    try:
+        return time.time() - marker.stat().st_mtime < 10_800
+    except OSError:
+        return False
 
 
 def phase(run_dir: Path) -> str:
@@ -37,6 +56,7 @@ def snapshot(run_dir: Path) -> str:
     summaries = 0
     tests = 0
     running = 0
+    stale_markers = 0
     newest = 0.0
     if generation.is_dir():
         for item in generation.iterdir():
@@ -44,9 +64,11 @@ def snapshot(run_dir: Path) -> str:
                 continue
             marker = item / ".running"
             summary_path = item / "summary.json"
-            if marker.is_file():
+            if marker.is_file() and running_marker_is_live(marker):
                 running += 1
                 newest = max(newest, marker.stat().st_mtime)
+            elif marker.is_file():
+                stale_markers += 1
             if (item / "final_test.py").is_file():
                 tests += 1
             if not summary_path.is_file():
@@ -87,7 +109,8 @@ def snapshot(run_dir: Path) -> str:
     lines = [
         f"时间: {datetime.now().isoformat(timespec='seconds')}",
         f"阶段: {phase(run_dir)}  目标实例: {total or '未知'}",
-        f"生成 summary: {summaries}/{total or '?'}  final_test: {tests}/{total or '?'}  正在运行: {running}",
+        f"生成 summary: {summaries}/{total or '?'}  final_test: {tests}/{total or '?'}  "
+        f"正在运行: {running}  陈旧标记: {stale_markers}",
         "生成状态: " + json.dumps(dict(statuses.most_common()), ensure_ascii=False),
         f"正式评测: {len(formal)}/{total or '?'}",
         "评测状态: " + json.dumps(dict(formal_statuses.most_common()), ensure_ascii=False),

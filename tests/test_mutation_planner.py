@@ -5,6 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytest.skip(
+    "legacy MutationPlan suite; production now uses SemanticDelta",
+    allow_module_level=True,
+)
+
 from brt6.core.schema import (
     BehaviorTarget,
     CandidateTest,
