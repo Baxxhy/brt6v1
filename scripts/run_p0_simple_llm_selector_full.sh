@@ -249,6 +249,7 @@ fi
 CONDA_BASE=$("$CONDA_EXE" info --base)
 export CONDA_EXE
 export BRT3_CONDA_SH=${BRT3_CONDA_SH:-$CONDA_BASE/etc/profile.d/conda.sh}
+export BRT_CONDA_PROBE_TIMEOUT_SECONDS=${BRT_CONDA_PROBE_TIMEOUT_SECONDS:-120}
 export BRT_WORKSPACE_ROOT=${BRT_WORKSPACE_ROOT:-$PACKAGE_ROOT}
 export DOCKER_HOST=${DOCKER_HOST:-unix:///run/mutate-docker.sock}
 export PATH="$(dirname "$CONDA_EXE"):$PATH"

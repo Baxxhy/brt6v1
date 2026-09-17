@@ -65,6 +65,7 @@ export BRT_LLM_STREAM=1
 export BRT3_LLM_REQUEST_TIMEOUT=600
 export BRT3_LLM_MAX_ATTEMPTS=2
 export BRT_LLM_TRUNCATION_MAX_TOKENS=8192
+export BRT_CONDA_PROBE_TIMEOUT_SECONDS=${BRT_CONDA_PROBE_TIMEOUT_SECONDS:-120}
 export BRT_REQUIRE_OFFICIAL_DOCKER=1
 export BRT_ALLOW_DIRTY_WORKTREE=1
 export BRT_OFFICIAL_DOCKER_STARTUP_TIMEOUT=7200
@@ -269,25 +270,35 @@ fi
 
 if [[ ! -f "$RUN_DIR/design2.done" ]]; then
   progress "stage 2/4: individual test adaptation"
-  run_managed env BRT4_BEHAVIOR_CACHE_DIR="$DESIGN1" \
-  "$PYTHON" -u -m brt6.pipeline.run \
-    --instances_path "$GENERATION_DATASET" \
-    --code_retrieval_path "$CODE_RETRIEVAL" \
-    --test_retrieval_path "$TEST_RETRIEVAL" \
-    --repo_root_base "${REPO_ROOT:-$PACKAGE_ROOT/swe_repos}" \
-    --output_dir "$DESIGN2" \
-    --model deepseek-v4-flash --llm-provider deepseek \
-    --temperature 0.1 --max_tokens 4096 --max_workers 20 \
-    --max_semantic_rounds 5 --timeout 7200 --resume \
-    --validation_mode buggy_only --alignment-verifier strict \
-    --dataset_mode swt --runtime_backend official_docker \
-    --official_harness_python "$SWT_PYTHON" \
-    --swtbench_root "$ROOT/evaluation/vendor/swtbench" \
-    --enable_behavior_target true --enable_seed_mutation true \
-    --enable_specialized_feedback true --enable_environment_feedback true \
-    --enable_trigger_feedback true --enable_assertion_feedback true \
-    --enable_semantic_delta true \
-    > "$RUN_DIR/logs/02_design2.log" 2>&1
+  for attempt in 1 2 3; do
+    progress "stage 2 pass $attempt/3"
+    run_managed env BRT4_BEHAVIOR_CACHE_DIR="$DESIGN1" \
+    "$PYTHON" -u -m brt6.pipeline.run \
+      --instances_path "$GENERATION_DATASET" \
+      --code_retrieval_path "$CODE_RETRIEVAL" \
+      --test_retrieval_path "$TEST_RETRIEVAL" \
+      --repo_root_base "${REPO_ROOT:-$PACKAGE_ROOT/swe_repos}" \
+      --output_dir "$DESIGN2" \
+      --model deepseek-v4-flash --llm-provider deepseek \
+      --temperature 0.1 --max_tokens 4096 --max_workers 20 \
+      --max_semantic_rounds 5 --timeout 7200 --resume \
+      --validation_mode buggy_only --alignment-verifier strict \
+      --dataset_mode swt --runtime_backend official_docker \
+      --official_harness_python "$SWT_PYTHON" \
+      --swtbench_root "$ROOT/evaluation/vendor/swtbench" \
+      --enable_behavior_target true --enable_seed_mutation true \
+      --enable_specialized_feedback true --enable_environment_feedback true \
+      --enable_trigger_feedback true --enable_assertion_feedback true \
+      --enable_semantic_delta true \
+      >> "$RUN_DIR/logs/02_design2.log" 2>&1 || true
+    if json_stage_complete "$DESIGN2/summary.json" 276 generation; then
+      break
+    fi
+  done
+  if ! json_stage_complete "$DESIGN2/summary.json" 276 generation; then
+    progress "stage 2 incomplete after three passes; see $DESIGN2/summary.json"
+    exit 2
+  fi
   touch "$RUN_DIR/design2.done"
 else
   progress "stage 2/4: already complete"

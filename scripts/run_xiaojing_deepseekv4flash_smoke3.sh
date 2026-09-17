@@ -49,6 +49,7 @@ export BRT_LLM_STREAM=1
 export BRT3_LLM_REQUEST_TIMEOUT=600
 export BRT3_LLM_MAX_ATTEMPTS=2
 export BRT_LLM_TRUNCATION_MAX_TOKENS=8192
+export BRT_CONDA_PROBE_TIMEOUT_SECONDS=${BRT_CONDA_PROBE_TIMEOUT_SECONDS:-120}
 export BRT_REQUIRE_OFFICIAL_DOCKER=1
 export BRT_ALLOW_DIRTY_WORKTREE=1
 export BRT_OFFICIAL_DOCKER_STARTUP_TIMEOUT=7200
@@ -79,20 +80,31 @@ cat > "$RUN_DIR/run_config.json" <<EOF
 EOF
 
 progress "stage 1/4: reproduction target recovery"
-"$PYTHON" -u -m brt6.pipeline.run_issue_rewrite \
-  --instances_path "$DATASET" \
-  --code_retrieval_path "$CODE_RETRIEVAL" \
-  --test_retrieval_path "$TEST_RETRIEVAL" \
-  --output_dir "$DESIGN1" \
-  --instance_ids_file "$IDS" \
-  --model deepseek-v4-flash --llm-provider deepseek \
-  --temperature 0.1 --max_tokens 4096 --max_workers 3 \
-  > "$RUN_DIR/logs/01_design1.log" 2>&1
+for attempt in 1 2 3; do
+  progress "stage 1 pass $attempt/3"
+  resume_args=()
+  if [[ "$attempt" -gt 1 ]]; then
+    resume_args+=(--resume)
+  fi
+  "$PYTHON" -u -m brt6.pipeline.run_issue_rewrite \
+    --instances_path "$DATASET" \
+    --code_retrieval_path "$CODE_RETRIEVAL" \
+    --test_retrieval_path "$TEST_RETRIEVAL" \
+    --output_dir "$DESIGN1" \
+    --instance_ids_file "$IDS" \
+    --model deepseek-v4-flash --llm-provider deepseek \
+    --temperature 0.1 --max_tokens 4096 --max_workers 3 \
+    "${resume_args[@]}" \
+    >> "$RUN_DIR/logs/01_design1.log" 2>&1
 
-"$PYTHON" "$ROOT/scripts/list_missing_behavior_targets.py" \
-  --instances-path "$DATASET" --target-root "$DESIGN1" \
-  --output "$RUN_DIR/design1_missing.txt" --report "$RUN_DIR/design1_completion.json" \
-  --restrict-file "$IDS"
+  "$PYTHON" "$ROOT/scripts/list_missing_behavior_targets.py" \
+    --instances-path "$DATASET" --target-root "$DESIGN1" \
+    --output "$RUN_DIR/design1_missing.txt" --report "$RUN_DIR/design1_completion.json" \
+    --restrict-file "$IDS"
+  if [[ ! -s "$RUN_DIR/design1_missing.txt" ]]; then
+    break
+  fi
+done
 if [[ -s "$RUN_DIR/design1_missing.txt" ]]; then
   progress "stopped: Design 1 is incomplete"
   exit 2

@@ -531,7 +531,7 @@ class OfficialRuntimeContractTests(unittest.TestCase):
             isolate_env.assert_not_called()
             execute_setup.assert_not_called()
 
-    def test_worktree_failure_cleans_partial_directory_before_clone(self) -> None:
+    def test_worktree_preparation_uses_isolated_no_checkout_clone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "source"
             source.mkdir()
@@ -549,10 +549,6 @@ class OfficialRuntimeContractTests(unittest.TestCase):
 
             def fake_run(command, cwd, timeout=300):
                 calls.append((command, cwd, timeout))
-                if command.startswith("git worktree add"):
-                    worktree.mkdir(parents=True)
-                    (worktree / "partial").write_text("partial", encoding="utf-8")
-                    return {"returncode": 124, "timeout": True}
                 if command.startswith("git clone"):
                     self.assertFalse(worktree.exists())
                     worktree.mkdir(parents=True)
@@ -569,12 +565,12 @@ class OfficialRuntimeContractTests(unittest.TestCase):
                 )
 
             commands = [item[0] for item in calls]
-            add_index = next(i for i, item in enumerate(commands) if item.startswith("git worktree add"))
-            remove_index = next(i for i, item in enumerate(commands) if item.startswith("git worktree remove"))
             clone_index = next(i for i, item in enumerate(commands) if item.startswith("git clone"))
-            self.assertLess(add_index, remove_index)
-            self.assertLess(remove_index, clone_index)
-            self.assertEqual(calls[add_index][2], 1200)
+            checkout_index = next(i for i, item in enumerate(commands) if item.startswith("git checkout"))
+            self.assertIn("--shared --no-checkout", commands[clone_index])
+            self.assertLess(clone_index, checkout_index)
+            self.assertFalse(any(item.startswith("git worktree") for item in commands))
+            self.assertEqual(calls[clone_index][2], 1200)
             self.assertEqual(meta["status"], "PASS")
 
     def test_container_command_uses_official_testbed_and_maps_host_path(self) -> None:

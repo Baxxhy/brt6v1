@@ -1036,34 +1036,45 @@ def prepare_instance_worktree(
         worktree_timeout = 1200
 
     def discard_partial_worktree() -> None:
-        _run_local(
-            f"git worktree remove --force {shlex.quote(str(worktree))}",
-            source_repo,
-            timeout=worktree_timeout,
-        )
+        # Historical experiment runs may leave thousands of registered Git
+        # worktrees in the shared source repository.  Consulting that global
+        # registry here made a single instance spend tens of minutes in
+        # ``git worktree remove/prune``.  The staging checkout is disposable,
+        # so removing its directory is sufficient for the isolated-clone path
+        # below and does not mutate the shared repository's worktree registry.
         if worktree.exists():
             shutil.rmtree(worktree)
-        _run_local("git worktree prune", source_repo, timeout=worktree_timeout)
 
     if worktree.exists():
         discard_partial_worktree()
     ensure_dir(worktree.parent)
-    add_cmd = f"git worktree add --force --detach {shlex.quote(str(worktree))} {shlex.quote(base_commit)}"
-    add_result = _run_local(add_cmd, source_repo, timeout=worktree_timeout)
-    if add_result["returncode"] != 0:
-        discard_partial_worktree()
-        clone_cmd = f"git clone --shared {shlex.quote(source_repo)} {shlex.quote(str(worktree))}"
-        clone_result = _run_local(
-            clone_cmd, str(Path(output_dir)), timeout=worktree_timeout
-        )
-        checkout_result = _run_local(
+    # Use an isolated shared-object clone instead of ``git worktree add``.
+    # ``--no-checkout`` avoids materialising the source repository's current
+    # HEAD only to replace it with the instance's base commit immediately.
+    clone_cmd = (
+        f"git clone --shared --no-checkout {shlex.quote(source_repo)} "
+        f"{shlex.quote(str(worktree))}"
+    )
+    clone_result = _run_local(
+        clone_cmd, str(Path(output_dir)), timeout=worktree_timeout
+    )
+    checkout_result = (
+        _run_local(
             f"git checkout --force {shlex.quote(base_commit)}",
             str(worktree),
             timeout=worktree_timeout,
-        ) if clone_result["returncode"] == 0 else {}
-        add_result = {"worktree_add": add_result, "clone": clone_result, "checkout": checkout_result}
-        if clone_result["returncode"] != 0 or checkout_result.get("returncode") != 0:
-            return str(worktree), {"status": "WORKTREE_ERROR", "details": add_result, "repo_path": str(worktree)}
+        )
+        if clone_result["returncode"] == 0
+        else {}
+    )
+    add_result = {"clone": clone_result, "checkout": checkout_result}
+    if clone_result["returncode"] != 0 or checkout_result.get("returncode") != 0:
+        discard_partial_worktree()
+        return str(worktree), {
+            "status": "WORKTREE_ERROR",
+            "details": add_result,
+            "repo_path": str(worktree),
+        }
     from ..runtime.official_docker_runtime import active_runtime
 
     official_runtime = active_runtime(context.instance_id)
