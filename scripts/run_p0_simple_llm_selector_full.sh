@@ -399,6 +399,15 @@ GENERATION_DIR=$RUN_DIR/generation
 FORMAL_DIR=$RUN_DIR/evaluation/formal_f2p
 LOG_DIR=$RUN_DIR/logs
 mkdir -p "$ISSUE_DIR" "$GENERATION_DIR" "$FORMAL_DIR" "$LOG_DIR" "$TMPDIR" "$XDG_CACHE_HOME"
+export BRT_COST_DIR=$RUN_DIR
+save_api_cost() {
+  local status=$?
+  trap - EXIT
+  "$PYTHON_BIN" "$PROJECT_ROOT/scripts/summarize_api_cost.py" --run-dir "$RUN_DIR" \
+    >> "$LOG_DIR/api_cost.log" 2>&1 || true
+  exit "$status"
+}
+trap save_api_cost EXIT
 
 GIT_COMMIT=$(git -C "$PROJECT_ROOT" rev-parse HEAD) || exit $?
 GIT_BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current) || exit $?
@@ -519,10 +528,9 @@ if [[ -n "$BEHAVIOR_TARGET_CACHE" ]]; then
 elif [ "$ENABLE_BEHAVIOR_TARGET" = "true" ]; then
   echo "__BRT_STAGE__ issue_rewrite_start $(date --iso-8601=seconds)"
   for ISSUE_ATTEMPT in 1 2 3; do
-    RESUME_ARGS=()
-    if [ "$ISSUE_ATTEMPT" -gt 1 ]; then
-      RESUME_ARGS+=(--resume)
-    fi
+    # A new run directory has no records; an interrupted run must also resume
+    # on the first pass instead of resampling all completed targets.
+    RESUME_ARGS=(--resume)
     echo "__BRT_STAGE__ issue_rewrite_attempt=$ISSUE_ATTEMPT"
     "$PYTHON_BIN" -m brt6.pipeline.run_issue_rewrite \
       --instances_path "$INSTANCES_PATH" \
@@ -536,6 +544,10 @@ elif [ "$ENABLE_BEHAVIOR_TARGET" = "true" ]; then
       --max_tokens 4096 \
       "${RESUME_ARGS[@]}"
     ISSUE_RC=$?
+    if [[ "$ISSUE_RC" -eq 75 || -f "$ISSUE_DIR/api_paused.json" ]]; then
+      echo "__BRT_STAGE__ paused_api stage=issue_rewrite; resume after service recovery"
+      exit 75
+    fi
     ISSUE_TARGETS=$("$PYTHON_BIN" - "$INSTANCES_PATH" "$ISSUE_DIR" <<'PY'
 import json
 import sys
@@ -610,6 +622,10 @@ else
   env -u BRT4_BEHAVIOR_CACHE_DIR "${GENERATION_COMMAND[@]}"
 fi
 GENERATION_RC=$?
+if [[ "$GENERATION_RC" -eq 75 || -f "$GENERATION_DIR/api_paused.json" ]]; then
+  echo "__BRT_STAGE__ paused_api stage=generation; no automatic ranking/evaluation"
+  exit 75
+fi
 echo "__BRT_STAGE__ generation_end rc=$GENERATION_RC $(date --iso-8601=seconds)"
 
 GENERATION_GATE_PATH=$RUN_DIR/generation_gate.json

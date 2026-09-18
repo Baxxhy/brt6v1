@@ -16,6 +16,7 @@ from ..core.schema import HostContext, ProtocolRecovery, RetrievedCode, Retrieve
 from ..core.utils import extract_json_object, safe_json_dump, truncate_text, write_text
 from ..io.io_utils import format_code_context
 from ..validation.delta_guard import normalize_delta
+from ..llm.errors import LLMUnavailableError
 
 
 MAX_PROMPT_BEHAVIOR_CHARS = 30_000
@@ -112,6 +113,8 @@ def propose_semantic_delta(
                 response,
             )
             data = extract_json_object(response)
+    except LLMUnavailableError:
+        raise
     except Exception as exc:  # noqa: BLE001
         return _save_delta(
             _invalid_delta(instance_id, round_id, f"planner response invalid: {exc}"),

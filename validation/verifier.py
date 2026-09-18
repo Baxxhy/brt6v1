@@ -22,6 +22,7 @@ from ..core.behavior_evidence import (
 )
 from ..core.schema import CandidateTest, ExecutionResult, VerifierDecision
 from ..core.utils import extract_json_object
+from ..llm.errors import LLMUnavailableError
 
 
 def _missing_check_target(
@@ -207,6 +208,8 @@ def verify_buggy_only(
                         or "Find the issue input, state, call chain, or optimized branch that remains uncovered."
                     )
                 return decision
+            except LLMUnavailableError:
+                raise
             except Exception:  # noqa: BLE001
                 pass
         return VerifierDecision(candidate.instance_id, "repair_trigger", "The buggy version passes, so the defect path was not triggered.", ["trigger"], "Strengthen the issue-grounded input, state, or call-chain adaptation.")
@@ -256,6 +259,8 @@ def verify_buggy_only(
                     source_context,
                     ablation_config,
                 )
+            except LLMUnavailableError:
+                raise
             except Exception:  # noqa: BLE001
                 pass
         if status == "ASSERTION_FAIL":
@@ -274,6 +279,8 @@ def verify_buggy_only(
                 source_context,
                 ablation_config,
             )
+        except LLMUnavailableError:
+            raise
         except Exception:  # noqa: BLE001
             pass
     if status == "TIMEOUT":

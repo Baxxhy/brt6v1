@@ -13,6 +13,8 @@ import traceback
 import re
 from pathlib import Path
 from typing import Any
+from ..llm.errors import LLMUnavailableError
+from ..runtime.step_journal import journaled_pipeline, recorded_dataclass_step
 
 from ..execution.executor import run_command_in_conda, run_subprocess_tree
 from ..execution.delta_loop import (
@@ -77,11 +79,14 @@ def _load_cached_behavior(context: InstanceContext, output_dir: str) -> Any:
         for item in raw_roots.split(os.pathsep)
         if item.strip()
     ]
-    candidates = [local_path]
-    candidates.extend(
+    candidates = list(
         root / context.instance_id / "behavior_target.json"
         for root in cache_roots
     )
+    # An explicitly supplied input takes precedence over a copy left by a
+    # previous invocation. Otherwise a changed input could pass resume checks
+    # but silently execute against the old target.
+    candidates.append(local_path)
     for path in candidates:
         if path.is_file():
             behavior = behavior_from_dict(context.instance_id, safe_json_load(path))
@@ -502,6 +507,8 @@ def _propose_delta_safely(
 
     try:
         return propose_semantic_delta(instance_id, round_id, *args, output_dir=output_dir, **kwargs)
+    except LLMUnavailableError:
+        raise
     except Exception as exc:  # noqa: BLE001
         delta = SemanticDelta(
             instance_id=instance_id,
@@ -1282,6 +1289,7 @@ def prepare_instance_worktree(
     }
 
 
+@journaled_pipeline
 def run_instance_pipeline(
     context: InstanceContext,
     llm_client: Any,
@@ -1832,7 +1840,7 @@ def run_instance_pipeline(
         else:
             seeds_to_try = ranked_tests[:3] if enable_protocol_recovery else ([related_test] if related_test else [])
         for seed_index, seed in enumerate(seeds_to_try):
-            candidate_host = build_host_context(
+            candidate_host = recorded_dataclass_step("parent_execution", build_host_context, HostContext,
                 context.instance_id, seed, context.buggy_repo_path, behavior,
                 context.retrieved_code, conda_env, timeout, no_conda,
                 skip_execution=generate_only, repo=context.repo,
@@ -1858,7 +1866,7 @@ def run_instance_pipeline(
                 break
             seed_fallback_used = seed_index < min(2, len(seeds_to_try) - 1)
         if host is None:
-            host = build_host_context(
+            host = recorded_dataclass_step("parent_execution", build_host_context, HostContext,
                 context.instance_id, None, context.buggy_repo_path, behavior,
                 context.retrieved_code, conda_env, timeout, no_conda,
                 skip_execution=generate_only, repo=context.repo,
@@ -1877,6 +1885,8 @@ def run_instance_pipeline(
                     output_dir,
                     config,
                 )
+            except LLMUnavailableError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 protocol.protocol_risks.append(
                     f"Protocol model audit failed; retaining the AST recovery result: {exc}"
@@ -1998,7 +2008,7 @@ def run_instance_pipeline(
                     guard,
                 )
             elif brt_attempt > 0 or execution is None:
-                execution = run_command_in_conda(candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
+                execution = recorded_dataclass_step("candidate_execution", run_command_in_conda, ExecutionResult, candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
             safe_json_dump(execution.to_dict(), str(Path(output_dir) / f"execution_round_{brt_attempt}.json"))
             write_text(str(Path(output_dir) / "logs" / f"execution_round_{brt_attempt}.log"), execution.stdout + "\n" + execution.stderr)
             effective_source = format_effective_source_context(
@@ -2274,6 +2284,10 @@ def run_instance_pipeline(
         )
         result.save_json(str(Path(output_dir) / "summary.json"))
         return result
+    except LLMUnavailableError as exc:
+        safe_json_dump({"instance_id": context.instance_id, "status": "PAUSED_API",
+                        "error": str(exc)}, str(Path(output_dir) / "summary.json"))
+        raise
     except Exception as exc:  # noqa: BLE001
         fallback_config = (
             ablation_config

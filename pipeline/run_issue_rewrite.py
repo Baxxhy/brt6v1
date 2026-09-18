@@ -6,6 +6,8 @@ import argparse
 import json
 import os
 import traceback
+import threading
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -13,6 +15,8 @@ from ..core.config import DEFAULT_MAX_TOKENS, DEFAULT_MAX_WORKERS, DEFAULT_TEMPE
 from ..io.io_utils import build_instance_context, load_issue_data
 from ..issue.issue_rewriter import rewrite_issue
 from ..llm.llm_client import LLMClient
+from ..llm.errors import LLMUnavailableError
+from ..runtime.step_journal import init_resume_run, instance_journal, pause_status, atomic_json, read_json
 from ..core.utils import ensure_dir, safe_json_dump
 from ..runtime.conda_env_manager import preflight_system
 
@@ -63,11 +67,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dict:
+    try:
+        event = getattr(args, "_api_pause_event", None)
+        if event is not None and event.is_set():
+            raise LLMUnavailableError("Model service paused; queued instance was not started")
+        return _run_one_impl(args, instance_id, issue_row)
+    except LLMUnavailableError as exc:
+        return pause_status(args, instance_id, exc)
+
+
+def _run_one_impl(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dict:
     out_dir = Path(args.output_dir) / instance_id
-    if args.resume and _has_valid_behavior_target(
-        out_dir / "behavior_target.json", instance_id
-    ):
-        return {"instance_id": instance_id, "status": "SKIP"}
     context = build_instance_context(
         instance_id,
         issue_row,
@@ -83,10 +93,23 @@ def run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dict
         base_url=args.base_url,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        cost_dir=args.output_dir,
+        usage_context={"stage": "design1", "instance_id": instance_id},
     )
+    journal = instance_journal(args, context, client, str(out_dir)) if getattr(args, "_resume_revision", None) else None
+    completed = read_json(journal.directory / "target_complete.json") if journal else None
+    target_path = out_dir / "behavior_target.json"
+    if args.resume and completed and _has_valid_behavior_target(target_path, instance_id):
+        if completed["target"] == target_path.read_bytes().decode("utf-8"):
+            return {"instance_id": instance_id, "status": "SKIP"}
     try:
-        rewrite_issue(context, client, str(out_dir))
+        with journal.activate() if journal else nullcontext():
+            rewrite_issue(context, client, str(out_dir))
+        if journal:
+            atomic_json(journal.directory / "target_complete.json", {"target": target_path.read_bytes().decode("utf-8")})
         return {"instance_id": instance_id, "status": "OK"}
+    except LLMUnavailableError:
+        raise
     except Exception as exc:  # noqa: BLE001
         return {"instance_id": instance_id, "status": "ERROR", "error": str(exc), "traceback": traceback.format_exc()}
 
@@ -95,6 +118,9 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     ensure_dir(args.output_dir)
+    args._resume_revision = init_resume_run(args.output_dir, args.resume)
+    args._api_pause_event = threading.Event()
+    (Path(args.output_dir) / "api_paused.json").unlink(missing_ok=True)
     tmp_root = os.environ.get("TMPDIR") or str(Path(args.output_dir) / "tmp")
     Path(tmp_root).mkdir(parents=True, exist_ok=True)
     preflight = preflight_system(
@@ -142,10 +168,13 @@ def main() -> None:
         "ok": sum(1 for r in results if r["status"] == "OK"),
         "skip": sum(1 for r in results if r["status"] == "SKIP"),
         "error": sum(1 for r in results if r["status"] == "ERROR"),
+        "paused_api": sum(1 for r in results if r["status"] == "PAUSED_API"),
         "results": sorted(results, key=lambda x: x["instance_id"]),
         "defaults": {"max_workers": DEFAULT_MAX_WORKERS, "top_code": DEFAULT_TOP_CODE, "top_tests": DEFAULT_TOP_TESTS},
     }
     safe_json_dump(summary, str(Path(args.output_dir) / "summary.json"))
+    if summary["paused_api"]:
+        raise SystemExit(75)
 
 
 if __name__ == "__main__":

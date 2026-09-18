@@ -5,4 +5,4 @@ Related test: {seed_test}
 Auto-recovery result: {protocol_json}
 
 Return only the fields that this audit may correct:
-{"test_framework":"pytest|unittest|django|unknown","runner_hints":[],"protocol_risks":[]}
+{{"test_framework":"pytest|unittest|django|unknown","runner_hints":[],"protocol_risks":[]}}

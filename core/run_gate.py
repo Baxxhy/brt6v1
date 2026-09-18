@@ -9,6 +9,8 @@ def formal_evaluation_allowed(
     dataset_size: int,
     allow_incomplete: bool,
 ) -> bool:
+    if generation_returncode == 75:
+        return False
     if dataset_size <= 0 or generated_tests <= 0:
         return False
     if allow_incomplete:

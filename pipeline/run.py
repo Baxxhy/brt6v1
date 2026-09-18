@@ -31,6 +31,8 @@ from ..execution.feedback import run_instance_pipeline
 from ..retrieval.icore_runtime import remove_isolated_runtime_environment
 from ..io.io_utils import build_instance_context, load_issue_data
 from ..llm.llm_client import LLMClient
+from ..llm.errors import LLMUnavailableError
+from ..runtime.step_journal import init_resume_run, instance_journal, pause_status
 from ..core.utils import ensure_dir, safe_json_dump
 from ..runtime.conda_env_manager import (
     default_env_name,
@@ -450,27 +452,19 @@ def _resolve_conda_env(env_name: str) -> str:
 
 
 def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dict:
+    try:
+        event = getattr(args, "_api_pause_event", None)
+        if event is not None and event.is_set():
+            raise LLMUnavailableError("Model service paused; queued instance was not started")
+        return _run_one_impl(args, instance_id, issue_row)
+    except LLMUnavailableError as exc:
+        return pause_status(args, instance_id, exc)
+
+
+def _run_one_impl(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dict:
     ablation_config = ablation_config_from_args(args)
     out_dir = Path(args.output_dir) / instance_id
     summary_path = out_dir / "summary.json"
-    if args.resume and summary_path.exists():
-        try:
-            previous = json.loads(summary_path.read_text(encoding="utf-8"))
-            previous_status = previous.get("status")
-            previous_signature_matches = resume_matches_ablation(
-                previous,
-                ablation_config,
-                args.behavior_target_source_signature,
-            )
-        except (OSError, ValueError, TypeError):
-            previous_status = "ERROR"
-            previous_signature_matches = False
-        if (
-            previous_signature_matches
-            and previous.get("alignment_verifier", "strict") == args.alignment_verifier
-            and previous_status not in {"ERROR", "SETUP_ERROR", "ENV_UNRESOLVED"}
-        ):
-            return {"instance_id": instance_id, "status": "SKIP"}
     if args.num_candidates != 1:
         raise ValueError("BRT6 supports exactly --num_candidates 1")
     context = build_instance_context(
@@ -490,7 +484,14 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
         base_url=args.base_url,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        cost_dir=args.output_dir,
+        usage_context={"stage": "design2", "instance_id": instance_id},
     )
+    client.resume_revision = getattr(args, "_resume_revision", None)
+    journal = instance_journal(args, context, client, str(out_dir)) if client.resume_revision else None
+    if args.resume and journal is not None and journal.completed(out_dir) is not None:
+        return {"instance_id": instance_id, "status": "SKIP"}
+    client.ensure_available()
     ensure_dir(out_dir)
     running_marker = out_dir / ".running"
     running_marker.write_text(
@@ -550,11 +551,15 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
             "behavior_target_source_signature"
         ] = args.behavior_target_source_signature
         safe_json_dump(result_payload, str(summary_path))
+        if journal is not None:
+            journal.finish(result, out_dir)
         return {
             "instance_id": instance_id,
             "status": result.status,
             "summary": result_payload,
         }
+    except LLMUnavailableError:
+        raise
     except Exception as exc:  # noqa: BLE001
         ensure_dir(out_dir)
         err = {
@@ -625,6 +630,8 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
 
 
 def _load_instance_summary(output_dir: Path, instance_id: str, fallback: dict | None = None) -> dict:
+    if fallback and fallback.get("status") == "PAUSED_API":
+        return dict(fallback)
     summary_path = output_dir / instance_id / "summary.json"
     if summary_path.is_file():
         try:
@@ -659,6 +666,9 @@ def main() -> int:
         behavior_target_source.get("source_signature") or ""
     )
     ensure_dir(args.output_dir)
+    args._resume_revision = init_resume_run(args.output_dir, args.resume)
+    args._api_pause_event = threading.Event()
+    (Path(args.output_dir) / "api_paused.json").unlink(missing_ok=True)
     safe_json_dump(
         {
             "dataset_mode": args.dataset_mode,
@@ -731,9 +741,10 @@ def main() -> int:
     summary = {
         "max_workers": args.max_workers,
         "total": len(ordered_results),
-        "ok": sum(1 for r in ordered_results if r.get("status") not in {"ERROR", "SKIP", "MISSING_SUMMARY"}),
+        "ok": sum(1 for r in ordered_results if r.get("status") not in {"ERROR", "PAUSED_API", "SKIP", "MISSING_SUMMARY"}),
         "skip": sum(1 for r in results if r.get("status") == "SKIP"),
         "error": sum(1 for r in ordered_results if r.get("status") in {"ERROR", "MISSING_SUMMARY"}),
+        "paused_api": sum(1 for r in ordered_results if r.get("status") == "PAUSED_API"),
         "completed_this_invocation": len(results),
         "results": ordered_results,
         "defaults": {
@@ -763,6 +774,8 @@ def main() -> int:
         },
     }
     safe_json_dump(summary, str(Path(args.output_dir) / "summary.json"))
+    if summary["paused_api"]:
+        return 75
     return 1 if summary["error"] else 0
 
 

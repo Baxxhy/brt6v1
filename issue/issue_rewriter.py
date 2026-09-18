@@ -254,6 +254,7 @@ def rewrite_issue(
         safe_json_dump(meta, str(Path(output_dir) / "meta.json"))
         return behavior
     except Exception as exc:  # noqa: BLE001
-        meta.update({"status": "ERROR", "finished_at": now_timestamp(), "error": str(exc), "traceback": traceback.format_exc()})
+        from ..llm.errors import LLMUnavailableError
+        meta.update({"status": "PAUSED_API" if isinstance(exc, LLMUnavailableError) else "ERROR", "finished_at": now_timestamp(), "error": str(exc), "traceback": traceback.format_exc()})
         safe_json_dump(meta, str(Path(output_dir) / "meta.json"))
         raise

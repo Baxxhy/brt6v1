@@ -41,6 +41,15 @@ output.write_text(json.dumps(selected, ensure_ascii=False, indent=2) + "\n")
 PY
 
 export PYTHONPATH=$PACKAGE_ROOT
+export BRT_COST_DIR=$RUN_DIR
+save_api_cost() {
+  local status=$?
+  trap - EXIT
+  "$PYTHON" "$ROOT/scripts/summarize_api_cost.py" --run-dir "$RUN_DIR" \
+    >> "$RUN_DIR/logs/api_cost.log" 2>&1 || true
+  exit "$status"
+}
+trap save_api_cost EXIT
 export BRT_API_POOL_FILE=$POOL
 export BRT_ALLOWED_API_HOST=api.open.xiaojingai.com
 export BRT_MODEL_ID=deepseek-v4-flash

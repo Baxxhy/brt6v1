@@ -39,6 +39,8 @@ cleanup_stage() {
     fi
     wait "$ACTIVE_STAGE_PID" 2>/dev/null || true
   fi
+  "$PYTHON" "$ROOT/scripts/summarize_api_cost.py" --run-dir "$RUN_DIR" \
+    >> "$RUN_DIR/logs/api_cost.log" 2>&1 || true
   exit "$status"
 }
 
@@ -57,6 +59,7 @@ run_managed() {
 trap cleanup_stage EXIT INT TERM HUP
 
 export PYTHONPATH=$PACKAGE_ROOT
+export BRT_COST_DIR=$RUN_DIR
 export BRT_API_POOL_FILE=$POOL
 export BRT_ALLOWED_API_HOST=api.open.xiaojingai.com
 export BRT_MODEL_ID=deepseek-v4-flash
@@ -108,6 +111,7 @@ if mode == "generation":
     ok = (
         int(value.get("total") or -1) == expected
         and int(value.get("error") or 0) == 0
+        and int(value.get("paused_api") or 0) == 0
         and len(value.get("results") or []) == expected
     )
 elif mode == "selection":
@@ -291,6 +295,10 @@ if [[ ! -f "$RUN_DIR/design2.done" ]]; then
       --enable_trigger_feedback true --enable_assertion_feedback true \
       --enable_semantic_delta true \
       >> "$RUN_DIR/logs/02_design2.log" 2>&1 || true
+    if [[ -f "$DESIGN2/api_paused.json" ]]; then
+      progress "stage 2 paused on API failure; progress saved. Restore service, then resume this run."
+      exit 75
+    fi
     if json_stage_complete "$DESIGN2/summary.json" 276 generation; then
       break
     fi
