@@ -26,7 +26,7 @@ from brt6.core.utils import safe_json_dump
 
 
 STRICT_ACCEPTED_STATUS = "ISSUE_ALIGNED_FAIL"
-SELECTION_PROTOCOL = "strict_verifier_then_icore_with_direct_fallback_v2"
+SELECTION_PROTOCOL = "strict_preferred_icore_exhausted_fallback_v3"
 
 
 def read(path: Path):
@@ -208,6 +208,7 @@ def process_instance(output: Path, issues: dict, row: dict) -> dict:
     decision_path = output / "decisions" / instance_id / "decision.json"
     accepted: list[dict] = []
     excluded: list[dict] = []
+    available: list[dict] = []
     for candidate in sorted(row["candidates"], key=lambda item: item["component1_rank"]):
         if candidate["strict_status"] != STRICT_ACCEPTED_STATUS:
             excluded.append(
@@ -216,9 +217,8 @@ def process_instance(output: Path, issues: dict, row: dict) -> dict:
                     "strict_status": candidate["strict_status"],
                 }
             )
-            continue
         frozen = output / "frozen" / instance_id / candidate["candidate_id"]
-        accepted.append(
+        available.append(
             {
                 "candidate_id": candidate["candidate_id"],
                 "component1_rank": candidate["component1_rank"],
@@ -227,14 +227,22 @@ def process_instance(output: Path, issues: dict, row: dict) -> dict:
             }
         )
 
+    accepted = [item for item in available if any(
+        c["candidate_id"] == item["candidate_id"] and c["strict_status"] == STRICT_ACCEPTED_STATUS
+        for c in row["candidates"]
+    )]
     if accepted:
         selected, ranking = rank_candidates(
             issues[instance_id]["problem_statement"], accepted
         )
         route = "STRICT_ACCEPTED_THEN_ICORE_RANK"
+    elif available:
+        selected, ranking = rank_candidates(issues[instance_id]["problem_statement"], available)
+        route = "EXHAUSTED_NO_STRICT_ACCEPTED_THEN_ICORE_RANK"
+        excluded = []
     else:
         selected, ranking = None, []
-        route = "NO_STRICT_ACCEPTED_CANDIDATE"
+        route = "NO_AVAILABLE_CANDIDATE"
 
     result = {
         "instance_id": instance_id,
@@ -265,7 +273,9 @@ def materialize(output: Path, predictions: list[dict]) -> None:
         summary.update(
             {
                 "instance_id": instance_id,
-                "status": STRICT_ACCEPTED_STATUS,
+                "strict_status": summary.get("status", ""),
+                "selection_route": prediction["route"],
+                "strict_accepted": summary.get("status") == STRICT_ACCEPTED_STATUS,
                 "final_test_path": str(destination / "final_test.py"),
                 "buggy_execution": read(frozen / "buggy_execution.json"),
                 "selected_seed_name": selected,

@@ -199,6 +199,10 @@ def _should_run_direct_fallback(
     must have accepted it and exported an actual test file.
     """
 
+    # Standalone target-refinement experiments already have a frozen direct
+    # fallback. Do not spend another three branches repeating that route.
+    if os.environ.get("BRT_DISABLE_DIRECT_FALLBACK") == "1":
+        return False
     if config.ablation_id != "full":
         return False
     return not any(

@@ -38,6 +38,7 @@ class ResumeTests(unittest.TestCase):
         self.stack.enter_context(patch.dict(os.environ, {
             "BRT_ALLOWED_API_HOST": "", "BRT_LLM_STREAM": "0", "BRT_COST_DIR": "",
             "BRT_DISABLE_THINKING": "1", "BRT4_BEHAVIOR_CACHE_DIR": "",
+            "BRT_RETRY_TRANSIENT_API": "0",
         }))
         self.stack.enter_context(patch("brt6.llm.llm_client.pool_policy", return_value={}))
         self.stack.enter_context(patch("brt6.llm.llm_client.time.sleep"))
@@ -92,6 +93,72 @@ class ResumeTests(unittest.TestCase):
         self.assertFalse(LLMClient._disabled_endpoints)
         c.open_request = lambda *a, **kw: self.response("OK")
         self.assertEqual(c.chat("s", "u"), "OK")
+
+    def test_transient_failure_retries_last_available_key(self):
+        entries = [("key-a", "https://a.invalid", "m"), ("key-b", "https://b.invalid", "m")]
+        with patch("brt6.llm.llm_client.configured_apis", return_value=entries):
+            LLMClient._disabled_endpoints.add(("https://a.invalid", "key-a"))
+            c = LLMClient(model="m")
+            c.max_attempts = 2
+            requests = []
+            def request(req, timeout):
+                requests.append((req.full_url, req.data))
+                if len(requests) == 1:
+                    raise self.http(524, "gateway timeout")
+                return self.response("OK")
+            c.open_request = request
+            self.assertEqual(c.chat("s", "u"), "OK")
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(requests[0], requests[1])
+            self.assertIn("b.invalid", requests[0][0])
+
+    def test_full_run_retries_only_transient_errors_and_replays_completed_steps(self):
+        with patch.dict(os.environ, {"BRT_RETRY_TRANSIENT_API": "1"}):
+            c = self.client()
+            c.open_request = Mock(side_effect=[self.response("first"),
+                self.http(524, "gateway timeout"), TimeoutError("timeout"),
+                self.http(429, "rate limited"), self.response("second")])
+            for _ in range(2):
+                with StepJournal(self.root, {"experiment": "transient"}).activate():
+                    self.assertEqual(c.chat("s", "first"), "first")
+                    self.assertEqual(c.chat("s", "second"), "second")
+            self.assertEqual(c.open_request.call_count, 5)
+            calls = c.open_request.call_args_list
+            self.assertTrue(all(x.args[0].data == calls[1].args[0].data for x in calls[1:]))
+
+    def test_full_run_stops_for_quota_invalid_request_and_explicit_probe_limit(self):
+        with patch.dict(os.environ, {"BRT_RETRY_TRANSIENT_API": "1"}):
+            for code, body in [(403, "insufficient_user_quota"), (400, "bad request")]:
+                with self.subTest(code=code):
+                    LLMClient._disabled_endpoints.clear()
+                    c = self.client()
+                    c.open_request = Mock(side_effect=self.http(code, body))
+                    with self.assertRaises(LLMUnavailableError):
+                        c.chat("s", "u")
+                    self.assertEqual(c.open_request.call_count, 1)
+            c.open_request = Mock(side_effect=self.http(524, "gateway timeout"))
+            with self.assertRaises(LLMUnavailableError):
+                c.chat("s", "probe", attempt_limit=1)
+            self.assertEqual(c.open_request.call_count, 1)
+
+    def test_full_run_retries_empty_and_truncated_without_saving_partial_content(self):
+        with patch.dict(os.environ, {"BRT_RETRY_TRANSIENT_API": "1"}):
+            c = self.client()
+            c.max_tokens = 4096
+            c.truncation_max_tokens = 8192
+            def partial():
+                return io.BytesIO(json.dumps({"choices": [{"message": {"content": "partial"},
+                    "finish_reason": "length"}]}).encode())
+            c.open_request = Mock(side_effect=[self.response(""), partial(), partial(), self.response("complete")])
+            for _ in range(2):
+                with StepJournal(self.root, {"experiment": "incomplete_response"}).activate():
+                    self.assertEqual(c.chat("s", "u"), "complete")
+            self.assertEqual(c.open_request.call_count, 4)
+            self.assertEqual([json.loads(x.args[0].data)["max_tokens"]
+                              for x in c.open_request.call_args_list], [4096, 4096, 8192, 8192])
+            saved = list(self.root.glob('.resume/steps/*/step_*.json'))
+            self.assertEqual(len(saved), 1)
+            self.assertEqual(json.loads(saved[0].read_text())['result']['content'], 'complete')
 
     def test_twenty_workers_keep_step_positions_isolated(self):
         calls = []

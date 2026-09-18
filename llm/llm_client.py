@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import os
 import sys
 import threading
@@ -146,12 +147,19 @@ class LLMClient:
             return None
         with cls._key_lock:
             start = cls._next_index(provider, len(entries))
+            available = []
             for offset in range(len(entries)):
                 entry = entries[(start + offset) % len(entries)]
                 identity = (entry[1].rstrip("/"), entry[0])
-                if identity not in cls._disabled_endpoints and identity not in (exclude or set()):
-                    return entry
-        raise LLMUnavailableError("No usable API endpoint remains in this request; resume after service recovery")
+                if identity not in cls._disabled_endpoints:
+                    available.append(entry)
+                    if identity not in (exclude or set()):
+                        return entry
+            # Exhausting a rotation is not exhausting the account. A healthy
+            # endpoint remains retryable after a transient network failure.
+            if available:
+                return available[0]
+        raise LLMUnavailableError("All configured API credentials are quota exhausted; resume after replenishment")
 
     @staticmethod
     def _env_keys(provider: str) -> list[str]:
@@ -277,22 +285,23 @@ class LLMClient:
             "Authorization": f"Bearer {self.api_key}",
         }
         last_error: Exception | None = None
-        # Bound one logical call independently of the pool size.  Failed
-        # instances are retried by the stage-level resume loop, which keeps
-        # scheduling fair: one unavailable request cannot occupy a worker
-        # forever merely because many credentials are configured.
+        # Keep a bounded default for probes and library callers. Full runs may
+        # explicitly retry transient service failures without replaying the
+        # instance's already completed model and execution steps.
         pool_size = len(configured_apis(self.provider)) if self._uses_local_pool else 0
-        # A logical request tries each configured endpoint at most once.  The
-        # caller may resume a failed instance later; one request must never
-        # hold a worker indefinitely.
         max_attempts = max(1, min(self.max_attempts, pool_size or self.max_attempts))
         if attempt_limit is not None:
             max_attempts = max(1, min(max_attempts, attempt_limit))
+        retry_transient = attempt_limit is None and os.environ.get(
+            "BRT_RETRY_TRANSIENT_API", ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        transient_error = False
         attempt = 0
         attempted_endpoints = set()
         logical_request_id = str(uuid.uuid4())
-        while attempt < max_attempts:
+        while attempt < max_attempts or (retry_transient and transient_error):
             self.ensure_available()
+            transient_error = False
             attempted_endpoints.add((self.base_url, self.api_key))
             payload["model"] = self.model
             data = json.dumps(payload).encode("utf-8")
@@ -397,6 +406,7 @@ class LLMClient:
                 # Provider bodies can contain account identifiers. Persist only
                 # the status and error category, never credentials or raw bodies.
                 exhausted = quota_exhausted(body)
+                transient_error = not exhausted and (exc.code in {408, 425, 429} or exc.code >= 500)
                 last_error = RuntimeError(f"LLM HTTP {exc.code}: " + ("quota exhausted" if exhausted else "provider rejected request"))
                 if exhausted:
                     with self._key_lock:
@@ -419,9 +429,8 @@ class LLMClient:
                 # long exponential backoff and cannot make them succeed.
                 if exc.code in {400, 404, 405, 413, 422} and not exhausted:
                     break
-                if (exhausted or self.immediate_failover or exc.code in {401, 403, 429} or exc.code >= 500) and attempt < max_attempts - 1:
-                    self._rotate_api(attempted_endpoints)
                 if not self.immediate_failover and exc.code == 429 and attempt < max_attempts - 1:
+                    self._rotate_api(attempted_endpoints)
                     retry_after = exc.headers.get("Retry-After")
                     try:
                         server_wait = float(retry_after) if retry_after else 0.0
@@ -441,8 +450,13 @@ class LLMClient:
                 if outcome == "interrupted":
                     outcome = "request_error"
                 last_error = exc
-                if attempt < max_attempts - 1:
-                    self._rotate_api(attempted_endpoints if outcome == "request_error" else None)
+                # A received but unusable model response is not a test
+                # failure. Full runs retry it too, retaining the existing
+                # output-limit escalation and never caching partial content.
+                transient_error = outcome in {"empty_response", "truncated"} or isinstance(exc, (
+                    urllib.error.URLError, TimeoutError, ConnectionError,
+                    http.client.HTTPException,
+                ))
             finally:
                 if attempt_id and self.accounting:
                     try:
@@ -459,7 +473,15 @@ class LLMClient:
                         # again merely because writing accounting data failed.
                         warnings.warn(f"API usage could not be saved ({type(exc).__name__})")
             attempt += 1
-            if attempt < max_attempts:
+            if attempt < max_attempts or (retry_transient and transient_error):
+                self._rotate_api(attempted_endpoints)
+                if retry_transient and transient_error and attempt >= max_attempts:
+                    # Small jitter avoids synchronized retries across workers.
+                    wait = min(15 * (2 ** min(attempt - max_attempts, 2)), 60) + uuid.uuid4().int % 10
+                    status = f"HTTP {status_code}" if status_code else type(last_error).__name__
+                    print(f"[API retry] {operation}: {status}; attempt {attempt + 1} in {wait}s; completed steps retained", flush=True)
+                    time.sleep(wait)
+                    continue
                 time.sleep(
                     (0 if attempt % max(1, len(configured_apis(self.provider))) else 1)
                     if self.immediate_failover else

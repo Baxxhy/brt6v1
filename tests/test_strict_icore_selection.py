@@ -175,9 +175,14 @@ class StrictIcoreSelectionTests(unittest.TestCase):
 
             self.assertEqual(result["selected"], "seed_1")
 
-    def test_no_strict_accepted_candidate_means_no_submission(self):
+    def test_no_strict_accepted_candidate_is_still_ranked_and_exported(self):
         with tempfile.TemporaryDirectory() as raw:
             output = Path(raw)
+            frozen = output / "frozen" / "project__repo-1" / "seed_0"
+            frozen.mkdir(parents=True)
+            (frozen / "candidate.py").write_text("def test_case():\n    assert False\n")
+            (frozen / "buggy_execution.json").write_text(json.dumps({"returncode": 1}))
+            (frozen / "source_summary.json").write_text(json.dumps({"status": "UNRELATED_FAIL"}))
             result = MODULE.process_instance(
                 output,
                 {"project__repo-1": {"problem_statement": "issue"}},
@@ -189,8 +194,13 @@ class StrictIcoreSelectionTests(unittest.TestCase):
                     ],
                 },
             )
-            self.assertIsNone(result["selected"])
-            self.assertEqual(result["route"], "NO_STRICT_ACCEPTED_CANDIDATE")
+            self.assertEqual(result["selected"], "seed_0")
+            self.assertEqual(result["route"], "EXHAUSTED_NO_STRICT_ACCEPTED_THEN_ICORE_RANK")
+            self.assertEqual(result["accepted_candidates"], [])
+            MODULE.materialize(output, [result])
+            summary = MODULE.read(output / "generation" / "project__repo-1" / "summary.json")
+            self.assertEqual(summary["status"], "UNRELATED_FAIL")
+            self.assertFalse(summary["strict_accepted"])
 
 
 if __name__ == "__main__":

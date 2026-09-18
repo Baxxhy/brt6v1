@@ -13,15 +13,17 @@ TEST_RETRIEVAL=$ROOT/retrieval_results/test/icore/gpt/related_tests.json
 POOL=${BRT_API_POOL_FILE:-$ROOT/.secrets/api_pool.json}
 
 RUN_TIMESTAMP=${RUN_TIMESTAMP:-$(date +%Y%m%d_%H%M%S)}
-RUN_DIR=${RUN_DIR:-$ROOT/results/runs/trait_xiaojing_deepseekv4flash_full_${RUN_TIMESTAMP}}
+RUN_DIR=${RUN_DIR:-$ROOT/results/runs/trait_wo_c1_full_${RUN_TIMESTAMP}}
 RUN_ID=$(basename "$RUN_DIR")
-DESIGN1=$RUN_DIR/design1_reproduction_target
+DESIGN1=$RUN_DIR/unused_design1
 DESIGN2=$RUN_DIR/design2_individual_adaptation
 SELECTION=$RUN_DIR/strict_icore
 EVALUATION=$RUN_DIR/evaluation/official_f2p
 MISSING_TARGETS=$RUN_DIR/design1_missing.txt
 
-mkdir -p "$RUN_DIR"/{logs,tmp,cache,evaluation} "$DESIGN1" "$DESIGN2" "$SELECTION"
+mkdir -p "$RUN_DIR"/{logs,tmp,cache,evaluation} "$DESIGN2" "$SELECTION"
+exec 9>"$RUN_DIR/launcher.lock"
+flock -n 9 || { echo "This experiment is already running" >&2; exit 1; }
 
 ACTIVE_STAGE_PID=""
 
@@ -60,6 +62,7 @@ trap cleanup_stage EXIT INT TERM HUP
 
 export PYTHONPATH=$PACKAGE_ROOT
 export BRT_COST_DIR=$RUN_DIR
+unset BRT4_BEHAVIOR_CACHE_DIR BRT_DISABLE_DIRECT_FALLBACK
 export BRT_API_POOL_FILE=$POOL
 export BRT_ALLOWED_API_HOST=api.open.xiaojingai.com
 export BRT_MODEL_ID=deepseek-v4-flash
@@ -155,11 +158,13 @@ cat > "$REQUESTED_CONFIG" <<EOF
   "method": "TRAIT",
   "algorithm_revision": "lossless_issue_target_fallback_v1",
   "instances": 276,
-  "design1": "lossless raw issue plus evidence-constrained reproduction target recovery",
+  "design1": "disabled; raw issue and identical repository context retained",
+  "behavior_target": false,
+  "reference_run": "trait_xiaojing_deepseekv4flash_full_20260918_051829",
   "design2": "three independently adapted retrieved tests with semantic-delta feedback",
-  "fallback": "direct adaptation only after all target-guided branches fail strict acceptance",
+  "fallback": "not applicable: direct adaptation is the primary ablation route",
   "candidate_acceptance": "frozen strict semantic verifier verdict",
-  "post_selection": "route-preserving local deterministic iCoRe ranking",
+  "post_selection": "strict accepted first; otherwise rank all available candidates after exhaustion",
   "additional_issue2test_judge": false,
   "model": "deepseek-v4-flash",
   "provider": "deepseek",
@@ -175,7 +180,7 @@ cat > "$REQUESTED_CONFIG" <<EOF
   "workers": 20,
   "maximum_concurrent_model_requests": 20,
   "api_timeout_seconds_per_endpoint": 600,
-  "logical_request_timeout_upper_bound_seconds": 1200,
+  "transient_api_retry": "enabled; logical request duration is not bounded by two attempts",
   "docker_timeout_seconds": 7200,
   "compute_coverage": false,
   "fixed_side_used_during_generation_or_selection": false,
@@ -195,18 +200,8 @@ else
   mv "$REQUESTED_CONFIG" "$RUN_DIR/run_config.json"
 fi
 
-if [[ -f "$RUN_DIR/design1.done" ]]; then
-  "$PYTHON" "$ROOT/scripts/list_missing_behavior_targets.py" \
-    --instances-path "$GENERATION_DATASET" \
-    --target-root "$DESIGN1" \
-    --output "$MISSING_TARGETS" \
-    --report "$RUN_DIR/design1_completion.json" >/dev/null
-  if [[ -s "$MISSING_TARGETS" ]]; then
-    progress "stage 1 marker is stale; resuming missing BehaviorTargets"
-    rm -f "$RUN_DIR/design1.done"
-  fi
-fi
-
+# C1 is intentionally absent; no recovery/cache/model call at this stage.
+touch "$RUN_DIR/design1.done"
 if [[ -f "$RUN_DIR/design2.done" ]] && \
    ! json_stage_complete "$DESIGN2/summary.json" 276 generation; then
   progress "stage 2 marker is stale; rebuilding incomplete adaptation outputs"
@@ -242,42 +237,56 @@ if [[ ! -f "$RUN_DIR/selection.done" ]]; then
   rm -f "$RUN_DIR/evaluation.done" "$RUN_DIR/completed.done"
 fi
 
-if [[ ! -f "$RUN_DIR/design1.done" ]]; then
-  progress "stage 1/4: reproduction target recovery"
-  for attempt in 1 2 3; do
-    progress "stage 1 pass $attempt/3"
-    run_managed "$PYTHON" -u -m brt6.pipeline.run_issue_rewrite \
-      --instances_path "$GENERATION_DATASET" \
-      --code_retrieval_path "$CODE_RETRIEVAL" \
-      --test_retrieval_path "$TEST_RETRIEVAL" \
-      --output_dir "$DESIGN1" \
-      --model deepseek-v4-flash --llm-provider deepseek \
-      --temperature 0.1 --max_tokens 4096 --max_workers 20 --resume \
-      >> "$RUN_DIR/logs/01_design1.log" 2>&1
+progress "stage 1 skipped: C1 disabled; original issue and repository context retained"
 
-    "$PYTHON" "$ROOT/scripts/list_missing_behavior_targets.py" \
-      --instances-path "$GENERATION_DATASET" \
-      --target-root "$DESIGN1" \
-      --output "$MISSING_TARGETS" \
-      --report "$RUN_DIR/design1_completion.json"
-    if [[ ! -s "$MISSING_TARGETS" ]]; then
-      break
-    fi
-  done
-  if [[ -s "$MISSING_TARGETS" ]]; then
-    progress "stage 1 incomplete after three passes; see $MISSING_TARGETS"
-    exit 2
-  fi
-  touch "$RUN_DIR/design1.done"
-else
-  progress "stage 1/4: already complete"
+# Smoke coverage is chosen by dataset order, never by official outcomes.
+# Completed pilot instances are reused by the identical full-run resume journal.
+if [[ ! -f "$RUN_DIR/pilot.done" && ! -f "$RUN_DIR/design2.done" ]]; then
+  "$PYTHON" - "$GENERATION_DATASET" "$RUN_DIR/pilot_ids.txt" <<'PYCODE'
+import json, sys
+from pathlib import Path
+raw = json.loads(Path(sys.argv[1]).read_text())
+rows = list(raw.values()) if isinstance(raw, dict) else raw
+Path(sys.argv[2]).write_text("\n".join(str(r["instance_id"]) for r in rows[:3]) + "\n")
+PYCODE
+  progress "pilot: first three dataset instances; no F2P threshold"
+  run_managed env -u BRT4_BEHAVIOR_CACHE_DIR "$PYTHON" -u -m brt6.pipeline.run \
+    --instances_path "$GENERATION_DATASET" --instance_ids_file "$RUN_DIR/pilot_ids.txt" \
+    --code_retrieval_path "$CODE_RETRIEVAL" --test_retrieval_path "$TEST_RETRIEVAL" \
+    --repo_root_base "${REPO_ROOT:-$PACKAGE_ROOT/swe_repos}" --output_dir "$DESIGN2" \
+    --model deepseek-v4-flash --llm-provider deepseek \
+    --temperature 0.1 --max_tokens 4096 --max_workers 20 \
+    --max_semantic_rounds 5 --timeout 7200 --resume \
+    --validation_mode buggy_only --alignment-verifier strict \
+    --dataset_mode swt --runtime_backend official_docker \
+    --official_harness_python "$SWT_PYTHON" --swtbench_root "$ROOT/evaluation/vendor/swtbench" \
+    --enable_behavior_target false --enable_seed_mutation true \
+    --enable_specialized_feedback true --enable_environment_feedback true \
+    --enable_trigger_feedback true --enable_assertion_feedback true --enable_semantic_delta true \
+    >> "$RUN_DIR/logs/02_design2.log" 2>&1
+  "$PYTHON" - "$DESIGN2" "$RUN_DIR/pilot_ids.txt" <<'PYCODE'
+import json, sys
+from pathlib import Path
+root=Path(sys.argv[1])
+if (root/'api_paused.json').exists():
+    raise SystemExit('pilot paused on API; resume after service recovers')
+for iid in Path(sys.argv[2]).read_text().splitlines():
+    d=json.loads((root/iid/'summary.json').read_text())
+    assert d['behavior_target_enabled'] is False, iid
+    assert d['ablation_id'] == 'wo_behavior_target', iid
+    assert d['strict_verifier_enabled'] is True, iid
+    assert d['status'] not in {'ERROR','PAUSED_API','MISSING'}, iid
+    assert not (root/iid/'behavior_target.json').exists(), iid
+print('pilot configuration verified; no success-rate gate')
+PYCODE
+  touch "$RUN_DIR/pilot.done"
 fi
 
 if [[ ! -f "$RUN_DIR/design2.done" ]]; then
   progress "stage 2/4: individual test adaptation"
   for attempt in 1 2 3; do
     progress "stage 2 pass $attempt/3"
-    run_managed env BRT4_BEHAVIOR_CACHE_DIR="$DESIGN1" \
+    run_managed env -u BRT4_BEHAVIOR_CACHE_DIR \
     "$PYTHON" -u -m brt6.pipeline.run \
       --instances_path "$GENERATION_DATASET" \
       --code_retrieval_path "$CODE_RETRIEVAL" \
@@ -291,7 +300,7 @@ if [[ ! -f "$RUN_DIR/design2.done" ]]; then
       --dataset_mode swt --runtime_backend official_docker \
       --official_harness_python "$SWT_PYTHON" \
       --swtbench_root "$ROOT/evaluation/vendor/swtbench" \
-      --enable_behavior_target true --enable_seed_mutation true \
+      --enable_behavior_target false --enable_seed_mutation true \
       --enable_specialized_feedback true --enable_environment_feedback true \
       --enable_trigger_feedback true --enable_assertion_feedback true \
       --enable_semantic_delta true \
@@ -337,7 +346,7 @@ if [[ ! -f "$RUN_DIR/evaluation.done" ]]; then
     --evaluation-dir "$EVALUATION" \
     --max-workers 20 --timeout 7200 \
     --run-id "$RUN_ID" \
-    --model-name trait-xiaojing-deepseek-v4-flash \
+    --model-name trait-wo-c1-deepseek-v4-flash \
     --compute-coverage false \
     --official-python "$SWT_PYTHON" \
     --swtbench-root "$ROOT/evaluation/vendor/swtbench" \
@@ -347,5 +356,7 @@ else
   progress "stage 4/4: already complete"
 fi
 
+run_managed "$PYTHON" "$ROOT/scripts/compare_wo_c1_full.py" --run-dir "$RUN_DIR" \
+  > "$RUN_DIR/logs/05_comparison.log" 2>&1
 touch "$RUN_DIR/completed.done"
 progress "complete: $RUN_DIR"
