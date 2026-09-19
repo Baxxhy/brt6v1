@@ -31,6 +31,7 @@ from ..execution.feedback import run_instance_pipeline
 from ..retrieval.icore_runtime import remove_isolated_runtime_environment
 from ..io.io_utils import build_instance_context, load_issue_data
 from ..llm.llm_client import LLMClient
+from ..runtime.infrastructure_errors import InfrastructureUnavailableError
 from ..llm.errors import LLMUnavailableError
 from ..runtime.step_journal import init_resume_run, instance_journal, pause_status
 from ..core.utils import ensure_dir, safe_json_dump
@@ -457,6 +458,13 @@ def _run_one(args: argparse.Namespace, instance_id: str, issue_row: dict) -> dic
         if event is not None and event.is_set():
             raise LLMUnavailableError("Model service paused; queued instance was not started")
         return _run_one_impl(args, instance_id, issue_row)
+    except InfrastructureUnavailableError as exc:
+        result = {"instance_id": instance_id, "status": "PAUSED_INFRA", "error": str(exc)}
+        directory = Path(args.output_dir) / instance_id
+        ensure_dir(directory)
+        safe_json_dump(result, str(directory / "infrastructure_pause.json"))
+        safe_json_dump(result, str(directory / "summary.json"))
+        return result
     except LLMUnavailableError as exc:
         return pause_status(args, instance_id, exc)
 
@@ -558,7 +566,7 @@ def _run_one_impl(args: argparse.Namespace, instance_id: str, issue_row: dict) -
             "status": result.status,
             "summary": result_payload,
         }
-    except LLMUnavailableError:
+    except (LLMUnavailableError, InfrastructureUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001
         ensure_dir(out_dir)
@@ -630,7 +638,7 @@ def _run_one_impl(args: argparse.Namespace, instance_id: str, issue_row: dict) -
 
 
 def _load_instance_summary(output_dir: Path, instance_id: str, fallback: dict | None = None) -> dict:
-    if fallback and fallback.get("status") == "PAUSED_API":
+    if fallback and fallback.get("status") in {"PAUSED_API", "PAUSED_INFRA"}:
         return dict(fallback)
     summary_path = output_dir / instance_id / "summary.json"
     if summary_path.is_file():
@@ -741,9 +749,10 @@ def main() -> int:
     summary = {
         "max_workers": args.max_workers,
         "total": len(ordered_results),
-        "ok": sum(1 for r in ordered_results if r.get("status") not in {"ERROR", "PAUSED_API", "SKIP", "MISSING_SUMMARY"}),
+        "ok": sum(1 for r in ordered_results if r.get("status") not in {"ERROR", "PAUSED_API", "PAUSED_INFRA", "SKIP", "MISSING_SUMMARY"}),
         "skip": sum(1 for r in results if r.get("status") == "SKIP"),
         "error": sum(1 for r in ordered_results if r.get("status") in {"ERROR", "MISSING_SUMMARY"}),
+        "paused_infra": sum(1 for r in ordered_results if r.get("status") == "PAUSED_INFRA"),
         "paused_api": sum(1 for r in ordered_results if r.get("status") == "PAUSED_API"),
         "completed_this_invocation": len(results),
         "results": ordered_results,
@@ -774,7 +783,7 @@ def main() -> int:
         },
     }
     safe_json_dump(summary, str(Path(args.output_dir) / "summary.json"))
-    if summary["paused_api"]:
+    if summary["paused_api"] or summary["paused_infra"]:
         return 75
     return 1 if summary["error"] else 0
 

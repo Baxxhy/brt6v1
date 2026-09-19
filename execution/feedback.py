@@ -13,6 +13,7 @@ import traceback
 import re
 from pathlib import Path
 from typing import Any
+from ..runtime.infrastructure_errors import InfrastructureUnavailableError, check_execution_infrastructure
 from ..llm.errors import LLMUnavailableError
 from ..runtime.step_journal import journaled_pipeline, recorded_dataclass_step
 
@@ -511,7 +512,7 @@ def _propose_delta_safely(
 
     try:
         return propose_semantic_delta(instance_id, round_id, *args, output_dir=output_dir, **kwargs)
-    except LLMUnavailableError:
+    except (LLMUnavailableError, InfrastructureUnavailableError):
         raise
     except Exception as exc:  # noqa: BLE001
         delta = SemanticDelta(
@@ -1889,7 +1890,7 @@ def run_instance_pipeline(
                     output_dir,
                     config,
                 )
-            except LLMUnavailableError:
+            except (LLMUnavailableError, InfrastructureUnavailableError):
                 raise
             except Exception as exc:  # noqa: BLE001
                 protocol.protocol_risks.append(
@@ -2015,6 +2016,7 @@ def run_instance_pipeline(
                 execution = recorded_dataclass_step("candidate_execution", run_command_in_conda, ExecutionResult, candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
             safe_json_dump(execution.to_dict(), str(Path(output_dir) / f"execution_round_{brt_attempt}.json"))
             write_text(str(Path(output_dir) / "logs" / f"execution_round_{brt_attempt}.log"), execution.stdout + "\n" + execution.stderr)
+            check_execution_infrastructure(execution)
             effective_source = format_effective_source_context(
                 behavior, context.retrieved_code, context.buggy_repo_path
             )
@@ -2288,6 +2290,10 @@ def run_instance_pipeline(
         )
         result.save_json(str(Path(output_dir) / "summary.json"))
         return result
+    except InfrastructureUnavailableError as exc:
+        safe_json_dump({"instance_id": context.instance_id, "status": "PAUSED_INFRA",
+                        "error": str(exc)}, str(Path(output_dir) / "infrastructure_pause.json"))
+        raise
     except LLMUnavailableError as exc:
         safe_json_dump({"instance_id": context.instance_id, "status": "PAUSED_API",
                         "error": str(exc)}, str(Path(output_dir) / "summary.json"))

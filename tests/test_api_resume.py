@@ -141,7 +141,7 @@ class ResumeTests(unittest.TestCase):
                 c.chat("s", "probe", attempt_limit=1)
             self.assertEqual(c.open_request.call_count, 1)
 
-    def test_full_run_retries_empty_and_truncated_without_saving_partial_content(self):
+    def test_full_run_pauses_at_output_cap_without_saving_partial_content(self):
         with patch.dict(os.environ, {"BRT_RETRY_TRANSIENT_API": "1"}):
             c = self.client()
             c.max_tokens = 4096
@@ -150,12 +150,18 @@ class ResumeTests(unittest.TestCase):
                 return io.BytesIO(json.dumps({"choices": [{"message": {"content": "partial"},
                     "finish_reason": "length"}]}).encode())
             c.open_request = Mock(side_effect=[self.response(""), partial(), partial(), self.response("complete")])
+            with StepJournal(self.root, {"experiment": "incomplete_response"}).activate():
+                with self.assertRaisesRegex(LLMUnavailableError, "output cap"):
+                    c.chat("s", "u")
+            self.assertEqual(c.open_request.call_count, 3)
+            self.assertEqual(list(self.root.glob('.resume/steps/*/step_*.json')), [])
+            # A later explicit resume can succeed and cache only complete output.
             for _ in range(2):
                 with StepJournal(self.root, {"experiment": "incomplete_response"}).activate():
                     self.assertEqual(c.chat("s", "u"), "complete")
             self.assertEqual(c.open_request.call_count, 4)
             self.assertEqual([json.loads(x.args[0].data)["max_tokens"]
-                              for x in c.open_request.call_args_list], [4096, 4096, 8192, 8192])
+                              for x in c.open_request.call_args_list], [4096, 4096, 8192, 4096])
             saved = list(self.root.glob('.resume/steps/*/step_*.json'))
             self.assertEqual(len(saved), 1)
             self.assertEqual(json.loads(saved[0].read_text())['result']['content'], 'complete')

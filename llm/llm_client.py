@@ -380,6 +380,11 @@ class LLMClient:
                 self.last_finish_reason = finish_reason
                 if finish_reason == "length":
                     outcome = "truncated"
+                    output_limit = int(payload.get("max_completion_tokens", payload.get("max_tokens", 0)))
+                    if output_limit >= self.truncation_max_tokens:
+                        raise LLMUnavailableError(
+                            "Response truncated at configured output cap; paused before repeated paid requests"
+                        )
                     current_limit = int(payload["max_tokens"])
                     payload["max_tokens"] = min(
                         max(current_limit * 2, current_limit + 1),
@@ -393,6 +398,8 @@ class LLMClient:
                     raise RuntimeError("LLM returned empty content")
                 outcome = "success"
                 return content
+            except LLMUnavailableError:
+                raise
             except urllib.error.HTTPError as exc:
                 status_code = exc.code
                 outcome = "http_error"

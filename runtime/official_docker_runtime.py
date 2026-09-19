@@ -622,8 +622,11 @@ class OfficialDockerRuntime:
             ],
             timeout=120,
         )
-        if modified.returncode != 0 or untracked.returncode != 0:
-            raise RuntimeError("could not enumerate host candidate delta")
+        if modified.returncode or untracked.returncode:
+            from .infrastructure_errors import InfrastructureUnavailableError
+            raise InfrastructureUnavailableError(
+                "Host Git delta lookup failed: " + str(modified.stderr)[-1000:] + str(untracked.stderr)[-1000:]
+            )
         changed = {
             item
             for raw in (str(modified.stdout or ""), str(untracked.stdout or ""))
@@ -660,9 +663,20 @@ class OfficialDockerRuntime:
         )
         if copy.returncode != 0:
             stderr = (copy.stderr or b"").decode("utf-8", errors="replace")
-            raise RuntimeError(f"docker candidate copy failed: {stderr[-2000:]}")
+            from .infrastructure_errors import InfrastructureUnavailableError
+            raise InfrastructureUnavailableError(f"docker candidate copy failed: {stderr[-2000:]}")
 
-    def execute(
+    def execute(self, command, host_repo, timeout, behavior):
+        from .infrastructure_errors import InfrastructureUnavailableError
+        try:
+            return self._execute_candidate(command, host_repo, timeout, behavior)
+        except (InfrastructureUnavailableError, OSError, subprocess.SubprocessError) as exc:
+            safe_json_dump({"status": "PAUSED_INFRA", "instance_id": self.instance_id,
+                            "error": str(exc), "command": command},
+                           str(self.output_dir / "infrastructure_pause.json"))
+            raise InfrastructureUnavailableError(str(exc)) from exc
+
+    def _execute_candidate(
         self,
         command: str,
         host_repo: str,
@@ -685,9 +699,11 @@ class OfficialDockerRuntime:
                 timeout=min(max(timeout, 120), 600),
             )
             if reset.returncode != 0:
-                stdout = str(reset.stdout or "")
-                stderr = str(reset.stderr or "")
-                returncode = reset.returncode
+                from .infrastructure_errors import InfrastructureUnavailableError
+                raise InfrastructureUnavailableError(
+                    "Repository reset/clean failed before test execution: "
+                    + str(reset.stdout or "")[-1000:] + str(reset.stderr or "")[-3000:]
+                )
             else:
                 files, deleted = self._host_delta(host_repo)
                 self._copy_delta(host_repo, files)
@@ -696,7 +712,10 @@ class OfficialDockerRuntime:
                         shlex.quote(f"{self.repo_directory}/{item}")
                         for item in deleted
                     )
-                    self._docker_exec(f"rm -f -- {targets}", timeout=120)
+                    deletion = self._docker_exec(f"rm -f -- {targets}", timeout=120)
+                    if deletion.returncode:
+                        from .infrastructure_errors import InfrastructureUnavailableError
+                        raise InfrastructureUnavailableError("Candidate synchronization failed: " + str(deletion.stderr)[-2000:])
                 mapped_command = command.replace(
                     str(Path(host_repo).resolve()), self.repo_directory
                 )
@@ -770,6 +789,8 @@ class OfficialDockerRuntime:
                 "a", encoding="utf-8"
             ) as handle:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            from .infrastructure_errors import check_execution_infrastructure
+            check_execution_infrastructure(result)
             return result
 
     def close(self) -> None:

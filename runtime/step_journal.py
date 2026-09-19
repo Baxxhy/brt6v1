@@ -16,6 +16,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+from .infrastructure_errors import infrastructure_result, InfrastructureUnavailableError
+
+
 _active = contextvars.ContextVar("brt_step_journal", default=None)
 
 
@@ -95,7 +98,7 @@ class StepJournal:
         path = self.directory / f"step_{index:05d}.json"
         expected = {"kind": kind, "inputs": plain(inputs)}
         saved = read_json(path)
-        if saved is not None and saved.get("request") == expected and saved.get("reusable", True):
+        if saved is not None and saved.get("request") == expected and saved.get("reusable", True) and not infrastructure_result(saved.get("result")):
             return saved["result"]
         # A changed/missing earlier step invalidates later dependencies. Keep
         # their records for audit; never silently replay a mismatched suffix.
@@ -122,7 +125,7 @@ class StepJournal:
 
     def completed(self, output_dir):
         saved = read_json(self.directory / "complete.json")
-        if not saved:
+        if not saved or infrastructure_result(saved.get("result")):
             return None
         for name, contents in saved["artifacts"].items():
             try:
@@ -133,7 +136,9 @@ class StepJournal:
         return saved["result"]
 
     def finish(self, result, output_dir):
-        if result.status in {"ERROR", "PAUSED_API", "SETUP_ERROR", "ENV_UNRESOLVED", "TIMEOUT"}:
+        if infrastructure_result(plain(result)):
+            return
+        if result.status in {"ERROR", "PAUSED_INFRA", "PAUSED_API", "SETUP_ERROR", "ENV_UNRESOLVED", "TIMEOUT"}:
             return
         root = Path(output_dir)
         # Ranking consumes these exact artifacts on resume. Final code alone
@@ -183,12 +188,17 @@ def pause_status(args, instance_id, error):
 def recorded_dataclass_step(kind, function, result_type, *args, **kwargs):
     journal = current_journal()
     if journal is None:
-        return function(*args, **kwargs)
+        result = function(*args, **kwargs)
+        if infrastructure_result(plain(result)):
+            raise InfrastructureUnavailableError("Infrastructure execution failed; model repair blocked")
+        return result
     data = journal.step(kind, {"args": args, "kwargs": kwargs},
                         lambda: function(*args, **kwargs).to_dict(),
                         reusable=lambda r: not r.get("timeout") and
                         r.get("status", r.get("seed_execution_status")) not in
                         {"TIMEOUT", "ERROR", "ENV_UNRESOLVED"})
+    if infrastructure_result(data):
+        raise InfrastructureUnavailableError("Infrastructure execution failed; model repair blocked")
     return result_type(**data)
 
 
