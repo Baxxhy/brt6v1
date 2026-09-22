@@ -26,7 +26,7 @@ from brt6.evaluation.official_benchmarks import (  # noqa: E402
     generation_completeness,
 )
 from brt6.evaluation.swtbench_runtime_compat import (  # noqa: E402
-    _configure_container_reuse,
+    _configure_official_environment,
 )
 from brt6.execution.executor import run_subprocess_tree, terminate_process_tree  # noqa: E402
 
@@ -169,6 +169,46 @@ def _metrics_from_report(
     return metrics
 
 
+def _summarize_runtime_audits(workspace: Path) -> dict[str, Any]:
+    """Summarize image identities and pre-test infrastructure failures."""
+
+    image_ids: dict[str, set[str]] = {}
+    environment_failures: list[dict[str, str]] = []
+    fingerprints = list(workspace.rglob("environment_fingerprint.json"))
+    for path in fingerprints:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        configured = str(payload.get("configured_image") or "")
+        image_id = str(payload.get("image_id") or "")
+        if configured and image_id:
+            image_ids.setdefault(configured, set()).add(image_id)
+    audits = list(workspace.rglob("execution_audit.json"))
+    for path in audits:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("environment_failure") is True:
+            environment_failures.append(
+                {
+                    "path": str(path.relative_to(workspace)),
+                    "reason": str(payload.get("environment_failure_reason") or "unknown"),
+                }
+            )
+    return {
+        "schema_version": 1,
+        "evaluated_states": len(fingerprints),
+        "audited_states": len(audits),
+        "image_ids_by_tag": {
+            key: sorted(values) for key, values in sorted(image_ids.items())
+        },
+        "image_identity_conflicts": {
+            key: sorted(values)
+            for key, values in sorted(image_ids.items())
+            if len(values) > 1
+        },
+        "environment_failure_count": len(environment_failures),
+        "environment_failures": environment_failures,
+        "official_score_changed": False,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", choices=("swt", "tdd"), required=True)
@@ -181,6 +221,12 @@ def main() -> int:
     parser.add_argument("--model-name", default="brt6-deepseek-v3")
     parser.add_argument("--compute-coverage", type=parse_bool, default=True)
     parser.add_argument("--official-python", default="")
+    parser.add_argument(
+        "--container-isolation",
+        choices=("fresh", "reuse"),
+        default="fresh",
+        help="fresh is reproducible; reuse is an exploratory speed optimization",
+    )
     parser.add_argument(
         "--swtbench-root",
         default=str(PROJECT_ROOT / "evaluation/vendor/swtbench"),
@@ -306,7 +352,9 @@ def main() -> int:
     official_commit = _git_head(official_root)
     environment = os.environ.copy()
     if args.dataset == "swt":
-        _configure_container_reuse(environment)
+        _configure_official_environment(
+            environment, isolation=args.container_isolation
+        )
     python_paths = [str(workspace), str(PACKAGE_ROOT), str(official_root), str(official_root / "src")]
     if environment.get("PYTHONPATH"):
         python_paths.append(environment["PYTHONPATH"])
@@ -334,6 +382,7 @@ def main() -> int:
         "official_harness_invoked": True,
         "evaluation_scope": "f2p_only" if not args.compute_coverage else "f2p_and_coverage",
         "compute_coverage": args.compute_coverage,
+        "container_isolation": args.container_isolation if args.dataset == "swt" else None,
         "f2p_only_marker": str(f2p_only_marker or ""),
         "runtime_compatibility": (
             {
@@ -347,11 +396,17 @@ def main() -> int:
                     "make official exception stringification side-effect free",
                     "rotate host-side official harness logs at a bounded size",
                     "preserve the shared cached instance image after all six official evaluation states finish",
-                    "reuse the official SWT-Bench container name per instance across all six states",
+                    (
+                        "create a fresh container for every official evaluation state"
+                        if args.container_isolation == "fresh"
+                        else "reuse one official container per instance across all six states"
+                    ),
                     "serialize each instance with a lock stored under /root",
                     "restore the benchmark checkout and remove ordinary untracked files before and after every state",
+                    "verify the base commit and a clean tracked checkout before applying each state",
                     "reuse ignored build artifacts baked into the official image and skip project reinstall",
                     "force optional pip commands and dataset access offline",
+                    "record the Docker image identity and audit pre-test environment failures for every state",
                     "decode Docker test output as strict UTF-8 first and auditably escape only invalid bytes",
                     "patch both official run_evaluation module aliases loaded by src.main",
                 ],
@@ -433,12 +488,18 @@ def main() -> int:
         (evaluation_dir / "metrics.json").write_text(
             json.dumps(metrics, indent=2) + "\n", encoding="utf-8"
         )
+    runtime_audit = _summarize_runtime_audits(workspace)
+    (evaluation_dir / "runtime_audit_summary.json").write_text(
+        json.dumps(runtime_audit, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     manifest.update(
         {
             "status": "complete" if returncode == 0 and report else "failed",
             "finished_at": datetime.now(timezone.utc).astimezone().isoformat(),
             "returncode": returncode,
             "official_report_path": str(report_path),
+            "runtime_audit": runtime_audit,
         }
     )
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

@@ -339,6 +339,10 @@ def _start_swt_cached(
                 "cached image base commit mismatch: "
                 f"expected {request['base_commit']}, got {actual_commit or 'unavailable'}"
             )
+        from brt6.runtime.offline_dependencies import ensure_cached_dependencies
+        dependency_audit = ensure_cached_dependencies(
+            container, repo=spec.repo, env_name=spec.env_name
+        )
         registry.confirm(
             instance_id=request["instance_id"],
             expected_image=image,
@@ -365,7 +369,8 @@ def _start_swt_cached(
             "attempt_container_names": attempt_names,
             "attempt_cleanup": cleanup_results,
             "docker_api_timeout_seconds": docker_api_timeout,
-            "official_setup_compatibility_changes": [],
+            "official_setup_compatibility_changes": dependency_audit["changes"],
+            "runtime_dependency_repair": dependency_audit,
         }
         lifecycle.update(
             {

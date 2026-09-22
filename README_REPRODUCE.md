@@ -1,5 +1,8 @@
 # Fresh-machine reproduction
 
+The frozen 2026-09-23 experiment procedure, including model and dataset
+switching, is documented in [2026-9-23-复现文档.md](2026-9-23-复现文档.md).
+
 The repository can prepare a new Debian/Ubuntu Linux machine with Conda already
 installed. This private deployment tracks its API pool at
 `.secrets/api_pool.json` at the repository owner's request. Initial setup downloads
@@ -102,7 +105,7 @@ source .bootstrap/use_fresh_swt_server.sh
 
 Each command replaces only that provider's entries and preserves the other
 provider. The GPT defaults are `https://aigc.x-see.cn/v1` and
-`gpt-5.4-mini`. Key input is hidden.
+`gpt-5-mini`. Key input is hidden.
 
 Alternatively copy `config/api_pool.example.json` to
 `.secrets/api_pool.json`, replace the placeholder locally, and run:
@@ -120,7 +123,7 @@ export DEEPSEEK_MODEL='deepseek-v3'
 
 export GPT_API_KEY='your-gpt-key'
 export GPT_BASE_URL='https://aigc.x-see.cn/v1'
-export GPT_MODEL='gpt-5.4-mini'
+export GPT_MODEL='gpt-5-mini'
 ```
 
 For a remote machine or cluster, either use the tracked private pool or pass
@@ -133,7 +136,7 @@ Select the configured provider explicitly when launching an experiment:
 # Existing behavior and DeepSeek key rotation.
 bash scripts/run_p0_simple_llm_selector_full.sh --dataset swt --model deepseek
 
-# GPT endpoint/key pool and gpt-5.4-mini.
+# GPT endpoint/key pool and gpt-5-mini.
 bash scripts/run_p0_simple_llm_selector_full.sh --dataset swt --model gpt
 ```
 

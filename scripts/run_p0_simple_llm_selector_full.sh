@@ -20,7 +20,7 @@ Options:
   --dataset {swt|tdd}  Select the experiment dataset (default: swt).
   --model {deepseek|gpt}
                        Select the isolated LLM/API pool (default: deepseek).
-                       gpt resolves to gpt-5.4-mini by default.
+                       gpt resolves to gpt-5-mini by default.
   --behavior-target {on|off}
                        Enable BehaviorTarget (default: on). Use off for the
                        "w/o Behavior Target" ablation; IssueRewrite is skipped.
@@ -338,7 +338,7 @@ REPO_ROOT=${REPO_ROOT:-$PACKAGE_ROOT/swe_repos}
 if [[ -n "${BRT_MODEL_ID:-}" ]]; then
   MODEL=$BRT_MODEL_ID
 elif [[ "$LLM_PROVIDER" == "gpt" ]]; then
-  MODEL=${GPT_MODEL:-gpt-5.4-mini}
+  MODEL=${GPT_MODEL:-gpt-5-mini}
 else
   MODEL=${MODEL:-${DEEPSEEK_MODEL:-deepseek-v4-flash}}
 fi
@@ -456,6 +456,7 @@ config = {
     "dataset_mode": "$DATASET_MODE",
     "llm_provider": "$LLM_PROVIDER",
     "llm_model": "$MODEL",
+    "final_selection": "${BRT_FINAL_SELECTION:-pipeline}",
     "behavior_target": "$ENABLE_BEHAVIOR_TARGET" == "true",
     "mutation": "$ENABLE_MUTATION" == "true",
     "specialized_feedback": "$ENABLE_SPECIALIZED_FEEDBACK" == "true",
@@ -689,10 +690,21 @@ PY
 FORMAL_EVALUATION_SKIPPED=false
 FORMAL_EVALUATION_SKIP_REASON=""
 if [[ "$FORMAL_EVALUATION_ALLOWED" == "true" ]]; then
+  EVAL_OUTPUTS_DIR="$GENERATION_DIR"
+  case "${BRT_FINAL_SELECTION:-pipeline}" in
+    strict_icore)
+      "$PYTHON_BIN" "$PROJECT_ROOT/scripts/run_generation_strict_icore.py" \
+        --generation "$GENERATION_DIR" --output "$RUN_DIR/strict_icore" \
+        --issues "$INSTANCES_PATH" --workers "$GENERATION_WORKERS" || exit $?
+      EVAL_OUTPUTS_DIR="$RUN_DIR/strict_icore/generation"
+      ;;
+    pipeline) ;;
+    *) echo "Unknown BRT_FINAL_SELECTION" >&2; exit 2 ;;
+  esac
   echo "__BRT_STAGE__ formal_f2p_start $(date --iso-8601=seconds)"
   "$PYTHON_BIN" "$PROJECT_ROOT/scripts/run_official_eval_after_generation.py" \
     --dataset "$DATASET_MODE" \
-    --outputs-dir "$GENERATION_DIR" \
+    --outputs-dir "$EVAL_OUTPUTS_DIR" \
     --dataset-file "$GOLD_DATASET" \
     --official-dataset-name "$GOLD_DATASET" \
     --max-workers "$EVALUATION_WORKERS" \

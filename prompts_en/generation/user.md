@@ -37,6 +37,6 @@ Related source code: {code_context}
 Current test code (this round's only parent candidate): {seed_test_code}
 Previous round feedback: {feedback}
 
-If a Semantic Delta is provided, implement only one change described in its `change`. CONTEXT only changes preconditions or input, INTERACTION only changes calls/order/state transitions, OBSERVATION only changes public behavior assertions supported by the Issue. `preserve` is the default item to keep; if an upstream change invalidates a downstream one, do not fix it in this round—leave it for the next round's feedback. Do not regenerate a different route from the seed or Issue as a whole.
+If a Semantic Delta is provided, follow its round-specific scope. An initial Delta defines one coherent target scenario and may require coordinated context, invocation, and observation edits. A feedback Delta completes only one remaining semantic obligation. CONTEXT changes preconditions or input, INTERACTION changes calls/order/state transitions, and OBSERVATION changes public behavior assertions supported by traceable target evidence. Preserve repository-native protocol listed in `preserve`; do not retain parent-scenario behavior that conflicts with the Issue.
 
 Output the modified complete Python file. Do not use bare assert False, no markdown, no explanation.

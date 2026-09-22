@@ -15,6 +15,26 @@ SPEC.loader.exec_module(MODULE)
 
 
 class StrictIcoreSelectionTests(unittest.TestCase):
+    def test_unresolved_global_names_detects_hidden_post_bug_failure(self):
+        code = (
+            "import flask\n"
+            "def test_case():\n"
+            "    app = flask.Flask(__name__)\n"
+            "    common_object_test(app)\n"
+        )
+        self.assertEqual(
+            MODULE.unresolved_global_names(code), ["common_object_test"]
+        )
+
+    def test_unresolved_global_names_accepts_self_contained_test(self):
+        code = (
+            "import flask\n"
+            "def test_case():\n"
+            "    app = flask.Flask(__name__)\n"
+            "    assert app is not None\n"
+        )
+        self.assertEqual(MODULE.unresolved_global_names(code), [])
+
     @staticmethod
     def _write_generation_seed(
         seed: Path,
@@ -138,7 +158,57 @@ class StrictIcoreSelectionTests(unittest.TestCase):
 
             self.assertEqual(result["selected"], "seed_1")
             self.assertEqual(result["accepted_candidates"], ["seed_1"])
-            self.assertEqual(result["route"], "STRICT_ACCEPTED_THEN_ICORE_RANK")
+            self.assertEqual(
+                result["route"],
+                "STRICT_ACCEPTED_SELF_CONTAINED_THEN_ICORE_RANK",
+            )
+
+    def test_hidden_undefined_name_is_filtered_before_icore_rank(self):
+        with tempfile.TemporaryDirectory() as raw:
+            output = Path(raw)
+            instance_id = "project__repo-1"
+            candidates = {
+                "seed_0": (
+                    "import flask\n"
+                    "def test_case():\n"
+                    "    app = flask.Flask(__name__)\n"
+                    "    common_object_test(app)\n"
+                ),
+                "seed_1": "def test_case():\n    assert 1 == 2\n",
+            }
+            rows = []
+            for rank, (candidate_id, code) in enumerate(candidates.items()):
+                frozen = output / "frozen" / instance_id / candidate_id
+                frozen.mkdir(parents=True)
+                (frozen / "candidate.py").write_text(code, encoding="utf-8")
+                (frozen / "buggy_execution.json").write_text(
+                    json.dumps({"returncode": 1, "stderr": "TypeError"}),
+                    encoding="utf-8",
+                )
+                rows.append(
+                    {
+                        "candidate_id": candidate_id,
+                        "component1_rank": rank,
+                        "strict_status": "ISSUE_ALIGNED_FAIL",
+                        "self_containment_errors": MODULE.unresolved_global_names(code),
+                    }
+                )
+
+            result = MODULE.process_instance(
+                output,
+                {instance_id: {"problem_statement": "api should return 2"}},
+                {
+                    "instance_id": instance_id,
+                    "component1_selected_candidate": "seed_0",
+                    "candidates": rows,
+                },
+            )
+
+            self.assertEqual(result["selected"], "seed_1")
+            self.assertEqual(
+                result["self_containment_excluded"][0]["names"],
+                ["common_object_test"],
+            )
 
     def test_existing_decision_does_not_override_current_candidates(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -195,7 +265,10 @@ class StrictIcoreSelectionTests(unittest.TestCase):
                 },
             )
             self.assertEqual(result["selected"], "seed_0")
-            self.assertEqual(result["route"], "EXHAUSTED_NO_STRICT_ACCEPTED_THEN_ICORE_RANK")
+            self.assertEqual(
+                result["route"],
+                "EXHAUSTED_NO_STRICT_ACCEPTED_SELF_CONTAINED_THEN_ICORE_RANK",
+            )
             self.assertEqual(result["accepted_candidates"], [])
             MODULE.materialize(output, [result])
             summary = MODULE.read(output / "generation" / "project__repo-1" / "summary.json")

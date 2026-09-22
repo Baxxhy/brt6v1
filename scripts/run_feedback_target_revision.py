@@ -18,6 +18,7 @@ from brt6.core.utils import extract_json_object, safe_json_dump, truncate_text
 from brt6.io.io_utils import build_instance_context
 from brt6.issue.issue_rewriter import behavior_from_dict
 from brt6.issue.feedback_target_revision import SYSTEM, eligibility, apply_revision
+from brt6.issue.bounded_target_fallback import SYSTEM as ALTERNATIVE_SYSTEM, apply_alternative
 from brt6.llm.llm_client import LLMClient
 from brt6.llm.cost_tracking import write_cost_summary
 from brt6.validation.component2_input import load_safe_issues
@@ -37,11 +38,20 @@ def save(p, value):
     safe_json_dump(value, p)
 
 
-def prepare(source, output):
+def include_instance(top, selected, mode):
+    if mode == "alternative_before_direct":
+        return bool(top.get("direct_fallback_attempted"))
+    return not (selected.get("strict_accepted") or selected.get("status") == "ISSUE_ALIGNED_FAIL")
+
+
+def prepare(source, output, mode="uncertainty_revision"):
+
     """Select failures from generation verdicts, not historical F2P labels."""
     path = output / "manifest.json"
     if path.exists():
         manifest = read(path)
+        if manifest.get("revision_mode", "uncertainty_revision") != mode:
+            raise ValueError("revision mode changed on resume")
         if manifest["source_run"] != str(source):
             raise ValueError("source changed on resume")
         return manifest
@@ -54,7 +64,7 @@ def prepare(source, output):
         primary = source / "design2_individual_adaptation" / iid
         top = read(primary / "summary.json")
         selected = read(baseline / iid / "summary.json")
-        if selected.get("strict_accepted") or selected.get("status") == "ISSUE_ALIGNED_FAIL":
+        if not include_instance(top, selected, mode):
             continue
         target = behavior_from_dict(iid, read(primary / "behavior_target.json"))
         branches = {}
@@ -94,18 +104,26 @@ def prepare(source, output):
         save(folder / "target.json", target.to_dict())
         save(folder / "sources.json", sources)
         save(folder / "branches.json", branches)
-        rows.append({"instance_id": iid, "skip_reason": eligibility(target, branches),
+        if mode == "alternative_before_direct":
+            from brt6.runtime.infrastructure_errors import infrastructure_result
+            infra = any(infrastructure_result(read(primary / "seed_candidates" / f"seed_{k}" / "summary.json")) for k in range(3))
+            skip_reason = "infrastructure failure: repair environment before target proposal" if infra else ""
+        else:
+            skip_reason = eligibility(target, branches)
+        rows.append({"instance_id": iid, "skip_reason": skip_reason,
                      "direct_fallback_already_attempted": top.get("direct_fallback_attempted"),
                      "direct_fallback_status": top.get("direct_fallback_status")})
     shutil.copytree(baseline, output / "baseline", dirs_exist_ok=True)
-    manifest = {"protocol": "uncertainty_linked_one_target_revision_v1",
+    manifest = {"protocol": "one_alternative_before_frozen_direct_v1" if mode == "alternative_before_direct" else "uncertainty_linked_one_target_revision_v1",
+                "revision_mode": mode,
                 "source_run": str(source), "instances": rows,
                 "official_labels_loaded": False, "workers": 20, "max_target_revisions": 1,
                 "max_semantic_rounds": 5, "direct_fallback": False,
-                "adoption": "strict accepted revised branch -> unchanged iCoRe rank; otherwise frozen baseline",
+                "adoption": "primary preserved; strict accepted alternative -> unchanged iCoRe rank; otherwise frozen direct fallback/baseline",
+                "fallback_reused_without_regeneration": True,
                 "limitations": "citation existence and scope are mechanical; semantic entailment and common-cause attribution are model judgments"}
     save(path, manifest)
-    for name in ("issue/feedback_target_revision.py", "scripts/run_feedback_target_revision.py",
+    for name in ("issue/feedback_target_revision.py", "issue/bounded_target_fallback.py", "scripts/run_feedback_target_revision.py",
                  "scripts/evaluate_feedback_target_revision.py", "execution/feedback.py",
                  "scripts/run_generation_strict_icore.py"):
         dest = output / "code_snapshot" / name
@@ -114,7 +132,7 @@ def prepare(source, output):
     return manifest
 
 
-def review(output, row):
+def review(output, row, mode="uncertainty_revision"):
     iid = row["instance_id"]
     dest = output / "reviews" / iid
     decision = dest / "decision.json"
@@ -131,17 +149,18 @@ def review(output, row):
     flat.pop("raw", None)
     prompt = json.dumps({"primary_target": flat, "sources": sources, "branches": branches}, ensure_ascii=False)
     dest.mkdir(parents=True, exist_ok=True)
-    (dest / "prompt.txt").write_text(SYSTEM + "\n\n" + prompt)
+    system = ALTERNATIVE_SYSTEM if mode == "alternative_before_direct" else SYSTEM
     response_path = dest / "response.txt"
     if not response_path.exists():
+        (dest / "prompt.txt").write_text(system + "\n\n" + prompt)
         response = LLMClient(provider="deepseek", model="deepseek-v4-flash", temperature=0,
                              max_tokens=4096, cost_dir=str(output),
-                             usage_context={"stage": "target_review", "instance_id": iid}).chat(SYSTEM, prompt)
+                             usage_context={"stage": "target_review", "instance_id": iid}).chat(system, prompt)
         response_path.write_text(response)
     try:
         proposal = extract_json_object(response_path.read_text())
         save(dest / "proposal.json", proposal)
-        revised = apply_revision(target, proposal, sources, branches)
+        revised = apply_alternative(target, proposal, sources) if mode == "alternative_before_direct" else apply_revision(target, proposal, sources, branches)
     except (ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
         result = {"instance_id": iid, "action": "KEEP_TARGET", "reason": str(exc), "review_error": True}
     else:
@@ -213,16 +232,23 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--review-only", action="store_true")
+    parser.add_argument("--revision-mode", choices=["uncertainty_revision", "alternative_before_direct"], default="uncertainty_revision")
+    parser.add_argument("--review-limit", type=int, default=0)
+    parser.add_argument("--wait-for-experiment", type=Path)
+
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    manifest = prepare(args.source_run.resolve(), output)
+    manifest = prepare(args.source_run.resolve(), output, args.revision_mode)
     print(json.dumps({"stage": "prepared", "instances": len(manifest["instances"]),
                       "review_eligible": sum(not r["skip_reason"] for r in manifest["instances"])}), flush=True)
     if args.prepare_only:
         return
     with ThreadPoolExecutor(max_workers=20) as pool:
-        futures = {pool.submit(review, output, r): r["instance_id"] for r in manifest["instances"]}
+        rows = manifest["instances"][:args.review_limit] if args.review_limit else manifest["instances"]
+        if args.review_limit and not args.review_only:
+            raise ValueError("--review-limit is allowed only with --review-only")
+        futures = {pool.submit(review, output, r, args.revision_mode): r["instance_id"] for r in rows}
         reviews = []
         errors = []
         for future in as_completed(futures):
@@ -240,6 +266,13 @@ def main():
     if args.review_only:
         return
     ids = sorted(r["instance_id"] for r in reviews if r["action"] == "REVISE_TARGET")
+    if args.wait_for_experiment:
+        import time
+        waiting = args.wait_for_experiment
+        print(json.dumps({"stage": "waiting_for_other_experiment", "directory": str(waiting)}), flush=True)
+        while not (waiting / "no_feedback.exit").exists():
+            time.sleep(10)
+        print(json.dumps({"stage": "other_experiment_stopped", "exit": (waiting / "no_feedback.exit").read_text().strip()}), flush=True)
     if not (output / "outputs_frozen.json").exists():
         run_adaptation(output, ids)
         frozen = freeze_outputs(output, ids)

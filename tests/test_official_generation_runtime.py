@@ -612,6 +612,9 @@ class OfficialRuntimeContractTests(unittest.TestCase):
             self.assertIn("git -C /testbed reset --hard base123", joined)
             self.assertIn("conda activate testbed", joined)
             self.assertIn("python -m pytest /testbed/test_brt.py", joined)
+            self.assertNotIn("export PYTHONPATH=", joined)
+            self.assertNotIn("/testbed/src", joined)
+            self.assertNotIn("/testbed/lib", joined)
 
     def test_close_removes_container_then_exact_instance_image(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -2,7 +2,8 @@
 
 The shim deliberately leaves dataset selection, test commands, patches,
 coverage collection, grading, image names, and official environment recipes
-unchanged.  It only makes host-side source transport and cleanup reliable.
+unchanged. It makes source transport and cleanup reliable and provisions the
+already-pinned roman dependency from a local wheel when a cached image lacks it.
 """
 
 from __future__ import annotations
@@ -37,18 +38,30 @@ _INSTALLED = False
 _DEFAULT_DOCKER_API_TIMEOUT = 1200
 _DEFAULT_LOCK_DIR = Path("/root/Baxxhy/BugReproduce/brt6/.runtime/locks")
 _DEFAULT_SWT_METADATA_ROOT = Path(__file__).resolve().parent / "vendor/swtbench_metadata"
+_DEFAULT_ISOLATION = "fresh"
 
 
-def _lock_filename(instance_id: str) -> str:
-    """Return a filesystem-safe lock name without changing Docker naming."""
-    return lock_filename(instance_id)
+def _evaluation_isolation(environment: Mapping[str, str]) -> str:
+    """Return the requested state-isolation policy."""
+
+    mode = environment.get("BRT_SWT_EVAL_ISOLATION", _DEFAULT_ISOLATION).strip().lower()
+    if mode not in {"fresh", "reuse"}:
+        raise ValueError("BRT_SWT_EVAL_ISOLATION must be 'fresh' or 'reuse'")
+    return mode
 
 
-def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
-    """Enable one persistent official container per benchmark instance."""
+def _configure_official_environment(
+    environment: MutableMapping[str, str], *, isolation: str = _DEFAULT_ISOLATION
+) -> None:
+    """Configure offline execution and the requested isolation policy."""
 
-    environment["SWT_REUSE_CONTAINERS"] = "1"
-    environment["SWT_KEEP_CONTAINERS"] = "1"
+    isolation = isolation.strip().lower()
+    if isolation not in {"fresh", "reuse"}:
+        raise ValueError("isolation must be 'fresh' or 'reuse'")
+    environment["BRT_SWT_EVAL_ISOLATION"] = isolation
+    enabled = "1" if isolation == "reuse" else "0"
+    environment["SWT_REUSE_CONTAINERS"] = enabled
+    environment["SWT_KEEP_CONTAINERS"] = enabled
     environment["SWT_CONTAINER_REUSE_SCOPE"] = "instance"
     environment["SWT_SKIP_EVAL_INSTALL"] = "1"
     environment["PIP_NO_INDEX"] = "1"
@@ -60,6 +73,17 @@ def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
     environment.setdefault(
         "BRT_SWT_DOCKER_API_TIMEOUT", str(_DEFAULT_DOCKER_API_TIMEOUT)
     )
+
+
+def _lock_filename(instance_id: str) -> str:
+    """Return a filesystem-safe lock name without changing Docker naming."""
+    return lock_filename(instance_id)
+
+
+def _configure_container_reuse(environment: MutableMapping[str, str]) -> None:
+    """Backward-compatible opt-in for persistent exploratory containers."""
+
+    _configure_official_environment(environment, isolation="reuse")
 
 
 def _configure_docker_api_timeout(docker_module, environment: Mapping[str, str]) -> None:
@@ -120,6 +144,14 @@ def _preserve_cached_image(client, image_id, logger=None):
     return None
 
 
+def _preserve_cached_images(client, prior_images, cache_level, clean):
+    """Prevent the official end-of-run sweep from deleting instance images."""
+
+    del client, prior_images, cache_level, clean
+    print("Preserving cached official images after evaluation.")
+    return None
+
+
 def _kill_running_container(container) -> None:
     """Terminate the dedicated idle container without a 15-second grace wait."""
 
@@ -160,6 +192,19 @@ def _prepare_container_for_official_start(container) -> None:
     if status == "running":
         container.kill()
         container.reload()
+
+
+def _remove_stale_named_container(client, container_name: str) -> bool:
+    """Remove an old container that would violate fresh-state isolation."""
+
+    try:
+        container = client.containers.get(container_name)
+    except Exception as error:  # Docker SDK versions expose different NotFound types.
+        if error.__class__.__name__ in {"NotFound", "ImageNotFound"}:
+            return False
+        raise
+    container.remove(force=True)
+    return True
 
 
 def _bounded_exec_run(container, cmd, timeout=60):
@@ -212,6 +257,62 @@ def _decode_test_output(raw: bytes, log_dir: Path) -> str:
             json.dumps(diagnostic, indent=2) + "\n", encoding="utf-8"
         )
         return raw.decode("utf-8", errors="backslashreplace")
+
+
+def _environment_failure_reason(log: str) -> str | None:
+    """Identify failures caused before the generated test can be evaluated.
+
+    This is an audit side channel only. It never changes official grading.
+    """
+
+    lowered = log.lower()
+    collected = re.search(r"\bcollected\s+\d+\s+items?\b", lowered) is not None
+    if not collected and (
+        "pytest_astropy_header" in lowered
+        or "error loading plugin" in lowered
+        or ("conftest.py" in lowered and "importerror" in lowered)
+    ):
+        return "pytest_startup_or_plugin_failure"
+    if not collected and re.search(
+        r"(?:modulenotfounderror|importerror):.*(?:no module named|cannot import name)",
+        lowered,
+    ):
+        return "dependency_import_failure_before_collection"
+    if any(
+        marker in lowered
+        for marker in (
+            "failed to process string with tex because latex could not be found",
+            "latex could not be found",
+            "ghostscript not found",
+            "pdftops not found",
+        )
+    ):
+        return "missing_external_test_tool"
+    return None
+
+
+def _write_container_fingerprint(container, log_dir: Path, isolation: str) -> None:
+    """Persist content identity for the container used by one eval state."""
+
+    container.reload()
+    attrs = container.attrs or {}
+    image = getattr(container, "image", None)
+    image_attrs = getattr(image, "attrs", {}) or {}
+    fingerprint = {
+        "schema_version": 1,
+        "isolation": isolation,
+        "container_id": getattr(container, "id", ""),
+        "container_name": getattr(container, "name", ""),
+        "configured_image": (attrs.get("Config") or {}).get("Image", ""),
+        "image_id": getattr(image, "id", "") or attrs.get("Image", ""),
+        "image_repo_digests": image_attrs.get("RepoDigests") or [],
+        "image_created": image_attrs.get("Created", ""),
+    }
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / "environment_fingerprint.json").write_text(
+        json.dumps(fingerprint, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _parse_pytest_single_test_progress(log: str) -> dict[str, str]:
@@ -372,7 +473,8 @@ def install() -> None:
     if _INSTALLED:
         return
     _INSTALLED = True
-    _configure_container_reuse(os.environ)
+    isolation = _evaluation_isolation(os.environ)
+    _configure_official_environment(os.environ, isolation=isolation)
 
     import docker
     from src import docker_utils, log_parsers, utils
@@ -410,7 +512,7 @@ def install() -> None:
 
     remove_image = _preserve_cached_image
     docker_utils.remove_image = remove_image
-    docker_utils.cleanup_container = _preserve_official_container
+    docker_utils.clean_images = _preserve_cached_images
 
     from src import docker_build
 
@@ -539,6 +641,23 @@ def install() -> None:
 
     original_build_container = docker_build.build_container
 
+    def build_fresh_container(
+        exec_spec, client, logger, nocache, force_rebuild=False, build_mode="api"
+    ):
+        container_name = exec_spec.get_instance_container_name()
+        if _remove_stale_named_container(client, container_name):
+            logger.info(
+                f"Removed stale container {container_name} before isolated state."
+            )
+        return original_build_container(
+            exec_spec,
+            client,
+            logger,
+            nocache,
+            force_rebuild=force_rebuild,
+            build_mode=build_mode,
+        )
+
     def reuse_validated_container(
         exec_spec, client, logger, nocache, force_rebuild=False, build_mode="api"
     ):
@@ -579,7 +698,11 @@ def install() -> None:
         )
         return container
 
-    docker_build.build_container = reuse_validated_container
+    if isolation == "reuse":
+        docker_utils.cleanup_container = _preserve_official_container
+        docker_build.build_container = reuse_validated_container
+    else:
+        docker_build.build_container = build_fresh_container
 
     def evaluation_error_str(error) -> str:
         return (
@@ -590,7 +713,8 @@ def install() -> None:
     def patch_run_evaluation(run_evaluation) -> None:
         run_evaluation.EvaluationError.__str__ = evaluation_error_str
         run_evaluation.remove_image = remove_image
-        run_evaluation.cleanup_container = _preserve_official_container
+        if isolation == "reuse":
+            run_evaluation.cleanup_container = _preserve_official_container
 
         run_evaluation.exec_run_with_timeout = _bounded_exec_run
 
@@ -606,6 +730,15 @@ def install() -> None:
         ):
             log_dir = Path(log_dir)
             log_dir.mkdir(parents=True, exist_ok=True)
+            _write_container_fingerprint(container, log_dir, isolation)
+            from brt6.runtime.offline_dependencies import ensure_cached_dependencies
+            dependency_audit = ensure_cached_dependencies(
+                container,
+                repo="sphinx-doc/sphinx" if instance_id.startswith("sphinx-doc__sphinx-") else "",
+            )
+            (log_dir / "runtime_dependency_repair.json").write_text(
+                json.dumps(dependency_audit, indent=2) + "\n", encoding="utf-8"
+            )
             eval_file = log_dir / "eval.sh"
             eval_file.write_text(eval_script, encoding="utf-8")
             logger.info(
@@ -631,6 +764,21 @@ def install() -> None:
             test_output = _decode_test_output(raw_output, log_dir)
             test_output_path = log_dir / "test_output.txt"
             test_output_path.write_text(test_output, encoding="utf-8")
+            environment_failure = _environment_failure_reason(test_output)
+            (log_dir / "execution_audit.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "official_score_unchanged": True,
+                        "environment_failure": environment_failure is not None,
+                        "environment_failure_reason": environment_failure,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             logger.info(f"Test output for {instance_id} written to {test_output_path}")
             return test_output_path
 

@@ -85,6 +85,12 @@ class LLMClient:
         self.max_attempts = int(
             os.environ.get("BRT3_LLM_MAX_ATTEMPTS", DEFAULT_LLM_MAX_ATTEMPTS)
         )
+        rotation_attempts = str(
+            os.environ.get("BRT_LLM_POOL_ROTATION_ATTEMPTS") or ""
+        ).strip()
+        self.pool_rotation_attempts = (
+            max(1, int(rotation_attempts)) if rotation_attempts else None
+        )
         self.backoff_base = float(
             os.environ.get("BRT3_LLM_BACKOFF_BASE", DEFAULT_LLM_BACKOFF_BASE)
         )
@@ -257,6 +263,9 @@ class LLMClient:
         operation: str = "unknown",
     ) -> str:
         self.ensure_available()
+        token_field = (
+            "max_completion_tokens" if self.provider == "gpt" else "max_tokens"
+        )
         payload = {
             "model": self.model,
             "messages": [
@@ -264,7 +273,7 @@ class LLMClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": self.temperature if temperature is None else temperature,
-            "max_tokens": self.max_tokens if max_tokens is None else max_tokens,
+            token_field: self.max_tokens if max_tokens is None else max_tokens,
         }
         if os.environ.get("BRT_DISABLE_THINKING", "").strip().lower() in {
             "1",
@@ -272,7 +281,19 @@ class LLMClient:
             "yes",
             "on",
         }:
-            payload["thinking"] = {"type": "disabled"}
+            if self.provider == "gpt":
+                # OpenAI-compatible GPT gateways use reasoning_effort rather
+                # than DeepSeek's `thinking` extension.  Sending the latter to
+                # Xiaojing currently produces a provider-side HTTP 500.
+                # GPT-5 Mini is a reasoning model.  Its lowest portable
+                # quality setting across OpenAI-compatible gateways is low;
+                # `none` is a GPT-5.4-specific setting on several gateways
+                # and may be rejected or silently remapped for gpt-5-mini.
+                payload["reasoning_effort"] = (
+                    "low" if self.model.strip().lower() == "gpt-5-mini" else "none"
+                )
+            else:
+                payload["thinking"] = {"type": "disabled"}
         if reasoning_effort is not None:
             payload["reasoning_effort"] = reasoning_effort
         if self.stream:
@@ -289,7 +310,13 @@ class LLMClient:
         # explicitly retry transient service failures without replaying the
         # instance's already completed model and execution steps.
         pool_size = len(configured_apis(self.provider)) if self._uses_local_pool else 0
-        max_attempts = max(1, min(self.max_attempts, pool_size or self.max_attempts))
+        if self.pool_rotation_attempts is not None and pool_size:
+            # A full experiment may deliberately cycle through a small pool
+            # more than once to survive a short shared-gateway outage. Keep it
+            # bounded so a bad request cannot spend indefinitely.
+            max_attempts = self.pool_rotation_attempts
+        else:
+            max_attempts = max(1, min(self.max_attempts, pool_size or self.max_attempts))
         if attempt_limit is not None:
             max_attempts = max(1, min(max_attempts, attempt_limit))
         retry_transient = attempt_limit is None and os.environ.get(
@@ -325,7 +352,7 @@ class LLMClient:
                     attempt_id = self.accounting.start(
                         logical_request_id=logical_request_id, attempt=attempt + 1,
                         host=request_host, requested_model=requested_model,
-                        operation=operation, max_tokens=payload["max_tokens"],
+                        operation=operation, max_tokens=payload[token_field],
                     )
                 except Exception as exc:
                     warnings.warn(f"API request accounting failed ({type(exc).__name__})")
@@ -378,6 +405,20 @@ class LLMClient:
                         content = choice["message"].get("content")
                         finish_reason = str(choice.get("finish_reason") or "")
                 self.last_finish_reason = finish_reason
+                if (
+                    self.provider == "gpt"
+                    and str(payload.get("model") or "").lower() == "gpt-5-mini"
+                    and self.last_model
+                ):
+                    returned_model = str(self.last_model).strip().lower()
+                    if not (
+                        returned_model == "gpt-5-mini"
+                        or returned_model.startswith("gpt-5-mini-")
+                    ):
+                        outcome = "model_mismatch"
+                        raise RuntimeError(
+                            "Provider returned a different model family for gpt-5-mini"
+                        )
                 if finish_reason == "length":
                     outcome = "truncated"
                     output_limit = int(payload.get("max_completion_tokens", payload.get("max_tokens", 0)))
@@ -385,8 +426,8 @@ class LLMClient:
                         raise LLMUnavailableError(
                             "Response truncated at configured output cap; paused before repeated paid requests"
                         )
-                    current_limit = int(payload["max_tokens"])
-                    payload["max_tokens"] = min(
+                    current_limit = int(payload[token_field])
+                    payload[token_field] = min(
                         max(current_limit * 2, current_limit + 1),
                         max(current_limit, self.truncation_max_tokens),
                     )
@@ -489,9 +530,21 @@ class LLMClient:
                     print(f"[API retry] {operation}: {status}; attempt {attempt + 1} in {wait}s; completed steps retained", flush=True)
                     time.sleep(wait)
                     continue
-                time.sleep(
-                    (0 if attempt % max(1, len(configured_apis(self.provider))) else 1)
-                    if self.immediate_failover else
-                    min(self.backoff_base * (2 ** min(attempt - 1, 8)), 180.0)
-                )
+                if self.pool_rotation_attempts is not None and pool_size:
+                    # Try the other credential immediately. After a complete
+                    # pool cycle, give the shared gateway a bounded recovery
+                    # delay before cycling again.
+                    completed_cycles = attempt // pool_size
+                    wait = 0 if attempt % pool_size else min(
+                        5.0 * (2 ** max(0, completed_cycles - 1)), 30.0
+                    )
+                elif self.immediate_failover:
+                    wait = 0 if attempt % max(
+                        1, len(configured_apis(self.provider))
+                    ) else 1
+                else:
+                    wait = min(
+                        self.backoff_base * (2 ** min(attempt - 1, 8)), 180.0
+                    )
+                time.sleep(wait)
         raise LLMUnavailableError(f"LLM request failed after {max(1, attempt)} attempts: {last_error}")

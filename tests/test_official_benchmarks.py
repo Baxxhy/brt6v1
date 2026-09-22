@@ -17,10 +17,45 @@ from brt6.evaluation.official_benchmarks import (
 from brt6.scripts.run_official_eval_after_generation import (
     _f2p_only_marker,
     _stop_running_official_containers,
+    _summarize_runtime_audits,
 )
 
 
 class OfficialBenchmarkExportTests(unittest.TestCase):
+    def test_runtime_audit_exposes_image_drift_and_environment_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            workspace = Path(temp)
+            for index, image_id in enumerate(("sha256:first", "sha256:second")):
+                state = workspace / f"state-{index}"
+                state.mkdir()
+                (state / "environment_fingerprint.json").write_text(
+                    json.dumps(
+                        {
+                            "configured_image": "exec.eval.same:latest",
+                            "image_id": image_id,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            (workspace / "state-0" / "execution_audit.json").write_text(
+                json.dumps(
+                    {
+                        "environment_failure": True,
+                        "environment_failure_reason": "pytest_startup_or_plugin_failure",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = _summarize_runtime_audits(workspace)
+
+        self.assertEqual(summary["environment_failure_count"], 1)
+        self.assertEqual(
+            summary["image_identity_conflicts"]["exec.eval.same:latest"],
+            ["sha256:first", "sha256:second"],
+        )
+        self.assertFalse(summary["official_score_changed"])
+
     def test_interrupt_cleanup_preserves_preexisting_eval_containers(self) -> None:
         with mock.patch(
             "brt6.scripts.run_official_eval_after_generation._running_official_container_ids",

@@ -38,6 +38,6 @@ Current test: {candidate_code}
 Execution log: {execution_log}
 Verifier feedback: {verifier_feedback}
 
-Strictly follow Semantic Delta: preserve what is to be preserved; this round only handles the single change corresponding to setup; avoid what is to be avoided; leave other differences for subsequent rounds; do not modify Trigger or Oracle incidentally.
+Strictly follow Semantic Delta: preserve the target trigger and Oracle, and complete one executable setup obligation. The same obligation may include its required import, fixture, class attribute, and variable binding. Do not modify an independent Trigger or Oracle behavior.
 
 You must prioritize completing the `next_action` in the Verifier feedback. If the feedback points to a specific import, fixture, class, nodeid, or setup issue, the returned code must substantially modify the corresponding location; do not return it unchanged.

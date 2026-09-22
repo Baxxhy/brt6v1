@@ -329,11 +329,27 @@ def generate_candidate(
         else None
     )
     if effective_delta is not None:
+        if effective_delta.round_id == 0:
+            delta_instruction = (
+                "\nUse the retrieved test as the repository-native protocol parent and "
+                "apply the complete coherent adaptation described by this initial Delta. "
+                "Coordinate the linked context, invocation, and observation edits needed "
+                "for that one target scenario. Preserve repository protocol, helpers, and "
+                "runner conventions, but do not preserve scenario-specific inputs or "
+                "oracles that conflict with the Issue. Include every explicit Issue call "
+                "argument and preserve all acceptable alternatives. Bind the oracle to "
+                "the value, artifact, or state produced by the adapted invocation."
+            )
+        else:
+            delta_instruction = (
+                "\nUse the current test as the only parent and apply only the stated "
+                "residual change. Preserve is the default; leave other downstream "
+                "effects for a later round."
+            )
         user_prompt += (
-            "\n\nThe only Semantic Delta for this round:\n"
+            "\n\nThe Semantic Delta for this round:\n"
             + json.dumps(effective_delta.to_dict(), ensure_ascii=False)
-            + "\nUse the current test as the only parent and apply only the stated change. "
-            + "Preserve is the default; leave downstream effects for a later round."
+            + delta_instruction
         )
     if delta_history:
         user_prompt += "\n\nPrevious Semantic Delta trace:\n" + _prompt_json(
@@ -346,7 +362,29 @@ def generate_candidate(
     prompt_path = str(Path(output_dir) / "prompts" / f"generation_round_{round_id}.txt")
     response_path = str(Path(output_dir) / "responses" / f"generation_round_{round_id}.txt")
     write_text(prompt_path, system_prompt + "\n\n" + user_prompt)
-    response = llm_client.chat(system_prompt, user_prompt)
+    # Initial adaptation is already a multi-constraint code transformation;
+    # starving only round 0 of reasoning produces a weak first checkpoint and
+    # then spends more calls repairing it.  Use the same small reasoning
+    # budget for every GPT generation round.
+    repair_reasoning = (
+        "low"
+        if str(getattr(llm_client, "provider", "")).lower() == "gpt"
+        else None
+    )
+    repair_max_tokens = None
+    if repair_reasoning is not None:
+        # Reasoning tokens share GPT's completion budget. Give repair enough
+        # room to return the complete test after its short reasoning pass.
+        repair_max_tokens = max(8192, int(getattr(llm_client, "max_tokens", 4096)))
+    if repair_reasoning is None:
+        response = llm_client.chat(system_prompt, user_prompt)
+    else:
+        response = llm_client.chat(
+            system_prompt,
+            user_prompt,
+            reasoning_effort=repair_reasoning,
+            max_tokens=repair_max_tokens,
+        )
     write_text(response_path, response)
     code = _wrap_if_needed(response, host, safe_id)
     rel_path, full_path = _candidate_paths(instance_id, buggy_repo, host)

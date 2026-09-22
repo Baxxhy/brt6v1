@@ -28,6 +28,6 @@ If the expected behavior requires the presence of a capability, attribute, text,
 **Observation result**: {observation_json}
 **Verifier feedback**: {verifier_feedback}
 
-Strictly follow Semantic Delta: preserve setup and trigger. In this round, execute only the single change corresponding to the Oracle. Remove any unrelated baselines, full-format guesses, private state, or overly strong assertions that are directly involved in and pointed out by `avoid`. Leave other differences for subsequent rounds. `post_fix_failure_risk` must be reduced to `low`.
+Strictly follow Semantic Delta: preserve setup and trigger and complete one evidence-grounded Oracle obligation. You may update the observation variable and matcher bindings required by that Oracle, but must not change the target input or invocation. Remove only concrete constraints identified in `avoid`; a vague or unlocated risk is not a deletion instruction.
 
 You must prioritize completing the Oracle fix target from the Verifier feedback. The returned code must make a substantive change to the public observation protocol. Do not only change comments or return the current test unchanged.

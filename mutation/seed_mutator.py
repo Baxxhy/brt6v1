@@ -68,8 +68,16 @@ def propose_semantic_delta(
     current_candidate_code: str = "",
     delta_history: list[dict[str, Any]] | None = None,
     issue_text: str = "",
+    adaptation_strategy: str = "",
 ) -> SemanticDelta:
     """Ask for exactly one frontier Delta and retry only malformed JSON once."""
+
+    # GPT benefits from a small amount of deliberate planning on the one
+    # semantic decision made here. Keep DeepSeek's established request shape
+    # unchanged and keep the downstream verifier deterministic.
+    reasoning_effort = (
+        "low" if str(getattr(llm_client, "provider", "")).lower() == "gpt" else None
+    )
 
     source = related_source or []
     current_test = current_candidate_code or (
@@ -81,6 +89,20 @@ def propose_semantic_delta(
         prompt_behavior.pop("issue_text", None)
         prompt_behavior["structured_target"] = "unavailable"
     prompt = SEED_MUTATION_PLAN_USER_PROMPT.format(
+        round_scope=(
+            "INITIAL ADAPTATION: construct the complete issue-grounded reproduction "
+            "scenario from this repository-native seed. Coordinate all linked "
+            "context, invocation, and observation edits required for that one "
+            "scenario; do not stop after creating any arbitrary buggy failure."
+            if round_id == 0
+            else "FEEDBACK REPAIR: change only the single most blocking residual "
+            "difference shown by the real execution and verifier evidence."
+        ),
+        adaptation_strategy=_text(
+            adaptation_strategy
+            or "DEFAULT: follow the target and preserve the useful repository-native test protocol.",
+            4_000,
+        ),
         issue_text=_text(issue_text, MAX_PROMPT_ISSUE_CHARS),
         behavior_json=_json(prompt_behavior, MAX_PROMPT_BEHAVIOR_CHARS),
         host_context_json=_json(host.to_dict(), MAX_PROMPT_HOST_CHARS),
@@ -96,7 +118,14 @@ def propose_semantic_delta(
     response_path = Path(output_dir) / "responses" / f"delta_round_{round_id}.txt"
     write_text(str(prompt_path), SEED_MUTATION_PLAN_SYSTEM_PROMPT + "\n\n" + prompt)
     try:
-        response = llm_client.chat(SEED_MUTATION_PLAN_SYSTEM_PROMPT, prompt)
+        if reasoning_effort is None:
+            response = llm_client.chat(SEED_MUTATION_PLAN_SYSTEM_PROMPT, prompt)
+        else:
+            response = llm_client.chat(
+                SEED_MUTATION_PLAN_SYSTEM_PROMPT,
+                prompt,
+                reasoning_effort=reasoning_effort,
+            )
         write_text(str(response_path), response)
         try:
             data = extract_json_object(response)
@@ -107,7 +136,16 @@ def propose_semantic_delta(
                 + str(exc)
                 + ". Return one complete JSON object only."
             )
-            response = llm_client.chat(SEED_MUTATION_PLAN_SYSTEM_PROMPT, retry_prompt)
+            if reasoning_effort is None:
+                response = llm_client.chat(
+                    SEED_MUTATION_PLAN_SYSTEM_PROMPT, retry_prompt
+                )
+            else:
+                response = llm_client.chat(
+                    SEED_MUTATION_PLAN_SYSTEM_PROMPT,
+                    retry_prompt,
+                    reasoning_effort=reasoning_effort,
+                )
             write_text(
                 str(Path(output_dir) / "responses" / f"delta_round_{round_id}_json_retry.txt"),
                 response,

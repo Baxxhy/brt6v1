@@ -18,7 +18,7 @@ Options:
   --dataset {swt|tdd}            Dataset (default: swt).
   --model {deepseek|gpt}         Model provider (default: deepseek).
   --model-id ID                  Concrete model ID (default: DeepSeek-V4-Flash
-                                 for deepseek, gpt-5.4-mini for gpt).
+                                 for deepseek, gpt-5-mini for gpt).
   --max-rounds N                 Semantic Delta rounds per seed, 1-5 (default: 5).
   --issue-workers N              IssueRewrite workers (default: 6).
   --generation-workers N         Generation workers (default: 6).
@@ -154,7 +154,7 @@ esac
 
 case "$MODEL_PROVIDER" in
   deepseek) MODEL_ID=${MODEL_ID:-DeepSeek-V4-Flash} ;;
-  gpt) MODEL_ID=${MODEL_ID:-gpt-5.4-mini} ;;
+  gpt) MODEL_ID=${MODEL_ID:-gpt-5-mini} ;;
   *)
     echo "--model must be deepseek or gpt" >&2
     exit 2
@@ -224,6 +224,10 @@ ENVIRONMENT=(
   "INSTANCES_PATH=$INSTANCES_FILE"
   "GOLD_DATASET=$GOLD_FILE"
   "BRT_MODEL_ID=$MODEL_ID"
+  # A transient shared-gateway error must not pause a full experiment after
+  # merely trying each credential once. Cycle through the configured pool a
+  # bounded number of times while preserving completed journal steps.
+  "BRT_LLM_POOL_ROTATION_ATTEMPTS=${BRT_LLM_POOL_ROTATION_ATTEMPTS:-10}"
   "ISSUE_WORKERS=$ISSUE_WORKERS_VALUE"
   "GENERATION_WORKERS=$GENERATION_WORKERS_VALUE"
   "EVALUATION_WORKERS=$EVALUATION_WORKERS_VALUE"

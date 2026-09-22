@@ -17,7 +17,7 @@ from typing import Any
 DEFAULT_BASE_URL = "https://api.open.xiaojingai.com/v1"
 DEFAULT_MODEL = "deepseek-v4-flash"
 DEFAULT_GPT_BASE_URL = "https://aigc.x-see.cn/v1"
-DEFAULT_GPT_MODEL = "gpt-5.4-mini"
+DEFAULT_GPT_MODEL = "gpt-5-mini"
 SUPPORTED_PROVIDERS = ("deepseek", "gpt")
 
 # Compatibility names retained for callers that imported the old constants.

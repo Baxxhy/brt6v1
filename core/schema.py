@@ -215,6 +215,8 @@ class StrictVerifierResult(JsonMixin):
     failure_class: str = "side_path"
     target_hit: bool = False
     oracle_grounded_in_issue: bool = False
+    oracle_grounded_in_target_evidence: bool = False
+    oracle_evidence_refs: list[dict[str, Any]] = field(default_factory=list)
     uses_public_behavior: bool = False
     oracle_kind: str = ""
     oracle_falsifiable: bool = False
@@ -230,6 +232,14 @@ class StrictVerifierResult(JsonMixin):
     expected_effect: str = ""
     failure_origin: str = ""
     post_fix_failure_risk: str = "unknown"
+    post_fix_risk_concrete: bool = False
+    post_fix_risk_constraint: str = ""
+    post_fix_risk_code_quote: str = ""
+    post_fix_risk_line: int = 0
+    post_fix_risk_role: str = "unknown"
+    post_fix_risk_evidence_status: str = "unknown"
+    post_fix_risk_downstream: bool = False
+    candidate_defect: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

@@ -224,7 +224,16 @@ def classify_execution(returncode: int, stdout: str, stderr: str, timeout: bool,
         return "COLLECT_ERROR"
     if returncode == 0:
         return "PASS"
-    if "syntaxerror" in low or "indentationerror" in low:
+    # A parser invoked by an already-running test can legitimately raise a
+    # SyntaxError. Only classify it as test syntax when there is no evidence
+    # that the generated test body was entered; runtime failures still need
+    # semantic verification below.
+    candidate_body_entered = bool(re.search(
+        r'(?:File "[^"\n]*test_brt_[^"\n]*\.py", line \d+, in test\w*'
+        r'|(?m:^[^\n]*test_brt_[^\n]*\.py:\d+: in test\w*))',
+        text,
+    ))
+    if ("syntaxerror" in low or "indentationerror" in low) and not candidate_body_entered:
         return "SYNTAX_ERROR"
     dependency_setup_markers = [
         "module 'numpy' has no attribute 'int'",

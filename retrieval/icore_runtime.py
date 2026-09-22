@@ -1302,13 +1302,13 @@ def icore_test_command(
         "requests",
     }:
         return (
-            "python -m pytest --no-header --tb=short --show-capture=no "
+            "python -m pytest --no-header --tb=short --show-capture=all "
             f"--disable-warnings -p no:cacheprovider {nodeid}"
         )
     if project == "seaborn":
-        return f"pytest --no-header --show-capture=no --disable-warnings {nodeid}"
+        return f"pytest --no-header --show-capture=all --disable-warnings {nodeid}"
     if project == "pytest":
-        return f"pytest --disable-warnings --show-capture=no {nodeid} -v"
+        return f"pytest --disable-warnings --show-capture=all {nodeid} -v"
     if project == "django":
         label = nodeid.replace(".py", "").replace("/", ".").replace("::", ".")
         if label.startswith("tests."):

@@ -152,7 +152,7 @@ class OneResponse:
     def __init__(self, value):
         self.value = value
 
-    def chat(self, *_args):
+    def chat(self, *_args, **_kwargs):
         return json.dumps(self.value, ensure_ascii=False)
 
 

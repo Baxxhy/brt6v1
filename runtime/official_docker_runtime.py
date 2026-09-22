@@ -580,6 +580,7 @@ class OfficialDockerRuntime:
             "container_registry": str(payload.get("container_registry") or ""),
             "repo_directory": self.repo_directory,
             "env_name": self.env_name,
+            "candidate_environment_policy": "inherit_official_container_environment",
             "gold_fields_present": [],
             "host_project_environment_created": False,
             "container_reuse_scope": (
@@ -606,9 +607,10 @@ class OfficialDockerRuntime:
         )
 
     def _host_delta(self, host_repo: str) -> tuple[list[str], list[str]]:
+        git_timeout = max(1, int(os.environ.get("BRT_WORKTREE_TIMEOUT", "1200")))
         modified = _run(
             ["git", "-C", host_repo, "diff", "--name-only", "-z", "HEAD"],
-            timeout=120,
+            timeout=git_timeout,
         )
         untracked = _run(
             [
@@ -620,7 +622,7 @@ class OfficialDockerRuntime:
                 "--exclude-standard",
                 "-z",
             ],
-            timeout=120,
+            timeout=git_timeout,
         )
         if modified.returncode or untracked.returncode:
             from .infrastructure_errors import InfrastructureUnavailableError
@@ -719,19 +721,11 @@ class OfficialDockerRuntime:
                 mapped_command = command.replace(
                     str(Path(host_repo).resolve()), self.repo_directory
                 )
-                python_paths = ":".join(
-                    (
-                        self.repo_directory,
-                        f"{self.repo_directory}/src",
-                        f"{self.repo_directory}/lib",
-                    )
-                )
                 activated = " && ".join(
                     (
                         "source /opt/miniconda3/bin/activate",
                         f"conda activate {shlex.quote(self.env_name)}",
                         f"cd {shlex.quote(self.repo_directory)}",
-                        f"export PYTHONPATH={shlex.quote(python_paths)}:${{PYTHONPATH:-}}",
                         mapped_command,
                     )
                 )

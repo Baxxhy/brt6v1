@@ -17,6 +17,6 @@ Execution Status: {execution_status}
 Execution Log: {execution_log}
 Verifier Feedback: {verifier_feedback}
 
-If the feedback contains a Semantic Delta Contract, you must preserve `preserve`, execute only the single change listed under `change` in this round, avoid `avoid`, and ensure this round’s modification produces the `expected_effect`. Leave other differences for subsequent execution rounds; do not freely rewrite setup, trigger, and oracle simultaneously.
+If the feedback contains a Semantic Delta Contract, preserve `preserve` and complete the single semantic obligation under `change`. You may update the imports, fixture wiring, and variable bindings required for that obligation, but must not alter an independent setup, trigger, or oracle obligation. Avoid `avoid` and ensure the result produces `expected_effect`.
 
 Integrate all the above information to complete one fix. Output only the complete Python code.

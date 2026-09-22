@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import unittest
 import urllib.error
 from unittest.mock import patch
@@ -111,6 +112,98 @@ class LLMClientTests(unittest.TestCase):
         self.assertNotIn("reasoning_effort", captured[0])
         self.assertEqual(captured[1]["reasoning_effort"], "none")
 
+    def test_gpt_uses_openai_token_and_reasoning_fields(self) -> None:
+        client = LLMClient(
+            provider="gpt",
+            model="gpt-5.4-mini",
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+        )
+        captured = []
+
+        def open_request(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return io.BytesIO(
+                json.dumps({
+                    "model": "gpt-5.4-mini",
+                    "usage": {},
+                    "choices": [{
+                        "message": {"content": "OK"},
+                        "finish_reason": "stop",
+                    }],
+                }).encode("utf-8")
+            )
+
+        client.open_request = open_request
+        with patch.dict(os.environ, {"BRT_DISABLE_THINKING": "1"}, clear=False):
+            client.chat("system", "user")
+
+        self.assertEqual(captured[0]["max_completion_tokens"], 4096)
+        self.assertNotIn("max_tokens", captured[0])
+        self.assertEqual(captured[0]["reasoning_effort"], "none")
+        self.assertNotIn("thinking", captured[0])
+
+    def test_gpt5_mini_disable_thinking_uses_low_reasoning(self) -> None:
+        client = LLMClient(
+            provider="gpt",
+            model="gpt-5-mini",
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+        )
+        captured = []
+
+        def open_request(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return io.BytesIO(
+                json.dumps({
+                    "model": "gpt-5-mini",
+                    "usage": {},
+                    "choices": [{
+                        "message": {"content": "OK"},
+                        "finish_reason": "stop",
+                    }],
+                }).encode("utf-8")
+            )
+
+        client.open_request = open_request
+        with patch.dict(os.environ, {"BRT_DISABLE_THINKING": "1"}, clear=False):
+            client.chat("system", "user")
+
+        self.assertEqual(captured[0]["reasoning_effort"], "low")
+
+    def test_gpt5_mini_accepts_versioned_model_identity(self) -> None:
+        client = LLMClient(
+            provider="gpt", model="gpt-5-mini", api_key="test-key",
+            base_url="https://example.invalid/v1",
+        )
+
+        def open_request(request, timeout):
+            return io.BytesIO(json.dumps({
+                "model": "gpt-5-mini-2025-08-07",
+                "usage": {},
+                "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+            }).encode("utf-8"))
+
+        client.open_request = open_request
+        self.assertEqual(client.chat("system", "user", attempt_limit=1), "OK")
+
+    def test_gpt5_mini_rejects_different_returned_model_family(self) -> None:
+        client = LLMClient(
+            provider="gpt", model="gpt-5-mini", api_key="test-key",
+            base_url="https://example.invalid/v1",
+        )
+
+        def open_request(request, timeout):
+            return io.BytesIO(json.dumps({
+                "model": "gpt-5.4-mini",
+                "usage": {},
+                "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+            }).encode("utf-8"))
+
+        client.open_request = open_request
+        with self.assertRaisesRegex(RuntimeError, "different model family"):
+            client.chat("system", "user", attempt_limit=1)
+
     def test_empty_content_is_retried(self) -> None:
         client = LLMClient(api_key="test-key", base_url="https://example.invalid")
         bodies = iter(
@@ -146,6 +239,31 @@ class LLMClientTests(unittest.TestCase):
             self.assertEqual(client.chat("system", "user"), "{\"x\":1}")
         self.assertEqual(captured[0]["max_tokens"], 4096)
         self.assertEqual(captured[1]["max_tokens"], 8192)
+
+    def test_gpt_length_retry_increases_max_completion_tokens(self) -> None:
+        client = LLMClient(
+            provider="gpt",
+            model="gpt-5.4-mini",
+            api_key="test-key",
+            base_url="https://example.invalid/v1",
+        )
+        captured = []
+        bodies = iter(
+            [
+                {"choices": [{"message": {"content": "{\"x\":"}, "finish_reason": "length"}]},
+                {"choices": [{"message": {"content": "{\"x\":1}"}, "finish_reason": "stop"}]},
+            ]
+        )
+
+        def open_request(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return io.BytesIO(json.dumps(next(bodies)).encode("utf-8"))
+
+        client.open_request = open_request
+        with patch("brt6.llm.llm_client.time.sleep"):
+            self.assertEqual(client.chat("system", "user"), "{\"x\":1}")
+        self.assertEqual(captured[0]["max_completion_tokens"], 4096)
+        self.assertEqual(captured[1]["max_completion_tokens"], 8192)
 
     def test_call_attempts_are_not_expanded_to_pool_size(self) -> None:
         client = LLMClient(api_key="test-key", base_url="https://example.invalid")
@@ -253,6 +371,33 @@ class LLMClientTests(unittest.TestCase):
                     client.chat("system", "user")
 
         self.assertEqual(request.call_count, 2)
+
+    def test_explicit_pool_rotation_attempts_can_cycle_pool(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"BRT_LLM_POOL_ROTATION_ATTEMPTS": "10"},
+        ), patch(
+            "brt6.llm.llm_client.pool_policy",
+            return_value={"immediate_failover": True},
+        ), patch(
+            "brt6.llm.llm_client.configured_apis",
+            return_value=[
+                ("key-1", "https://one.example/v1", "model"),
+                ("key-2", "https://two.example/v1", "model"),
+            ],
+        ):
+            client = LLMClient(provider="deepseek", model="model")
+            with patch.object(
+                client,
+                "open_request",
+                side_effect=TimeoutError("timed out"),
+                create=True,
+            ) as request, patch("brt6.llm.llm_client.time.sleep") as sleep:
+                with self.assertRaisesRegex(RuntimeError, "after 10 attempts"):
+                    client.chat("system", "user")
+
+        self.assertEqual(request.call_count, 10)
+        self.assertEqual(sleep.call_count, 9)
 
 
 if __name__ == "__main__":

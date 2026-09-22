@@ -18,6 +18,7 @@ from brt6.core.schema import (
     RetrievedTest,
 )
 from brt6.execution.feedback import (
+    _independent_adaptation_strategy,
     _load_behavior_evidence,
     _should_run_direct_fallback,
 )
@@ -27,6 +28,30 @@ from brt6.pipeline.run import build_parser
 
 
 class BehaviorTargetAblationTests(unittest.TestCase):
+    def test_target_prompt_does_not_promote_issue_only_external_tool(self):
+        from brt6.core.prompts import ISSUE_REWRITE_USER_PROMPT
+
+        self.assertIn(
+            "external tool used only to demonstrate it",
+            ISSUE_REWRITE_USER_PROMPT,
+        )
+        self.assertIn(
+            "not in the retrieved repository source or tests",
+            ISSUE_REWRITE_USER_PROMPT,
+        )
+
+    def test_diversity_pilot_assigns_three_distinct_fixed_strategies(self) -> None:
+        with patch.dict("os.environ", {"BRT_DIVERSE_ADAPTATION": "1"}):
+            strategies = [_independent_adaptation_strategy(index) for index in range(3)]
+        self.assertEqual(len(set(strategies)), 3)
+        self.assertIn("PARENT-PRESERVING", strategies[0])
+        self.assertIn("ISSUE-FIRST", strategies[1])
+        self.assertIn("EVIDENCE-ALTERNATIVE", strategies[2])
+
+    def test_diversity_pilot_is_off_by_default(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(_independent_adaptation_strategy(0), "")
+
     def test_cli_defaults_to_current_full_method(self) -> None:
         parser = build_parser()
         required = [
@@ -205,6 +230,82 @@ class BehaviorTargetAblationTests(unittest.TestCase):
             )
         self.assertIn(marker, prompt)
         self.assertIn("normalized delta summary", prompt)
+        self.assertIn("INITIAL ADAPTATION", prompt)
+
+    def test_feedback_delta_keeps_single_residual_scope(self) -> None:
+        behavior = BehaviorTarget("x", issue_summary="target")
+        host = HostContext("x", seed_test_code="def test_seed():\n    assert True\n")
+        llm = Mock()
+        llm.chat.return_value = json.dumps(
+            {
+                "schema_version": "semantic_delta.v2",
+                "action": "KEEP",
+                "dimension": "",
+                "seed_fact": "seed",
+                "target_fact": "target",
+                "change": "",
+                "preserve": [],
+                "avoid": [],
+                "reason": "insufficient evidence",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "prompts").mkdir()
+            (Path(tmp) / "responses").mkdir()
+            propose_semantic_delta("x", 1, behavior, host, None, llm, tmp)
+            prompt = (Path(tmp) / "prompts" / "delta_round_1.txt").read_text(
+                encoding="utf-8"
+            )
+        self.assertIn("FEEDBACK REPAIR", prompt)
+        self.assertIn("single most blocking residual", prompt)
+
+    def test_gpt_delta_planning_uses_low_reasoning(self) -> None:
+        behavior = BehaviorTarget("x", issue_summary="target")
+        host = HostContext("x", seed_test_code="def test_seed():\n    assert True\n")
+        llm = Mock(provider="gpt")
+        llm.chat.return_value = json.dumps(
+            {
+                "schema_version": "semantic_delta.v2",
+                "action": "KEEP",
+                "dimension": "",
+                "seed_fact": "seed",
+                "target_fact": "target",
+                "change": "",
+                "preserve": [],
+                "avoid": [],
+                "reason": "insufficient evidence",
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "prompts").mkdir()
+            (Path(tmp) / "responses").mkdir()
+            propose_semantic_delta("x", 0, behavior, host, None, llm, tmp)
+        self.assertEqual(llm.chat.call_args.kwargs["reasoning_effort"], "low")
+
+    def test_gpt_generation_uses_low_reasoning_for_initial_and_repairs(self) -> None:
+        behavior = BehaviorTarget("x", issue_summary="target")
+        host = HostContext("x", seed_test_code="def test_seed():\n    assert True\n")
+        seed = RetrievedTest(
+            "x", name="test_seed", file="tests/test_seed.py",
+            code_content=host.seed_test_code,
+        )
+        llm = Mock(provider="gpt", max_tokens=4096)
+        llm.chat.return_value = "def test_generated():\n    assert False\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            generate_candidate(
+                "x", behavior, host, seed, [], llm, tmp, tmp,
+                round_id=0, write_to_repo=False,
+            )
+            initial = llm.chat.call_args.kwargs
+            generate_candidate(
+                "x", behavior, host, seed, [], llm, tmp, tmp,
+                round_id=1, write_to_repo=False,
+            )
+            repair = llm.chat.call_args.kwargs
+        self.assertEqual(initial["reasoning_effort"], "low")
+        self.assertEqual(initial["max_tokens"], 8192)
+        self.assertEqual(repair["reasoning_effort"], "low")
+        self.assertEqual(repair["max_tokens"], 8192)
 
     def test_direct_fallback_runs_only_after_full_target_exhaustion(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

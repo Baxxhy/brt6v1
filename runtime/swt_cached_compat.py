@@ -59,6 +59,10 @@ def offline_eval_commands(commands: list[str], *, base_commit: str) -> list[str]
         f"git reset --hard {base_commit}",
         "git clean -fd",
         "find . -type f -name '*.py[co]' -delete",
+        f'test "$(git rev-parse HEAD)" = "{base_commit}"',
+        "git diff --quiet -- .",
+        'echo "BRT_ENV_PYTHON=$(command -v python)"',
+        'python -c \'import sys; print("BRT_ENV_PYTHON_VERSION=" + sys.version.replace("\\n", " ")); print("BRT_ENV_SYS_PATH=" + repr(sys.path))\'',
     ]
     converted = [_OFFLINE_EXPORT]
     for command in commands:

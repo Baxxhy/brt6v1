@@ -10,7 +10,7 @@ Current test: {candidate_code}
 Execution log: {execution_log}
 Verifier feedback: {verifier_feedback}
 
-Strictly follow the Semantic Delta: keep `preserve`; in this round, only execute the single Trigger change specified by `change`, and avoid `avoid`; leave other differences for subsequent rounds. If `last_transition=STAGNANT`, you must switch to a different operator; if `last_transition=REGRESSED`, base your work on the restored parent candidate.
+Strictly follow the Semantic Delta: keep `preserve` and complete the single Trigger obligation specified by `change`. The obligation may include the imports, fixture state, and variable bindings required to reach that trigger, but it must not rewrite an independent Oracle behavior. Avoid `avoid`. If `last_transition=STAGNANT`, switch operator; if `last_transition=REGRESSED`, use the restored parent candidate.
 
 Before fixing, verify the following:
 

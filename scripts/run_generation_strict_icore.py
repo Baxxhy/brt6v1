@@ -9,10 +9,12 @@ fixed version, gold patch, test patch, and official labels.
 from __future__ import annotations
 
 import argparse
+import builtins
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
 import shutil
+import symtable
 import sys
 
 
@@ -26,7 +28,44 @@ from brt6.core.utils import safe_json_dump
 
 
 STRICT_ACCEPTED_STATUS = "ISSUE_ALIGNED_FAIL"
-SELECTION_PROTOCOL = "strict_preferred_icore_exhausted_fallback_v3"
+SELECTION_PROTOCOL = "strict_preferred_self_contained_icore_fallback_v4"
+
+
+def unresolved_global_names(code: str) -> list[str]:
+    """Return statically unresolved globals in a standalone generated test."""
+
+    try:
+        tree = symtable.symtable(code, "candidate.py", "exec")
+    except SyntaxError:
+        return ["<syntax-error>"]
+    # A star import prevents sound name resolution. The execution stage has
+    # already collected the file, so abstain from filtering in that case.
+    if "import *" in code:
+        return []
+    module_bound = {
+        symbol.get_name()
+        for symbol in tree.get_symbols()
+        if symbol.is_imported() or symbol.is_assigned() or symbol.is_namespace()
+    }
+    referenced: set[str] = set()
+
+    def visit(table) -> None:
+        for symbol in table.get_symbols():
+            if symbol.is_referenced() and (
+                table is tree or symbol.is_global()
+            ):
+                referenced.add(symbol.get_name())
+        for child in table.get_children():
+            visit(child)
+
+    visit(tree)
+    allowed = set(dir(builtins)) | module_bound | {
+        "__builtins__",
+        "__file__",
+        "__name__",
+        "__package__",
+    }
+    return sorted(referenced - allowed)
 
 
 def read(path: Path):
@@ -152,6 +191,7 @@ def freeze_candidates(generation: Path, output: Path, issues: dict) -> dict:
                     "seed_index": seed_index,
                     "component1_rank": 0 if seed_index == selected_index else seed_index + 1,
                     "strict_status": str(summary.get("status") or ""),
+                    "self_containment_errors": unresolved_global_names(code),
                 }
             )
 
@@ -224,21 +264,44 @@ def process_instance(output: Path, issues: dict, row: dict) -> dict:
                 "component1_rank": candidate["component1_rank"],
                 "code": (frozen / "candidate.py").read_text(encoding="utf-8"),
                 "buggy_execution": read(frozen / "buggy_execution.json"),
+                "self_containment_errors": list(
+                    candidate.get("self_containment_errors") or []
+                ),
             }
         )
 
-    accepted = [item for item in available if any(
+    accepted_all = [item for item in available if any(
         c["candidate_id"] == item["candidate_id"] and c["strict_status"] == STRICT_ACCEPTED_STATUS
         for c in row["candidates"]
     )]
+    accepted = [item for item in accepted_all if not item["self_containment_errors"]]
+    self_containment_excluded = [
+        {
+            "candidate_id": item["candidate_id"],
+            "reason": "UNRESOLVED_GLOBAL_NAMES",
+            "names": item["self_containment_errors"],
+        }
+        for item in available
+        if item["self_containment_errors"]
+    ]
+    eligible = [item for item in available if not item["self_containment_errors"]]
     if accepted:
         selected, ranking = rank_candidates(
             issues[instance_id]["problem_statement"], accepted
         )
-        route = "STRICT_ACCEPTED_THEN_ICORE_RANK"
+        route = "STRICT_ACCEPTED_SELF_CONTAINED_THEN_ICORE_RANK"
+    elif eligible:
+        selected, ranking = rank_candidates(issues[instance_id]["problem_statement"], eligible)
+        route = "EXHAUSTED_NO_STRICT_ACCEPTED_SELF_CONTAINED_THEN_ICORE_RANK"
+        excluded = []
+    elif accepted_all:
+        selected, ranking = rank_candidates(
+            issues[instance_id]["problem_statement"], accepted_all
+        )
+        route = "ALL_ACCEPTED_STATICALLY_UNRESOLVED_THEN_ICORE_FALLBACK"
     elif available:
         selected, ranking = rank_candidates(issues[instance_id]["problem_statement"], available)
-        route = "EXHAUSTED_NO_STRICT_ACCEPTED_THEN_ICORE_RANK"
+        route = "ALL_AVAILABLE_STATICALLY_UNRESOLVED_THEN_ICORE_FALLBACK"
         excluded = []
     else:
         selected, ranking = None, []
@@ -252,6 +315,7 @@ def process_instance(output: Path, issues: dict, row: dict) -> dict:
         "route": route,
         "accepted_candidates": [row["candidate_id"] for row in accepted],
         "excluded_candidates": excluded,
+        "self_containment_excluded": self_containment_excluded,
         "ranking": ranking,
     }
     write(decision_path, result)

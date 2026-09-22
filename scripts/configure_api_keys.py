@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = PROJECT_ROOT / ".secrets" / "api_pool.json"
 PROVIDER_DEFAULTS = {
     "deepseek": ("https://api.deepseek.com", "deepseek-v3"),
-    "gpt": ("https://aigc.x-see.cn/v1", "gpt-5.4-mini"),
+    "gpt": ("https://aigc.x-see.cn/v1", "gpt-5-mini"),
 }
 
 

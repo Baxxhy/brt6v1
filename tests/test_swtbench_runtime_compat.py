@@ -15,14 +15,18 @@ from brt6.evaluation.swtbench_runtime_compat import (
     _bounded_setup_logger,
     _bounded_exec_run,
     _configure_container_reuse,
+    _configure_official_environment,
     _configure_docker_api_timeout,
     _container_is_reusable,
     _decode_test_output,
+    _environment_failure_reason,
     _lock_filename,
     _make_tree_world_accessible,
     _parse_pytest_single_test_progress,
     _prepare_container_for_official_start,
+    _preserve_cached_images,
     _preserve_official_container,
+    _remove_stale_named_container,
     _retryable_build_failure,
 )
 from brt6.runtime.swt_cached_compat import offline_eval_commands
@@ -63,6 +67,16 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
 
         container.kill.assert_called_once_with()
         container.stop.assert_not_called()
+
+    def test_fresh_isolation_removes_same_named_stale_container(self) -> None:
+        client = mock.Mock()
+        stale = client.containers.get.return_value
+
+        removed = _remove_stale_named_container(client, "exec.eval.instance")
+
+        self.assertTrue(removed)
+        client.containers.get.assert_called_once_with("exec.eval.instance")
+        stale.remove.assert_called_once_with(force=True)
 
     def test_docker_clients_receive_a_control_plane_timeout(self) -> None:
         docker_module = mock.Mock()
@@ -118,6 +132,35 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
             "/root/Baxxhy/BugReproduce/brt6/.runtime/locks",
         )
 
+    def test_fresh_isolation_is_the_reproducible_default_policy(self) -> None:
+        environment = {}
+
+        _configure_official_environment(environment)
+
+        self.assertEqual(environment["BRT_SWT_EVAL_ISOLATION"], "fresh")
+        self.assertEqual(environment["SWT_REUSE_CONTAINERS"], "0")
+        self.assertEqual(environment["SWT_KEEP_CONTAINERS"], "0")
+
+    def test_environment_failures_are_audited_without_changing_grading(self) -> None:
+        plugin_failure = """
+Traceback (most recent call last):
+  File \"_pytest/config.py\", line 1, in import_plugin
+  File \"pytest_astropy_header/display.py\", line 2, in <module>
+AttributeError: 'LooseVersion' object has no attribute 'version'
+"""
+        missing_dependency = "ModuleNotFoundError: No module named 'numpy'"
+        ordinary_assertion = "collected 1 item\ntest_brt.py F [100%]\nAssertionError"
+
+        self.assertEqual(
+            _environment_failure_reason(plugin_failure),
+            "pytest_startup_or_plugin_failure",
+        )
+        self.assertEqual(
+            _environment_failure_reason(missing_dependency),
+            "dependency_import_failure_before_collection",
+        )
+        self.assertIsNone(_environment_failure_reason(ordinary_assertion))
+
     def test_reuse_rejects_wrong_image_or_broken_state(self) -> None:
         healthy = {
             "Config": {"Image": "exec.eval.expected:latest"},
@@ -163,6 +206,10 @@ class SWTBenchRuntimeCompatibilityTests(unittest.TestCase):
         self.assertEqual(rendered.count("git clean -fd"), 2)
         self.assertEqual(
             rendered.count("find . -type f -name '*.py[co]' -delete"), 2
+        )
+        self.assertEqual(rendered.count("git diff --quiet -- ."), 2)
+        self.assertEqual(
+            rendered.count('test "$(git rev-parse HEAD)" = "base123"'), 2
         )
         self.assertNotIn("git clean -fdx", converted)
         self.assertNotIn("/root/pre_state.patch", rendered)
@@ -232,6 +279,13 @@ astropy/wcs/tests/test_brt_case.py F                    [100%]
         self.assertIsNone(
             remover(Client(), "exec.eval.x86_64.cached:latest", "quiet")
         )
+
+    def test_end_of_run_image_sweep_is_a_noop(self) -> None:
+        client = mock.Mock()
+
+        self.assertIsNone(_preserve_cached_images(client, {"old"}, "env", False))
+
+        client.images.remove.assert_not_called()
 
     def test_valid_utf8_is_unchanged_and_has_no_diagnostic(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

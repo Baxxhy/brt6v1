@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import fcntl
@@ -49,6 +50,7 @@ from ..core.behavior_evidence import (
     behavior_target_payload,
     is_behavior_target,
     raw_issue_payload,
+    target_apis,
 )
 from ..core.ablation import AblationConfig
 from ..core.schema import (
@@ -447,6 +449,21 @@ def _residual_transition(
     }
 
 
+def _restore_repair_state(snapshot: dict[str, Any], rejected_round: int) -> dict[str, Any]:
+    """Restore executable bytes and their matching evidence as one checkpoint."""
+    restored = copy.deepcopy(snapshot)
+    candidate = restored["candidate"]
+    write_text(candidate.candidate_file_path, candidate.code)
+    restored["semantic_feedback"]["search_control"] = {
+        "action": "RESTORE_PARENT",
+        "reason": "last semantic mutation broke an already satisfied stage",
+        "restored_round_id": restored["round_id"],
+        "rejected_round_id": rejected_round,
+        "preserve": list((restored["residual"] or {}).get("preserve") or []),
+    }
+    return restored
+
+
 def _residual_instruction(
     state: dict[str, Any],
     transition: dict[str, Any],
@@ -526,6 +543,32 @@ def _propose_delta_safely(
         return delta
 
 
+def _independent_adaptation_strategy(seed_index: int | None) -> str:
+    """Return a fixed-blind strategy for the optional diversity pilot."""
+
+    if os.environ.get("BRT_DIVERSE_ADAPTATION", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return ""
+    strategies = (
+        "PARENT-PRESERVING: retain the seed's repository-native protocol, setup, "
+        "and public oracle whenever compatible; make the smallest coherent edit "
+        "that introduces the issue trigger.",
+        "ISSUE-FIRST: construct the smallest public reproduction stated by the raw "
+        "Issue. Reuse seed mechanics only when they directly serve that scenario; "
+        "avoid inherited output details that the Issue does not require.",
+        "EVIDENCE-ALTERNATIVE: pursue a distinct trigger or observation interpretation "
+        "that is explicitly supported by the Issue or repository evidence and differs "
+        "from the obvious primary interpretation. Do not invent an alternative merely "
+        "for diversity.",
+    )
+    index = seed_index if isinstance(seed_index, int) and seed_index >= 0 else 0
+    return strategies[index % len(strategies)]
+
+
 def _evidence_result_fields(
     evidence: BehaviorEvidence,
     ablation_config: AblationConfig | None = None,
@@ -585,6 +628,15 @@ def _refresh_candidate_command(context: InstanceContext, candidate: Any) -> None
     )
 
 
+def _oracle_evidence_grounded(strict_result: Any | None) -> bool:
+    if strict_result is None:
+        return False
+    return bool(
+        getattr(strict_result, "oracle_grounded_in_target_evidence", False)
+        or getattr(strict_result, "oracle_grounded_in_issue", False)
+    )
+
+
 def _checkpoint_score(
     execution: ExecutionResult,
     decision: VerifierDecision,
@@ -597,7 +649,7 @@ def _checkpoint_score(
         strict_result and strict_result.failure_class == "issue_aligned"
     )
     target_hit = bool(strict_result and strict_result.target_hit)
-    grounded = bool(strict_result and strict_result.oracle_grounded_in_issue)
+    grounded = _oracle_evidence_grounded(strict_result)
     public = bool(strict_result and strict_result.uses_public_behavior)
     if decision.decision == "accept" and executable_fail:
         score = 600
@@ -632,11 +684,24 @@ def _strict_no_exception_contract(
         and strict_result is not None
         and getattr(strict_result, "failure_class", "") == "issue_aligned"
         and getattr(strict_result, "target_hit", False)
-        and getattr(strict_result, "oracle_grounded_in_issue", False)
+        and _oracle_evidence_grounded(strict_result)
         and getattr(strict_result, "uses_public_behavior", False)
         and getattr(strict_result, "oracle_falsifiable", False)
         and "NO_EXCEPTION" in oracle_kinds
     )
+
+
+def _execute_or_reuse_keep(args, *, keep, identity, previous_identity, previous_execution):
+    """Reuse only an adjacent KEEP execution, retaining its journal position."""
+    reusable = bool(
+        keep and identity == previous_identity and previous_execution is not None
+        and not previous_execution.timeout
+        and previous_execution.returncode is not None
+        and previous_execution.status in {"PASS", "ASSERTION_FAIL", "FAIL", "ERROR_FAIL"}
+    )
+    execute = (lambda *a, **kw: copy.deepcopy(previous_execution)) if reusable else run_command_in_conda
+    result = recorded_dataclass_step("candidate_execution", execute, ExecutionResult, *args)
+    return result, reusable
 
 
 def _semantic_feedback_payload(
@@ -660,6 +725,12 @@ def _semantic_feedback_payload(
                 "oracle_grounded_in_issue": bool(
                     getattr(strict_result, "oracle_grounded_in_issue", False)
                 ),
+                "oracle_grounded_in_target_evidence": _oracle_evidence_grounded(
+                    strict_result
+                ),
+                "oracle_evidence_refs": list(
+                    getattr(strict_result, "oracle_evidence_refs", []) or []
+                ),
                 "uses_public_behavior": bool(
                     getattr(strict_result, "uses_public_behavior", False)
                 ),
@@ -672,6 +743,7 @@ def _semantic_feedback_payload(
                 "observed_behavior": str(getattr(strict_result, "observed_behavior", "") or ""),
                 "target_behavior": str(getattr(strict_result, "target_behavior", "") or ""),
                 "semantic_gap": str(getattr(strict_result, "semantic_gap", "") or ""),
+                "candidate_defect": dict(getattr(strict_result, "candidate_defect", {}) or {}),
                 "preserve": list(getattr(strict_result, "preserve", []) or []),
                 "change": list(getattr(strict_result, "change", []) or []),
                 "avoid": list(getattr(strict_result, "avoid", []) or []),
@@ -679,6 +751,12 @@ def _semantic_feedback_payload(
                 "expected_effect": str(getattr(strict_result, "expected_effect", "") or ""),
                 "failure_origin": str(getattr(strict_result, "failure_origin", "") or ""),
                 "post_fix_failure_risk": str(getattr(strict_result, "post_fix_failure_risk", "unknown") or "unknown"),
+                "located_oracle_risk": ({
+                    "description": str(getattr(strict_result, "post_fix_risk_constraint", "") or ""),
+                    "code_quote": str(getattr(strict_result, "post_fix_risk_code_quote", "") or ""),
+                    "line": int(getattr(strict_result, "post_fix_risk_line", 0) or 0),
+                    "instruction": "Treat this as a diagnosis to verify against evidence, not as an instruction to negate the described behavior.",
+                } if getattr(strict_result, "post_fix_risk_concrete", False) else {}),
             }
         )
     if current_residual is not None and transition is not None:
@@ -740,6 +818,107 @@ def _save_residual_trace(
     )
 
 
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
+_PYTEST_FRAME = re.compile(r"(?m)^(.+?\.py):(\d+): in\s+")
+
+
+def _call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _call_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    if isinstance(node, ast.Call):
+        return _call_name(node.func)
+    return ""
+
+
+def _target_api_names(behavior: Any | None) -> list[str]:
+    if behavior is None:
+        return []
+    names: list[str] = []
+    for item in target_apis(behavior):
+        name = str(item.get("name") or item.get("symbol") or "").strip()
+        if name:
+            names.append(name.removesuffix("()"))
+    return names
+
+
+def _failure_line_in_candidate(
+    candidate: Any,
+    execution: ExecutionResult,
+) -> int | None:
+    log = _ANSI_ESCAPE.sub("", execution.stdout + "\n" + execution.stderr)
+    frames = [(path.strip(), int(line)) for path, line in _PYTEST_FRAME.findall(log)]
+    if not frames:
+        return None
+
+    expected_names = {
+        Path(str(value)).name
+        for value in (
+            getattr(candidate, "candidate_repo_path", ""),
+            getattr(candidate, "candidate_file_path", ""),
+        )
+        if str(value or "").strip()
+    }
+    matching = [
+        line
+        for path, line in frames
+        if Path(path).name in expected_names
+        or Path(path).name.startswith("test_brt_")
+    ]
+    return matching[-1] if matching else None
+
+
+def _failure_call_target_alignment(
+    candidate: Any,
+    execution: ExecutionResult,
+    behavior: Any | None,
+) -> int:
+    """Compare the failure-leading candidate call with recovered target APIs.
+
+    Returns 2 for a structural match, 1 when no decisive comparison can be
+    made, and 0 for an explicit call mismatch.  This is a ranking signal only:
+    it never discards the sole executable candidate.
+    """
+
+    target_names = _target_api_names(behavior)
+    failure_line = _failure_line_in_candidate(candidate, execution)
+    if not target_names or failure_line is None:
+        return 1
+    try:
+        tree = ast.parse(str(candidate.code or ""))
+    except SyntaxError:
+        return 1
+
+    calls = [
+        _call_name(node.func)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and int(getattr(node, "lineno", -1)) <= failure_line
+        <= int(getattr(node, "end_lineno", getattr(node, "lineno", -1)))
+    ]
+    calls = [item for item in calls if item]
+    if not calls:
+        return 1
+
+    normalized_targets = []
+    for name in target_names:
+        normalized_targets.append(name)
+        if name.endswith(".__call__"):
+            normalized_targets.append(name[: -len(".__call__")])
+
+    for call in calls:
+        if any(
+            call == target
+            or call.endswith("." + target)
+            or target.endswith("." + call)
+            for target in normalized_targets
+        ):
+            return 2
+    return 0
+
+
 def _save_checkpoint(
     output_dir: str,
     attempt_id: int,
@@ -764,7 +943,7 @@ def _save_checkpoint(
         strict_result and strict_result.failure_class == "issue_aligned"
     )
     target_hit = bool(strict_result and strict_result.target_hit)
-    grounded = bool(strict_result and strict_result.oracle_grounded_in_issue)
+    grounded = _oracle_evidence_grounded(strict_result)
     public = bool(strict_result and strict_result.uses_public_behavior)
     oracle_contract_preserved = bool(
         getattr(candidate, "oracle_contract_preserved", True)
@@ -805,8 +984,26 @@ def _save_checkpoint(
     post_fix_risk = str(
         getattr(strict_result, "post_fix_failure_risk", "unknown") or "unknown"
     ).lower()
-    risk_preference = {"low": 3, "unknown": 2, "medium": 1, "high": 0}.get(
-        post_fix_risk, 1
+    concrete_high_risk = bool(
+        post_fix_risk == "high"
+        and getattr(strict_result, "post_fix_risk_concrete", False)
+    )
+    delta_application = dict(getattr(candidate, "delta_application", {}) or {})
+    delta_observed = bool(
+        str(delta_application.get("status") or "").upper() == "OBSERVED"
+        and delta_application.get("requested_dimension_observed") is True
+    )
+    extra_delta_dimensions = len(delta_application.get("extra_dimensions") or [])
+    parent_counts = dict(delta_application.get("parent_fragment_counts") or {})
+    candidate_counts = dict(
+        delta_application.get("candidate_fragment_counts") or {}
+    )
+    delta_churn = sum(
+        abs(int(candidate_counts.get(name) or 0) - int(parent_counts.get(name) or 0))
+        for name in set(parent_counts) | set(candidate_counts)
+    )
+    failure_call_alignment = _failure_call_target_alignment(
+        candidate, execution, behavior
     )
     rank_key = [
         int(hard_eligible),
@@ -814,16 +1011,20 @@ def _save_checkpoint(
         int(issue_aligned),
         int(target_hit),
         int(grounded),
-        int(public),
         int(executable_fail),
-        risk_preference,
-        1,
         int(oracle_contract_preserved),
+        int(not concrete_high_risk),
+        failure_call_alignment,
+        int(delta_observed),
+        -extra_delta_dimensions,
+        -delta_churn,
+        int(public),
         int((oracle_risk or {}).get("level") != "high"),
         -len(candidate.code.splitlines()),
         -attempt_id,
     ]
     verifier_payload = decision.to_dict()
+    verifier_payload["failure_call_target_alignment"] = failure_call_alignment
     if residual_state is not None:
         verifier_payload["residual_state"] = residual_state
     if residual_transition is not None:
@@ -1919,6 +2120,7 @@ def run_instance_pipeline(
             related_source=context.retrieved_code,
             related_test=related_test,
             issue_text=context.issue_text,
+            adaptation_strategy=_independent_adaptation_strategy(_forced_seed_index),
         ) if enable_seed_mutation else None
         if initial_delta is not None:
             semantic_deltas.append(initial_delta)
@@ -2000,9 +2202,13 @@ def run_instance_pipeline(
         best_dual = None
         best_observation = None
         best_strict_result = None
+        best_repair_state = None
         seed_residual = _seed_residual_state(host)
         previous_residual = None
         residual_rounds: list[dict[str, Any]] = []
+        keep_execution = False
+        previous_execution_identity = None
+        previous_candidate_execution = None
         while brt_attempt < max_brt_attempts:
             guard = check_candidate(candidate.code, candidate.candidate_repo_path)
             if not guard.ok:
@@ -2013,7 +2219,23 @@ def run_instance_pipeline(
                     guard,
                 )
             elif brt_attempt > 0 or execution is None:
-                execution = recorded_dataclass_step("candidate_execution", run_command_in_conda, ExecutionResult, candidate.command, context.buggy_repo_path, conda_env, timeout, no_conda, behavior, context.instance_id)
+                execution_identity = (candidate.code, candidate.command,
+                                      candidate.candidate_repo_path, context.buggy_repo_path,
+                                      conda_env, timeout, no_conda)
+                execution, reused = _execute_or_reuse_keep(
+                    (candidate.command, context.buggy_repo_path, conda_env, timeout,
+                     no_conda, behavior, context.instance_id),
+                    keep=keep_execution, identity=execution_identity,
+                    previous_identity=previous_execution_identity,
+                    previous_execution=previous_candidate_execution,
+                )
+                if reused:
+                    safe_json_dump({"reason": "KEEP with unchanged candidate and execution inputs",
+                                    "round_id": brt_attempt, "reused_previous_execution": True},
+                                   str(Path(output_dir) / f"execution_reuse_round_{brt_attempt}.json"))
+                previous_execution_identity = execution_identity
+                previous_candidate_execution = copy.deepcopy(execution)
+            keep_execution = False
             safe_json_dump(execution.to_dict(), str(Path(output_dir) / f"execution_round_{brt_attempt}.json"))
             write_text(str(Path(output_dir) / "logs" / f"execution_round_{brt_attempt}.log"), execution.stdout + "\n" + execution.stderr)
             check_execution_infrastructure(execution)
@@ -2106,17 +2328,28 @@ def run_instance_pipeline(
                 best_dual = copy.deepcopy(candidate_dual)
                 best_observation = copy.deepcopy(observation)
                 best_strict_result = copy.deepcopy(strict_result)
+                best_repair_state = copy.deepcopy({
+                    "round_id": brt_attempt,
+                    "candidate": candidate,
+                    "execution": execution,
+                    "decision": decision,
+                    "strict_result": strict_result,
+                    "semantic_feedback": semantic_feedback,
+                    "residual": current_residual,
+                })
             if (
                 residual_transition is not None
                 and residual_transition.get("relation") == "REGRESSED"
-                and best_candidate is not None
+                and best_repair_state is not None
+                and best_repair_state["round_id"] < brt_attempt
             ):
-                candidate = copy.deepcopy(best_candidate)
-                semantic_feedback["search_control"] = {
-                    "action": "RESTORE_PARENT",
-                    "reason": "last semantic mutation broke an already satisfied stage",
-                    "preserve": list(current_residual.get("preserve") or []),
-                }
+                restored = _restore_repair_state(best_repair_state, brt_attempt)
+                candidate = restored["candidate"]
+                execution = restored["execution"]
+                decision = restored["decision"]
+                strict_result = restored["strict_result"]
+                semantic_feedback = restored["semantic_feedback"]
+                previous_residual = restored["residual"]
             if decision.decision == "accept":
                 # Accept ends repair for this seed only. The outer fixed
                 # top-3 loop still evaluates later iCoRe seeds before rank.
@@ -2139,6 +2372,7 @@ def run_instance_pipeline(
                 current_candidate_code=candidate.code,
                 delta_history=[item.to_dict() for item in semantic_deltas],
                 issue_text=context.issue_text,
+                adaptation_strategy=_independent_adaptation_strategy(_forced_seed_index),
             ) if enable_seed_mutation else None
             if delta is not None:
                 semantic_deltas.append(delta)
@@ -2147,6 +2381,7 @@ def run_instance_pipeline(
             if delta is None:
                 break
             if not delta.is_actionable:
+                keep_execution = delta.action == "KEEP"
                 brt_attempt += 1
                 continue
             candidate = generate_candidate(
@@ -2207,10 +2442,11 @@ def run_instance_pipeline(
                 {
                     "selection_policy": (
                         "Hard eligibility (executable buggy fail, falsifiable Oracle, "
-                        "minimal guard passed) > semantic "
-                        "consensus > LLM accept > "
-                        "issue_aligned > semantic target_hit > issue-grounded Oracle > "
-                        "public behavior > post-fix/Oracle risk > shorter test > earliest round"
+                        "minimal guard passed) > LLM accept > issue_aligned > "
+                        "semantic target_hit > evidence-grounded Oracle > "
+                        "failure-leading target API alignment > observed Semantic Delta > "
+                        "fewer extra Delta dimensions > less AST-fragment churn > "
+                        "public behavior > static Oracle risk > shorter test > earliest round"
                     ),
                     "selected_attempt": checkpoints[best_index].round_id,
                     "checkpoints": [item.to_dict() for item in checkpoints],

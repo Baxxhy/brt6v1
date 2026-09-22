@@ -34,3 +34,4 @@ Rules:
 6. If the issue does not specify an exact full string, use stable fragments, types, or relations rather than guessing the repaired output.
 7. Do not generate test code or use fixed-side artifacts, a gold patch, or a gold test.
 8. Return JSON only, parseable by `json.loads`, with no Markdown or commentary.
+9. Separate the repository-internal defect trigger from an external tool used only to demonstrate it. If a third-party package or API appears in the Issue but not in the retrieved repository source or tests, do not make that package a required setup step, target API, or hard trigger. Describe the repository-native interaction or state that it induces when the supplied evidence supports one, and record the external workflow as an uncertainty or optional reproduction route.
