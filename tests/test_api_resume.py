@@ -21,7 +21,11 @@ from brt6.core.schema import (BehaviorTarget, ExecutionResult, HostContext,
                              FinalResult, InstanceContext, ProtocolRecovery, RetrievedTest,
                              StrictVerifierResult, VerifierDecision)
 from brt6.execution.feedback import _load_cached_behavior, _propose_delta_safely, run_instance_pipeline
-from brt6.llm.errors import LLMResponseTruncatedError, LLMUnavailableError
+from brt6.llm.errors import (
+    LLMRequestFailedError,
+    LLMResponseTruncatedError,
+    LLMUnavailableError,
+)
 from brt6.llm.llm_client import LLMClient
 from brt6.mutation.seed_mutator import propose_semantic_delta
 from brt6.pipeline.run import _run_one, build_parser
@@ -88,7 +92,7 @@ class ResumeTests(unittest.TestCase):
     def test_rate_limit_is_not_account_exhaustion(self):
         c = self.client()
         c.open_request = Mock(side_effect=self.http(429, "rate limit exceeded"))
-        with self.assertRaises(LLMUnavailableError):
+        with self.assertRaises(LLMRequestFailedError):
             c.chat("s", "u")
         self.assertFalse(LLMClient._disabled_endpoints)
         c.open_request = lambda *a, **kw: self.response("OK")
@@ -126,18 +130,22 @@ class ResumeTests(unittest.TestCase):
             calls = c.open_request.call_args_list
             self.assertTrue(all(x.args[0].data == calls[1].args[0].data for x in calls[1:]))
 
-    def test_full_run_stops_for_quota_invalid_request_and_explicit_probe_limit(self):
+    def test_full_run_stops_only_for_quota_and_localizes_other_failures(self):
         with patch.dict(os.environ, {"BRT_RETRY_TRANSIENT_API": "1"}):
-            for code, body in [(403, "insufficient_user_quota"), (400, "bad request")]:
-                with self.subTest(code=code):
-                    LLMClient._disabled_endpoints.clear()
-                    c = self.client()
-                    c.open_request = Mock(side_effect=self.http(code, body))
-                    with self.assertRaises(LLMUnavailableError):
-                        c.chat("s", "u")
-                    self.assertEqual(c.open_request.call_count, 1)
-            c.open_request = Mock(side_effect=self.http(524, "gateway timeout"))
+            LLMClient._disabled_endpoints.clear()
+            c = self.client()
+            c.open_request = Mock(side_effect=self.http(403, "insufficient_user_quota"))
             with self.assertRaises(LLMUnavailableError):
+                c.chat("s", "u")
+            self.assertEqual(c.open_request.call_count, 1)
+            LLMClient._disabled_endpoints.clear()
+            c = self.client()
+            c.open_request = Mock(side_effect=self.http(400, "bad request"))
+            with self.assertRaises(LLMRequestFailedError):
+                c.chat("s", "u")
+            self.assertEqual(c.open_request.call_count, 1)
+            c.open_request = Mock(side_effect=self.http(524, "gateway timeout"))
+            with self.assertRaises(LLMRequestFailedError):
                 c.chat("s", "probe", attempt_limit=1)
             self.assertEqual(c.open_request.call_count, 1)
 
@@ -187,7 +195,11 @@ class ResumeTests(unittest.TestCase):
 
     def test_quota_error_does_not_become_keep_delta(self):
         c = self.client()
-        c.open_request = Mock(side_effect=self.http(403, "insufficient_user_quota"))
+        c.open_request = Mock(
+            side_effect=lambda *a, **kw: (_ for _ in ()).throw(
+                self.http(403, "insufficient_user_quota")
+            )
+        )
         for fn in (propose_semantic_delta, _propose_delta_safely):
             # Test both exception boundaries separately.
             LLMClient._disabled_endpoints.clear()
@@ -292,7 +304,7 @@ class ResumeTests(unittest.TestCase):
             return c
         with patch("brt6.pipeline.run_issue_rewrite.build_instance_context", return_value=context), \
              patch("brt6.pipeline.run_issue_rewrite.LLMClient", side_effect=make_client):
-            self.assertEqual(rewrite_one(args, "demo", {})["status"], "PAUSED_API")
+            self.assertEqual(rewrite_one(args, "demo", {})["status"], "ERROR")
             args._api_pause_event.clear()
             self.assertEqual(rewrite_one(args, "demo", {})["status"], "OK")
             self.assertEqual(len(calls), 3)
@@ -377,17 +389,17 @@ class ResumeTests(unittest.TestCase):
             counters.clear()
             interrupted_dir = self.root / "interrupted"
             _, first_calls, first_run = run(interrupted_dir, fail_call=6)
-            with self.assertRaises(LLMUnavailableError):
-                first_run()
-            self.assertFalse((interrupted_dir / "direct_fallback").exists())
-            self.assertEqual(json.loads((interrupted_dir / "summary.json").read_text())["status"], "PAUSED_API")
+            interrupted = first_run()
+            self.assertEqual(interrupted.status, "ISSUE_ALIGNED_FAIL")
+            self.assertFalse((interrupted_dir / "api_pause.json").exists())
+            self.assertEqual(json.loads((interrupted_dir / "summary.json").read_text())["status"], "ISSUE_ALIGNED_FAIL")
             _, resumed_calls, resumed_run = run(interrupted_dir)
             result = resumed_run()
             self.assertEqual(result.status, baseline.status)
             self.assertEqual(result.selected_seed_index, baseline.selected_seed_index)
             self.assertEqual(Path(result.final_test_path).read_bytes(), Path(baseline.final_test_path).read_bytes())
-            self.assertEqual(len(first_calls), 6)  # five successes and one timeout
-            self.assertEqual(len(resumed_calls), 4)  # missing verifier + third seed
+            self.assertEqual(len(first_calls), 9)  # one local timeout; other seeds continue
+            self.assertEqual(len(resumed_calls), 1)  # retry only the interrupted verifier
             self.assertEqual(counters, {"parent": 3, "execution": 3})
             self.assertEqual(len(result.target_seed_attempts_summary), 3)
             for i in range(3):

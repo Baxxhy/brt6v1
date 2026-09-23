@@ -16,7 +16,12 @@ import warnings
 
 from .api_pool import configured_apis, pool_policy
 from .cost_tracking import RequestAccounting
-from .errors import LLMResponseTruncatedError, LLMUnavailableError, quota_exhausted
+from .errors import (
+    LLMRequestFailedError,
+    LLMResponseTruncatedError,
+    LLMUnavailableError,
+    quota_exhausted,
+)
 from ..core.config import (
     DEFAULT_LLM_BACKOFF_BASE,
     DEFAULT_DEEPSEEK_BASE_URL,
@@ -547,4 +552,10 @@ class LLMClient:
                         self.backoff_base * (2 ** min(attempt - 1, 8)), 180.0
                     )
                 time.sleep(wait)
-        raise LLMUnavailableError(f"LLM request failed after {max(1, attempt)} attempts: {last_error}")
+        message = f"LLM request failed after {max(1, attempt)} attempts: {last_error}"
+        # Only an explicit account/quota failure can justify stopping queued
+        # instances. Gateway, TLS, rate-limit, and request-specific failures
+        # remain local so independent seeds and instances can continue.
+        if last_error and "quota exhausted" in str(last_error).lower():
+            raise LLMUnavailableError(message)
+        raise LLMRequestFailedError(message)

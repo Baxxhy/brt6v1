@@ -9,6 +9,10 @@ class LLMResponseTruncatedError(RuntimeError):
     """One response exhausted its output cap; other requests may continue."""
 
 
+class LLMRequestFailedError(RuntimeError):
+    """One request exhausted its retries; independent work may continue."""
+
+
 def quota_exhausted(body: str) -> bool:
     """Only explicit account/balance errors disable a credential, not rate limits."""
     text = body.lower()
