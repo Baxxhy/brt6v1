@@ -16,7 +16,7 @@ import warnings
 
 from .api_pool import configured_apis, pool_policy
 from .cost_tracking import RequestAccounting
-from .errors import LLMUnavailableError, quota_exhausted
+from .errors import LLMResponseTruncatedError, LLMUnavailableError, quota_exhausted
 from ..core.config import (
     DEFAULT_LLM_BACKOFF_BASE,
     DEFAULT_DEEPSEEK_BASE_URL,
@@ -423,8 +423,8 @@ class LLMClient:
                     outcome = "truncated"
                     output_limit = int(payload.get("max_completion_tokens", payload.get("max_tokens", 0)))
                     if output_limit >= self.truncation_max_tokens:
-                        raise LLMUnavailableError(
-                            "Response truncated at configured output cap; paused before repeated paid requests"
+                        raise LLMResponseTruncatedError(
+                            "Response truncated at configured output cap; skipped this candidate without pausing the run"
                         )
                     current_limit = int(payload[token_field])
                     payload[token_field] = min(
@@ -439,7 +439,7 @@ class LLMClient:
                     raise RuntimeError("LLM returned empty content")
                 outcome = "success"
                 return content
-            except LLMUnavailableError:
+            except (LLMUnavailableError, LLMResponseTruncatedError):
                 raise
             except urllib.error.HTTPError as exc:
                 status_code = exc.code

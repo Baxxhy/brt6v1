@@ -21,7 +21,7 @@ from brt6.core.schema import (BehaviorTarget, ExecutionResult, HostContext,
                              FinalResult, InstanceContext, ProtocolRecovery, RetrievedTest,
                              StrictVerifierResult, VerifierDecision)
 from brt6.execution.feedback import _load_cached_behavior, _propose_delta_safely, run_instance_pipeline
-from brt6.llm.errors import LLMUnavailableError
+from brt6.llm.errors import LLMResponseTruncatedError, LLMUnavailableError
 from brt6.llm.llm_client import LLMClient
 from brt6.mutation.seed_mutator import propose_semantic_delta
 from brt6.pipeline.run import _run_one, build_parser
@@ -141,7 +141,7 @@ class ResumeTests(unittest.TestCase):
                 c.chat("s", "probe", attempt_limit=1)
             self.assertEqual(c.open_request.call_count, 1)
 
-    def test_full_run_pauses_at_output_cap_without_saving_partial_content(self):
+    def test_output_cap_is_local_failure_without_saving_partial_content(self):
         with patch.dict(os.environ, {"BRT_RETRY_TRANSIENT_API": "1"}):
             c = self.client()
             c.max_tokens = 4096
@@ -151,7 +151,7 @@ class ResumeTests(unittest.TestCase):
                     "finish_reason": "length"}]}).encode())
             c.open_request = Mock(side_effect=[self.response(""), partial(), partial(), self.response("complete")])
             with StepJournal(self.root, {"experiment": "incomplete_response"}).activate():
-                with self.assertRaisesRegex(LLMUnavailableError, "output cap"):
+                with self.assertRaisesRegex(LLMResponseTruncatedError, "output cap"):
                     c.chat("s", "u")
             self.assertEqual(c.open_request.call_count, 3)
             self.assertEqual(list(self.root.glob('.resume/steps/*/step_*.json')), [])

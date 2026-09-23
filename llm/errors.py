@@ -5,6 +5,10 @@ class LLMUnavailableError(RuntimeError):
     """The current model step did not complete; preserve and resume it later."""
 
 
+class LLMResponseTruncatedError(RuntimeError):
+    """One response exhausted its output cap; other requests may continue."""
+
+
 def quota_exhausted(body: str) -> bool:
     """Only explicit account/balance errors disable a credential, not rate limits."""
     text = body.lower()
